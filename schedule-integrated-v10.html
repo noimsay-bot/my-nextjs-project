@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>근무표 통합 개발 체크</title>
+  <style>
+    :root{
+      --bg1:#07111f;--bg2:#0b1628;--bg3:#0e1b31;
+      --line:rgba(255,255,255,.1);--card:rgba(255,255,255,.05);--card2:rgba(255,255,255,.03);
+      --text:#fff;--muted:#aeb8ca;--cyan:#22d3ee;--blue:#3b82f6;--pink:#d946ef;
+      --green:#10b981;--red:#ef4444;--amber:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Pretendard,sans-serif;color:var(--text);
+      background:radial-gradient(circle at top, rgba(77,122,255,.16), transparent 30%),linear-gradient(180deg,var(--bg1),var(--bg2) 52%,var(--bg3))}
+    .container{max-width:1500px;margin:0 auto;padding:22px 16px 60px}
+    .stack{display:flex;flex-direction:column;gap:18px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+    .layout{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;align-items:start}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:28px;box-shadow:0 16px 40px rgba(0,0,0,.25);overflow:hidden}
+    .card-top{height:6px;background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink))}
+    .card-pad{padding:22px}
+    .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;border:1px solid rgba(34,211,238,.18);background:rgba(34,211,238,.10);color:#d8fbff;font-size:12px;font-weight:800;letter-spacing:.18em}
+    .title-xl{font-size:38px;font-weight:900;line-height:1.1;margin:0}
+    .title-md{font-size:24px;font-weight:900;line-height:1.15;margin:0}
+    .muted{color:var(--muted)}
+    .field{display:flex;flex-direction:column;gap:8px}
+    .field label{font-size:13px;font-weight:800;color:#e2e8f0}
+    .input,.textarea,.select{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.05);color:#fff;outline:none}
+    .textarea{min-height:100px;resize:vertical}
+    .btn{padding:12px 16px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.05);color:#fff;font-weight:900;cursor:pointer}
+    .btn.primary{background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));border:0}
+    .btn.white{background:#fff;color:#0f172a;border:0}
+    .note,.warn,.ok{padding:12px 14px;border-radius:16px;font-size:14px;line-height:1.8}
+    .note{border:1px solid var(--line);background:rgba(255,255,255,.04)}
+    .warn{border:1px solid rgba(239,68,68,.25);background:rgba(239,68,68,.12);color:#fecaca}
+    .ok{border:1px solid rgba(16,185,129,.25);background:rgba(16,185,129,.12);color:#bbf7d0}
+    .kpi{padding:16px;border-radius:18px;border:1px solid var(--line);background:rgba(255,255,255,.04)}
+    .kpi .label{font-size:12px;font-weight:800;color:#cbd5e1;letter-spacing:.16em}
+    .kpi .value{font-size:26px;font-weight:900;margin-top:8px}
+    .cat-card{border:1px solid var(--line);background:var(--card2);border-radius:22px;padding:16px}
+    .cat-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+    .cat-title{font-size:18px;font-weight:900}
+    .order-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+    .order-box{display:flex;flex-direction:column;gap:6px}
+    .order-box label{font-size:11px;font-weight:800;color:#cbd5e1;letter-spacing:.08em}
+    .order-box input{width:100%;padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.05);color:#fff}
+    .preview-section{border:1px solid var(--line);background:var(--card2);border-radius:22px;padding:16px}
+    .preview-list{display:flex;flex-direction:column;gap:10px;max-height:320px;overflow:auto}
+    .preview-item{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.04);font-size:14px}
+    .calendar-wrap{overflow:auto}
+    .calendar{display:grid;grid-template-columns:repeat(7,minmax(210px,1fr));gap:12px;min-width:1480px}
+    .weekday-head{padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.03);font-size:13px;font-weight:800;color:#cbd5e1;text-align:center}
+    .day{border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:20px;padding:14px;min-height:320px;display:flex;flex-direction:column;gap:10px}
+    .day.other{opacity:.25}
+    .day.holiday{box-shadow:inset 0 0 0 1px rgba(245,158,11,.25)}
+    .day-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .date-no{font-size:22px;font-weight:900}
+    .badge{display:inline-flex;align-items:center;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800}
+    .badge.weekend{background:rgba(245,158,11,.14);color:#fde68a}
+    .badge.holiday{background:rgba(239,68,68,.14);color:#fecaca}
+    .shift-list{display:flex;flex-direction:column;gap:8px}
+    .shift-row{border:1px solid var(--line);background:rgba(0,0,0,.18);border-radius:14px;padding:10px}
+    .shift-label{font-size:12px;font-weight:900;color:#cbd5e1;margin-bottom:6px}
+    .names{display:flex;flex-wrap:wrap;gap:6px}
+    .name-pill{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.06);font-size:12px}
+    .name-pill.conflict{background:rgba(239,68,68,.20);color:#fecaca;border:1px solid rgba(239,68,68,.28)}
+    .snapshot-item{padding:12px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.03)}
+    pre{margin:0;white-space:pre-wrap;word-break:break-word;color:#dbeafe;font-size:13px;line-height:1.7}
+    .footer-actions{position:sticky;bottom:0;background:rgba(2,6,23,.82);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding:14px 0;margin-top:24px}
+    @media (max-width: 1200px){.layout,.grid4,.grid3,.grid2{grid-template-columns:1fr}}
+    @media (max-width: 960px){.order-grid{grid-template-columns:repeat(3,1fr)} .title-xl{font-size:32px}}
+    @media (max-width: 760px){.order-grid{grid-template-columns:repeat(2,1fr)} .calendar{grid-template-columns:1fr;min-width:0} .weekday-head{display:none} .day{min-height:auto}}
+  </style>
+</head>
+<body>
+<div class="container stack">
+  <section class="card">
+    <div class="card-top"></div>
+    <div class="card-pad stack">
+      <div class="chip">SCHEDULE INTEGRATED DEV CHECK</div>
+      <h1 class="title-xl">순번 입력 + 오프 기능 + 자동 근무표 통합 버전</h1>
+      <div class="note muted">
+        이제 한 파일에서 <strong style="color:#fff">근무 종류별 30명 순번 입력</strong>,
+        <strong style="color:#fff">특정 인원 오프/활성화</strong>,
+        <strong style="color:#fff">월말이 주중에 끝나도 그 주 일요일까지 이어지는 자동 근무표</strong>,
+        <strong style="color:#fff">야근 다음날 충돌 표시</strong>,
+        <strong style="color:#fff">원본 사본 저장 + 자동 재배치</strong>,
+        그리고 <strong style="color:#fff">주말/휴일용 국회·청사·청와대 수동 입력칸</strong>, <strong style="color:#fff">평일용 휴가 수동 입력칸</strong>, <strong style="color:#fff">각 날짜별 추가 수동 칸</strong>까지 같이 확인할 수 있습니다.
+      </div>
+    </div>
+  </section>
+
+  <section class="grid4">
+    <div class="kpi"><div class="label">대상 연도</div><div class="value" id="targetYearValue">-</div></div>
+    <div class="kpi"><div class="label">대상 월</div><div class="value" id="targetMonthValue">-</div></div>
+    <div class="kpi"><div class="label">제크 인원</div><div class="value" id="jcheckValue">1명</div></div>
+    <div class="kpi"><div class="label">활성 인원 수</div><div class="value" id="activeCountValue">0명</div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-pad stack">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <div class="chip">CALENDAR</div>
+          <h2 class="title-md" style="margin-top:10px">근무표 작성</h2>
+        </div>
+        <div class="row">
+          <input class="input" id="currentUserInput" style="width:140px;padding:10px 12px" placeholder="로그인 사용자" value="정철원" oninput="state.currentUser=this.value.trim(); save(); renderCalendar()">
+          <button class="btn" onclick="toggleMyWork()"><span id="myWorkBtnLabel">내 근무 보기</span></button>
+          <button class="btn primary" onclick="saveConfig()">저장</button>
+          <button class="btn white" onclick="generateSchedule()">작성</button>
+          <button class="btn" onclick="autoRebalance()">자동 재배치</button>
+          <button class="btn" onclick="downloadJson()">JSON 다운로드</button>
+        </div>
+      </div>
+      <div id="scheduleMessageBox"></div>
+      <div class="calendar-wrap">
+        <div class="calendar" id="calendarWrap">
+          <div class="weekday-head">월</div><div class="weekday-head">화</div><div class="weekday-head">수</div>
+          <div class="weekday-head">목</div><div class="weekday-head">금</div><div class="weekday-head">토</div><div class="weekday-head">일</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="layout">
+    <div class="stack">
+      <div class="card">
+        <div class="card-pad stack">
+          <h2 class="title-md">기본 정보</h2>
+          <div class="grid2">
+            <div class="field"><label for="year">연도</label><input id="year" class="input" type="number"></div>
+            <div class="field"><label for="month">월</label><input id="month" class="input" type="number" min="1" max="12"></div>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label for="jcheckCount">제크 인원</label>
+              <select id="jcheckCount" class="select">
+                <option value="1">1명</option>
+                <option value="2">2명</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="activeCategory">카테고리 바로가기</label>
+              <select id="activeCategory" class="select"></select>
+            </div>
+          </div>
+          <div class="field"><label for="extraHolidays">추가 휴일</label><textarea id="extraHolidays" class="textarea" placeholder="쉼표 구분&#10;예) 2026-05-05,2026-05-06"></textarea></div>
+          <div class="field"><label for="vacations">휴가자</label><textarea id="vacations" class="textarea" placeholder="한 줄씩 입력&#10;예) 2026-05-03: 정철원, 홍길동"></textarea></div>
+          
+          <div id="messageBox"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-pad stack">
+          <h2 class="title-md">근무 종류별 순번 입력</h2>
+          <div class="note muted">
+            각 카테고리마다 1번부터 30번까지 이름을 입력합니다.
+            연장은 일 단위가 아니라 주 단위로 돌아가며, 한 주에 선정된 4명이 월요일부터 금요일까지 동일하게 유지됩니다. 주말에는 조근 1명, 일반근무 2명, 뉴스대기 1명, 야근 1명으로 배치하고 제크는 표시하지 않습니다. 평일에는 휴가 칸이 보이며, 주말/휴일에는 국회·청사·청와대 칸이 보입니다. 휴가자를 수정 모드에서 쉼표로 구분해 한 번에 입력하면 이름별 객체처럼 분리된 칩으로 처리합니다. 각 근무유형의 이름은 두 줄 중심으로 보기 좋게 배치했습니다. 날짜의 수정 버튼을 누르면 각 근무 유형 옆에 + 버튼이 나타나고, 이름마다 − 버튼으로 삭제할 수 있습니다. 이름은 클릭 또는 드래그해서 다른 칸으로 이동할 수 있으며, 내 근무 보기 시 로그인한 사람 이름은 하늘색으로 강조됩니다.
+          </div>
+          <div id="categoryForms" class="stack"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-pad stack">
+          <h2 class="title-md">실시간 미리보기</h2>
+          <div class="preview-section">
+            <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.16em;margin-bottom:10px">카테고리별 입력 현황</div>
+            <div id="livePreview" class="preview-list"></div>
+          </div>
+          <div class="preview-section">
+            <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.16em;margin-bottom:10px">특정 인원 오프 / 활성화</div>
+            <div class="note muted" style="margin-bottom:10px">오프시키면 입력값은 유지되지만 근무표 작성에서만 제외됩니다. 다시 활성화하면 즉시 반영됩니다.</div>
+            <div id="offPeopleList" class="preview-list"></div>
+          </div>
+          <div class="preview-section">
+            <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.16em;margin-bottom:10px">저장 데이터 JSON</div>
+            <div style="max-height:360px;overflow:auto"><pre id="jsonPreview"></pre></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-pad stack">
+          <h2 class="title-md">사본 보관함</h2>
+          <div id="snapshotList" class="stack"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="footer-actions">
+  <div class="container row">
+    <button class="btn primary" onclick="saveConfig()">저장</button>
+    <button class="btn white" onclick="loadSaved()">불러오기</button>
+    <button class="btn" onclick="resetForm()">초기화</button>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = "j-schedule-integrated-dev-v1";
+const categories = [
+  { key: "morning", label: "조근" },
+  { key: "extension", label: "연장" },
+  { key: "evening", label: "석근" },
+  { key: "nightWeekday", label: "월~목 야근" },
+  { key: "nightFriday", label: "금요일 야근" },
+  { key: "nightSaturday", label: "토요일 야근" },
+  { key: "nightSunday", label: "일요일 야근" },
+  { key: "jcheck", label: "제크" },
+  { key: "holidayDuty", label: "휴일근무" },
+  { key: "weekdayHolidayDuty", label: "평일휴일근무" }
+];
+
+const defaultState = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  jcheckCount: 1,
+  extraHolidays: "",
+  vacations: "",
+  offPeople: [],
+  orders: Object.fromEntries(categories.map(cat => [cat.key, Array.from({length:30}, () => "")])),
+  pointers: {
+    morning: 1, extension: 1, evening: 1,
+    nightWeekday: 1, nightFriday: 1, nightSaturday: 1, nightSunday: 1,
+    jcheck: 1, holidayDuty: 1, weekdayHolidayDuty: 1
+  },
+  generated: null,
+  snapshots: {},
+
+};
+
+let state = loadState();
+state.orders = {
+  "extension": [
+    "반일훈",
+    "정재우",
+    "변경태",
+    "박재현",
+    "황현우",
+    "유연경",
+    "구본준",
+    "김진광",
+    "정철원",
+    "이지수",
+    "김재식",
+    "유규열",
+    "김준택",
+    "이주원",
+    "정상원",
+    "이현일",
+    "이학진",
+    "박대권",
+    "이완근",
+    "조용희",
+    "방극철",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "morning": [
+    "이주원",
+    "이지수",
+    "방극철",
+    "김준택",
+    "김재식",
+    "정재우",
+    "반일훈",
+    "변경태",
+    "구본준",
+    "유규열",
+    "박재현",
+    "유연경",
+    "정상원",
+    "김진광",
+    "박대권",
+    "정철원",
+    "이학진",
+    "이완근",
+    "조용희",
+    "황현우",
+    "이현일",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "evening": [
+    "유규열",
+    "김재식",
+    "박재현",
+    "유연경",
+    "정상원",
+    "김진광",
+    "박대권",
+    "정철원",
+    "이학진",
+    "이완근",
+    "황현우",
+    "이현일",
+    "이주원",
+    "이지수",
+    "방극철",
+    "김준택",
+    "정재우",
+    "반일훈",
+    "변경태",
+    "조용희",
+    "구본준",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "nightWeekday": [
+    "정철원",
+    "황현우",
+    "김재식",
+    "정재우",
+    "반일훈",
+    "정상원",
+    "방극철",
+    "이학진",
+    "김준택",
+    "변경태",
+    "이지수",
+    "박재현",
+    "박대권",
+    "이현일",
+    "유연경",
+    "유규열",
+    "김진광",
+    "이주원",
+    "구본준",
+    "이완근",
+    "조용희",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "holidayDuty": [
+    "김재식",
+    "이지수",
+    "박재현",
+    "황현우",
+    "유규열",
+    "이주원",
+    "정철원",
+    "반일훈",
+    "변경태",
+    "정재우",
+    "이학진",
+    "구본준",
+    "신동환",
+    "정상원",
+    "유연경",
+    "이동현",
+    "김준택",
+    "김진광",
+    "박대권",
+    "이완근",
+    "방극철",
+    "조용희",
+    "이현일",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "weekdayHolidayDuty": [
+    "박재현",
+    "구본준",
+    "김재식",
+    "김준택",
+    "유규열",
+    "이학진",
+    "유연경",
+    "박대권",
+    "변경태",
+    "황현우",
+    "이완근",
+    "장후원",
+    "신동환",
+    "방극철",
+    "반일훈",
+    "정재우",
+    "이동현",
+    "김진광",
+    "정철원",
+    "조용희",
+    "이주원",
+    "이지수",
+    "정상원",
+    "이현일",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "nightFriday": [
+    "유규열",
+    "박재현",
+    "박대권",
+    "김준택",
+    "정재우",
+    "정철원",
+    "이현일",
+    "변경태",
+    "이학진",
+    "황현우",
+    "이지수",
+    "구본준",
+    "김재식",
+    "반일훈",
+    "유연경",
+    "조용희",
+    "방극철",
+    "정상원",
+    "이주원",
+    "이완근",
+    "김진광",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "nightSaturday": [
+    "김진광",
+    "이학진",
+    "김준택",
+    "이지수",
+    "이완근",
+    "방극철",
+    "김재식",
+    "이주원",
+    "정재우",
+    "정철원",
+    "구본준",
+    "반일훈",
+    "정상원",
+    "박대권",
+    "유규열",
+    "유연경",
+    "이동현",
+    "조용희",
+    "황현우",
+    "변경태",
+    "이현일",
+    "신동환",
+    "박재현",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "nightSunday": [
+    "변경태",
+    "김진광",
+    "황현우",
+    "정상원",
+    "정철원",
+    "조용희",
+    "이완근",
+    "구본준",
+    "방극철",
+    "반일훈",
+    "박재현",
+    "이지수",
+    "박대권",
+    "이주원",
+    "정재우",
+    "이현일",
+    "이학진",
+    "김재식",
+    "유규열",
+    "김준택",
+    "유연경",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "jcheck": [
+    "김미란",
+    "이현일",
+    "반일훈",
+    "유규열",
+    "이완근",
+    "김진광",
+    "변경태",
+    "박대권",
+    "김준택",
+    "정철원",
+    "방극철",
+    "황현우",
+    "최무룡",
+    "장후원",
+    "신동환",
+    "이학진",
+    "이지수",
+    "조용희",
+    "정재우",
+    "정상원",
+    "이주원",
+    "유연경",
+    "박재현",
+    "김재식",
+    "구본준",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ]
+};
+save();
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      return {
+        ...defaultState,
+        ...parsed,
+        offPeople: parsed.offPeople || [],
+        orders: Object.fromEntries(categories.map(cat => [
+          cat.key,
+          Array.from({length:30}, (_,i) => parsed.orders?.[cat.key]?.[i] ?? "")
+        ])),
+        pointers: {...defaultState.pointers, ...(parsed.pointers || {})},
+      };
+    }
+  }catch(e){}
+  return structuredClone(defaultState);
+}
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+function setMessage(text, type="ok"){ document.getElementById("messageBox").innerHTML = text ? `<div class="${type}">${text}</div>` : ""; }
+function setScheduleMessage(text, type="ok"){ document.getElementById("scheduleMessageBox").innerHTML = text ? `<div class="${type}" style="margin:10px 0 2px">${text}</div>` : ""; }
+
+function getUniquePeople(data){
+  const set = new Set();
+  categories.forEach(cat => (data.orders?.[cat.key] || []).forEach(name => { const n = String(name||"").trim(); if(n) set.add(n); }));
+  return Array.from(set);
+}
+
+function toggleOffPerson(name){
+  const off = new Set(state.offPeople || []);
+  if(off.has(name)) off.delete(name); else off.add(name);
+  state.offPeople = Array.from(off);
+  save();
+  renderPreview();
+}
+
+function renderCategoryOptions(){
+  const select = document.getElementById("activeCategory");
+  select.innerHTML = categories.map(cat => `<option value="${cat.key}">${cat.label}</option>`).join("");
+  select.onchange = e => {
+    const target = document.getElementById(`cat-${e.target.value}`);
+    if(target) target.scrollIntoView({behavior:"smooth", block:"start"});
+  };
+}
+
+function renderCategoryForms(){
+  const wrap = document.getElementById("categoryForms");
+  wrap.innerHTML = categories.map(cat => `
+    <div class="cat-card" id="cat-${cat.key}">
+      <div class="cat-head">
+        <div class="cat-title">${cat.label}</div>
+        <div class="muted" style="font-size:12px">1~30 순번</div>
+      </div>
+      <div class="order-grid">
+        ${Array.from({length:30}, (_,i) => `
+          <div class="order-box">
+            <label>${i+1}번</label>
+            <input type="text" id="${cat.key}-${i}" value="${esc(state.orders?.[cat.key]?.[i] || "")}" placeholder="${i+1}번 이름">
+          </div>`).join("")}
+      </div>
+    </div>`).join("");
+  categories.forEach(cat => {
+    for(let i=0;i<30;i++){
+      document.getElementById(`${cat.key}-${i}`).addEventListener("input", e => {
+        state.orders[cat.key][i] = e.target.value.trim();
+        renderPreview();
+      });
+    }
+  });
+}
+
+function collectForm(){
+  return {
+    year: Number(document.getElementById("year").value || defaultState.year),
+    month: Number(document.getElementById("month").value || defaultState.month),
+    jcheckCount: Number(document.getElementById("jcheckCount").value || 1),
+    extraHolidays: document.getElementById("extraHolidays").value,
+    vacations: document.getElementById("vacations").value,
+    offPeople: state.offPeople || [],
+    orders: Object.fromEntries(categories.map(cat => [cat.key, Array.from({length:30}, (_,i) => document.getElementById(`${cat.key}-${i}`).value.trim())])),
+    pointers: state.pointers,
+    generated: state.generated,
+    snapshots: state.snapshots
+  };
+}
+
+function fillForm(data){
+  document.getElementById("year").value = data.year;
+  document.getElementById("month").value = data.month;
+  document.getElementById("jcheckCount").value = data.jcheckCount;
+  document.getElementById("extraHolidays").value = data.extraHolidays;
+  document.getElementById("vacations").value = data.vacations;
+  state = structuredClone(data);
+  renderCategoryForms();
+  renderPreview();
+  renderSnapshots();
+  renderCalendar();
+}
+
+function saveConfig(){
+  const data = collectForm();
+  if(!getUniquePeople(data).length){
+    setMessage("최소 한 칸 이상 이름을 입력해주세요.", "warn");
+    return;
+  }
+  state = data;
+  save();
+  renderPreview();
+  renderSnapshots();
+  setMessage("저장되었습니다. 오프 상태와 순번이 함께 유지됩니다.", "ok");
+}
+
+function loadSaved(){
+  state = loadState();
+  fillForm(state);
+  setMessage("저장된 값을 불러왔습니다.", "ok");
+}
+
+function resetForm(){
+  state = structuredClone(defaultState);
+  fillForm(state);
+  setMessage("초기화했습니다. 저장하려면 다시 저장 버튼을 눌러주세요.", "ok");
+}
+
+function downloadJson(){
+  const data = collectForm();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "schedule-integrated-config.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  setMessage("JSON 파일로 다운로드했습니다.", "ok");
+}
+
+function renderPreview(){
+  const data = collectForm();
+  document.getElementById("targetYearValue").textContent = `${data.year}년`;
+  document.getElementById("targetMonthValue").textContent = `${data.month}월`;
+  document.getElementById("jcheckValue").textContent = `${data.jcheckCount}명`;
+
+  const uniquePeople = getUniquePeople(data);
+  const activeCount = uniquePeople.filter(name => !(data.offPeople || []).includes(name)).length;
+  document.getElementById("activeCountValue").textContent = `${activeCount}명`;
+
+  document.getElementById("livePreview").innerHTML = categories.map(cat => {
+    const names = data.orders[cat.key]
+      .map((name, idx) => name ? `${idx+1}. ${name}${(data.offPeople || []).includes(name) ? " (오프)" : ""}` : null)
+      .filter(Boolean);
+    return `<div class="preview-item"><div style="font-weight:900">${cat.label}</div><div class="muted" style="text-align:right">${names.length ? names.slice(0,6).join(" / ") + (names.length > 6 ? " ..." : "") : "입력 없음"}</div></div>`;
+  }).join("");
+
+  document.getElementById("offPeopleList").innerHTML = uniquePeople.length ? uniquePeople.map(name => {
+    const isOff = (data.offPeople || []).includes(name);
+    return `<div class="preview-item"><div style="font-weight:800">${esc(name)}</div><button class="btn ${isOff ? "" : "white"}" onclick="toggleOffPerson('${String(name).replace(/'/g, "\\'")}')">${isOff ? "활성화" : "오프"}</button></div>`;
+  }).join("") : `<div class="muted">입력된 이름이 없습니다.</div>`;
+
+  document.getElementById("jsonPreview").textContent = JSON.stringify(data, null, 2);
+}
+
+
+function toggleMyWork(){
+  state.showMyWork = !state.showMyWork;
+  save();
+  renderCalendar();
+  const btn = document.getElementById("myWorkBtnLabel");
+  if(btn) btn.textContent = state.showMyWork ? "내 근무 숨기기" : "내 근무 보기";
+}
+function splitNames(value){
+  return String(value || "").split(",").map(x => x.trim()).filter(Boolean);
+}
+
+function parseHolidaySet(text){
+  return new Set(String(text || "").split(",").map(x => x.trim()).filter(Boolean));
+}
+function parseVacationMap(text){
+  const map = {};
+  String(text || "").split(/\n+/).map(x => x.trim()).filter(Boolean).forEach(line => {
+    const parts = line.split(":");
+    if(parts.length < 2) return;
+    map[parts[0].trim()] = parts.slice(1).join(":").split(",").map(x => x.trim()).filter(Boolean);
+  });
+  return map;
+}
+function fmtDate(y,m,d){ return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+function daysInMonth(y,m){ return new Date(y,m,0).getDate(); }
+function getScheduleRange(y,m){
+  const first = new Date(y,m-1,1);
+  const last = new Date(y,m-1,daysInMonth(y,m));
+  const end = new Date(last);
+  const dow = end.getDay();
+  if(dow !== 0) end.setDate(end.getDate() + (7 - dow));
+  return {start:first,end};
+}
+
+function getOrderPool(key){
+  return (state.orders[key] || []).map(x => String(x || "").trim()).filter(Boolean);
+}
+
+function nextCandidatesByOrder(key, count, usedNames, excludeNames, vacationNames, localPointers){
+  const pool = getOrderPool(key).filter(name => !(state.offPeople || []).includes(name));
+  const selected = [];
+  if(!pool.length) return selected;
+  let pointer = localPointers[key] || 1;
+  let guard = 0;
+  while(selected.length < count && guard < pool.length * 6){
+    const idx = ((pointer - 1) % pool.length + pool.length) % pool.length;
+    const name = pool[idx];
+    if(name && !usedNames.has(name) && !selected.includes(name) && !excludeNames.includes(name) && !vacationNames.includes(name)){
+      selected.push(name);
+    }
+    pointer += 1;
+    guard += 1;
+  }
+  localPointers[key] = pointer;
+  return selected;
+}
+
+function generateSchedule(){
+  saveConfig();
+  const y = Number(state.year), m = Number(state.month);
+  const holidaySet = parseHolidaySet(state.extraHolidays);
+  const vacationMap = parseVacationMap(state.vacations);
+  const range = getScheduleRange(y,m);
+  const pointers = structuredClone(state.pointers);
+  const days = [];
+  const warnings = [];
+  let previousNight = [];
+  let weeklyExtensionCrew = [];
+  let weeklyExtensionWeekKey = "";
+
+  for(let cur = new Date(range.start); cur <= range.end; cur.setDate(cur.getDate()+1)){
+    const dateKey = fmtDate(cur.getFullYear(), cur.getMonth()+1, cur.getDate());
+    const dow = cur.getDay();
+    const mondayAnchor = new Date(cur);
+    const diffToMonday = dow === 0 ? -6 : 1 - dow;
+    mondayAnchor.setDate(cur.getDate() + diffToMonday);
+    const weekKey = fmtDate(mondayAnchor.getFullYear(), mondayAnchor.getMonth()+1, mondayAnchor.getDate());
+
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = holidaySet.has(dateKey);
+    const isWeekdayHoliday = isHoliday && !isWeekend;
+    const vacationObjects = vacationMap[dateKey] || [];
+    const vacations = vacationObjects.map(v => v.name);
+    const used = new Set();
+    const assignments = {};
+
+    if(isWeekend){
+      assignments["주말조근"] = nextCandidatesByOrder("morning", 1, used, [], vacations, pointers);
+      assignments["주말조근"].forEach(n => used.add(n));
+      assignments["주말일반근무"] = nextCandidatesByOrder("holidayDuty", 2, used, [], vacations, pointers);
+      assignments["주말일반근무"].forEach(n => used.add(n));
+      assignments["뉴스대기"] = nextCandidatesByOrder("holidayDuty", 1, used, [], vacations, pointers);
+      assignments["뉴스대기"].forEach(n => used.add(n));
+    } else {
+      assignments["조근"] = nextCandidatesByOrder("morning", 2, used, [], vacations, pointers);
+      assignments["조근"].forEach(n => used.add(n));
+
+      const weekdayForExtension = dow >= 1 && dow <= 5;
+      if(weekdayForExtension){
+        if(weeklyExtensionWeekKey !== weekKey){
+          weeklyExtensionWeekKey = weekKey;
+          weeklyExtensionCrew = nextCandidatesByOrder("extension", 4, new Set(), [], [], pointers);
+        }
+        const validExtensionCrew = (weeklyExtensionCrew || []).filter(name => !vacations.includes(name) && !(state.offPeople || []).includes(name));
+        assignments["연장"] = validExtensionCrew.slice(0,4);
+      } else {
+        assignments["연장"] = [];
+      }
+      assignments["연장"].forEach(n => used.add(n));
+
+      assignments["석근"] = nextCandidatesByOrder("evening", 3, used, [], vacations, pointers);
+      assignments["석근"].forEach(n => used.add(n));
+    }
+
+    let nightKey = "nightWeekday";
+    if(dow === 5) nightKey = "nightFriday";
+    if(dow === 6) nightKey = "nightSaturday";
+    if(dow === 0) nightKey = "nightSunday";
+    assignments["야근"] = nextCandidatesByOrder(nightKey, 1, used, [], vacations, pointers);
+    assignments["야근"].forEach(n => used.add(n));
+
+    if(!isWeekend){
+      assignments["제크"] = nextCandidatesByOrder("jcheck", Number(state.jcheckCount || 1), used, [], vacations, pointers);
+      assignments["제크"].forEach(n => used.add(n));
+    }
+
+    if(isWeekdayHoliday){
+      const crew = nextCandidatesByOrder("weekdayHolidayDuty", 4, used, [], vacations, pointers);
+      assignments["평일휴일조근"] = crew.slice(0,1);
+      assignments["평일휴일일반근무"] = crew.slice(1,3);
+      assignments["평일휴일뉴스대기"] = crew.slice(3,4);
+      crew.forEach(n => used.add(n));
+    }
+
+    if(isWeekend || isHoliday){
+      assignments["국회"] = [];
+      assignments["청사"] = [];
+      assignments["청와대"] = [];
+    } else {
+      assignments["휴가"] = [];
+    }
+
+    const conflicts = [];
+    Object.entries(assignments).forEach(([category, names]) => {
+      names.forEach(name => {
+        if(previousNight.includes(name)){
+          conflicts.push({category, name});
+          warnings.push({date:dateKey, category, name});
+        }
+      });
+    });
+
+    days.push({
+      dateKey,
+      day:cur.getDate(),
+      month:cur.getMonth()+1,
+      year:cur.getFullYear(),
+      dow,
+      isWeekend,
+      isHoliday,
+      isWeekdayHoliday,
+      isOverflowMonth:(cur.getMonth()+1)!==m,
+      vacations: vacationObjects,
+      assignments,
+      manualExtras: [],
+      conflicts
+    });
+    previousNight = [...(assignments["야근"] || [])];
+  }
+
+  const nextMonthStart = new Date(range.end);
+  nextMonthStart.setDate(nextMonthStart.getDate() + 1);
+  state.generated = {year:y, month:m, monthKey:`${y}-${String(m).padStart(2,"0")}`, days, nextPointers:pointers, nextStartDate:fmtDate(nextMonthStart.getFullYear(), nextMonthStart.getMonth()+1, nextMonthStart.getDate())};
+  state.pointers = pointers;
+  save();
+  renderCalendar();
+  renderSnapshots();
+  setScheduleMessage(warnings.length ? `야근 다음날 근무 충돌 ${warnings.length}건이 발견되었습니다. 다음 근무표는 ${state.generated.nextStartDate}부터 이어서 작성하면 됩니다.` : `충돌 없이 자동 작성되었습니다. 다음 근무표는 ${state.generated.nextStartDate}부터 이어서 작성하면 됩니다.`, warnings.length ? "warn" : "ok");
+  if(warnings.length){
+    setTimeout(() => {
+      const answer = confirm("빨간색 표시가 된 부분에 대해 자동 재배치할까요? 자동 재배치 전에 원본 사본을 저장합니다.");
+      if(answer) autoRebalance();
+    }, 100);
+  }
+}
+
+function snapshotCurrent(label="원본"){
+  if(!state.generated) return;
+  const key = state.generated.monthKey;
+  if(!state.snapshots[key]) state.snapshots[key] = [];
+  state.snapshots[key].unshift({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    label,
+    createdAt: new Date().toLocaleString("ko-KR"),
+    generated: structuredClone(state.generated)
+  });
+  save();
+}
+
+function mapCategoryToPointer(category, day){
+  if(category === "조근" || category === "주말조근") return "morning";
+  if(category === "연장") return "extension";
+  if(category === "석근") return "evening";
+  if(category === "제크") return "jcheck";
+  if(category === "휴일조근" || category === "휴일일반근무" || category === "주말일반근무" || category === "뉴스대기") return "holidayDuty";
+  if(category === "평일휴일조근" || category === "평일휴일일반근무" || category === "평일휴일뉴스대기") return "weekdayHolidayDuty";
+  if(category === "야근"){
+    if(day.dow === 5) return "nightFriday";
+    if(day.dow === 6) return "nightSaturday";
+    if(day.dow === 0) return "nightSunday";
+    return "nightWeekday";
+  }
+  return "extension";
+}
+
+function autoRebalance(){
+  if(!state.generated) return;
+  snapshotCurrent("원본");
+  const g = structuredClone(state.generated);
+  const pointers = structuredClone(state.pointers);
+  let previousNight = [];
+  const remainingWarnings = [];
+
+  g.days.forEach(day => {
+    const vacations = day.vacations || [];
+    const used = new Set();
+    Object.values(day.assignments).forEach(arr => (arr || []).forEach(name => used.add(name)));
+
+    Object.entries(day.assignments).forEach(([category, names]) => {
+      names.forEach((name, idx) => {
+        if(previousNight.includes(name)){
+          used.delete(name);
+          const pointerKey = mapCategoryToPointer(category, day);
+          const replacement = nextCandidatesByOrder(pointerKey, 1, used, previousNight, vacations, pointers)[0];
+          if(replacement){
+            day.assignments[category][idx] = replacement;
+            used.add(replacement);
+          } else {
+            day.assignments[category][idx] = name;
+            used.add(name);
+            remainingWarnings.push({date:day.dateKey, category, name});
+          }
+        }
+      });
+    });
+
+    day.conflicts = [];
+    Object.entries(day.assignments).forEach(([category, names]) => {
+      names.forEach(name => {
+        if(previousNight.includes(name)) day.conflicts.push({category, name});
+      });
+    });
+    previousNight = [...(day.assignments["야근"] || [])];
+  });
+
+  state.generated = g;
+  save();
+  renderCalendar();
+  renderSnapshots();
+  setScheduleMessage(remainingWarnings.length ? `자동 재배치 후에도 ${remainingWarnings.length}건의 충돌이 남아 있습니다.` : "자동 재배치가 완료되었습니다. 원본 사본이 저장되었습니다.", remainingWarnings.length ? "warn" : "ok");
+}
+
+function openSnapshot(id){
+  const key = state.generated?.monthKey;
+  const snap = (state.snapshots[key] || []).find(x => x.id === id);
+  if(!snap) return;
+  state.generated = structuredClone(snap.generated);
+  save();
+  renderCalendar();
+  setScheduleMessage(`${snap.label} 사본을 열었습니다.`, "ok");
+}
+
+function renderSnapshots(){
+  const key = state.generated?.monthKey;
+  const list = key ? (state.snapshots[key] || []) : [];
+  document.getElementById("snapshotList").innerHTML = list.length ? list.map(s => `
+    <div class="snapshot-item">
+      <div style="font-weight:900">${s.label}</div>
+      <div class="muted" style="font-size:12px;margin-top:6px">${s.createdAt}</div>
+      <button class="btn" style="margin-top:10px" onclick="openSnapshot('${s.id}')">열기</button>
+    </div>`).join("") : `<div class="note muted">저장된 사본이 없습니다.</div>`;
+}
+
+
+
+function isWeekendLikeDay(day){
+  return !!(day.isWeekend || day.isHoliday);
+}
+function setEditDate(dateKey){
+  state.editDateKey = state.editDateKey === dateKey ? null : dateKey;
+  state.selectedPerson = null;
+  save();
+  renderCalendar();
+}
+function addPersonToCategory(dateKey, category){
+  if(!state.generated) return;
+  const day = state.generated.days.find(d => d.dateKey === dateKey);
+  if(!day) return;
+  const name = prompt(`${category}에 추가할 이름을 입력하세요.`);
+  if(name === null) return;
+  const trimmed = String(name).trim();
+  if(!trimmed) return;
+  day.assignments[category] = day.assignments[category] || [];
+  day.assignments[category].push(trimmed);
+  save();
+  renderCalendar();
+}
+function removePersonFromCategory(dateKey, category, index){
+  if(!state.generated) return;
+  const day = state.generated.days.find(d => d.dateKey === dateKey);
+  if(!day || !day.assignments[category]) return;
+  day.assignments[category].splice(index, 1);
+  save();
+  renderCalendar();
+}
+function selectPerson(dateKey, category, index){
+  const current = state.selectedPerson;
+  if(current && current.dateKey === dateKey && current.category === category && current.index === index){
+    state.selectedPerson = null;
+  } else {
+    state.selectedPerson = {dateKey, category, index};
+  }
+  save();
+  renderCalendar();
+}
+function moveSelectedTo(dateKey, category){
+  if(!state.generated || !state.selectedPerson) return;
+  const sel = state.selectedPerson;
+  const srcDay = state.generated.days.find(d => d.dateKey === sel.dateKey);
+  const dstDay = state.generated.days.find(d => d.dateKey === dateKey);
+  if(!srcDay || !dstDay) return;
+  const srcArr = srcDay.assignments[sel.category] || [];
+  if(sel.index < 0 || sel.index >= srcArr.length) return;
+  const [person] = srcArr.splice(sel.index, 1);
+  dstDay.assignments[category] = dstDay.assignments[category] || [];
+  dstDay.assignments[category].push(person);
+  state.selectedPerson = null;
+  save();
+  renderCalendar();
+}
+function handleDropPerson(event, dateKey, category){
+  event.preventDefault();
+  moveSelectedTo(dateKey, category);
+}
+function allowDrop(event){
+  event.preventDefault();
+}
+
+function isManualField(category){
+  return ["휴가","국회","청사","청와대"].includes(category) || String(category || "").startsWith("추가칸");
+}
+function updateManualAssignment(dateKey, category, value){
+  if(!state.generated) return;
+  const day = state.generated.days.find(d => d.dateKey === dateKey);
+  if(!day) return;
+  day.assignments[category] = splitNames(value);
+  save();
+  renderCalendar();
+}
+function addManualField(dateKey){
+  if(!state.generated) return;
+  const day = state.generated.days.find(d => d.dateKey === dateKey);
+  if(!day) return;
+  const name = prompt("추가할 칸 이름을 입력하세요.", "추가칸");
+  if(name === null) return;
+  const trimmed = String(name).trim() || "추가칸";
+  let finalName = trimmed;
+  let suffix = 2;
+  while(Object.prototype.hasOwnProperty.call(day.assignments, finalName)){
+    finalName = `${trimmed}${suffix}`;
+    suffix += 1;
+  }
+  day.assignments[finalName] = [];
+  day.manualExtras = day.manualExtras || [];
+  day.manualExtras.push(finalName);
+  save();
+  renderCalendar();
+}
+
+function renderDay(day){
+  const badge = day.isWeekdayHoliday
+    ? `<span class="badge holiday">평일휴일</span>`
+    : day.isHoliday
+    ? `<span class="badge holiday">휴일</span>`
+    : day.isWeekend
+    ? `<span class="badge weekend">주말</span>` : "";
+
+  const isWeekendLike = isWeekendLikeDay(day);
+  const filteredAssignments = Object.fromEntries(
+    Object.entries(day.assignments).filter(([category]) => {
+      if(isWeekendLike){
+        return category !== "휴가" && category !== "제크";
+      }
+      return !["국회","청사","청와대"].includes(category);
+    })
+  );
+
+  if(!isWeekendLike && !Object.prototype.hasOwnProperty.call(filteredAssignments, "휴가")){
+    filteredAssignments["휴가"] = [];
+  }
+
+  const conflictSet = new Set((day.conflicts || []).map(c => `${c.category}-${c.name}`));
+  const isEdit = state.editDateKey === day.dateKey;
+  const currentUser = String(state.currentUser || "").trim();
+
+  const rows = Object.entries(filteredAssignments).map(([category, names]) => {
+    const labelStyle = (category === "휴일조근" || category === "평일휴일조근" || category === "주말조근")
+      ? 'style="color:#fde68a;font-weight:900"'
+      : (category === "뉴스대기" || category === "평일휴일뉴스대기")
+      ? 'style="color:#a5f3fc;font-weight:900"' : "";
+
+    if(isManualField(category)){
+      return `
+        <div class="shift-row" ondragover="allowDrop(event)" ondrop="handleDropPerson(event, '${day.dateKey}', '${String(category).replace(/'/g, "\'")}')">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <div class="shift-label" ${labelStyle}>${category}</div>
+            ${isEdit ? `<button class="btn" style="padding:4px 9px;border-radius:999px" onclick="addPersonToCategory('${day.dateKey}','${String(category).replace(/'/g, "\'")}')">+</button>` : ``}
+          </div>
+          <div class="names" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;justify-content:start;gap:6px 8px">
+            ${(names || []).map((name, idx) => {
+              const highlight = state.showMyWork && currentUser && name === currentUser;
+              return `<span class="name-pill ${state.selectedPerson && state.selectedPerson.dateKey === day.dateKey && state.selectedPerson.category === category && state.selectedPerson.index === idx ? 'conflict' : ''}"
+                    style="${highlight ? 'background:rgba(34,211,238,.22);color:#d8fbff;border:1px solid rgba(34,211,238,.35)' : ''}"
+                    draggable="true"
+                    onclick="selectPerson('${day.dateKey}','${String(category).replace(/'/g, "\'")}', ${idx})"
+                    ondragstart="selectPerson('${day.dateKey}','${String(category).replace(/'/g, "\'")}', ${idx})">
+                ${esc(name)}
+                ${isEdit ? `<button style="margin-left:6px;background:none;border:0;color:#fecaca;cursor:pointer;font-weight:900" onclick="event.stopPropagation(); removePersonFromCategory('${day.dateKey}','${String(category).replace(/'/g, "\'")}', ${idx})">−</button>` : ``}
+              </span>`;
+            }).join("") || `<span class="muted" style="font-size:12px">비어 있음</span>`}
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="shift-row" ondragover="allowDrop(event)" ondrop="handleDropPerson(event, '${day.dateKey}', '${String(category).replace(/'/g, "\'")}')">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div class="shift-label" ${labelStyle}>${category}</div>
+          ${isEdit ? `<button class="btn" style="padding:4px 9px;border-radius:999px" onclick="addPersonToCategory('${day.dateKey}','${String(category).replace(/'/g, "\'")}')">+</button>` : ``}
+        </div>
+        <div class="names" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;justify-content:start;gap:6px 8px">
+          ${(names || []).map((name, idx) => {
+            const selected = state.selectedPerson && state.selectedPerson.dateKey === day.dateKey && state.selectedPerson.category === category && state.selectedPerson.index === idx;
+            const highlight = state.showMyWork && currentUser && name === currentUser;
+            const conflict = conflictSet.has(`${category}-${name}`);
+            const style = highlight ? 'background:rgba(34,211,238,.22);color:#d8fbff;border:1px solid rgba(34,211,238,.35)' : '';
+            return `<span class="name-pill ${(conflict || selected) ? 'conflict' : ''}"
+                  style="${style}"
+                  draggable="true"
+                  onclick="selectPerson('${day.dateKey}','${String(category).replace(/'/g, "\'")}', ${idx})"
+                  ondragstart="selectPerson('${day.dateKey}','${String(category).replace(/'/g, "\'")}', ${idx})">
+              ${esc(name)}
+              ${isEdit ? `<button style="margin-left:6px;background:none;border:0;color:#fecaca;cursor:pointer;font-weight:900" onclick="event.stopPropagation(); removePersonFromCategory('${day.dateKey}','${String(category).replace(/'/g, "\'")}', ${idx})">−</button>` : ``}
+            </span>`;
+          }).join("") || `<span class="muted" style="font-size:12px">배정 없음</span>`}
+        </div>
+      </div>`;
+  }).join("");
+
+  return `<div class="day ${day.isHoliday || day.isWeekend ? 'holiday' : ''} ${day.isOverflowMonth ? 'other' : ''}">
+    <div class="day-head">
+      <div class="date-no">${day.month}/${day.day}</div>
+      <div class="row" style="justify-content:flex-end;align-items:center">
+        ${badge}
+        <button class="btn" style="padding:6px 10px;border-radius:999px" onclick="setEditDate('${day.dateKey}')">${isEdit ? '닫기' : '수정'}</button>
+      </div>
+    </div>
+    <div class="shift-list">${rows}</div>
+  </div>`;
+}
+
+function renderCalendar(){
+  const userInput = document.getElementById("currentUserInput");
+  if(userInput) userInput.value = state.currentUser || "";
+  const btn = document.getElementById("myWorkBtnLabel");
+  if(btn) btn.textContent = state.showMyWork ? "내 근무 숨기기" : "내 근무 보기";
+  const wrap = document.getElementById("calendarWrap");
+  wrap.innerHTML = `<div class="weekday-head">월</div><div class="weekday-head">화</div><div class="weekday-head">수</div><div class="weekday-head">목</div><div class="weekday-head">금</div><div class="weekday-head">토</div><div class="weekday-head">일</div>`;
+  const g = state.generated;
+  if(!g){
+    wrap.innerHTML += `<div class="note muted" style="grid-column:1/-1">저장 후 <strong style="color:#fff">작성</strong> 버튼을 누르면 오프 인원을 제외한 월별 근무표가 생성됩니다.</div>`;
+    return;
+  }
+  let firstDow = new Date(g.year, g.month-1, 1).getDay();
+  firstDow = firstDow === 0 ? 6 : firstDow - 1;
+  for(let i=0;i<firstDow;i++) wrap.innerHTML += `<div class="day other"></div>`;
+  g.days.forEach(day => wrap.innerHTML += renderDay(day));
+}
+
+document.getElementById("year").addEventListener("input", renderPreview);
+document.getElementById("month").addEventListener("input", renderPreview);
+document.getElementById("jcheckCount").addEventListener("change", renderPreview);
+document.getElementById("extraHolidays").addEventListener("input", renderPreview);
+document.getElementById("vacations").addEventListener("input", renderPreview);
+
+renderCategoryOptions();
+fillForm(state);
+</script>
+</body>
+</html>

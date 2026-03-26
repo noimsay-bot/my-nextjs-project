@@ -1,0 +1,120 @@
+export type CategoryKey =
+  | "morning"
+  | "extension"
+  | "evening"
+  | "nightWeekday"
+  | "nightFriday"
+  | "nightSaturday"
+  | "nightSunday"
+  | "jcheck"
+  | "holidayDuty";
+
+export interface CategoryDefinition {
+  key: CategoryKey;
+  label: string;
+}
+
+export interface Conflict {
+  category: string;
+  name: string;
+}
+
+export interface DaySchedule {
+  dateKey: string;
+  day: number;
+  month: number;
+  year: number;
+  dow: number;
+  isWeekend: boolean;
+  isHoliday: boolean;
+  isCustomHoliday: boolean;
+  isWeekdayHoliday: boolean;
+  isOverflowMonth: boolean;
+  vacations: string[];
+  assignments: Record<string, string[]>;
+  manualExtras: string[];
+  conflicts: Conflict[];
+}
+
+export interface GeneratedSchedule {
+  year: number;
+  month: number;
+  monthKey: string;
+  days: DaySchedule[];
+  nextPointers: PointerState;
+  nextStartDate: string;
+}
+
+export interface SnapshotItem {
+  id: string;
+  label: string;
+  createdAt: string;
+  generated: GeneratedSchedule;
+}
+
+export interface SelectedPerson {
+  dateKey: string;
+  category: string;
+  index: number;
+}
+
+export interface SchedulePersonRef {
+  monthKey: string;
+  dateKey: string;
+  category: string;
+  index: number;
+  name: string;
+}
+
+export type ScheduleChangeRequestStatus = "pending" | "accepted" | "rejected";
+
+export interface ScheduleChangeRequest {
+  id: string;
+  monthKey: string;
+  requesterId: string;
+  requesterName: string;
+  source: SchedulePersonRef;
+  target: SchedulePersonRef;
+  status: ScheduleChangeRequestStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+}
+
+export interface ScheduleNameObject {
+  key: string;
+  name: string;
+  ref: SchedulePersonRef;
+  pending: boolean;
+}
+
+export interface ScheduleState {
+  year: number;
+  month: number;
+  jcheckCount: number;
+  extraHolidays: string;
+  vacations: string;
+  offPeople: string[];
+  orders: Record<CategoryKey, string[]>;
+  pointers: PointerState;
+  generated: GeneratedSchedule | null;
+  generatedHistory: GeneratedSchedule[];
+  snapshots: Record<string, SnapshotItem[]>;
+  currentUser: string;
+  showMyWork: boolean;
+  editDateKey: string | null;
+  selectedPerson: SelectedPerson | null;
+}
+
+export type PointerState = Record<CategoryKey, number>;
+
+export interface MessageState {
+  tone: "ok" | "warn" | "note";
+  text: string;
+}
+
+export interface GenerationResult {
+  state: ScheduleState;
+  warningCount: number;
+  message: string;
+}

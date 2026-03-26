@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>근무 순번 입력 페이지</title>
+  <style>
+    :root{
+      --bg1:#07111f;--bg2:#0b1628;--bg3:#0e1b31;
+      --line:rgba(255,255,255,.1);--card:rgba(255,255,255,.05);--card2:rgba(255,255,255,.03);
+      --text:#fff;--muted:#aeb8ca;--cyan:#22d3ee;--blue:#3b82f6;--pink:#d946ef;--green:#10b981;--red:#ef4444;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Pretendard,sans-serif;color:var(--text);background:
+      radial-gradient(circle at top, rgba(77,122,255,.16), transparent 30%),
+      linear-gradient(180deg,var(--bg1),var(--bg2) 52%,var(--bg3));}
+    .container{max-width:1480px;margin:0 auto;padding:24px 16px 60px}
+    .layout{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;align-items:start}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:28px;box-shadow:0 16px 40px rgba(0,0,0,.25);overflow:hidden}
+    .card-top{height:6px;background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink))}
+    .card-pad{padding:22px}
+    .stack{display:flex;flex-direction:column;gap:18px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+    .title-xl{font-size:38px;font-weight:900;line-height:1.1;margin:0}
+    .title-md{font-size:22px;font-weight:900;line-height:1.15;margin:0}
+    .muted{color:var(--muted)}
+    .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;border:1px solid rgba(34,211,238,.18);background:rgba(34,211,238,.10);color:#d8fbff;font-size:12px;font-weight:800;letter-spacing:.18em}
+    .field{display:flex;flex-direction:column;gap:8px}
+    .field label{font-size:13px;font-weight:800;color:#e2e8f0}
+    .input,.textarea,.select{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.05);color:#fff;outline:none}
+    .textarea{min-height:110px;resize:vertical}
+    .btn{padding:12px 16px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.05);color:#fff;font-weight:900;cursor:pointer}
+    .btn.primary{background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));border:0}
+    .btn.white{background:#fff;color:#0f172a;border:0}
+    .note{padding:12px 14px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:14px;line-height:1.8}
+    .ok{padding:12px 14px;border-radius:16px;border:1px solid rgba(16,185,129,.25);background:rgba(16,185,129,.12);color:#bbf7d0;font-size:14px}
+    .warn{padding:12px 14px;border-radius:16px;border:1px solid rgba(239,68,68,.25);background:rgba(239,68,68,.12);color:#fecaca;font-size:14px}
+    .kpi{padding:16px;border-radius:18px;border:1px solid var(--line);background:rgba(255,255,255,.04)}
+    .kpi .label{font-size:12px;font-weight:800;color:#cbd5e1;letter-spacing:.16em}
+    .kpi .value{font-size:26px;font-weight:900;margin-top:8px}
+    .cat-card{border:1px solid var(--line);background:var(--card2);border-radius:22px;padding:16px}
+    .cat-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+    .cat-title{font-size:18px;font-weight:900}
+    .order-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+    .order-box{display:flex;flex-direction:column;gap:6px}
+    .order-box label{font-size:11px;font-weight:800;color:#cbd5e1;letter-spacing:.08em}
+    .order-box input{width:100%;padding:10px 10px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.05);color:#fff}
+    .preview-section{border:1px solid var(--line);background:var(--card2);border-radius:22px;padding:16px}
+    .preview-list{display:flex;flex-direction:column;gap:10px;max-height:260px;overflow:auto}
+    .preview-item{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.04);font-size:14px}
+    .json-box{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:18px;padding:14px;max-height:400px;overflow:auto}
+    pre{margin:0;white-space:pre-wrap;word-break:break-word;color:#dbeafe;font-size:13px;line-height:1.7}
+    .footer-actions{position:sticky;bottom:0;background:rgba(2,6,23,.82);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding:14px 0;margin-top:24px}
+    @media (max-width: 1200px){.layout{grid-template-columns:1fr}}
+    @media (max-width: 960px){.grid4,.grid2{grid-template-columns:1fr} .order-grid{grid-template-columns:repeat(3,1fr)} .title-xl{font-size:32px}}
+    @media (max-width: 640px){.order-grid{grid-template-columns:repeat(2,1fr)} .container{padding:18px 12px 50px}}
+  </style>
+</head>
+<body>
+  <div class="container stack">
+    <section class="card">
+      <div class="card-top"></div>
+      <div class="card-pad stack">
+        <div class="chip">SHIFT ORDER INPUT</div>
+        <h1 class="title-xl">근무 순번 입력 페이지</h1>
+        <div class="note muted">
+          근무 종류별로 순번을 따로 입력할 수 있게 카테고리를 분리했습니다.<br>
+          각 카테고리마다 최대 <strong style="color:#fff">30명</strong>까지 입력할 수 있고, 수정하면 오른쪽 미리보기에 <strong style="color:#fff">즉시 반영</strong>됩니다.
+        </div>
+      </div>
+    </section>
+
+    <section class="grid4">
+      <div class="kpi"><div class="label">대상 연도</div><div class="value" id="targetYearValue">-</div></div>
+      <div class="kpi"><div class="label">대상 월</div><div class="value" id="targetMonthValue">-</div></div>
+      <div class="kpi"><div class="label">제크 인원</div><div class="value" id="jcheckValue">1명</div></div>
+      <div class="kpi"><div class="label">입력된 이름 수</div><div class="value" id="filledCount">0명</div></div>
+    </section>
+
+    <section class="layout">
+      <div class="stack">
+        <div class="card">
+          <div class="card-pad stack">
+            <h2 class="title-md">기본 정보</h2>
+            <div class="grid2">
+              <div class="field"><label for="year">연도</label><input id="year" class="input" type="number"></div>
+              <div class="field"><label for="month">월</label><input id="month" class="input" type="number" min="1" max="12"></div>
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <label for="jcheckCount">제크 인원</label>
+                <select id="jcheckCount" class="select">
+                  <option value="1">1명</option>
+                  <option value="2">2명</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="activeCategory">현재 편집 카테고리 바로가기</label>
+                <select id="activeCategory" class="select"></select>
+              </div>
+            </div>
+            <div class="field"><label for="extraHolidays">추가 휴일</label><textarea id="extraHolidays" class="textarea" placeholder="쉼표로 구분&#10;예) 2026-05-05,2026-05-06"></textarea></div>
+            <div class="field"><label for="vacations">휴가자</label><textarea id="vacations" class="textarea" placeholder="한 줄씩 입력&#10;예) 2026-05-03: 정철원, 홍길동"></textarea></div>
+            <div id="messageBox"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-pad stack">
+            <h2 class="title-md">근무 종류별 순번 입력</h2>
+            <div class="note muted">
+              각 카테고리마다 1번부터 30번까지 이름을 직접 입력합니다. 입력한 값은 즉시 오른쪽 미리보기에 반영됩니다.
+            </div>
+            <div id="categoryForms" class="stack"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="card-pad stack">
+            <h2 class="title-md">실시간 미리보기</h2>
+            <div class="preview-section">
+              <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.16em;margin-bottom:10px">카테고리별 입력 현황</div>
+              <div id="livePreview" class="preview-list"></div>
+            </div>
+            <div class="preview-section">
+              <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.16em;margin-bottom:10px">특정 인원 오프 / 활성화</div>
+              <div class="note muted" style="margin-bottom:10px">
+                오프시키면 순번 입력값은 그대로 남아 있고, 근무표 작성 시 해당 인원만 제외됩니다.
+                다시 활성화하면 같은 순번 위치에서 바로 반영됩니다.
+              </div>
+              <div id="offPeopleList" class="preview-list"></div>
+            </div>
+            <div class="preview-section">
+              <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.16em;margin-bottom:10px">저장 데이터 JSON</div>
+              <div class="json-box"><pre id="jsonPreview"></pre></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="footer-actions">
+    <div class="container row">
+      <button class="btn primary" onclick="saveConfig()">저장</button>
+      <button class="btn white" onclick="loadSaved()">불러오기</button>
+      <button class="btn" onclick="resetForm()">초기화</button>
+      <button class="btn" onclick="downloadJson()">JSON 다운로드</button>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "j-shift-order-input-page-v2";
+    const categories = [
+      { key: "morning", label: "조근" },
+      { key: "extension", label: "연장" },
+      { key: "evening", label: "석근" },
+      { key: "nightWeekday", label: "월~목 야근" },
+      { key: "nightFriday", label: "금요일 야근" },
+      { key: "nightSaturday", label: "토요일 야근" },
+      { key: "nightSunday", label: "일요일 야근" },
+      { key: "jcheck", label: "제크" },
+      { key: "holidayDuty", label: "휴일근무" },
+      { key: "weekdayHolidayDuty", label: "평일휴일근무" }
+    ];
+
+    const defaultState = {
+      year: new Date().getFullYear(),
+      month: new Date().getMonth() + 1,
+      jcheckCount: 1,
+      extraHolidays: "",
+      vacations: "",
+      offPeople: [],
+      orders: {
+        morning: Array.from({length:30}, (_,i)=>""),
+        extension: Array.from({length:30}, (_,i)=>""),
+        evening: Array.from({length:30}, (_,i)=>""),
+        nightWeekday: Array.from({length:30}, (_,i)=>""),
+        nightFriday: Array.from({length:30}, (_,i)=>""),
+        nightSaturday: Array.from({length:30}, (_,i)=>""),
+        nightSunday: Array.from({length:30}, (_,i)=>""),
+        jcheck: Array.from({length:30}, (_,i)=>""),
+        holidayDuty: Array.from({length:30}, (_,i)=>""),
+        weekdayHolidayDuty: Array.from({length:30}, (_,i)=>"")
+      }
+    };
+
+    function loadState(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(raw){
+          const parsed = JSON.parse(raw);
+          return {
+            ...defaultState,
+            ...parsed,
+            offPeople: parsed.offPeople || [],
+            orders: Object.fromEntries(categories.map(cat => [
+              cat.key,
+              Array.from({length:30}, (_,i) => (parsed.orders?.[cat.key]?.[i] ?? defaultState.orders[cat.key][i] ?? ""))
+            ]))
+          };
+        }
+      }catch(e){}
+      return structuredClone(defaultState);
+    }
+
+    let state = loadState();
+
+    function setMessage(text, type="ok"){
+      document.getElementById("messageBox").innerHTML = text ? `<div class="${type}">${text}</div>` : "";
+    }
+
+    function renderCategoryOptions(){
+      const select = document.getElementById("activeCategory");
+      select.innerHTML = categories.map(cat => `<option value="${cat.key}">${cat.label}</option>`).join("");
+      select.onchange = (e) => {
+        const target = document.getElementById(`cat-${e.target.value}`);
+        if(target) target.scrollIntoView({behavior:"smooth", block:"start"});
+      };
+    }
+
+    function renderCategoryForms(){
+      const wrap = document.getElementById("categoryForms");
+      wrap.innerHTML = categories.map(cat => `
+        <div class="cat-card" id="cat-${cat.key}">
+          <div class="cat-head">
+            <div class="cat-title">${cat.label}</div>
+            <div class="muted" style="font-size:12px">1~30 순번</div>
+          </div>
+          <div class="order-grid">
+            ${
+              Array.from({length:30}, (_,i) => `
+                <div class="order-box">
+                  <label>${i+1}번</label>
+                  <input type="text" id="${cat.key}-${i}" value="${(state.orders?.[cat.key]?.[i] || "").replace(/"/g, '&quot;')}" placeholder="${i+1}번 이름">
+                </div>
+              `).join("")
+            }
+          </div>
+        </div>
+      `).join("");
+
+      categories.forEach(cat => {
+        for(let i=0;i<30;i++) {
+          const el = document.getElementById(`${cat.key}-${i}`);
+          el.addEventListener("input", (e) => {
+            state.orders[cat.key][i] = e.target.value.trim();
+            renderPreview();
+          });
+        }
+      });
+    }
+
+    function collectForm(){
+      return {
+        year: Number(document.getElementById("year").value || defaultState.year),
+        month: Number(document.getElementById("month").value || defaultState.month),
+        jcheckCount: Number(document.getElementById("jcheckCount").value || 1),
+        extraHolidays: document.getElementById("extraHolidays").value,
+        vacations: document.getElementById("vacations").value,
+        offPeople: (state.offPeople || []).filter(name =>
+          categories.some(cat => Array.from({length:30}, (_,i) => document.getElementById(`${cat.key}-${i}`).value.trim()).includes(name))
+        ),
+        orders: categories.reduce((acc, cat) => {
+          acc[cat.key] = Array.from({length:30}, (_,i) => document.getElementById(`${cat.key}-${i}`).value.trim());
+          return acc;
+        }, {})
+      };
+    }
+
+
+    function getUniquePeople(data){
+      const set = new Set();
+      categories.forEach(cat => {
+        (data.orders?.[cat.key] || []).forEach(name => {
+          const trimmed = String(name || "").trim();
+          if(trimmed) set.add(trimmed);
+        });
+      });
+      return Array.from(set);
+    }
+
+    function toggleOffPerson(name){
+      const current = new Set(state.offPeople || []);
+      if(current.has(name)) current.delete(name);
+      else current.add(name);
+      state.offPeople = Array.from(current);
+      renderPreview();
+    }
+
+    function fillForm(data){
+      document.getElementById("year").value = data.year;
+      document.getElementById("month").value = data.month;
+      document.getElementById("jcheckCount").value = data.jcheckCount;
+      document.getElementById("extraHolidays").value = data.extraHolidays;
+      document.getElementById("vacations").value = data.vacations;
+      state = structuredClone({...data, offPeople: data.offPeople || []});
+      renderCategoryForms();
+      renderPreview();
+    }
+
+    function saveConfig(){
+      const data = collectForm();
+      const filled = categories.flatMap(cat => data.orders[cat.key]).filter(Boolean).length;
+      if(!filled){
+        setMessage("최소 한 칸 이상 이름을 입력해주세요.", "warn");
+        return;
+      }
+      state = data;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      renderPreview();
+      setMessage("저장되었습니다. 수정 내용은 미리보기에 즉시 반영되며, 다시 열어도 유지됩니다.", "ok");
+    }
+
+    function loadSaved(){
+      state = loadState();
+      fillForm(state);
+      setMessage("저장된 값을 불러왔습니다.", "ok");
+    }
+
+    function resetForm(){
+      state = structuredClone(defaultState);
+      fillForm(state);
+      setMessage("초기화했습니다. 저장하려면 다시 저장 버튼을 눌러주세요.", "ok");
+    }
+
+    function downloadJson(){
+      const data = collectForm();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "shift-order-config-v2.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMessage("JSON 파일로 다운로드했습니다.", "ok");
+    }
+
+    function renderPreview(){
+      const data = collectForm();
+      state.offPeople = data.offPeople || state.offPeople || [];
+      document.getElementById("targetYearValue").textContent = `${data.year}년`;
+      document.getElementById("targetMonthValue").textContent = `${data.month}월`;
+      document.getElementById("jcheckValue").textContent = `${data.jcheckCount}명`;
+
+      const uniquePeople = getUniquePeople(data);
+      const filledCount = uniquePeople.length;
+      document.getElementById("filledCount").textContent = `${filledCount}명`;
+
+      const preview = document.getElementById("livePreview");
+      preview.innerHTML = categories.map(cat => {
+        const names = data.orders[cat.key]
+          .map((name, idx) => name ? `${idx+1}. ${name}${(data.offPeople || []).includes(name) ? " (오프)" : ""}` : null)
+          .filter(Boolean);
+        return `
+          <div class="preview-item">
+            <div style="font-weight:900">${cat.label}</div>
+            <div class="muted" style="text-align:right">${names.length ? names.slice(0,6).join(" / ") + (names.length > 6 ? " ..." : "") : "입력 없음"}</div>
+          </div>
+        `;
+      }).join("");
+
+      const offWrap = document.getElementById("offPeopleList");
+      offWrap.innerHTML = uniquePeople.length ? uniquePeople.map(name => {
+        const isOff = (data.offPeople || []).includes(name);
+        return `
+          <div class="preview-item">
+            <div style="font-weight:800">${name}</div>
+            <button class="btn ${isOff ? "" : "white"}" onclick="toggleOffPerson('${"${"}String(name).replace(/'/g, "\\'")${"}"}')">${isOff ? "활성화" : "오프"}</button>
+          </div>
+        `;
+      }).join("") : `<div class="muted">입력된 이름이 없습니다.</div>`;
+
+      document.getElementById("jsonPreview").textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.getElementById("year").addEventListener("input", renderPreview);
+    document.getElementById("month").addEventListener("input", renderPreview);
+    document.getElementById("jcheckCount").addEventListener("change", renderPreview);
+    document.getElementById("extraHolidays").addEventListener("input", renderPreview);
+    document.getElementById("vacations").addEventListener("input", renderPreview);
+
+    renderCategoryOptions();
+    fillForm(state);
+  </script>
+</body>
+</html>

@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>J특공대 포털</title>
+  <style>
+    :root{
+      --bg1:#07111f;--bg2:#0b1628;--bg3:#0e1b31;
+      --card:rgba(255,255,255,.05);--card2:rgba(255,255,255,.03);
+      --line:rgba(255,255,255,.1);--text:#fff;--muted:#a9b4c8;
+      --cyan:#22d3ee;--blue:#3b82f6;--pink:#d946ef;--white:#fff;
+      --green:#10b981;--amber:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Pretendard,sans-serif;background:
+      radial-gradient(circle at top, rgba(77,122,255,.18), transparent 30%),
+      linear-gradient(180deg,var(--bg1),var(--bg2) 52%,var(--bg3)); color:var(--text)}
+    a{text-decoration:none;color:inherit}
+    button,input,textarea,select{font:inherit}
+    .container{max-width:1280px;margin:0 auto;padding:0 16px}
+    .hidden{display:none!important}
+    .gradient{background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink))}
+    .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(34,211,238,.15);background:rgba(34,211,238,.10);padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.2em;color:#d8fbff}
+    .page{min-height:100vh}
+    .header{position:sticky;top:0;z-index:10;background:rgba(2,6,23,.78);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+    .header-inner{display:flex;justify-content:space-between;align-items:center;padding:16px 0;gap:12px}
+    .brand{display:flex;align-items:center;gap:12px;background:none;border:0;color:#fff;cursor:pointer}
+    .brand-bar{width:6px;height:40px;border-radius:999px;background:linear-gradient(180deg,var(--cyan),var(--blue),var(--pink))}
+    .brand-title{font-size:28px;font-weight:900;line-height:1}
+    .brand-sub{font-size:11px;letter-spacing:.28em;color:#94a3b8;margin-top:4px}
+    .nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .nav-wrap{display:flex;gap:10px;align-items:center}
+    .nav-btn,.btn,.tab-btn{
+      border:1px solid var(--line);background:rgba(255,255,255,.05);color:#fff;
+      padding:11px 16px;border-radius:999px;cursor:pointer;font-weight:700
+    }
+    .nav-btn.active{background:#fff;color:#0f172a}
+    .btn-primary{background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));border:0}
+    .btn-white{background:#fff;color:#0f172a;border:0}
+    .btn{border-radius:16px}
+    .user-pill{padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:#cbd5e1;font-size:14px}
+    .hero-grid,.eval-grid,.home-grid{display:grid;gap:24px}
+    .hero-grid{grid-template-columns:1.1fr .9fr;align-items:center;min-height:calc(100vh - 73px)}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:32px;box-shadow:0 16px 40px rgba(0,0,0,.28)}
+    .card-sm{border-radius:28px}
+    .card-pad{padding:28px}
+    .card-top{height:6px;width:100%;border-radius:999px 999px 0 0}
+    .muted{color:var(--muted)}
+    .title-xl{font-size:64px;line-height:1.05;font-weight:900;letter-spacing:-.03em;margin:20px 0 0}
+    .title-lg{font-size:42px;line-height:1.1;font-weight:900;letter-spacing:-.03em;margin:0}
+    .title-md{font-size:30px;line-height:1.15;font-weight:900;margin:0}
+    .gradient-text{background:linear-gradient(90deg,#9eeaf6,#9cc8ff,#f5b7ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+    .mini-card{border:1px solid var(--line);background:rgba(255,255,255,.04);padding:18px;border-radius:24px}
+    .field{display:flex;flex-direction:column;gap:8px}
+    .field label{font-size:14px;font-weight:700;color:#e2e8f0}
+    .input,.textarea,.select{
+      width:100%;padding:14px 16px;border-radius:16px;border:1px solid var(--line);
+      background:rgba(255,255,255,.05);color:#fff;outline:none
+    }
+    .textarea{min-height:120px;resize:vertical}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .msg{padding:12px 14px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:16px;font-size:14px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.56);display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(6px);z-index:50}
+    .section{padding:24px 0 80px}
+    .home-grid{grid-template-columns:1.2fr .8fr;align-items:start}
+    .eval-grid{grid-template-columns:.88fr 1.12fr}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:28px;background:rgba(0,0,0,.2)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:16px 20px;text-align:left}
+    thead{background:rgba(255,255,255,.04);color:#cbd5e1}
+    tbody tr{border-top:1px solid var(--line)}
+    .name-tabs-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:24px;align-items:start}
+    .sidebar{position:sticky;top:94px}
+    .tabs{display:flex;flex-direction:column;gap:12px}
+    .tab-btn{border-radius:18px;text-align:left;padding:16px}
+    .tab-btn.active{background:linear-gradient(90deg, rgba(34,211,238,.20), rgba(59,130,246,.20), rgba(217,70,239,.20));border-color:rgba(34,211,238,.3)}
+    .status{display:inline-flex;padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700}
+    .status.pending{background:rgba(34,211,238,.12);color:#d8fbff}
+    .status.progress{background:rgba(245,158,11,.15);color:#fde68a}
+    .status.done{background:rgba(16,185,129,.15);color:#bbf7d0}
+    .entry{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:28px;padding:20px}
+    .score-section{border:1px solid var(--line);background:rgba(0,0,0,.2);border-radius:18px;padding:16px}
+    .score-item{display:flex;justify-content:space-between;gap:14px;border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:18px;padding:14px;margin-top:10px}
+    .score-item-text{font-size:14px;line-height:1.6;color:#e5e7eb}
+    .score-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .point-pill{padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:12px;font-weight:700}
+    .complete-btn{padding:10px 16px;border-radius:999px;border:0;font-weight:800;cursor:pointer}
+    .complete-btn.on{background:#fff;color:#0f172a}
+    .complete-btn.off{background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));color:#fff}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .warn{padding:12px 14px;border-radius:16px;border:1px solid rgba(245,158,11,.25);background:rgba(245,158,11,.12);color:#fde68a;font-size:14px}
+    .mobile-menu-toggle{display:none}
+    .stack{display:flex;flex-direction:column;gap:16px}
+    .flow-list{display:flex;flex-direction:column;gap:16px}
+    .flow-item{display:flex;gap:14px;padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
+    .flow-no{width:44px;height:44px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-weight:900;background:linear-gradient(135deg,rgba(34,211,238,.25),rgba(59,130,246,.25),rgba(217,70,239,.25))}
+    .kpi{border:1px solid var(--line);background:rgba(255,255,255,.04);padding:16px;border-radius:18px}
+    .spaced{margin-top:24px}
+    @media (max-width: 1024px){
+      .hero-grid,.home-grid,.eval-grid,.name-tabs-layout{grid-template-columns:1fr}
+      .sidebar{position:static}
+      .tabs{flex-direction:row;overflow:auto;padding-bottom:4px}
+      .tab-btn{min-width:160px}
+      .title-xl{font-size:48px}
+      .title-lg{font-size:36px}
+    }
+    @media (max-width: 720px){
+      .header-inner{align-items:flex-start}
+      .mobile-menu-toggle{display:inline-flex}
+      .nav-wrap{display:none;width:100%;flex-direction:column;align-items:stretch}
+      .nav-wrap.open{display:flex}
+      .nav{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .nav-btn{border-radius:16px;padding:12px}
+      .user-pill,.logout-btn{width:100%;text-align:center}
+      .brand-title{font-size:24px}
+      .brand-sub{font-size:10px}
+      .title-xl{font-size:40px}
+      .title-lg{font-size:30px}
+      .card,.card-sm{border-radius:24px}
+      .card-pad{padding:20px}
+      .grid3,.stats{grid-template-columns:1fr}
+      th,td{padding:14px}
+      .score-item{flex-direction:column}
+      .score-right{justify-content:space-between}
+      .section{padding-top:16px}
+      .container{padding:0 14px}
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="page"></div>
+  <script>
+    const FORM_TYPES = [
+      "일반리포트",
+      "기획리포트",
+      "인터뷰리포트",
+      "LIVE(기자연결, 현장연결, 모바일)"
+    ];
+
+    const REVIEW_TEMPLATES = {
+      "일반리포트": [
+        { category: "1. 기사 주제와의 정합성", items: [
+          { label: "영상이 기사 핵심 내용과 직관적으로 매칭되는가", points: 3 },
+          { label: "전개 흐름에 맞는 컷 구성과 연결이 자연스러운가", points: 3 },
+        ]},
+        { category: "2. 기술적 완성도 및 기본기", items: [
+          { label: "수평·수직·사이즈·헤드룸 등이 안정적인가", points: 2 },
+          { label: "화이트밸런스·노출·초점이 정확하고 현장 오디오가 명료한가", points: 3 },
+        ]},
+        { category: "3. 기본 영상 확보 및 현장 커버리지", items: [
+          { label: "기사 구성에 필요한 사이즈별 영상이 충분한가", points: 3 },
+          { label: "인서트 및 상황 설명 화면을 적절히 확보했는가", points: 3 },
+        ]},
+        { category: "4. 현장 활용 및 대응력", items: [{ label: "제한된 환경 속에서 최적의 앵글과 배경을 선택했는가", points: 3 }]},
+        { category: "5. 가점(플랫폼 확장성 / 대응)", items: [
+          { label: "모바일라이브 또는 콘텐츠 제작에 선제 대응하였는가", points: 1 },
+          { label: "현장 돌발 상황에 유연하게 대응했는가", points: 1 },
+        ]},
+      ],
+      "기획리포트": [
+        { category: "1. 메시지 전달력 및 스토리텔링", items: [
+          { label: "영상이 기획 의도와 핵심 메시지를 명확히 전달하는가", points: 3 },
+          { label: "화면 호흡과 흐름이 자연스럽고 몰입도가 있는가", points: 3 },
+        ]},
+        { category: "2. 영상 표현력", items: [
+          { label: "심도·프레이밍·카메라 무빙이 의도적으로 설계되었는가", points: 3 },
+          { label: "인물 심리와 현장 상황을 고려한 프레임 구성인가", points: 3 },
+        ]},
+        { category: "3. 빛, 공간 해석 능력", items: [
+          { label: "자연광·조명을 전략적으로 활용했는가", points: 3 },
+          { label: "공간을 입체적으로 활용해 주제를 강화했는가", points: 3 },
+        ]},
+        { category: "4. 오디오·현장감 완성도", items: [
+          { label: "인터뷰이 오디오가 선명하고 현장의 음향을 의도적으로 컨트롤하였는가", points: 2 },
+        ]},
+        { category: "5. (가점) 차별·창의성 / 확장성", items: [
+          { label: "동일 사안 대비 독창적 영상 접근이 있는가", points: 1 },
+          { label: "확장성(추가 콘텐츠 제작)을 고려하여 구성하였나", points: 1 },
+        ]},
+      ],
+      "인터뷰리포트": [
+        { category: "1. 구도 안정성", items: [{ label: "주제와 어울리는 적절한 사이즈와 배경을 선정했는가", points: 5 }]},
+        { category: "2. 인물 부각 및 배경 선택", items: [{ label: "조명·자연광을 활용해 인물을 효과적으로 부각했는가", points: 5 }]},
+        { category: "3. 오디오 완성도", items: [{ label: "목소리를 노이즈 없이 명료하게 수음했는가", points: 5 }]},
+        { category: "4. 내용 보완 화면 확보", items: [{ label: "제스처·반응 컷 등 인서트를 충분히 확보했는가", points: 5 }]},
+        { category: "5. (가점) 진행 완성도", items: [
+          { label: "로드 인터뷰·돌발 상황에서 구도 유지와 피벗팅이 매끄러운가", points: 1 },
+          { label: "다인 인터뷰 시 균형이 유지되는가", points: 1 },
+        ]},
+      ],
+      "LIVE(기자연결, 현장연결, 모바일)": [
+        { category: "1. 시각적 현장성", items: [
+          { label: "보도 주제를 가장 잘 설명하는 배경을 선택했는가", points: 4 },
+          { label: "주·야간 환경에서 기자(혹은 주요 피사체)가 선명히 표현되는가", points: 3 },
+        ]},
+        { category: "2. 기술 안정성", items: [
+          { label: "화면 수평·구도가 안정적인가", points: 3 },
+          { label: "송출 신호·화질이 안정적인가", points: 3 },
+        ]},
+        { category: "3. 오디오 명료성", items: [
+          { label: "취재기자 또는 출연자의 음성과 현장음이 혼선 없이 전달되는가", points: 3 },
+        ]},
+        { category: "4. 카메라 운용능력", items: [
+          { label: "워크앤토크·이동 동선에 맞는 매끄러운 무빙인가", points: 4 },
+        ]},
+        { category: "5. (가점) 디지털 확장성 / 대응", items: [
+          { label: "라이브 이후 클립 재가공이 가능한 소스를 확보했는가", points: 1 },
+          { label: "현장 돌발 상황에 즉각 대응했는가", points: 1 },
+        ]},
+      ],
+    };
+
+    const STORAGE_KEY = "j-special-force-portal-v1";
+
+    const defaultState = {
+      isLoggedIn: false,
+      currentUser: "",
+      mobileMenuOpen: false,
+      activeMenu: "home",
+      selectedReviewOwner: "박지훈",
+      loginMessage: "",
+      signUpMessage: "",
+      evaluationMessage: "",
+      showSignUp: false,
+      loginForm: { id: "", password: "" },
+      signUpForm: { id: "", password: "", passwordConfirm: "" },
+      members: [
+        { id: "정철원", password: "jco080900", role: "admin", canReview: true },
+        { id: "홍길동", password: "1234", role: "admin", canReview: true },
+        { id: "김민수", password: "pass", role: "member", canReview: true },
+        { id: "박지훈", password: "1111", role: "member", canReview: false },
+        { id: "이서연", password: "2222", role: "member", canReview: false },
+      ],
+      scheduleItems: [
+        { date: "03.25", shift: "주간", person: "홍길동", note: "뉴스데스크 / 스튜디오" },
+        { date: "03.25", shift: "야간", person: "김민수", note: "사회부 사건팀" },
+        { date: "03.26", shift: "주간", person: "박지훈", note: "현장 ENG / 시청" },
+        { date: "03.26", shift: "야간", person: "이서연", note: "편집 대기 / 당직" },
+      ],
+      evaluationEntries: [],
+      evaluationSubmissions: [],
+    };
+
+    function createScoreState(type){
+      return (REVIEW_TEMPLATES[type] || []).map(section => ({
+        category: section.category,
+        items: section.items.map(item => ({...item, checked:false}))
+      }));
+    }
+    function getScoreTotal(scoreSections){
+      return (scoreSections || []).reduce((sum, section) =>
+        sum + section.items.reduce((acc, item) => acc + (item.checked ? item.points : 0), 0), 0);
+    }
+    function createEmptyEntry(type = FORM_TYPES[0]){
+      return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, type, title:"", link:"", date:"", comment:"" };
+    }
+    function seedInitialSubmissions(){
+      const entry = {
+        id: "seed-1", type: "일반리포트", title: "서울시청 현장 리포트",
+        link: "https://example.com/report-1", date: "2026-03-22",
+        comment: "현장 동선은 좋았지만 오프닝 멘트 호흡을 더 짧게 정리할 필요가 있습니다."
+      };
+      return [{
+        owner: "박지훈",
+        submittedAt: "2026-03-23 09:40",
+        status: "평가 대기",
+        entries: [entry],
+        reviews: {
+          [entry.id]: { scoreSections: createScoreState(entry.type), extraPoints: 0, extraComment: "", totalScore: 0 }
+        }
+      }];
+    }
+
+    function loadState(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(raw){
+          const parsed = JSON.parse(raw);
+          return {
+            ...defaultState,
+            ...parsed,
+            evaluationEntries: parsed.evaluationEntries?.length ? parsed.evaluationEntries : [createEmptyEntry()],
+            evaluationSubmissions: parsed.evaluationSubmissions?.length ? parsed.evaluationSubmissions : seedInitialSubmissions(),
+          };
+        }
+      }catch(e){}
+      return {
+        ...defaultState,
+        evaluationEntries: [createEmptyEntry()],
+        evaluationSubmissions: seedInitialSubmissions(),
+      };
+    }
+
+    let state = loadState();
+
+    function persist(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function currentMember(){
+      return state.members.find(m => m.id === state.currentUser);
+    }
+    function canReview(){
+      const m = currentMember();
+      return !!(m && (m.canReview || m.role === "admin"));
+    }
+    function activeReviewOwner(){
+      return state.evaluationSubmissions.some(s => s.owner === state.selectedReviewOwner)
+        ? state.selectedReviewOwner
+        : (state.evaluationSubmissions[0]?.owner || "");
+    }
+    function activeReviewSubmission(){
+      return state.evaluationSubmissions.find(s => s.owner === activeReviewOwner());
+    }
+    function statusClass(status){
+      if(status === "평가 완료") return "done";
+      if(status === "평가 진행 중") return "progress";
+      return "pending";
+    }
+    function esc(str){
+      return String(str ?? "").replace(/[&<>"']/g, m => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[m]));
+    }
+
+    function setState(patch){
+      state = {...state, ...patch};
+      persist();
+      render();
+    }
+
+    function updateNested(path, value){
+      let ref = state;
+      for(let i=0;i<path.length-1;i++) ref = ref[path[i]];
+      ref[path[path.length-1]] = value;
+      persist();
+      render();
+    }
+
+    function handleLogin(e){
+      e.preventDefault();
+      const user = state.members.find(m => m.id === state.loginForm.id.trim() && m.password === state.loginForm.password);
+      if(!user){
+        setState({loginMessage:"아이디 또는 비밀번호가 일치하지 않습니다."});
+        return;
+      }
+      setState({isLoggedIn:true,currentUser:user.id,activeMenu:"home",loginMessage:"",mobileMenuOpen:false});
+    }
+
+    function handleSignUp(e){
+      e.preventDefault();
+      const id = state.signUpForm.id.trim();
+      if(!id) return setState({signUpMessage:"이름(아이디)을 입력해주세요."});
+      if(!/^[가-힣]+$/.test(id)) return setState({signUpMessage:"아이디는 한글 이름으로만 입력해주세요."});
+      if(!state.signUpForm.password) return setState({signUpMessage:"비밀번호를 입력해주세요."});
+      if(state.signUpForm.password !== state.signUpForm.passwordConfirm) return setState({signUpMessage:"비밀번호 확인이 일치하지 않습니다."});
+      if(state.members.some(m => m.id === id)) return setState({signUpMessage:"이미 등록된 이름입니다."});
+      state.members.push({id, password: state.signUpForm.password, role:"member", canReview:false});
+      state.signUpForm = {id:"", password:"", passwordConfirm:""};
+      state.loginForm.id = id;
+      state.showSignUp = false;
+      state.signUpMessage = "";
+      state.loginMessage = "회원가입이 완료되었습니다. 로그인해주세요.";
+      persist(); render();
+    }
+
+    function logout(){
+      setState({isLoggedIn:false,currentUser:"",activeMenu:"home",mobileMenuOpen:false,loginForm:{id:"",password:""},evaluationMessage:""});
+    }
+
+    function addEvaluationEntry(){
+      if(state.evaluationEntries.length >= 3){
+        setState({evaluationMessage:"폼은 최대 3개까지 제출할 수 있습니다."});
+        return;
+      }
+      state.evaluationEntries.push(createEmptyEntry());
+      state.evaluationMessage = "";
+      persist(); render();
+    }
+
+    function removeEvaluationEntry(id){
+      if(state.evaluationEntries.length === 1){
+        setState({evaluationMessage:"최소 1개의 폼은 유지되어야 합니다."});
+        return;
+      }
+      state.evaluationEntries = state.evaluationEntries.filter(e => e.id !== id);
+      state.evaluationMessage = "";
+      persist(); render();
+    }
+
+    function submitEvaluation(e){
+      e.preventDefault();
+      const invalid = state.evaluationEntries.some(entry => !entry.title.trim() || !entry.link.trim() || !entry.date.trim() || !entry.comment.trim());
+      if(invalid){
+        setState({evaluationMessage:"모든 폼에 제목, 링크, 날짜, 코멘트를 입력해주세요."});
+        return;
+      }
+      const reviews = {};
+      state.evaluationEntries.forEach(entry => {
+        reviews[entry.id] = {scoreSections:createScoreState(entry.type), extraPoints:0, extraComment:"", totalScore:0};
+      });
+      const now = new Date();
+      const pad = n => String(n).padStart(2,"0");
+      const submittedAt = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      const payload = {
+        owner: state.currentUser,
+        submittedAt,
+        status: "평가 대기",
+        entries: state.evaluationEntries.map(e => ({...e})),
+        reviews
+      };
+      state.evaluationSubmissions = [payload, ...state.evaluationSubmissions.filter(s => s.owner !== state.currentUser)];
+      state.selectedReviewOwner = state.currentUser;
+      state.evaluationEntries = [createEmptyEntry()];
+      state.evaluationMessage = `${state.currentUser} 이름으로 평가 폼이 저장되었습니다.`;
+      persist(); render();
+    }
+
+    function toggleScoreItem(owner, entryId, sectionIndex, itemIndex){
+      const sub = state.evaluationSubmissions.find(s => s.owner === owner);
+      if(!sub) return;
+      const review = sub.reviews[entryId];
+      review.scoreSections[sectionIndex].items[itemIndex].checked = !review.scoreSections[sectionIndex].items[itemIndex].checked;
+      review.totalScore = getScoreTotal(review.scoreSections) + (review.extraPoints || 0);
+      if(review.totalScore > 0 && sub.status === "평가 대기") sub.status = "평가 진행 중";
+      persist(); render();
+    }
+
+    function updateExtraPoints(owner, entryId, points){
+      const sub = state.evaluationSubmissions.find(s => s.owner === owner);
+      if(!sub) return;
+      const review = sub.reviews[entryId];
+      review.extraPoints = Number(points);
+      review.totalScore = getScoreTotal(review.scoreSections) + review.extraPoints;
+      if(review.totalScore > 0 && sub.status === "평가 대기") sub.status = "평가 진행 중";
+      persist(); render();
+    }
+
+    function updateExtraComment(owner, entryId, text){
+      const sub = state.evaluationSubmissions.find(s => s.owner === owner);
+      if(!sub) return;
+      sub.reviews[entryId].extraComment = text;
+      persist(); render();
+    }
+
+    function validateCompletion(sub){
+      for(const entry of sub.entries){
+        const review = sub.reviews[entry.id];
+        if((review.extraPoints || 0) > 0 && !String(review.extraComment || "").trim()){
+          return `${sub.owner}님의 ${entry.title} 항목은 가점을 부여하려면 추가가점의견을 입력해야 합니다.`;
+        }
+      }
+      return "";
+    }
+
+    function completeReview(owner){
+      const sub = state.evaluationSubmissions.find(s => s.owner === owner);
+      if(!sub) return;
+      const msg = validateCompletion(sub);
+      if(msg){
+        setState({evaluationMessage:msg, activeMenu:"review"});
+        return;
+      }
+      sub.status = "평가 완료";
+      state.evaluationMessage = `${owner}님의 평가가 완료 처리되었습니다.`;
+      persist(); render();
+    }
+
+    function bindGlobalEvents(){
+      document.querySelectorAll("[data-action]").forEach(el => {
+        el.onclick = () => handleAction(el.dataset.action, el.dataset);
+      });
+      const loginForm = document.getElementById("login-form");
+      if(loginForm) loginForm.onsubmit = handleLogin;
+      const signUpForm = document.getElementById("signup-form");
+      if(signUpForm) signUpForm.onsubmit = handleSignUp;
+      const evalForm = document.getElementById("evaluation-form");
+      if(evalForm) evalForm.onsubmit = submitEvaluation;
+
+      document.querySelectorAll("[data-bind]").forEach(el => {
+        const path = el.dataset.bind.split(".");
+        el.oninput = (e) => {
+          let target = state;
+          for(let i=0;i<path.length-1;i++) target = target[path[i]];
+          target[path[path.length-1]] = e.target.value;
+          persist();
+        };
+      });
+      document.querySelectorAll("[data-entry-bind]").forEach(el => {
+        el.oninput = (e) => {
+          const entry = state.evaluationEntries.find(x => x.id === el.dataset.entryId);
+          if(entry){ entry[el.dataset.field] = e.target.value; persist(); }
+        };
+      });
+    }
+
+    function handleAction(action, data){
+      if(action === "go-home") return setState({activeMenu:"home", mobileMenuOpen:false});
+      if(action === "toggle-menu") return setState({mobileMenuOpen:!state.mobileMenuOpen});
+      if(action === "go-menu") return setState({activeMenu:data.menu, mobileMenuOpen:false});
+      if(action === "open-signup") return setState({showSignUp:true, signUpMessage:""});
+      if(action === "close-signup") return setState({showSignUp:false});
+      if(action === "logout") return logout();
+      if(action === "add-entry") return addEvaluationEntry();
+      if(action === "remove-entry") return removeEvaluationEntry(data.id);
+      if(action === "select-type"){
+        const entry = state.evaluationEntries.find(x => x.id === data.entryId);
+        if(entry){ entry.type = data.type; persist(); render(); }
+        return;
+      }
+      if(action === "select-review-owner") return setState({selectedReviewOwner:data.owner, activeMenu:"review"});
+      if(action === "toggle-score") return toggleScoreItem(data.owner, data.entryId, Number(data.sectionIndex), Number(data.itemIndex));
+      if(action === "extra-points") return updateExtraPoints(data.owner, data.entryId, Number(data.points));
+      if(action === "complete-review") return completeReview(data.owner);
+    }
+
+    function loginPage(){
+      return `
+      <div class="page">
+        <div class="container">
+          <div class="hero-grid">
+            <section>
+              <div class="chip">JTBC INSPIRED INTERNAL PORTAL</div>
+              <h1 class="title-xl">J특공대</h1>
+              <p class="muted" style="max-width:720px;font-size:18px;line-height:1.8;margin-top:18px">
+                부서 내 근무표 공지, 수정 요청, 영상평가 제출과 평가 결과 취합까지 하나의 흐름으로 연결하는 내부 전용 포털입니다.
+              </p>
+              <div class="grid3 spaced">
+                ${[
+                  ["근무표 운영","공지 및 수정 반영"],
+                  ["영상평가 제출","로그인 후 폼 작성"],
+                  ["평가 결과 취합","평가자·관리자·팀장 공유"]
+                ].map(([t,d]) => `<div class="mini-card"><div style="font-weight:800">${t}</div><div class="muted" style="margin-top:8px;font-size:14px;line-height:1.7">${d}</div></div>`).join("")}
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-top gradient"></div>
+              <div class="card-pad">
+                <div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.24em">LOGIN</div>
+                <h2 class="title-md" style="margin-top:10px">포털 로그인</h2>
+                <p class="muted" style="margin-top:12px;line-height:1.8;font-size:14px">로그인 후에만 본 페이지로 들어갈 수 있도록 구성했습니다. 회원가입 시 아이디는 한글 이름으로 등록됩니다.</p>
+                <form id="login-form" class="stack spaced">
+                  <div class="field">
+                    <label>아이디</label>
+                    <input class="input" placeholder="예: 정철원" value="${esc(state.loginForm.id)}" data-bind="loginForm.id" />
+                  </div>
+                  <div class="field">
+                    <label>비밀번호</label>
+                    <input class="input" type="password" placeholder="비밀번호 입력" value="${esc(state.loginForm.password)}" data-bind="loginForm.password" />
+                  </div>
+                  ${state.loginMessage ? `<div class="msg">${esc(state.loginMessage)}</div>` : ""}
+                  <button class="btn btn-primary" style="padding:14px 16px;font-weight:900">로그인</button>
+                </form>
+                <div class="row spaced" style="justify-content:space-between;align-items:center;padding:16px;border:1px solid var(--line);background:var(--card2);border-radius:18px">
+                  <div>
+                    <div style="font-size:14px;font-weight:800">처음 이용하시나요?</div>
+                    <div class="muted" style="font-size:12px;margin-top:6px">회원가입 후 같은 아이디로 로그인할 수 있습니다.</div>
+                  </div>
+                  <button class="btn" data-action="open-signup">회원가입</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        ${state.showSignUp ? `
+        <div class="modal">
+          <div class="card" style="width:100%;max-width:520px">
+            <div class="card-top gradient"></div>
+            <div class="card-pad">
+              <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                <div><div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.2em">SIGN UP</div><h3 class="title-md" style="margin-top:8px">회원가입</h3></div>
+                <button class="btn" data-action="close-signup">닫기</button>
+              </div>
+              <form id="signup-form" class="stack spaced">
+                <div class="field"><label>아이디(한글 이름)</label><input class="input" placeholder="예: 홍길동" value="${esc(state.signUpForm.id)}" data-bind="signUpForm.id" /></div>
+                <div class="field"><label>비밀번호</label><input class="input" type="password" placeholder="제한 없이 설정 가능" value="${esc(state.signUpForm.password)}" data-bind="signUpForm.password" /></div>
+                <div class="field"><label>비밀번호 확인</label><input class="input" type="password" placeholder="비밀번호 다시 입력" value="${esc(state.signUpForm.passwordConfirm)}" data-bind="signUpForm.passwordConfirm" /></div>
+                ${state.signUpMessage ? `<div class="msg">${esc(state.signUpMessage)}</div>` : ""}
+                <button class="btn btn-white" style="padding:14px 16px;font-weight:900">가입 완료</button>
+              </form>
+            </div>
+          </div>
+        </div>` : ""}
+      </div>`;
+    }
+
+    function header(){
+      const reviewBtn = canReview() ? `<button class="nav-btn ${state.activeMenu==='review'?'active':''}" data-action="go-menu" data-menu="review">평가페이지</button>` : "";
+      return `
+      <header class="header">
+        <div class="container header-inner">
+          <button class="brand" data-action="go-home">
+            <span class="brand-bar"></span>
+            <span>
+              <div class="brand-title">J특공대</div>
+              <div class="brand-sub">J SPECIAL FORCE PORTAL</div>
+            </span>
+          </button>
+          <button class="nav-btn mobile-menu-toggle" data-action="toggle-menu">메뉴</button>
+          <div class="nav-wrap ${state.mobileMenuOpen ? 'open' : ''}">
+            <nav class="nav">
+              <button class="nav-btn ${state.activeMenu==='schedule'?'active':''}" data-action="go-menu" data-menu="schedule">근무표</button>
+              <button class="nav-btn ${state.activeMenu==='evaluation'?'active':''}" data-action="go-menu" data-menu="evaluation">영상평가제출</button>
+              ${reviewBtn}
+            </nav>
+            <div class="nav" style="grid-template-columns:1fr 1fr">
+              <div class="user-pill">${esc(state.currentUser)} 님${canReview() ? " · 평가권한" : ""}</div>
+              <button class="nav-btn logout-btn" data-action="logout">로그아웃</button>
+            </div>
+          </div>
+        </div>
+      </header>`;
+    }
+
+    function homePage(){
+      return `
+      <main class="container section">
+        <section class="home-grid">
+          <div class="card">
+            <div class="card-top gradient"></div>
+            <div class="card-pad">
+              <div class="chip" style="letter-spacing:0">내부 운영 포털 · 근무표 공지 · 영상평가 제출</div>
+              <h1 class="title-lg" style="margin-top:18px">부서 운영을 한 화면에서.<br><span class="gradient-text">신뢰감 있는 방송사 스타일의 내부 포털</span></h1>
+              <p class="muted" style="margin-top:18px;line-height:1.8">근무표 공지와 수정 요청, 영상평가 제출 및 평가 결과 취합까지 연결되는 부서 전용 웹페이지의 홈 화면입니다. 약 40여 명의 인원이 쉽게 접근하고, 관리자와 팀장이 필요한 흐름을 직관적으로 확인할 수 있도록 구성했습니다.</p>
+              <div class="row spaced">
+                <button class="btn btn-white" data-action="go-menu" data-menu="schedule">근무표 보러가기</button>
+                <button class="btn" data-action="go-menu" data-menu="evaluation">영상평가 제출 이동</button>
+              </div>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="card card-sm card-pad">
+              <div class="muted" style="font-size:14px;font-weight:800">운영 흐름</div>
+              <div class="flow-list spaced">
+                ${[
+                  ["01","근무표 공지","관리자가 일정 공지 및 수정사항 반영"],
+                  ["02","영상평가 제출","개인이 로그인 후 지정된 폼 제출"],
+                  ["03","평가 및 취합","관리자가 지정한 평가자가 평가 후 결과 종합"],
+                ].map(([n,t,d]) => `<div class="flow-item"><div class="flow-no">${n}</div><div><div style="font-weight:800">${t}</div><div class="muted" style="margin-top:6px;font-size:14px;line-height:1.7">${d}</div></div></div>`).join("")}
+              </div>
+            </div>
+            <div class="card card-sm card-pad">
+              <div class="muted" style="font-size:14px;font-weight:800">현재 반영된 기능</div>
+              <p class="muted" style="margin-top:12px;line-height:1.8;font-size:14px">반응형 구조로 PC와 모바일에서 다르게 보이며, 평가페이지는 이름 탭을 눌러 사람별 평가표를 확인하도록 구성했습니다.</p>
+            </div>
+          </div>
+        </section>
+      </main>`;
+    }
+
+    function schedulePage(){
+      return `
+      <main class="container section">
+        <section class="card card-pad">
+          <div class="row" style="justify-content:space-between;align-items:flex-end">
+            <div>
+              <div class="chip" style="letter-spacing:.18em">SCHEDULE</div>
+              <h1 class="title-md" style="margin-top:12px">근무표</h1>
+              <p class="muted" style="margin-top:12px;line-height:1.8">근무표 공지와 수정 요청을 관리하는 페이지입니다. 현재는 화면 구조를 보기 위한 예시 데이터가 들어 있습니다.</p>
+            </div>
+            <button class="btn btn-primary">수정 요청하기</button>
+          </div>
+          <div class="table-wrap spaced">
+            <table>
+              <thead><tr><th>날짜</th><th>근무</th><th>담당자</th><th>비고</th></tr></thead>
+              <tbody>
+                ${state.scheduleItems.map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.shift)}</td><td style="font-weight:800">${esc(item.person)}</td><td class="muted">${esc(item.note)}</td></tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>`;
+    }
+
+    function evaluationPage(){
+      const mySub = state.evaluationSubmissions.find(item => item.owner === state.currentUser);
+      return `
+      <main class="container section">
+        <section class="eval-grid">
+          <article class="card card-pad">
+            <div class="chip" style="letter-spacing:.18em">VIDEO EVALUATION</div>
+            <h1 class="title-md" style="margin-top:12px">영상평가 제출</h1>
+            <p class="muted" style="margin-top:12px;line-height:1.8">폼 추가 후 각 카드 안에서 유형을 선택하도록 구성했습니다. 최대 3개까지 제출할 수 있습니다.</p>
+            <div class="stats spaced">
+              ${[
+                ["제출자", state.currentUser || "로그인 사용자"],
+                ["제출 가능 수", `${state.evaluationEntries.length}/3`],
+                ["평가 상태", mySub?.status || "미제출"],
+              ].map(([l,v]) => `<div class="kpi"><div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.16em">${l}</div><div style="margin-top:8px;font-size:18px;font-weight:900">${esc(v)}</div></div>`).join("")}
+            </div>
+            <div class="card-sm spaced" style="padding:18px;border:1px solid var(--line);background:var(--card2)">
+              <div style="font-size:14px;font-weight:800">제출 안내</div>
+              <div class="muted" style="margin-top:10px;font-size:14px;line-height:1.8">폼 종류 선택 영역은 없애고, 폼 추가 후 각 카드 안에서 유형을 선택하도록 바꿨습니다. 최종 제출하면 현재 로그인한 이름으로 저장됩니다.</div>
+              <button class="btn spaced" style="width:100%" data-action="add-entry">폼 추가하기</button>
+            </div>
+          </article>
+
+          <article class="card card-pad">
+            <form id="evaluation-form" class="stack">
+              ${state.evaluationEntries.map((entry, index) => `
+                <div class="entry">
+                  <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:14px">
+                    <div>
+                      <div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.18em">FORM ${index+1}</div>
+                      <div class="row" style="margin-top:10px">
+                        ${FORM_TYPES.map(type => `<button type="button" class="complete-btn ${entry.type===type?'off':'on'}" style="${entry.type===type?'':'background:rgba(255,255,255,.04);color:#e2e8f0;border:1px solid var(--line)'}" data-action="select-type" data-entry-id="${entry.id}" data-type="${esc(type)}">${esc(type)}</button>`).join("")}
+                      </div>
+                    </div>
+                    <button type="button" class="btn" data-action="remove-entry" data-id="${entry.id}">폼 삭제</button>
+                  </div>
+                  <div class="stack spaced">
+                    <div class="row" style="display:grid;grid-template-columns:1fr 1fr">
+                      <div class="field"><label>제목</label><input class="input" value="${esc(entry.title)}" data-entry-bind data-entry-id="${entry.id}" data-field="title" placeholder="영상 제목 입력"></div>
+                      <div class="field"><label>링크</label><input class="input" value="${esc(entry.link)}" data-entry-bind data-entry-id="${entry.id}" data-field="link" placeholder="URL 입력"></div>
+                    </div>
+                    <div class="field"><label>날짜</label><input class="input" type="date" value="${esc(entry.date)}" data-entry-bind data-entry-id="${entry.id}" data-field="date"></div>
+                    <div class="field"><label>코멘트</label><textarea class="textarea" data-entry-bind data-entry-id="${entry.id}" data-field="comment" placeholder="기획 의도, 촬영 포인트, 보완점 등을 입력">${esc(entry.comment)}</textarea></div>
+                  </div>
+                </div>
+              `).join("")}
+              ${state.evaluationMessage ? `<div class="msg">${esc(state.evaluationMessage)}</div>` : ""}
+              <div class="row">
+                <button type="button" class="btn" style="flex:1" data-action="add-entry">폼 추가하기</button>
+                <button class="btn btn-primary" style="flex:1">최종 제출</button>
+              </div>
+            </form>
+          </article>
+        </section>
+      </main>`;
+    }
+
+    function reviewPage(){
+      if(!canReview()){
+        return `<main class="container section"><section class="card card-pad" style="text-align:center"><div class="title-md">접근 권한이 없습니다.</div><p class="muted" style="margin-top:16px;line-height:1.8">평가페이지는 관리자가 지정한 사용자만 볼 수 있습니다.</p></section></main>`;
+      }
+      if(!state.evaluationSubmissions.length){
+        return `<main class="container section"><section class="card card-pad"><div class="msg">아직 제출된 평가 폼이 없습니다.</div></section></main>`;
+      }
+      const sub = activeReviewSubmission();
+      return `
+      <main class="container section">
+        <section class="stack">
+          <div class="card card-pad">
+            <div class="chip" style="letter-spacing:.18em">REVIEW CENTER</div>
+            <h1 class="title-md" style="margin-top:12px">평가페이지</h1>
+            <p class="muted" style="margin-top:12px;line-height:1.8">왼쪽 이름 탭을 누르면 해당 제출자의 평가표가 열립니다. 모바일에서는 이름 탭이 상단 가로 스크롤 형태로 바뀝니다.</p>
+            ${state.evaluationMessage ? `<div class="msg spaced">${esc(state.evaluationMessage)}</div>` : ""}
+          </div>
+
+          <div class="name-tabs-layout">
+            <aside class="card card-sm card-pad sidebar">
+              <div class="muted" style="font-size:13px;font-weight:800;letter-spacing:.18em;margin-bottom:12px">제출자 목록</div>
+              <div class="tabs">
+                ${state.evaluationSubmissions.map(s => `
+                  <button class="tab-btn ${s.owner===activeReviewOwner()?'active':''}" data-action="select-review-owner" data-owner="${esc(s.owner)}">
+                    <div style="font-size:16px;font-weight:900">${esc(s.owner)}</div>
+                    <div class="muted" style="margin-top:8px;font-size:12px">${esc(s.submittedAt)}</div>
+                    <div class="status ${statusClass(s.status)}" style="margin-top:12px">${esc(s.status)}</div>
+                  </button>`).join("")}
+              </div>
+            </aside>
+
+            <article class="card card-pad">
+              <div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:16px">
+                <div>
+                  <div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.18em">SUBMITTED BY</div>
+                  <h2 class="title-md" style="margin-top:8px">${esc(sub.owner)}</h2>
+                  <div class="muted" style="margin-top:8px;font-size:14px">제출 시각 ${esc(sub.submittedAt)}</div>
+                </div>
+                <div class="status ${statusClass(sub.status)}" style="font-size:14px">${esc(sub.status)}</div>
+              </div>
+
+              <div class="stack spaced">
+                ${sub.entries.map((entry, index) => {
+                  const review = sub.reviews[entry.id];
+                  const baseScore = getScoreTotal(review.scoreSections);
+                  const totalScore = baseScore + (review.extraPoints || 0);
+                  return `
+                  <div class="entry">
+                    <div class="row" style="justify-content:space-between;align-items:flex-start">
+                      <div>
+                        <div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.18em">ENTRY ${index+1}</div>
+                        <div class="status pending" style="margin-top:8px;background:linear-gradient(90deg,var(--cyan),var(--blue),var(--pink));color:#fff">${esc(entry.type)}</div>
+                        <h3 style="margin:14px 0 0;font-size:22px;font-weight:900">${esc(entry.title)}</h3>
+                      </div>
+                      <div class="muted" style="font-size:14px">제작일 ${esc(entry.date)}</div>
+                    </div>
+
+                    <div class="row spaced" style="display:grid;grid-template-columns:1fr 1fr">
+                      <div class="score-section"><div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.16em">링크</div><div style="margin-top:8px;font-size:14px;word-break:break-all;color:#a5f3fc">${esc(entry.link)}</div></div>
+                      <div class="score-section"><div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.16em">코멘트</div><div style="margin-top:8px;font-size:14px;line-height:1.7;color:#d1d5db">${esc(entry.comment)}</div></div>
+                    </div>
+
+                    <div class="stack spaced">
+                      ${review.scoreSections.map((section, sectionIndex) => `
+                        <div class="score-section">
+                          <div style="font-size:14px;font-weight:800">${esc(section.category)}</div>
+                          ${section.items.map((item, itemIndex) => `
+                            <div class="score-item">
+                              <div class="score-item-text">${esc(item.label)}</div>
+                              <div class="score-right">
+                                <div class="point-pill">${item.points}점</div>
+                                <button type="button" class="complete-btn ${item.checked ? 'on' : 'off'}"
+                                  data-action="toggle-score" data-owner="${esc(sub.owner)}" data-entry-id="${entry.id}" data-section-index="${sectionIndex}" data-item-index="${itemIndex}">
+                                  ${item.checked ? '충족됨' : '충족'}
+                                </button>
+                              </div>
+                            </div>
+                          `).join("")}
+                        </div>
+                      `).join("")}
+                    </div>
+
+                    <div class="row spaced" style="display:grid;grid-template-columns:.8fr 1.2fr">
+                      <div class="score-section">
+                        <div style="font-size:14px;font-weight:800">추가 가점</div>
+                        <div class="row" style="margin-top:12px">
+                          ${[0,1,2,3,4,5].map(p => `
+                            <button type="button" class="complete-btn ${review.extraPoints===p?'on':'off'}" style="${review.extraPoints===p?'':'background:rgba(255,255,255,.04);color:#e2e8f0;border:1px solid var(--line)'}"
+                              data-action="extra-points" data-owner="${esc(sub.owner)}" data-entry-id="${entry.id}" data-points="${p}">
+                              ${p}점
+                            </button>`).join("")}
+                        </div>
+                        <div class="muted" style="margin-top:12px;font-size:12px;line-height:1.6">가점을 1점 이상 부여할 때는 반드시 추가가점의견을 남겨주세요.</div>
+                      </div>
+                      <div class="score-section">
+                        <div style="font-size:14px;font-weight:800">추가가점의견</div>
+                        <textarea class="textarea" style="margin-top:12px;min-height:100px" oninput="updateExtraComment('${esc(sub.owner)}','${entry.id}', this.value)">${esc(review.extraComment || '')}</textarea>
+                      </div>
+                    </div>
+
+                    <div class="stats spaced">
+                      <div class="kpi"><div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.16em">기본 점수</div><div style="margin-top:8px;font-size:30px;font-weight:900">${baseScore}점</div></div>
+                      <div class="kpi"><div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.16em">추가 가점</div><div style="margin-top:8px;font-size:30px;font-weight:900">${review.extraPoints || 0}점</div></div>
+                      <div class="kpi" style="border-color:rgba(34,211,238,.2);background:rgba(34,211,238,.10)"><div style="font-size:12px;font-weight:800;letter-spacing:.16em;color:#d8fbff">종합점수</div><div style="margin-top:8px;font-size:36px;font-weight:900">${totalScore}점</div></div>
+                    </div>
+
+                    <div class="row spaced">
+                      <button type="button" class="btn btn-primary" data-action="complete-review" data-owner="${esc(sub.owner)}">평가 완료 처리</button>
+                      ${(review.extraPoints || 0) > 0 && !String(review.extraComment || '').trim() ? `<div class="warn">가점을 부여한 경우 추가가점의견을 반드시 입력해야 합니다.</div>` : ""}
+                    </div>
+                  </div>`;
+                }).join("")}
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>`;
+    }
+
+    function render(){
+      const app = document.getElementById("app");
+      if(!state.isLoggedIn){
+        app.innerHTML = loginPage();
+        bindGlobalEvents();
+        return;
+      }
+      let page = "";
+      if(state.activeMenu === "schedule") page = schedulePage();
+      else if(state.activeMenu === "evaluation") page = evaluationPage();
+      else if(state.activeMenu === "review") page = reviewPage();
+      else page = homePage();
+
+      app.innerHTML = `${header()}${page}`;
+      bindGlobalEvents();
+    }
+
+    window.updateExtraComment = updateExtraComment;
+    render();
+  </script>
+</body>
+</html>
