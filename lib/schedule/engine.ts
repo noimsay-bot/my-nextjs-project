@@ -1,4 +1,14 @@
-import { categories, defaultPointers, defaultScheduleState } from "@/lib/schedule/constants";
+﻿import {
+  categories,
+  createEmptyOffByCategory,
+  DEFAULT_JCHECK_COUNT,
+  defaultPointers,
+  defaultScheduleState,
+  getScheduleCategoryLabel,
+  SCHEDULE_MONTHS,
+  SCHEDULE_YEAR_END,
+  SCHEDULE_YEAR_START,
+} from "@/lib/schedule/constants";
 import {
   CategoryKey,
   DaySchedule,
@@ -7,19 +17,39 @@ import {
   PointerState,
   ScheduleState,
   SnapshotItem,
+  VacationType,
 } from "@/lib/schedule/types";
 
 export function cloneScheduleState(state: ScheduleState): ScheduleState {
   return JSON.parse(JSON.stringify(state)) as ScheduleState;
 }
 
+function clampNumber(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
 export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): ScheduleState {
   const base = cloneScheduleState(defaultScheduleState);
   if (!input) return base;
+  const legacyOffPeople = Array.isArray(input.offPeople) ? input.offPeople : [];
+  const nextOffByCategory = createEmptyOffByCategory();
+  categories.forEach((category) => {
+    nextOffByCategory[category.key] = Array.from(
+      new Set(
+        input.offByCategory?.[category.key] ??
+          (legacyOffPeople.length > 0 ? legacyOffPeople : base.offByCategory[category.key]),
+      ),
+    );
+  });
   return {
     ...base,
     ...input,
-    offPeople: Array.isArray(input.offPeople) ? input.offPeople : [],
+    year: clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year),
+    month: clampNumber(input.month ?? base.month, SCHEDULE_MONTHS[0], SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1], base.month),
+    jcheckCount: DEFAULT_JCHECK_COUNT,
+    offPeople: [],
+    offByCategory: nextOffByCategory,
     orders: Object.fromEntries(
       categories.map((category) => [
         category.key,
@@ -27,6 +57,21 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
       ]),
     ) as Record<CategoryKey, string[]>,
     pointers: { ...defaultPointers, ...(input.pointers ?? {}) },
+    monthStartPointers: Object.fromEntries(
+      Object.entries(input.monthStartPointers ?? {}).map(([monthKey, pointerState]) => [
+        monthKey,
+        { ...defaultPointers, ...pointerState },
+      ]),
+    ) as Record<string, PointerState>,
+    monthStartNames: Object.fromEntries(
+      Object.entries(input.monthStartNames ?? {}).map(([monthKey, names]) => [
+        monthKey,
+        Object.fromEntries(
+          Object.entries(names ?? {}).map(([key, name]) => [key, typeof name === "string" ? name.trim() : ""]),
+        ),
+      ]),
+    ) as Record<string, Partial<Record<CategoryKey, string>>>,
+    pendingSnapshotMonthKey: typeof input.pendingSnapshotMonthKey === "string" ? input.pendingSnapshotMonthKey : null,
     snapshots: input.snapshots ?? {},
     generated: input.generated ?? null,
     generatedHistory: input.generatedHistory ?? (input.generated ? [input.generated] : []),
@@ -50,6 +95,29 @@ export function getUniquePeople(state: ScheduleState) {
 
 export function splitNames(value: string) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+export function parseVacationEntry(value: string): { type: VacationType; name: string } {
+  const trimmed = value.trim();
+  const matched = /^(연차|대휴)\s*:(.+)$/.exec(trimmed);
+  if (matched) {
+    return {
+      type: matched[1] as VacationType,
+      name: matched[2].trim(),
+    };
+  }
+  return {
+    type: "연차",
+    name: trimmed,
+  };
+}
+
+export function formatVacationEntry(type: VacationType, name: string) {
+  return `${type}:${name.trim()}`;
+}
+
+function getVacationNames(entries: string[]) {
+  return entries.map((entry) => parseVacationEntry(entry).name).filter(Boolean);
 }
 
 export function parseHolidaySet(text: string, year?: number, month?: number) {
@@ -90,6 +158,101 @@ export function fmtDate(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+export function getMonthKey(year: number, month: number) {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+export function getMonthStartPointers(state: ScheduleState, monthKey: string): PointerState {
+  const base = { ...defaultPointers, ...(state.monthStartPointers[monthKey] ?? state.pointers) };
+  const startNames = state.monthStartNames[monthKey] ?? {};
+
+  categories.forEach((category) => {
+    const startName = startNames[category.key]?.trim();
+    if (!startName) return;
+    const pool = getActiveOrderPool(state, category.key);
+    const foundIndex = pool.findIndex((name) => name === startName);
+    if (foundIndex >= 0) {
+      base[category.key] = foundIndex + 1;
+    }
+  });
+
+  return base;
+}
+
+export function getStartPointerRawIndex(state: ScheduleState, monthKey: string, key: CategoryKey) {
+  const order = state.orders[key] ?? [];
+  const startName = state.monthStartNames[monthKey]?.[key]?.trim();
+  if (startName) {
+    const rawIndex = order.findIndex((name) => name.trim() === startName);
+    if (rawIndex >= 0) return rawIndex;
+  }
+  const nonEmptyIndices = order
+    .map((name, index) => ({ name: name.trim(), index }))
+    .filter((item) => Boolean(item.name))
+    .map((item) => item.index);
+  if (nonEmptyIndices.length === 0) return null;
+  const pointer = getMonthStartPointers(state, monthKey)[key] || 1;
+  const compactIndex = ((pointer - 1) % nonEmptyIndices.length + nonEmptyIndices.length) % nonEmptyIndices.length;
+  return nonEmptyIndices[compactIndex] ?? null;
+}
+
+export function setMonthStartPointer(state: ScheduleState, monthKey: string, key: CategoryKey, rawIndex: number) {
+  const order = state.orders[key] ?? [];
+  const nonEmptyIndices = order
+    .map((name, index) => ({ name: name.trim(), index }))
+    .filter((item) => Boolean(item.name));
+  const compactIndex = nonEmptyIndices.findIndex((item) => item.index === rawIndex);
+  if (compactIndex < 0) return state;
+  const selectedName = nonEmptyIndices[compactIndex]?.name ?? "";
+
+  const next = cloneScheduleState(state);
+  next.monthStartPointers = {
+    ...next.monthStartPointers,
+    [monthKey]: {
+      ...defaultPointers,
+      ...(next.monthStartPointers[monthKey] ?? next.pointers),
+      [key]: compactIndex + 1,
+    },
+  };
+  next.monthStartNames = {
+    ...next.monthStartNames,
+    [monthKey]: {
+      ...(next.monthStartNames[monthKey] ?? {}),
+      [key]: selectedName,
+    },
+  };
+  next.pointers = {
+    ...next.pointers,
+    [key]: compactIndex + 1,
+  };
+  if (selectedName) {
+    next.offByCategory = {
+      ...next.offByCategory,
+      [key]: (next.offByCategory[key] ?? []).filter((name) => name !== selectedName),
+    };
+  }
+  const activePool = getActiveOrderPool(next, key);
+  const activeIndex = activePool.findIndex((name) => name === selectedName);
+  const nextPointer = activeIndex >= 0 ? activeIndex + 1 : compactIndex + 1;
+  next.monthStartPointers = {
+    ...next.monthStartPointers,
+    [monthKey]: {
+      ...next.monthStartPointers[monthKey],
+      [key]: nextPointer,
+    },
+  };
+  next.pointers = {
+    ...next.pointers,
+    [key]: nextPointer,
+  };
+  return next;
+}
+
+function formatDayOnly(dateKey: string) {
+  const [, , day] = dateKey.split("-");
+  return `${Number(day)}일`;
+}
+
 export function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
 }
@@ -110,16 +273,40 @@ function getOrderPool(state: ScheduleState, key: CategoryKey) {
   return state.orders[key].map((name) => name.trim()).filter(Boolean);
 }
 
+function getActiveOrderPool(state: ScheduleState, key: CategoryKey) {
+  const offSet = new Set((state.offByCategory[key] ?? []).map((name) => name.trim()).filter(Boolean));
+  return getOrderPool(state, key).filter((name) => !offSet.has(name));
+}
+
+export function getCategoryPeople(state: ScheduleState, key: CategoryKey) {
+  return Array.from(new Set(getOrderPool(state, key)));
+}
+
+function getStartNameFromPointer(state: ScheduleState, key: CategoryKey, pointer: number) {
+  const pool = getActiveOrderPool(state, key);
+  if (pool.length === 0) return "";
+  const index = ((pointer - 1) % pool.length + pool.length) % pool.length;
+  return pool[index] ?? "";
+}
+
+function buildMonthStartNamesFromPointers(state: ScheduleState, pointers: PointerState) {
+  return categories.reduce((accumulator, category) => {
+    const pointer = pointers[category.key] || 1;
+    accumulator[category.key] = getStartNameFromPointer(state, category.key, pointer);
+    return accumulator;
+  }, {} as Partial<Record<CategoryKey, string>>);
+}
+
 function nextCandidatesByOrder(
   state: ScheduleState,
   key: CategoryKey,
   count: number,
-  usedNames: Set<string>,
+  blockedNames: Set<string>,
   excludeNames: string[],
   vacationNames: string[],
   pointers: PointerState,
 ) {
-  const pool = getOrderPool(state, key).filter((name) => !state.offPeople.includes(name));
+  const pool = getActiveOrderPool(state, key);
   const selected: string[] = [];
   if (pool.length === 0) return selected;
 
@@ -130,7 +317,7 @@ function nextCandidatesByOrder(
     const name = pool[index];
     if (
       name &&
-      !usedNames.has(name) &&
+      !blockedNames.has(name) &&
       !selected.includes(name) &&
       !excludeNames.includes(name) &&
       !vacationNames.includes(name)
@@ -145,6 +332,29 @@ function nextCandidatesByOrder(
   return selected;
 }
 
+function takeSequentialCandidatesByOrder(
+  state: ScheduleState,
+  key: CategoryKey,
+  count: number,
+  pointers: PointerState,
+) {
+  const pool = getActiveOrderPool(state, key);
+  const selected: string[] = [];
+  if (pool.length === 0 || count <= 0) return selected;
+
+  let pointer = pointers[key] || 1;
+  let taken = 0;
+  while (taken < count) {
+    const index = ((pointer - 1) % pool.length + pool.length) % pool.length;
+    selected.push(pool[index]);
+    pointer += 1;
+    taken += 1;
+  }
+
+  pointers[key] = pointer;
+  return selected;
+}
+
 function collectConflicts(
   assignments: Record<string, string[]>,
   previousNight: string[],
@@ -152,23 +362,110 @@ function collectConflicts(
   dateKey: string,
 ) {
   const conflicts: DaySchedule["conflicts"] = [];
+  const conflictKeys = new Set<string>();
+
+  const pushConflict = (category: string, name: string) => {
+    const key = `${category}-${name}`;
+    if (conflictKeys.has(key)) return;
+    conflictKeys.add(key);
+    conflicts.push({ category, name });
+    warnings.push({ date: dateKey, category, name });
+  };
+
   Object.entries(assignments).forEach(([category, names]) => {
+    if (category === "휴가") return;
     names.forEach((name) => {
       if (previousNight.includes(name)) {
-        conflicts.push({ category, name });
-        warnings.push({ date: dateKey, category, name });
+        pushConflict(category, name);
       }
     });
   });
+
+  const categoriesByName = new Map<string, string[]>();
+  Object.entries(assignments).forEach(([category, names]) => {
+    if (category === "휴가") return;
+    names.forEach((name) => {
+      const current = categoriesByName.get(name) ?? [];
+      if (!current.includes(category)) current.push(category);
+      categoriesByName.set(name, current);
+    });
+  });
+
+  categoriesByName.forEach((categoriesForName, name) => {
+    if (categoriesForName.length <= 1) return;
+    const movableCategories = categoriesForName.includes("연장")
+      ? categoriesForName.filter((category) => category !== "연장")
+      : categoriesForName.slice(1);
+    movableCategories.forEach((category) => pushConflict(category, name));
+  });
+
   return conflicts;
+}
+
+function getAssignedNamesForDay(day: DaySchedule) {
+  const assigned = new Set<string>();
+  Object.values(day.assignments).forEach((names) => {
+    names.forEach((name) => assigned.add(name));
+  });
+  return assigned;
+}
+
+function ensureMonthlyJcheckCoverage(state: ScheduleState, days: DaySchedule[]) {
+  const activePeople = getCategoryPeople(state, "jcheck").filter((name) => !(state.offByCategory.jcheck ?? []).includes(name));
+  if (activePeople.length === 0) return;
+
+  const eligibleDays = days.filter(
+    (day) =>
+      !day.isOverflowMonth &&
+      day.month === state.month &&
+      !day.isWeekend &&
+      !day.isCustomHoliday &&
+      Array.isArray(day.assignments["제크"]),
+  );
+  if (eligibleDays.length === 0) return;
+
+  const assignedSet = new Set(eligibleDays.flatMap((day) => day.assignments["제크"] ?? []));
+  const priorityDays = eligibleDays.filter((day) => day.dow === 1 || day.dow === 5);
+  const fallbackDays = eligibleDays.filter((day) => day.dow !== 1 && day.dow !== 5);
+  const missingPeople = activePeople.filter((name) => !assignedSet.has(name));
+
+  const assignMissing = (targetDays: DaySchedule[], allowSameDayOtherWork: boolean) => {
+    if (targetDays.length === 0) return;
+    let dayIndex = 0;
+
+    for (let personIndex = 0; personIndex < missingPeople.length; personIndex += 1) {
+      const name = missingPeople[personIndex];
+      if (!name || assignedSet.has(name)) continue;
+
+      for (let offset = 0; offset < targetDays.length; offset += 1) {
+        const target = targetDays[(dayIndex + offset) % targetDays.length];
+        const usedNames = getAssignedNamesForDay(target);
+        const isAvailable = !getVacationNames(target.vacations).includes(name) && !target.assignments["제크"].includes(name);
+        const canAssign = isAvailable && (allowSameDayOtherWork || !usedNames.has(name));
+        if (!canAssign) continue;
+
+        target.assignments["제크"] = [...(target.assignments["제크"] ?? []), name];
+        assignedSet.add(name);
+        dayIndex = (dayIndex + offset + 1) % targetDays.length;
+        break;
+      }
+    }
+  };
+
+  assignMissing(priorityDays, false);
+  assignMissing(fallbackDays, false);
+  assignMissing(priorityDays, true);
+  assignMissing(fallbackDays, true);
 }
 
 export function generateSchedule(state: ScheduleState): GenerationResult {
   const nextState = cloneScheduleState(state);
+  const monthKey = getMonthKey(nextState.year, nextState.month);
   const holidaySet = parseHolidaySet(nextState.extraHolidays, nextState.year, nextState.month);
   const vacationMap = parseVacationMap(nextState.vacations);
   const range = getScheduleRange(nextState.year, nextState.month);
-  const pointers = { ...nextState.pointers };
+  const startPointers = getMonthStartPointers(nextState, monthKey);
+  const pointers = { ...startPointers };
   const days: DaySchedule[] = [];
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
@@ -187,41 +484,33 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
     const isCustomHoliday = isHoliday;
     const isWeekdayHoliday = isHoliday && !isWeekend;
     const vacations = vacationMap[dateKey] ?? [];
-    const used = new Set<string>();
     const assignments: Record<string, string[]> = {};
 
     if (isCustomHoliday) {
       assignments["조근"] = [];
+      assignments["연장"] = [];
       assignments["일반"] = [];
-      assignments["석근"] = [];
       assignments["야근"] = [];
       assignments["국회"] = [];
     } else if (isWeekend) {
-      assignments["주말조근"] = nextCandidatesByOrder(nextState, "morning", 1, used, [], vacations, pointers);
-      assignments["주말조근"].forEach((name) => used.add(name));
-      assignments["주말일반근무"] = nextCandidatesByOrder(nextState, "holidayDuty", 2, used, [], vacations, pointers);
-      assignments["주말일반근무"].forEach((name) => used.add(name));
-      assignments["뉴스대기"] = nextCandidatesByOrder(nextState, "holidayDuty", 1, used, [], vacations, pointers);
-      assignments["뉴스대기"].forEach((name) => used.add(name));
+      const weekendCrew = takeSequentialCandidatesByOrder(nextState, "holidayDuty", 4, pointers);
+      assignments["주말조근"] = weekendCrew.slice(0, 1);
+      assignments["주말일반근무"] = weekendCrew.slice(1, 3);
+      assignments["뉴스대기"] = weekendCrew.slice(3, 4);
     } else {
-      assignments["조근"] = nextCandidatesByOrder(nextState, "morning", 2, used, [], vacations, pointers);
-      assignments["조근"].forEach((name) => used.add(name));
+      assignments["조근"] = takeSequentialCandidatesByOrder(nextState, "morning", 2, pointers);
 
       if (dow >= 1 && dow <= 5) {
         if (weeklyExtensionWeekKey !== weekKey) {
           weeklyExtensionWeekKey = weekKey;
-          weeklyExtensionCrew = nextCandidatesByOrder(nextState, "extension", 4, new Set<string>(), [], [], pointers);
+          weeklyExtensionCrew = takeSequentialCandidatesByOrder(nextState, "extension", 4, pointers);
         }
-        assignments["연장"] = weeklyExtensionCrew
-          .filter((name) => !vacations.includes(name) && !nextState.offPeople.includes(name))
-          .slice(0, 4);
+        assignments["연장"] = [...weeklyExtensionCrew];
       } else {
         assignments["연장"] = [];
       }
-      assignments["연장"].forEach((name) => used.add(name));
 
-      assignments["석근"] = nextCandidatesByOrder(nextState, "evening", 3, used, [], vacations, pointers);
-      assignments["석근"].forEach((name) => used.add(name));
+      assignments["일반"] = takeSequentialCandidatesByOrder(nextState, "evening", 3, pointers);
     }
 
     if (!isCustomHoliday) {
@@ -229,13 +518,11 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
       if (dow === 5) nightKey = "nightFriday";
       if (dow === 6) nightKey = "nightSaturday";
       if (dow === 0) nightKey = "nightSunday";
-      assignments["야근"] = nextCandidatesByOrder(nextState, nightKey, 1, used, [], vacations, pointers);
-      assignments["야근"].forEach((name) => used.add(name));
+      assignments["야근"] = takeSequentialCandidatesByOrder(nextState, nightKey, 1, pointers);
     }
 
     if (!isWeekend && !isCustomHoliday) {
-      assignments["제크"] = nextCandidatesByOrder(nextState, "jcheck", nextState.jcheckCount, used, [], vacations, pointers);
-      assignments["제크"].forEach((name) => used.add(name));
+      assignments["제크"] = takeSequentialCandidatesByOrder(nextState, "jcheck", nextState.jcheckCount, pointers);
     }
 
     if (isCustomHoliday) {
@@ -270,38 +557,51 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
 
   const nextMonthStart = new Date(range.end);
   nextMonthStart.setDate(nextMonthStart.getDate() + 1);
+  const nextMonthKey = getMonthKey(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1);
+  const nextMonthStartNames = buildMonthStartNamesFromPointers(nextState, pointers);
 
   const generated: GeneratedSchedule = {
     year: nextState.year,
     month: nextState.month,
-    monthKey: `${nextState.year}-${String(nextState.month).padStart(2, "0")}`,
+    monthKey,
     days,
     nextPointers: pointers,
     nextStartDate: fmtDate(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1, nextMonthStart.getDate()),
   };
 
   nextState.generated = generated;
+  nextState.monthStartPointers = {
+    ...nextState.monthStartPointers,
+    [monthKey]: startPointers,
+    [nextMonthKey]: { ...pointers },
+  };
+  nextState.monthStartNames = {
+    ...nextState.monthStartNames,
+    [nextMonthKey]: nextMonthStartNames,
+  };
   nextState.generatedHistory = [
     ...nextState.generatedHistory.filter((item) => item.monthKey !== generated.monthKey),
     generated,
   ].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   nextState.pointers = pointers;
+  nextState.pendingSnapshotMonthKey = monthKey;
 
   return {
     state: nextState,
     warningCount: warnings.length,
     message:
       warnings.length > 0
-        ? `야근 다음날 근무 충돌 ${warnings.length}건이 발견되었습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`
-        : `충돌 없이 자동 작성되었습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`,
+        ? `순번대로 작성했고 충돌 ${warnings.length}건을 표시했습니다. 자동 재배치로 조정할 수 있습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`
+        : `순번대로 작성했습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`,
   };
 }
 
 function mapCategoryToPointer(category: string, day: DaySchedule): CategoryKey {
-  if (category === "조근" || category === "주말조근") return "morning";
+  if (category === "조근") return "morning";
   if (category === "연장") return "extension";
-  if (category === "석근") return "evening";
+  if (category === "일반") return "evening";
   if (category === "제크") return "jcheck";
+  if (category === "주말조근") return "holidayDuty";
   if (category === "주말일반근무" || category === "뉴스대기") return "holidayDuty";
   if (category === "야근") {
     if (day.dow === 5) return "nightFriday";
@@ -323,54 +623,294 @@ export function createSnapshot(state: ScheduleState, label = "원본") {
     createdAt: new Date().toLocaleString("ko-KR"),
     generated: cloneScheduleState(next).generated as GeneratedSchedule,
   };
-  next.snapshots[key] = [item, ...(next.snapshots[key] ?? [])];
+  next.snapshots[key] = [item];
   return next;
 }
 
 export function autoRebalance(state: ScheduleState): GenerationResult {
   if (!state.generated) return { state, warningCount: 0, message: "먼저 근무표를 작성하세요." };
 
-  const next = createSnapshot(state, "원본");
+  const next = cloneScheduleState(state);
   const generated = cloneScheduleState(next).generated as GeneratedSchedule;
-  const pointers = { ...next.pointers };
-  let previousNight: string[] = [];
+  let snapshotSavedThisRun = false;
+  if (next.pendingSnapshotMonthKey === generated.monthKey) {
+    const snapshotState = createSnapshot(next, "원본");
+    next.snapshots = snapshotState.snapshots;
+    next.pendingSnapshotMonthKey = null;
+    snapshotSavedThisRun = true;
+  }
   const warnings: Array<{ date: string; category: string; name: string }> = [];
+  const changes: Array<{ sourceDate: string; targetDate: string; category: string; sourceName: string; targetName: string }> = [];
+  const allDays = generated.days;
+  const generatedIndex = next.generatedHistory.findIndex((item) => item.monthKey === generated.monthKey);
+  const previousGenerated = generatedIndex > 0 ? next.generatedHistory[generatedIndex - 1] ?? null : null;
+  const rebalanceStartDate = previousGenerated?.nextStartDate ?? allDays[0]?.dateKey ?? "";
+  const sheetDays = allDays.filter((day) => day.dateKey >= rebalanceStartDate);
+  const rebalanceDateSet = new Set(sheetDays.map((day) => day.dateKey));
+  const indexByDateKey = new Map(allDays.map((day, index) => [day.dateKey, index]));
 
-  generated.days.forEach((day) => {
-    const vacations = day.assignments["휴가"] ?? day.vacations ?? [];
-    const used = new Set<string>();
-    Object.values(day.assignments).forEach((group) => group.forEach((name) => used.add(name)));
+  const getPreviousDay = (dateKey: string) => {
+    const currentIndex = indexByDateKey.get(dateKey);
+    if (currentIndex === undefined || currentIndex <= 0) return null;
+    return allDays[currentIndex - 1] ?? null;
+  };
 
-    Object.entries(day.assignments).forEach(([category, names]) => {
-      names.forEach((name, index) => {
-        if (!previousNight.includes(name)) return;
-        used.delete(name);
-        const replacement = nextCandidatesByOrder(next, mapCategoryToPointer(category, day), 1, used, previousNight, vacations, pointers)[0];
-        if (replacement) {
-          day.assignments[category][index] = replacement;
-          used.add(replacement);
-        } else {
-          day.assignments[category][index] = name;
-          used.add(name);
-          warnings.push({ date: day.dateKey, category, name });
-        }
-      });
+  const getNextDay = (dateKey: string) => {
+    const currentIndex = indexByDateKey.get(dateKey);
+    if (currentIndex === undefined || currentIndex >= allDays.length - 1) return null;
+    return allDays[currentIndex + 1] ?? null;
+  };
+
+  const getWeekKey = (dateKey: string) => {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    const dow = date.getDay();
+    const diffToMonday = dow === 0 ? -6 : 1 - dow;
+    date.setDate(date.getDate() + diffToMonday);
+    return fmtDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  };
+
+  const weekDaysByKey = sheetDays.reduce(
+    (accumulator, day) => {
+      const weekKey = getWeekKey(day.dateKey);
+      accumulator.set(weekKey, [...(accumulator.get(weekKey) ?? []), day]);
+      return accumulator;
+    },
+    new Map<string, DaySchedule[]>(),
+  );
+
+  const hasNightShiftPreviousDay = (dateKey: string, name: string) => {
+    const previousDay = getPreviousDay(dateKey);
+    return (previousDay?.assignments["야근"] ?? []).includes(name);
+  };
+
+  const hasLockedAssignmentNextDay = (dateKey: string, name: string) => {
+    const nextDay = getNextDay(dateKey);
+    if (!nextDay) return false;
+    return (nextDay.assignments["연장"] ?? []).includes(name);
+  };
+
+  const canPlaceNameOnDay = (
+    day: DaySchedule,
+    category: string,
+    indexToReplace: number,
+    name: string,
+  ) => {
+    if (getVacationNames(day.vacations ?? []).includes(name)) return false;
+    return !Object.entries(day.assignments).some(([currentCategory, names]) =>
+      names.some((currentName, currentIndex) => {
+        if (currentName !== name) return false;
+        return !(currentCategory === category && currentIndex === indexToReplace);
+      }),
+    );
+  };
+
+  const trySwapWithinCategory = (
+    sourceDay: DaySchedule,
+    category: string,
+    index: number,
+    sourceName: string,
+  ) => {
+    for (const candidateDay of sheetDays) {
+      if (candidateDay.dateKey === sourceDay.dateKey) continue;
+      const candidateNames = candidateDay.assignments[category] ?? [];
+      if (candidateNames.length === 0) continue;
+
+      for (let candidateIndex = 0; candidateIndex < candidateNames.length; candidateIndex += 1) {
+        const candidateName = candidateNames[candidateIndex];
+        if (!candidateName || candidateName === sourceName) continue;
+        if (category === "야근" && [5, 6, 0].includes(sourceDay.dow) && candidateDay.dow !== sourceDay.dow) continue;
+        if (hasNightShiftPreviousDay(sourceDay.dateKey, candidateName)) continue;
+        if (hasNightShiftPreviousDay(candidateDay.dateKey, sourceName)) continue;
+        if (category === "야근" && hasLockedAssignmentNextDay(sourceDay.dateKey, candidateName)) continue;
+        if (category === "야근" && hasLockedAssignmentNextDay(candidateDay.dateKey, sourceName)) continue;
+        if (!canPlaceNameOnDay(sourceDay, category, index, candidateName)) continue;
+        if (!canPlaceNameOnDay(candidateDay, category, candidateIndex, sourceName)) continue;
+
+        sourceDay.assignments[category][index] = candidateName;
+        candidateDay.assignments[category][candidateIndex] = sourceName;
+        changes.push({
+          sourceDate: sourceDay.dateKey,
+          targetDate: candidateDay.dateKey,
+          category,
+          sourceName,
+          targetName: candidateName,
+        });
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const canSwapExtensionWeeks = (
+    sourceWeekDays: DaySchedule[],
+    candidateWeekDays: DaySchedule[],
+    sourceName: string,
+    candidateName: string,
+  ) => {
+    for (const day of sourceWeekDays) {
+      if (!(day.assignments["연장"] ?? []).includes(sourceName)) continue;
+      if (!canPlaceNameOnDay(day, "연장", (day.assignments["연장"] ?? []).indexOf(sourceName), candidateName)) return false;
+      if (hasNightShiftPreviousDay(day.dateKey, candidateName)) return false;
+    }
+
+    for (const day of candidateWeekDays) {
+      if (!(day.assignments["연장"] ?? []).includes(candidateName)) continue;
+      if (!canPlaceNameOnDay(day, "연장", (day.assignments["연장"] ?? []).indexOf(candidateName), sourceName)) return false;
+      if (hasNightShiftPreviousDay(day.dateKey, sourceName)) return false;
+    }
+
+    return true;
+  };
+
+  const trySwapExtensionWeek = (day: DaySchedule, sourceName: string) => {
+    const sourceWeekKey = getWeekKey(day.dateKey);
+    const sourceWeekDays = weekDaysByKey.get(sourceWeekKey) ?? [];
+    if (sourceWeekDays.length === 0) return false;
+
+    for (const [candidateWeekKey, candidateWeekDays] of weekDaysByKey.entries()) {
+      if (candidateWeekKey === sourceWeekKey) continue;
+      const candidateNames = Array.from(
+        new Set(candidateWeekDays.flatMap((weekDay) => weekDay.assignments["연장"] ?? [])),
+      ).filter((name) => Boolean(name) && name !== sourceName);
+
+      for (const candidateName of candidateNames) {
+        if (!canSwapExtensionWeeks(sourceWeekDays, candidateWeekDays, sourceName, candidateName)) continue;
+
+        sourceWeekDays.forEach((weekDay) => {
+          weekDay.assignments["연장"] = (weekDay.assignments["연장"] ?? []).map((name) =>
+            name === sourceName ? candidateName : name,
+          );
+        });
+        candidateWeekDays.forEach((weekDay) => {
+          weekDay.assignments["연장"] = (weekDay.assignments["연장"] ?? []).map((name) =>
+            name === candidateName ? sourceName : name,
+          );
+        });
+        changes.push({
+          sourceDate: sourceWeekDays[0]?.dateKey ?? day.dateKey,
+          targetDate: candidateWeekDays[0]?.dateKey ?? day.dateKey,
+          category: "연장",
+          sourceName,
+          targetName: candidateName,
+        });
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const getAssignmentSignature = () =>
+    JSON.stringify(
+      sheetDays.map((day) => ({
+        dateKey: day.dateKey,
+        assignments: day.assignments,
+      })),
+    );
+
+  const recomputeConflicts = () => {
+    const nextWarnings: Array<{ date: string; category: string; name: string }> = [];
+    let previousNight: string[] = [];
+    allDays.forEach((day) => {
+      day.conflicts = collectConflicts(day.assignments, previousNight, nextWarnings, day.dateKey);
+      previousNight = [...(day.assignments["야근"] ?? [])];
     });
+    return nextWarnings;
+  };
 
-    day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
-    previousNight = [...(day.assignments["야근"] ?? [])];
-  });
+  const seenSignatures = new Set<string>();
+  let passCount = 0;
+
+  while (passCount < 20) {
+    const beforeSignature = getAssignmentSignature();
+    if (seenSignatures.has(beforeSignature)) break;
+    seenSignatures.add(beforeSignature);
+
+    let swappedInPass = false;
+
+    for (const day of sheetDays) {
+      const previousDay = getPreviousDay(day.dateKey);
+      const previousNight = previousDay?.assignments["야근"] ?? [];
+
+      (day.assignments["연장"] ?? []).forEach((name) => {
+        if (!previousNight.includes(name) || !previousDay) return;
+        const canMovePreviousNight = rebalanceDateSet.has(previousDay.dateKey);
+        const previousNightIndex = (previousDay.assignments["야근"] ?? []).findIndex((nightName) => nightName === name);
+        const swapped =
+          canMovePreviousNight && previousNightIndex >= 0
+            ? trySwapWithinCategory(previousDay, "야근", previousNightIndex, name)
+            : false;
+        const fallbackSwapped = swapped ? false : trySwapExtensionWeek(day, name);
+        if (swapped || fallbackSwapped) swappedInPass = true;
+      });
+
+      Object.entries(day.assignments).forEach(([category, names]) => {
+        if (category === "휴가") return;
+        if (category === "연장") return;
+
+        names.forEach((name, index) => {
+          if (!previousNight.includes(name)) return;
+          const swapped = trySwapWithinCategory(day, category, index, name);
+          if (swapped) swappedInPass = true;
+        });
+      });
+
+      const sameDayAssignments = new Map<string, string[]>();
+      Object.entries(day.assignments).forEach(([category, names]) => {
+        if (category === "휴가") return;
+        names.forEach((name) => {
+          const current = sameDayAssignments.get(name) ?? [];
+          if (!current.includes(category)) current.push(category);
+          sameDayAssignments.set(name, current);
+        });
+      });
+
+      sameDayAssignments.forEach((categoriesForName, name) => {
+        if (categoriesForName.length <= 1) return;
+        const categoriesToMove = categoriesForName.includes("연장")
+          ? categoriesForName.filter((category) => category !== "연장")
+          : categoriesForName.slice(1);
+
+        categoriesToMove.forEach((category) => {
+          const indexes = (day.assignments[category] ?? [])
+            .map((currentName, index) => ({ currentName, index }))
+            .filter((item) => item.currentName === name)
+            .map((item) => item.index);
+
+          indexes.forEach((index) => {
+            const swapped = trySwapWithinCategory(day, category, index, name);
+            if (swapped) swappedInPass = true;
+          });
+        });
+      });
+    }
+
+    passCount += 1;
+    if (!swappedInPass) break;
+  }
+
+  warnings.splice(0, warnings.length, ...recomputeConflicts());
+  const visibleWarnings = warnings.filter((warning) => rebalanceDateSet.has(warning.date));
+  const visibleConflictDays = new Set(visibleWarnings.map((warning) => warning.date)).size;
 
   next.generated = generated;
   next.generatedHistory = next.generatedHistory.map((item) => (item.monthKey === generated.monthKey ? generated : item));
-  next.pointers = pointers;
+  const changeSummary =
+    changes.length > 0
+      ? ` 재배치: ${changes
+          .map((item) => `${formatDayOnly(item.sourceDate)} ${getScheduleCategoryLabel(item.category)} ${item.sourceName}↔${formatDayOnly(item.targetDate)} ${getScheduleCategoryLabel(item.category)} ${item.targetName}`)
+          .join(", ")}`
+      : "";
+  const snapshotSummary = snapshotSavedThisRun ? " 원본 사본을 저장했습니다." : "";
   return {
     state: next,
-    warningCount: warnings.length,
+    warningCount: visibleWarnings.length,
     message:
-      warnings.length > 0
-        ? `자동 재배치 후에도 ${warnings.length}건의 충돌이 남아 있습니다.`
-        : "자동 재배치가 완료되었습니다. 원본 사본이 저장되었습니다.",
+      visibleWarnings.length > 0
+        ? `자동 재배치 후에도 충돌 날짜 ${visibleConflictDays}일(상세 ${visibleWarnings.length}건)이 남아 있습니다.${snapshotSummary}${changeSummary}`
+        : `자동 재배치가 완료되었습니다.${snapshotSummary}${changeSummary}`,
   };
 }
 
@@ -387,6 +927,12 @@ export function openSnapshot(state: ScheduleState, snapshotId: string) {
   return next;
 }
 
+function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule) {
+  next.generated = generated;
+  next.generatedHistory = next.generatedHistory.map((item) => (item.monthKey === generated.monthKey ? generated : item));
+  return next;
+}
+
 export function updateManualAssignment(state: ScheduleState, dateKey: string, category: string, value: string) {
   if (!state.generated) return state;
   const next = cloneScheduleState(state);
@@ -395,7 +941,7 @@ export function updateManualAssignment(state: ScheduleState, dateKey: string, ca
   if (!day) return state;
   day.assignments[category] = splitNames(value);
   if (category === "휴가") day.vacations = day.assignments[category];
-  return next;
+  return syncGeneratedSchedule(next, generated);
 }
 
 export function addManualField(state: ScheduleState, dateKey: string, name: string) {
@@ -413,7 +959,47 @@ export function addManualField(state: ScheduleState, dateKey: string, name: stri
   }
   day.assignments[finalName] = [];
   day.manualExtras.push(finalName);
-  return next;
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function removeAssignmentCategory(state: ScheduleState, dateKey: string, category: string) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day || !Object.prototype.hasOwnProperty.call(day.assignments, category)) return state;
+  delete day.assignments[category];
+  day.manualExtras = day.manualExtras.filter((item) => item !== category);
+  day.conflicts = day.conflicts.filter((item) => item.category !== category);
+  if (category === "휴가") day.vacations = [];
+  if (next.selectedPerson?.dateKey === dateKey && next.selectedPerson.category === category) {
+    next.selectedPerson = null;
+  }
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function moveAssignmentCategory(
+  state: ScheduleState,
+  dateKey: string,
+  sourceCategory: string,
+  targetCategory: string,
+) {
+  if (!state.generated || sourceCategory === targetCategory) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day) return state;
+
+  const order = Object.keys(day.assignments);
+  if (!order.includes(sourceCategory) || !order.includes(targetCategory)) return state;
+
+  const reordered = order.filter((item) => item !== sourceCategory);
+  const targetIndex = reordered.indexOf(targetCategory);
+  if (targetIndex < 0) return state;
+  reordered.splice(targetIndex, 0, sourceCategory);
+  day.assignments = Object.fromEntries(reordered.map((key) => [key, day.assignments[key] ?? []]));
+
+  return syncGeneratedSchedule(next, generated);
 }
 
 export function addPersonToCategory(state: ScheduleState, dateKey: string, category: string, name: string) {
@@ -426,7 +1012,7 @@ export function addPersonToCategory(state: ScheduleState, dateKey: string, categ
   if (!trimmed) return state;
   day.assignments[category] = [...(day.assignments[category] ?? []), trimmed];
   if (category === "휴가") day.vacations = day.assignments[category];
-  return next;
+  return syncGeneratedSchedule(next, generated);
 }
 
 export function removePersonFromCategory(state: ScheduleState, dateKey: string, category: string, index: number) {
@@ -437,7 +1023,7 @@ export function removePersonFromCategory(state: ScheduleState, dateKey: string, 
   if (!day || !day.assignments[category]) return state;
   day.assignments[category].splice(index, 1);
   if (category === "휴가") day.vacations = day.assignments[category];
-  return next;
+  return syncGeneratedSchedule(next, generated);
 }
 
 export function movePerson(
@@ -458,5 +1044,6 @@ export function movePerson(
   if (source.category === "휴가") sourceDay.vacations = sourceDay.assignments[source.category] ?? [];
   if (destination.category === "휴가") destinationDay.vacations = destinationDay.assignments[destination.category];
   next.selectedPerson = null;
-  return next;
+  return syncGeneratedSchedule(next, generated);
 }
+

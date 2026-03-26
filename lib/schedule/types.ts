@@ -19,6 +19,8 @@ export interface Conflict {
   name: string;
 }
 
+export type VacationType = "연차" | "대휴";
+
 export interface DaySchedule {
   dateKey: string;
   day: number;
@@ -95,8 +97,12 @@ export interface ScheduleState {
   extraHolidays: string;
   vacations: string;
   offPeople: string[];
+  offByCategory: Record<CategoryKey, string[]>;
   orders: Record<CategoryKey, string[]>;
   pointers: PointerState;
+  monthStartPointers: Record<string, PointerState>;
+  monthStartNames: Record<string, Partial<Record<CategoryKey, string>>>;
+  pendingSnapshotMonthKey: string | null;
   generated: GeneratedSchedule | null;
   generatedHistory: GeneratedSchedule[];
   snapshots: Record<string, SnapshotItem[]>;

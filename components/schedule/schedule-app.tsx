@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession } from "@/lib/auth/storage";
-import { STORAGE_KEY, categories, defaultScheduleState } from "@/lib/schedule/constants";
+import { SCHEDULE_MONTHS, SCHEDULE_YEARS, STORAGE_KEY, categories, defaultScheduleState, getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import {
   CHANGE_REQUESTS_EVENT,
   getScheduleChangeRequests,
@@ -13,18 +13,87 @@ import {
   addManualField,
   addPersonToCategory,
   autoRebalance,
+  cloneScheduleState,
+  formatVacationEntry,
   generateSchedule,
+  getCategoryPeople,
+  getMonthKey,
+  getStartPointerRawIndex,
   getUniquePeople,
+  parseVacationEntry,
+  moveAssignmentCategory,
   movePerson,
-  openSnapshot,
+  removeAssignmentCategory,
   removePersonFromCategory,
   sanitizeScheduleState,
+  setMonthStartPointer,
   updateManualAssignment,
 } from "@/lib/schedule/engine";
-import { publishSchedule } from "@/lib/schedule/published";
-import { DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState } from "@/lib/schedule/types";
+import { getPublishedSchedules, publishSchedule, PublishedScheduleItem } from "@/lib/schedule/published";
+import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+
+function getAdjacentMonth(year: number, month: number, offset: number) {
+  const date = new Date(year, month - 1 + offset, 1);
+  const nextYear = date.getFullYear();
+  const nextMonth = date.getMonth() + 1;
+  return {
+    year: nextYear,
+    month: nextMonth,
+    monthKey: getMonthKey(nextYear, nextMonth),
+  };
+}
+
+function isSchedulableMonth(year: number, month: number) {
+  const firstYear = SCHEDULE_YEARS[0];
+  const lastYear = SCHEDULE_YEARS[SCHEDULE_YEARS.length - 1];
+  return year >= firstYear && year <= lastYear && month >= 1 && month <= 12;
+}
+
+interface AddPersonDialogState {
+  dateKey: string;
+  category: string;
+  dayLabel: string;
+}
+
+const vacationLegendStyles = {
+  연차: {
+    background: "rgba(59,130,246,.22)",
+    border: "1px solid rgba(96,165,250,.5)",
+    color: "#dbeafe",
+  },
+  대휴: {
+    background: "rgba(16,185,129,.22)",
+    border: "1px solid rgba(52,211,153,.5)",
+    color: "#d1fae5",
+  },
+} as const;
+
+function getAssignmentDisplay(category: string, value: string) {
+  if (category !== "휴가") {
+    return {
+      name: value,
+      chipStyle: null,
+      isVacation: false,
+    };
+  }
+  const parsed = parseVacationEntry(value);
+  return {
+    name: parsed.name,
+    chipStyle: vacationLegendStyles[parsed.type],
+    isVacation: true,
+  };
+}
+
+interface OrderOffEditorState {
+  categoryKey: CategoryKey;
+  selectedNames: string[];
+}
+
+type ScheduleDragPayload =
+  | { kind: "person"; dateKey: string; category: string; index: number }
+  | { kind: "category"; dateKey: string; category: string };
 
 function MessageBox({ message }: { message: MessageState | null }) {
   if (!message?.text) return null;
@@ -32,15 +101,44 @@ function MessageBox({ message }: { message: MessageState | null }) {
 }
 
 function dayBadge(day: DaySchedule) {
-  if (day.isCustomHoliday) return "평일 휴일";
-  if (day.isWeekdayHoliday) return "휴일";
+  if (day.isCustomHoliday || day.isWeekdayHoliday) return "평일 휴일";
   if (day.isHoliday) return "휴일";
-  if (day.isWeekend) return "주말";
   return "";
 }
 
+function getCenteredDayLabel(day: DaySchedule) {
+  if (day.isWeekend) return "";
+  return dayBadge(day);
+}
+
+function getDayCardStyle(day: DaySchedule) {
+  const isRedDay = day.isWeekend || day.isWeekdayHoliday;
+  if (isRedDay) {
+    return {
+      background: "rgba(239,68,68,.28)",
+      border: "1px solid rgba(248,113,113,.45)",
+    };
+  }
+  return {
+    background: "rgba(255,255,255,.14)",
+    border: "1px solid rgba(255,255,255,.18)",
+  };
+}
+
 function isManualField(category: string) {
-  return ["휴가", "국회", "청사", "청와대"].includes(category) || category.startsWith("추가칸");
+  return ["오프", "국회", "청사", "청와대"].includes(category) || category.startsWith("추가칸");
+}
+
+function canOpenManualInput(category: string) {
+  return isManualField(category) && category !== "오프";
+}
+
+function parseScheduleDragPayload(value: string): ScheduleDragPayload | null {
+  try {
+    return JSON.parse(value) as ScheduleDragPayload;
+  } catch {
+    return null;
+  }
 }
 
 function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], targetMonth?: number) {
@@ -83,6 +181,17 @@ function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], tar
   return [...leading, ...days];
 }
 
+function getOwnedDisplayDays(days: DaySchedule[], previousSchedule?: { nextStartDate: string } | null) {
+  if (days.length === 0) return days;
+  const startDateKey = previousSchedule?.nextStartDate ?? days[0]?.dateKey;
+  return days
+    .filter((day) => day.dateKey >= startDateKey)
+    .map((day) => ({
+      ...day,
+      isOverflowMonth: false,
+    }));
+}
+
 function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null) {
   if (!left || !right) return false;
   return (
@@ -95,7 +204,7 @@ function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null
 }
 
 function describeRequest(request: ScheduleChangeRequest) {
-  return `${request.source.dateKey} ${request.source.category} ${request.source.name} → ${request.target.dateKey} ${request.target.category} ${request.target.name}`;
+  return `${request.source.dateKey} ${getScheduleCategoryLabel(request.source.category)} ${request.source.name} ↔ ${request.target.dateKey} ${getScheduleCategoryLabel(request.target.category)} ${request.target.name}`;
 }
 
 export function ScheduleApp() {
@@ -104,24 +213,36 @@ export function ScheduleApp() {
   const [loaded, setLoaded] = useState(false);
   const [visibleMonthKey, setVisibleMonthKey] = useState<string | null>(null);
   const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishMonthKey, setPublishMonthKey] = useState<string>("");
+  const [publishedItems, setPublishedItems] = useState<PublishedScheduleItem[]>([]);
+  const [originalPreviewSnapshot, setOriginalPreviewSnapshot] = useState<SnapshotItem | null>(null);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
+  const [addPersonDialog, setAddPersonDialog] = useState<AddPersonDialogState | null>(null);
+  const [addPersonName, setAddPersonName] = useState("");
+  const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴">("연차");
+  const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
+  const addPersonInputRef = useRef<HTMLInputElement | null>(null);
+  const editBackupRef = useRef<ScheduleState | null>(null);
   const session = getSession();
+  const isEditingDate = Boolean(state.editDateKey);
 
   const loadState = () => {
     if (typeof window === "undefined") return;
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       try {
+        editBackupRef.current = null;
         setState(sanitizeScheduleState(JSON.parse(raw) as Partial<ScheduleState>));
         return;
       } catch {
+        editBackupRef.current = null;
         setState(defaultScheduleState);
         return;
       }
     }
+    editBackupRef.current = null;
     setState(defaultScheduleState);
   };
 
@@ -129,10 +250,15 @@ export function ScheduleApp() {
     setRequests(getScheduleChangeRequests());
   };
 
+  const loadPublishedItems = () => {
+    setPublishedItems(getPublishedSchedules());
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     loadState();
     loadRequests();
+    loadPublishedItems();
     setLoaded(true);
   }, []);
 
@@ -153,6 +279,7 @@ export function ScheduleApp() {
     const onRefresh = () => {
       loadRequests();
       loadState();
+      loadPublishedItems();
     };
     window.addEventListener("storage", onRefresh);
     window.addEventListener("focus", onRefresh);
@@ -165,44 +292,232 @@ export function ScheduleApp() {
   }, []);
 
   useEffect(() => {
+    const hasVisibleMonth = visibleMonthKey
+      ? state.generatedHistory.some((item) => item.monthKey === visibleMonthKey)
+      : false;
+    if (hasVisibleMonth) return;
     if (state.generated?.monthKey) {
       setVisibleMonthKey(state.generated.monthKey);
       return;
     }
-    if (state.generatedHistory.length > 0 && !visibleMonthKey) {
+    if (state.generatedHistory.length > 0) {
       setVisibleMonthKey(state.generatedHistory[state.generatedHistory.length - 1].monthKey);
+      return;
     }
+    setVisibleMonthKey(null);
   }, [state.generated, state.generatedHistory, visibleMonthKey]);
 
+  useEffect(() => {
+    if (!addPersonDialog) return;
+    addPersonInputRef.current?.focus();
+    addPersonInputRef.current?.select();
+  }, [addPersonDialog]);
+
+  useEffect(() => {
+    if (!addPersonDialog) return;
+    if (state.editDateKey === addPersonDialog.dateKey && state.generated?.monthKey === visibleMonthKey) return;
+    setAddPersonDialog(null);
+    setAddPersonName("");
+    setAddPersonVacationType("연차");
+  }, [addPersonDialog, state.editDateKey, state.generated?.monthKey, visibleMonthKey]);
+
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
-  const activeCount = uniquePeople.filter((name) => !state.offPeople.includes(name)).length;
+  const totalCount = uniquePeople.length;
+  const targetMonthKey = useMemo(() => getMonthKey(state.year, state.month), [state.month, state.year]);
   const visibleSchedule = useMemo(() => {
     if (state.generatedHistory.length === 0) return state.generated;
     return state.generatedHistory.find((item) => item.monthKey === visibleMonthKey) ?? state.generatedHistory[state.generatedHistory.length - 1];
   }, [state.generated, state.generatedHistory, visibleMonthKey]);
+  const originalSnapshotEntries = useMemo(
+    () =>
+      Object.keys(state.snapshots)
+        .map((monthKey) => ({ monthKey, snapshot: (state.snapshots[monthKey] ?? [])[0] ?? null }))
+        .filter((item): item is { monthKey: string; snapshot: SnapshotItem } => Boolean(item.snapshot))
+        .sort((left, right) => right.monthKey.localeCompare(left.monthKey)),
+    [state.snapshots],
+  );
   const previousVisibleSchedule = useMemo(() => {
     if (!visibleSchedule) return null;
     const index = state.generatedHistory.findIndex((item) => item.monthKey === visibleSchedule.monthKey);
     if (index <= 0) return null;
     return state.generatedHistory[index - 1] ?? null;
   }, [state.generatedHistory, visibleSchedule]);
+  const previousOriginalSchedule = useMemo(() => {
+    if (!originalPreviewSnapshot) return null;
+    const index = state.generatedHistory.findIndex((item) => item.monthKey === originalPreviewSnapshot.generated.monthKey);
+    if (index <= 0) return null;
+    return state.generatedHistory[index - 1] ?? null;
+  }, [originalPreviewSnapshot, state.generatedHistory]);
   const visibleDays = useMemo(
-    () => (visibleSchedule ? buildDisplayDays(visibleSchedule.days, previousVisibleSchedule?.days, visibleSchedule.month) : []),
+    () => (visibleSchedule ? getOwnedDisplayDays(visibleSchedule.days, previousVisibleSchedule) : []),
     [previousVisibleSchedule, visibleSchedule],
   );
+  const originalVisibleDays = useMemo(
+    () =>
+      originalPreviewSnapshot
+        ? getOwnedDisplayDays(originalPreviewSnapshot.generated.days, previousOriginalSchedule)
+        : [],
+    [originalPreviewSnapshot, previousOriginalSchedule],
+  );
+  const visiblePublishedItem = useMemo(
+    () => publishedItems.find((item) => item.monthKey === visibleSchedule?.monthKey) ?? null,
+    [publishedItems, visibleSchedule?.monthKey],
+  );
+  const hasUnpublishedChanges = useMemo(() => {
+    if (!visibleSchedule || !visiblePublishedItem) return false;
+    return JSON.stringify(visibleSchedule) !== JSON.stringify(visiblePublishedItem.schedule);
+  }, [visiblePublishedItem, visibleSchedule]);
   const visibleIndex = visibleSchedule ? state.generatedHistory.findIndex((item) => item.monthKey === visibleSchedule.monthKey) : -1;
+  const previousVisibleMonth = useMemo(
+    () => (visibleSchedule ? getAdjacentMonth(visibleSchedule.year, visibleSchedule.month, -1) : null),
+    [visibleSchedule],
+  );
+  const nextVisibleMonth = useMemo(
+    () => (visibleSchedule ? getAdjacentMonth(visibleSchedule.year, visibleSchedule.month, 1) : null),
+    [visibleSchedule],
+  );
+  const hasPreviousVisibleMonth = useMemo(
+    () => Boolean(previousVisibleMonth && state.generatedHistory.some((item) => item.monthKey === previousVisibleMonth.monthKey)),
+    [previousVisibleMonth, state.generatedHistory],
+  );
+  const hasNextVisibleMonth = useMemo(
+    () => Boolean(nextVisibleMonth && state.generatedHistory.some((item) => item.monthKey === nextVisibleMonth.monthKey)),
+    [nextVisibleMonth, state.generatedHistory],
+  );
+  const targetHasExistingMonth = useMemo(
+    () => state.generatedHistory.some((item) => item.monthKey === targetMonthKey),
+    [state.generatedHistory, targetMonthKey],
+  );
+  const previousTargetMonth = useMemo(() => getAdjacentMonth(state.year, state.month, -1), [state.month, state.year]);
+  const generationBlockedReason = useMemo(() => {
+    if (state.generatedHistory.length === 0) return null;
+    if (targetHasExistingMonth) return null;
+    if (!isSchedulableMonth(previousTargetMonth.year, previousTargetMonth.month)) return null;
+    const hasPreviousMonth = state.generatedHistory.some((item) => item.monthKey === previousTargetMonth.monthKey);
+    if (hasPreviousMonth) return null;
+    return `${previousTargetMonth.year}년 ${previousTargetMonth.month}월 근무표를 먼저 작성해야 ${state.year}년 ${state.month}월 근무표를 작성할 수 있습니다.`;
+  }, [previousTargetMonth, state.generatedHistory, state.month, state.year, targetHasExistingMonth]);
   const pendingRequests = useMemo(
-    () => requests.filter((item) => item.status === "pending" && (!visibleSchedule || item.monthKey === visibleSchedule.monthKey)),
-    [requests, visibleSchedule],
+    () => requests.filter((item) => item.status === "pending"),
+    [requests],
   );
 
-  const updateState = (recipe: (current: ScheduleState) => ScheduleState) => {
+  const updateEditingState = (recipe: (current: ScheduleState) => ScheduleState) => {
     setState((current) => sanitizeScheduleState(recipe(current)));
+  };
+
+  const closeAddPersonDialog = () => {
+    setAddPersonDialog(null);
+    setAddPersonName("");
+    setAddPersonVacationType("연차");
+  };
+
+  const startOrderOffEdit = (categoryKey: CategoryKey) => {
+    setOrderOffEditor({
+      categoryKey,
+      selectedNames: [...(state.offByCategory[categoryKey] ?? [])],
+    });
+  };
+
+  const cancelOrderOffEdit = () => {
+    setOrderOffEditor(null);
+  };
+
+  const saveOrderOffEdit = () => {
+    if (!orderOffEditor) return;
+    const startName = state.monthStartNames[targetMonthKey]?.[orderOffEditor.categoryKey]?.trim();
+    const nextSelectedNames = startName
+      ? orderOffEditor.selectedNames.filter((name) => name !== startName)
+      : orderOffEditor.selectedNames;
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        offByCategory: {
+          ...current.offByCategory,
+          [orderOffEditor.categoryKey]: [...nextSelectedNames],
+        },
+      }),
+    );
+    setOrderOffEditor(null);
+    setMessage({
+      tone: "ok",
+      text: startName && nextSelectedNames.length !== orderOffEditor.selectedNames.length
+        ? `해당 근무유형 오프를 저장했습니다. 시작점 ${startName}은 오프에서 제외했습니다.`
+        : "해당 근무유형 오프를 저장했습니다.",
+    });
+  };
+
+  const submitAddPerson = () => {
+    if (!addPersonDialog || !isEditingDate) return;
+    const trimmed = addPersonName.trim();
+    if (!trimmed) return;
+    const value =
+      addPersonDialog.category === "휴가"
+        ? formatVacationEntry(addPersonVacationType, trimmed)
+        : trimmed;
+    updateEditingState((current) => addPersonToCategory(current, addPersonDialog.dateKey, addPersonDialog.category, value));
+    setAddPersonName("");
+    if (addPersonDialog.category === "휴가") {
+      setAddPersonVacationType("연차");
+    }
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        addPersonInputRef.current?.focus();
+        addPersonInputRef.current?.select();
+      });
+    }
+  };
+
+  const startDayEdit = (dateKey: string) => {
+    if (!visibleSchedule || isEditingDate) return;
+    editBackupRef.current = cloneScheduleState(state);
+    const visibleScheduleClone = JSON.parse(JSON.stringify(visibleSchedule));
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generated: visibleScheduleClone,
+        generatedHistory: current.generatedHistory.map((item) =>
+          item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
+        ),
+        editDateKey: dateKey,
+        selectedPerson: null,
+      }),
+    );
+    closeAddPersonDialog();
+  };
+
+  const cancelDayEdit = () => {
+    const backup = editBackupRef.current ? cloneScheduleState(editBackupRef.current) : null;
+    setState((current) =>
+      sanitizeScheduleState(
+        backup ?? {
+          ...current,
+          editDateKey: null,
+          selectedPerson: null,
+        },
+      ),
+    );
+    editBackupRef.current = null;
+    closeAddPersonDialog();
+  };
+
+  const confirmDayEdit = () => {
+    if (!isEditingDate) return;
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        editDateKey: null,
+        selectedPerson: null,
+      }),
+    );
+    editBackupRef.current = null;
+    closeAddPersonDialog();
+    setMessage({ tone: "ok", text: "날짜 수정 내용이 반영되었습니다." });
   };
 
   const saveCurrent = () => {
     if (!uniquePeople.length) {
-      setMessage({ tone: "warn", text: "최소 한 칸 이상 이름을 입력해주세요." });
+      setMessage({ tone: "warn", text: "최소 한 칸 이상 이름을 입력해 주세요." });
       return false;
     }
     setMessage({ tone: "ok", text: "저장되었습니다. 입력값과 오프 상태를 유지합니다." });
@@ -211,9 +526,11 @@ export function ScheduleApp() {
 
   const onGenerate = () => {
     if (!saveCurrent()) return;
-    const targetMonthKey = `${state.year}-${String(state.month).padStart(2, "0")}`;
-    const hasExistingMonth = state.generatedHistory.some((item) => item.monthKey === targetMonthKey);
-    if (hasExistingMonth) {
+    if (generationBlockedReason) {
+      setMessage({ tone: "warn", text: generationBlockedReason });
+      return;
+    }
+    if (targetHasExistingMonth) {
       setOverwriteConfirmOpen(true);
       return;
     }
@@ -232,10 +549,43 @@ export function ScheduleApp() {
   };
 
   const onRebalance = () => {
-    const result = autoRebalance(state);
+    if (!visibleSchedule) return;
+    const targetSchedule = JSON.parse(JSON.stringify(visibleSchedule));
+    const workingState = sanitizeScheduleState({
+      ...state,
+      generated: targetSchedule,
+      generatedHistory: state.generatedHistory.map((item) =>
+        item.monthKey === visibleSchedule.monthKey ? targetSchedule : item,
+      ),
+    });
+    const result = autoRebalance(workingState);
     setState(result.state);
-    setVisibleMonthKey(result.state.generated?.monthKey ?? visibleMonthKey);
+    setVisibleMonthKey(visibleSchedule.monthKey);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
+  };
+
+  const confirmDeleteSchedule = () => {
+    if (!visibleSchedule) return;
+    const nextHistory = state.generatedHistory.filter((item) => item.monthKey !== visibleSchedule.monthKey);
+    const nextVisible = nextHistory[visibleIndex - 1] ?? nextHistory[visibleIndex] ?? nextHistory[nextHistory.length - 1] ?? null;
+
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generatedHistory: current.generatedHistory.filter((item) => item.monthKey !== visibleSchedule.monthKey),
+        generated: current.generated?.monthKey === visibleSchedule.monthKey ? nextVisible : current.generated,
+        snapshots: Object.fromEntries(
+          Object.entries(current.snapshots).filter(([monthKey]) => monthKey !== visibleSchedule.monthKey),
+        ),
+        editDateKey: current.editDateKey && current.generated?.monthKey === visibleSchedule.monthKey ? null : current.editDateKey,
+        selectedPerson: null,
+      }),
+    );
+    setVisibleMonthKey(nextVisible?.monthKey ?? null);
+    setDeleteConfirmOpen(false);
+    closeAddPersonDialog();
+    editBackupRef.current = null;
+    setMessage({ tone: "ok", text: `${visibleSchedule.year}년 ${visibleSchedule.month}월 근무표를 삭제했습니다.` });
   };
 
   const onDownload = () => {
@@ -249,39 +599,32 @@ export function ScheduleApp() {
     URL.revokeObjectURL(url);
   };
 
-  const confirmReset = () => {
-    setState(defaultScheduleState);
-    setVisibleMonthKey(null);
-    setResetConfirmOpen(false);
-    setMessage({ tone: "ok", text: "초기화했습니다." });
-  };
-
   const confirmPublish = () => {
     const target = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
     const published = publishSchedule(target);
+    loadPublishedItems();
     setPublishOpen(false);
-    setMessage({ tone: "ok", text: `${published.title}를 홈 화면에 게시했습니다.` });
+    setMessage({ tone: "ok", text: `${published.title}를 홈화면에 게시했습니다.` });
   };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-            <button className="btn primary" onClick={saveCurrent}>순번 확인</button>
-            <button className="btn white" onClick={onGenerate}>작성</button>
-            <button className="btn" onClick={onRebalance}>자동 재배치</button>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <button className="btn white" disabled={isEditingDate} onClick={onGenerate}>작성</button>
+            <button className="btn" disabled={isEditingDate} onClick={onRebalance}>자동 재배치</button>
+            <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={() => setDeleteConfirmOpen(true)}>삭제</button>
             <button className="btn" onClick={() => {
               setPublishMonthKey(visibleSchedule?.monthKey ?? state.generatedHistory[state.generatedHistory.length - 1]?.monthKey ?? "");
               setPublishOpen(true);
-            }}>
+            }} disabled={isEditingDate}>
               근무표 게시
             </button>
-            <button className="btn" onClick={() => setResetConfirmOpen(true)}>
-              초기화
-            </button>
+            {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
+          {isEditingDate ? <div className="status note">날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요.</div> : null}
           {overwriteConfirmOpen ? (
             <div className="status warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <span>이미 작성된 {state.month}월 근무표가 있습니다. 다시 작성하시겠습니까?</span>
@@ -291,18 +634,19 @@ export function ScheduleApp() {
               </div>
             </div>
           ) : null}
-          {resetConfirmOpen ? (
+          {deleteConfirmOpen && visibleSchedule ? (
             <div className="status warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <span>초기화하시겠습니까?</span>
+              <span>{visibleSchedule.year}년 {visibleSchedule.month}월 근무표를 반드시 삭제하시겠습니까?</span>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn primary" onClick={confirmReset}>확인</button>
-                <button className="btn" onClick={() => setResetConfirmOpen(false)}>취소</button>
+                <button className="btn primary" onClick={confirmDeleteSchedule}>삭제</button>
+                <button className="btn" onClick={() => setDeleteConfirmOpen(false)}>취소</button>
               </div>
             </div>
           ) : null}
+          {generationBlockedReason ? <div className="status warn">{generationBlockedReason}</div> : null}
           {publishOpen ? (
             <div className="status note" style={{ display: "grid", gap: 12 }}>
-              <strong>게시할 근무표를 선택하세요.</strong>
+              <strong>게시할 근무표를 선택하세요</strong>
               <select className="field-select" value={publishMonthKey} onChange={(e) => setPublishMonthKey(e.target.value)}>
                 {state.generatedHistory.map((item) => (
                   <option key={item.monthKey} value={item.monthKey}>
@@ -323,36 +667,39 @@ export function ScheduleApp() {
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="chip">근무표 설정</div>
+          <div className="status note" style={{ display: "none" }}>
+            ?곗옣? 二??⑥쐞濡??좎??⑸땲?? ??二쇱뿉 戮묓엺 4紐낆씠 ?붿슂?쇰???湲덉슂?쇨퉴吏 媛숆퀬, ?붾쭚??二쇱쨷???앸굹硫?洹?二??쇱슂?쇨퉴吏 ?먮룞 ?앹꽦?⑸땲??
+            ?됱씪 ?댁씪???낅젰???좎쭨??`議곌렐 / ?쇰컲 / ?앷렐 / ?쇨렐 / 援?쉶` 移몃쭔 留뚮뱾怨?諛곗튂???섏? ?딆뒿?덈떎.
+          </div>
           <div className="status note">
-            연장은 주 단위로 유지됩니다. 한 주에 뽑힌 4명이 월요일부터 금요일까지 같고, 월말이 주중에 끝나면 그 주 일요일까지 자동 생성합니다.
-            평일 휴일에 입력한 날짜는 `조근 / 일반 / 석근 / 야근 / 국회` 칸만 만들고 배치는 하지 않습니다.
+            연장은 주 단위로 묶여 배정됩니다. 한 주에 4명을 먼저 잡고, 휴가나 오프가 있으면 그 주 안에서 다시 맞춥니다.
+            평일 휴일로 입력한 날짜에는 `조근 / 연장 / 일반 / 야근 / 국회` 칸만 만들고 자동 배치는 하지 않습니다.
           </div>
           <div className="subgrid-2">
             <label>
               <div style={{ marginBottom: 8 }}>연도</div>
-              <input className="field-input" type="number" value={state.year} onChange={(e) => setState({ ...state, year: Number(e.target.value) || state.year })} />
-            </label>
-            <label>
-              <div style={{ marginBottom: 8 }}>월</div>
-              <input className="field-input" type="number" min={1} max={12} value={state.month} onChange={(e) => setState({ ...state, month: Number(e.target.value) || state.month })} />
-            </label>
-          </div>
-          <div className="subgrid-2">
-            <label>
-              <div style={{ marginBottom: 8 }}>제크 인원</div>
-              <select className="field-select" value={state.jcheckCount} onChange={(e) => setState({ ...state, jcheckCount: Number(e.target.value) })}>
-                <option value={1}>1명</option>
-                <option value={2}>2명</option>
+              <select className="field-select" disabled={isEditingDate} value={state.year} onChange={(e) => setState({ ...state, year: Number(e.target.value) })}>
+                {SCHEDULE_YEARS.map((year) => (
+                  <option key={year} value={year}>
+                    {year}년
+                  </option>
+                ))}
               </select>
             </label>
             <label>
-              <div style={{ marginBottom: 8 }}>로그인 사용자</div>
-              <input className="field-input" value={state.currentUser} onChange={(e) => setState({ ...state, currentUser: e.target.value })} />
+              <div style={{ marginBottom: 8 }}>월</div>
+              <select className="field-select" disabled={isEditingDate} value={state.month} onChange={(e) => setState({ ...state, month: Number(e.target.value) })}>
+                {SCHEDULE_MONTHS.map((month) => (
+                  <option key={month} value={month}>
+                    {month}월
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <label>
             <div style={{ marginBottom: 8 }}>평일 휴일</div>
-            <textarea className="field-textarea" value={state.extraHolidays} onChange={(e) => setState({ ...state, extraHolidays: e.target.value })} placeholder="2,15,22" />
+            <textarea className="field-textarea" disabled={isEditingDate} value={state.extraHolidays} onChange={(e) => setState({ ...state, extraHolidays: e.target.value })} placeholder="2,15,22" />
           </label>
             <MessageBox message={message} />
           </div>
@@ -360,7 +707,7 @@ export function ScheduleApp() {
 
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div className="chip">근무수정요청</div>
+            <div className="chip">근무 수정 요청</div>
             {visibleSchedule ? (
               pendingRequests.length > 0 ? (
                 <div style={{ display: "grid", gap: 10 }}>
@@ -388,27 +735,27 @@ export function ScheduleApp() {
                             const result = resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
                             loadRequests();
                             if (result.applied) loadState();
-                            setMessage({ tone: "ok", text: "근무 변경 요청을 수락했습니다." });
+                            setMessage({ tone: "ok", text: "근무 변경 요청을 승인했습니다." });
                           }}
                         >
-                          수락
+                          승인
                         </button>
                         <button
                           className="btn"
                           onClick={() => {
                             resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
                             loadRequests();
-                            setMessage({ tone: "note", text: "근무 변경 요청을 거부했습니다." });
+                            setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
                           }}
                         >
-                          거부
+                          거절
                         </button>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="status note">현재 월에 들어온 근무 수정 요청이 없습니다.</div>
+                <div className="status note">현재 이 월에 들어온 근무 수정 요청이 없습니다.</div>
               )
             ) : (
               <div className="status note">근무표를 먼저 작성하면 요청 목록이 여기에 표시됩니다.</div>
@@ -420,15 +767,61 @@ export function ScheduleApp() {
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <div className="chip">근무표</div>
+            <div className="chip">DESK</div>
             {visibleSchedule ? (
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <button className="btn" disabled={visibleIndex <= 0} onClick={() => setVisibleMonthKey(state.generatedHistory[visibleIndex - 1]?.monthKey ?? null)}>
-                  ← 이전
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "2px 6px",
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.연차,
+                  }}
+                >
+                  연차
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "2px 6px",
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.대휴,
+                  }}
+                >
+                  대휴
+                </span>
+                <button
+                  className="btn"
+                  disabled={isEditingDate || !hasPreviousVisibleMonth}
+                  onClick={() => {
+                    if (!previousVisibleMonth) return;
+                    setVisibleMonthKey(previousVisibleMonth.monthKey);
+                    setState((current) => sanitizeScheduleState({ ...current, year: previousVisibleMonth.year, month: previousVisibleMonth.month }));
+                  }}
+                >
+                  이전 달
                 </button>
                 <strong>{visibleSchedule.year}년 {visibleSchedule.month}월</strong>
-                <button className="btn" disabled={visibleIndex < 0 || visibleIndex >= state.generatedHistory.length - 1} onClick={() => setVisibleMonthKey(state.generatedHistory[visibleIndex + 1]?.monthKey ?? null)}>
-                  다음 →
+                <button
+                  className="btn"
+                  disabled={isEditingDate || !hasNextVisibleMonth}
+                  onClick={() => {
+                    if (!nextVisibleMonth) return;
+                    setVisibleMonthKey(nextVisibleMonth.monthKey);
+                    setState((current) => sanitizeScheduleState({ ...current, year: nextVisibleMonth.year, month: nextVisibleMonth.month }));
+                  }}
+                >
+                  다음 달
                 </button>
               </div>
             ) : null}
@@ -444,7 +837,10 @@ export function ScheduleApp() {
                 {visibleDays.map((day) => {
                   const editMode = state.generated?.monthKey === visibleSchedule.monthKey && state.editDateKey === day.dateKey;
                   const currentUser = state.currentUser.trim();
+                  const editLocked = Boolean(state.editDateKey && state.editDateKey !== day.dateKey);
                   const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
+                  const dayCardStyle = getDayCardStyle(day);
+                  const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const visibleAssignments = Object.entries(day.assignments).filter(([category]) => {
                     if (isWeekendLike) return category !== "휴가" && category !== "제크";
@@ -459,57 +855,165 @@ export function ScheduleApp() {
                         padding: 8,
                         minHeight: 220,
                         opacity: day.isOverflowMonth ? 0.55 : 1,
-                        background: day.isOverflowMonth ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.14)",
-                        border: "1px solid rgba(255,255,255,.18)",
+                        background: dayCardStyle.background,
+                        border: dayCardStyle.border,
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "auto 1fr auto",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 8,
+                        }}
+                      >
                         <div style={{ fontSize: 17, fontWeight: 900 }}>{day.month}/{day.day}</div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            minHeight: 24,
+                            textAlign: "center",
+                            color: "#ffd7d7",
+                            fontWeight: 800,
+                            fontSize: 12,
+                          }}
+                        >
+                          {centeredDayLabel}
+                        </div>
                         <div style={{ display: "flex", gap: 8 }}>
-                          {dayBadge(day) ? (
-                            <span style={{ padding: "2px 7px", borderRadius: 999, background: day.isWeekend ? "rgba(245,158,11,.16)" : "rgba(239,68,68,.16)", fontSize: 10 }}>{dayBadge(day)}</span>
-                          ) : null}
-                          <button className="btn" style={{ padding: "5px 8px", fontSize: 12 }} disabled={state.generated?.monthKey !== visibleSchedule.monthKey} onClick={() => setState({ ...state, editDateKey: editMode ? null : day.dateKey, selectedPerson: null })}>
-                            {editMode ? "닫기" : "수정"}
-                          </button>
+                          {editMode ? (
+                            <>
+                              <button type="button" className="btn primary" style={{ padding: "5px 8px", fontSize: 12 }} onClick={confirmDayEdit}>
+                                확인
+                              </button>
+                              <button type="button" className="btn" style={{ padding: "5px 8px", fontSize: 12 }} onClick={cancelDayEdit}>
+                                취소
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="btn"
+                              style={{ padding: "5px 8px", fontSize: 12 }}
+                              type="button"
+                              disabled={editLocked}
+                              onClick={() => startDayEdit(day.dateKey)}
+                            >
+                              수정
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ display: "grid", gap: 2 }}>
                         {visibleAssignments.map(([category, names]) => (
-                          <div
+                          <article
                             key={`${day.dateKey}-${category}`}
-                            onDragOver={(event) => event.preventDefault()}
+                            draggable={editMode && state.generated?.monthKey === visibleSchedule.monthKey}
+                            onDragStart={(event) => {
+                              if (!editMode || state.generated?.monthKey !== visibleSchedule.monthKey) return;
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "category", dateKey: day.dateKey, category }));
+                            }}
+                            onDragOver={(event) => {
+                              if (!editMode) return;
+                              event.preventDefault();
+                            }}
                             onDrop={(event) => {
+                              if (!editMode) return;
                               event.preventDefault();
                               const payload = event.dataTransfer.getData("text/plain");
                               if (!payload) return;
-                              const source = JSON.parse(payload) as { dateKey: string; category: string; index: number };
-                              setState((current) => movePerson(current, source, { dateKey: day.dateKey, category }));
+                              const source = parseScheduleDragPayload(payload);
+                              if (!source) return;
+                              if (source.kind === "person") {
+                                updateEditingState((current) => movePerson(current, source, { dateKey: day.dateKey, category }));
+                                return;
+                              }
+                              if (editMode && source.dateKey === day.dateKey) {
+                                updateEditingState((current) => moveAssignmentCategory(current, day.dateKey, source.category, category));
+                              }
                             }}
-                            style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}
+                            style={{
+                              border: "1px solid rgba(255,255,255,.16)",
+                              borderRadius: 10,
+                              padding: 6,
+                              background: "rgba(9,17,30,.34)",
+                              cursor: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? "grab" : "default",
+                            }}
                           >
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6, marginBottom: 0 }}>
-                              <strong style={{ fontSize: 12, lineHeight: 1.2, minWidth: 42, paddingTop: 2 }}>{category}</strong>
+                              <strong style={{ fontSize: 12, lineHeight: 1.2, minWidth: 42, paddingTop: 2 }}>
+                                {getScheduleCategoryLabel(category)}
+                              </strong>
                               {editMode && state.generated?.monthKey === visibleSchedule.monthKey ? (
-                                <div style={{ display: "flex", gap: 8 }}>
-                                  <button className="btn" style={{ padding: "4px 9px" }} onClick={() => {
-                                    const name = window.prompt(`${category}에 추가할 이름을 입력하세요.`);
-                                    if (!name) return;
-                                    setState((current) => addPersonToCategory(current, day.dateKey, category, name));
-                                  }}>+</button>
-                                  {isManualField(category) ? (
-                                    <button className="btn" style={{ padding: "4px 9px" }} onClick={() => {
-                                      const value = window.prompt(`${category} 이름을 쉼표로 입력하세요.`, names.join(", "));
-                                      if (value === null) return;
-                                      setState((current) => updateManualAssignment(current, day.dateKey, category, value));
-                                    }}>입력</button>
+                                <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
+                                  <button
+                                    className="btn"
+                                    style={{ width: 34, padding: "4px 0" }}
+                                    onClick={() => {
+                                      setAddPersonDialog({
+                                        dateKey: day.dateKey,
+                                        category,
+                                        dayLabel: `${day.month}/${day.day}`,
+                                      });
+                                      setAddPersonName("");
+                                      setAddPersonVacationType("연차");
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                  <button
+                                    className="btn"
+                                    style={{
+                                      width: 34,
+                                      padding: "4px 0",
+                                      color: "#ffd7d7",
+                                      borderColor: "rgba(239,68,68,.38)",
+                                      background: "rgba(239,68,68,.18)",
+                                    }}
+                                    onClick={() => {
+                                      if (addPersonDialog?.dateKey === day.dateKey && addPersonDialog.category === category) {
+                                        closeAddPersonDialog();
+                                      }
+                                      updateEditingState((current) => removeAssignmentCategory(current, day.dateKey, category));
+                                    }}
+                                    title="칸 삭제"
+                                  >
+                                    -
+                                  </button>
+                                  {canOpenManualInput(category) ? (
+                                    <button
+                                      className="btn"
+                                      style={{ padding: "4px 9px" }}
+                                      onClick={() => {
+                                        const value = window.prompt(`${getScheduleCategoryLabel(category)} 이름을 쉼표로 입력하세요`, names.join(", "));
+                                        if (value === null) return;
+                                        updateEditingState((current) => updateManualAssignment(current, day.dateKey, category, value));
+                                      }}
+                                    >
+                                      입력
+                                    </button>
                                   ) : null}
                                 </div>
                               ) : null}
                             </div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "flex-start", alignContent: "flex-start", marginLeft: 48, marginTop: -16 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: 3,
+                                justifyContent: "flex-start",
+                                alignContent: "flex-start",
+                                marginLeft: editMode ? 0 : 48,
+                                marginTop: editMode ? 6 : -16,
+                                minHeight: 22,
+                              }}
+                            >
                               {names.length > 0 ? (
                                 names.map((name, index) => {
+                                  const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const ref: SchedulePersonRef = {
                                     monthKey: visibleSchedule.monthKey,
                                     dateKey: day.dateKey,
@@ -527,16 +1031,29 @@ export function ScheduleApp() {
                                     state.selectedPerson?.dateKey === day.dateKey &&
                                     state.selectedPerson?.category === category &&
                                     state.selectedPerson?.index === index;
-                                  const highlighted = state.showMyWork && currentUser && currentUser === name;
+                                  const highlighted = state.showMyWork && currentUser && currentUser === assignmentDisplay.name;
                                   const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending;
+                                  const weekendConflict = conflicted && isWeekendLike;
                                   return (
                                     <div
                                       key={personObject.key}
-                                      draggable
-                                      onClick={() => setState({ ...state, selectedPerson: selected ? null : { dateKey: day.dateKey, category, index } })}
+                                      draggable={editMode}
+                                      onClick={() => {
+                                        if (!editMode) return;
+                                        setState((current) => ({
+                                          ...current,
+                                          selectedPerson: selected ? null : { dateKey: day.dateKey, category, index },
+                                        }));
+                                      }}
                                       onDragStart={(event) => {
-                                        event.dataTransfer.setData("text/plain", JSON.stringify({ dateKey: day.dateKey, category, index }));
-                                        setState({ ...state, selectedPerson: { dateKey: day.dateKey, category, index } });
+                                        if (!editMode) return;
+                                        event.stopPropagation();
+                                        event.dataTransfer.effectAllowed = "move";
+                                        event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "person", dateKey: day.dateKey, category, index }));
+                                        setState((current) => ({
+                                          ...current,
+                                          selectedPerson: { dateKey: day.dateKey, category, index },
+                                        }));
                                       }}
                                       style={{
                                         display: "inline-flex",
@@ -547,46 +1064,51 @@ export function ScheduleApp() {
                                         borderRadius: 999,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
-                                          : highlighted
-                                            ? "rgba(34,211,238,.22)"
-                                            : conflicted
-                                              ? "rgba(239,68,68,.22)"
-                                              : "rgba(255,255,255,.16)",
+                                          : conflicted
+                                              ? weekendConflict
+                                                ? "rgba(34,211,238,.28)"
+                                                : "rgba(239,68,68,.22)"
+                                              : assignmentDisplay.isVacation
+                                                ? assignmentDisplay.chipStyle?.background
+                                                : highlighted
+                                                  ? "rgba(34,211,238,.22)"
+                                                  : "rgba(255,255,255,.16)",
                                         border: personObject.pending
                                           ? "1px solid rgba(245,158,11,.35)"
                                           : conflicted
-                                            ? "1px solid rgba(239,68,68,.28)"
+                                            ? weekendConflict
+                                              ? "1px solid rgba(103,232,249,.65)"
+                                              : "1px solid rgba(239,68,68,.28)"
                                             : highlighted
                                               ? "1px solid rgba(34,211,238,.35)"
-                                              : "1px solid transparent",
-                                        color: "#f8fbff",
+                                              : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                        color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
                                         fontSize: 12,
                                         lineHeight: 1.2,
+                                        boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
                                       }}
                                     >
-                                      <span>{personObject.name}</span>
+                                      <span>{assignmentDisplay.name}</span>
                                       {personObject.pending ? <span style={{ fontSize: 11 }}>근무변경요청중</span> : null}
                                       {editMode ? (
                                         <button className="btn" style={{ padding: "2px 7px" }} onClick={(event) => {
                                           event.stopPropagation();
-                                          setState((current) => removePersonFromCategory(current, day.dateKey, category, index));
+                                          updateEditingState((current) => removePersonFromCategory(current, day.dateKey, category, index));
                                         }}>-</button>
                                       ) : null}
                                     </div>
                                   );
                                 })
-                              ) : (
-                                <span className="muted">배정 없음</span>
-                              )}
+                              ) : null}
                             </div>
-                          </div>
+                          </article>
                         ))}
                         {editMode && state.generated?.monthKey === visibleSchedule.monthKey ? (
                           <button className="btn" onClick={() => {
-                            const label = window.prompt("추가할 칸 이름을 입력하세요.", "추가칸");
+                            const label = window.prompt("추가칸 이름을 입력하세요", "추가칸");
                             if (label === null) return;
-                            updateState((current) => addManualField(current, day.dateKey, label));
+                            updateEditingState((current) => addManualField(current, day.dateKey, label));
                           }}>
                             날짜 수동 칸 추가
                           </button>
@@ -598,47 +1120,112 @@ export function ScheduleApp() {
               </div>
             </div>
           ) : (
-            <div className="status note">저장 후 작성 버튼을 누르면 근무표가 생성됩니다.</div>
+            <div className="status note">상단의 작성 버튼을 누르면 근무표가 생성됩니다.</div>
           )}
         </div>
       </section>
 
       <div className="subgrid-2">
       <section style={{ display: "grid", gap: 16 }}>
-        <section className="subgrid-4">
+        <section className="subgrid-3">
           <article className="kpi">
-            <div className="kpi-label">대상 연도</div>
+            <div className="kpi-label">선택 연도</div>
             <div className="kpi-value">{state.year}년</div>
           </article>
           <article className="kpi">
-            <div className="kpi-label">대상 월</div>
+            <div className="kpi-label">선택 월</div>
             <div className="kpi-value">{state.month}월</div>
           </article>
           <article className="kpi">
-            <div className="kpi-label">제크 인원</div>
-            <div className="kpi-value">{state.jcheckCount}명</div>
-          </article>
-          <article className="kpi">
-            <div className="kpi-label">활성 인원 수</div>
-            <div className="kpi-value">{activeCount}명</div>
+            <div className="kpi-label">총 인원 수</div>
+            <div className="kpi-value">{totalCount}명</div>
           </article>
         </section>
 
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
             <div className="chip">순번 입력</div>
-            {categories.map((category) => (
-              <article key={category.key} style={{ border: "1px solid var(--line)", borderRadius: 20, padding: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                  <strong>{category.label}</strong>
-                  <span className="muted">1~30 순번</span>
+            {categories.map((category) => {
+              const categoryPeople = getCategoryPeople(state, category.key);
+              const isOffEditing = orderOffEditor?.categoryKey === category.key;
+              const selectedOffNames = isOffEditing ? orderOffEditor.selectedNames : state.offByCategory[category.key] ?? [];
+              const startRawIndex = getStartPointerRawIndex(state, targetMonthKey, category.key);
+
+              return (
+              <article key={category.key} style={{ border: "1px solid var(--line)", borderRadius: 20, padding: 16, display: "grid", gap: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 0, gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <strong>{category.label}</strong>
+                    <span className="muted">1~30 순번</span>
+                  </div>
+                  {isOffEditing ? (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button className="btn primary" disabled={isEditingDate} onClick={saveOrderOffEdit}>저장</button>
+                      <button className="btn" disabled={isEditingDate} onClick={cancelOrderOffEdit}>취소</button>
+                    </div>
+                  ) : (
+                    <button className="btn" disabled={isEditingDate} onClick={() => startOrderOffEdit(category.key)}>수정</button>
+                  )}
                 </div>
+                {isOffEditing ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div className="status note">이름을 누르면 오프로 저장됩니다. 아래 순번의 `시작점` 버튼으로 이번 달 시작 사람도 바꿀 수 있습니다.</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {categoryPeople.length > 0 ? (
+                        categoryPeople.map((name) => {
+                          const selected = selectedOffNames.includes(name);
+                          return (
+                            <button
+                              key={`${category.key}-${name}`}
+                              type="button"
+                              className="btn"
+                              onClick={() =>
+                                setOrderOffEditor((current) =>
+                                  current && current.categoryKey === category.key
+                                    ? {
+                                        ...current,
+                                        selectedNames: selected
+                                          ? current.selectedNames.filter((item) => item !== name)
+                                          : [...current.selectedNames, name],
+                                      }
+                                    : current,
+                                )
+                              }
+                              style={{
+                                padding: "8px 12px",
+                                borderColor: selected ? "rgba(239,68,68,.55)" : undefined,
+                                background: selected ? "rgba(239,68,68,.24)" : undefined,
+                                color: selected ? "#ffd7d7" : undefined,
+                              }}
+                            >
+                              {name}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <span className="muted">등록된 이름이 없습니다.</span>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
                   {Array.from({ length: 30 }, (_, index) => (
-                    <label key={`${category.key}-${index}`} style={{ display: "grid", gap: 6 }}>
+                    <label
+                      key={`${category.key}-${index}`}
+                      style={{
+                        display: "grid",
+                        gap: 6,
+                        padding: 8,
+                        borderRadius: 12,
+                        border: index === startRawIndex ? "1px solid rgba(74,222,128,.55)" : "1px solid rgba(255,255,255,.08)",
+                        background: index === startRawIndex ? "rgba(34,197,94,.16)" : "rgba(255,255,255,.02)",
+                      }}
+                    >
                       <span className="muted" style={{ fontSize: 12 }}>{index + 1}번</span>
                       <input
                         className="field-input"
+                        disabled={isEditingDate}
+                        style={index === startRawIndex ? { borderColor: "rgba(74,222,128,.55)", background: "rgba(15,23,42,.86)" } : undefined}
                         value={state.orders[category.key][index] ?? ""}
                         onChange={(e) => {
                           const orders = { ...state.orders, [category.key]: [...state.orders[category.key]] };
@@ -646,11 +1233,30 @@ export function ScheduleApp() {
                           setState({ ...state, orders });
                         }}
                       />
+                      {index === startRawIndex ? (
+                        <span style={{ fontSize: 12, fontWeight: 800, color: "#86efac" }}>이번 달 시작점</span>
+                      ) : null}
+                      {isOffEditing && state.orders[category.key][index]?.trim() ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: 12,
+                            borderColor: "rgba(74,222,128,.45)",
+                            background: index === startRawIndex ? "rgba(34,197,94,.22)" : "rgba(34,197,94,.12)",
+                            color: "#dcfce7",
+                          }}
+                          onClick={() => setState((current) => sanitizeScheduleState(setMonthStartPointer(current, targetMonthKey, category.key, index)))}
+                        >
+                          시작점
+                        </button>
+                      ) : null}
                     </label>
                   ))}
                 </div>
               </article>
-            ))}
+            )})}
           </div>
         </section>
       </section>
@@ -658,62 +1264,227 @@ export function ScheduleApp() {
       <section style={{ display: "grid", gap: 16 }}>
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div className="chip">오프 / 미리보기</div>
-            <div style={{ display: "grid", gap: 10, maxHeight: 360, overflow: "auto" }}>
-              {uniquePeople.map((name) => {
-                const isOff = state.offPeople.includes(name);
-                return (
-                  <div key={name} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: 10, borderRadius: 14, background: "rgba(255,255,255,.04)" }}>
-                    <strong>{name}</strong>
-                    <button
-                      className={`btn ${isOff ? "" : "white"}`}
-                      onClick={() =>
-                        setState({
-                          ...state,
-                          offPeople: isOff ? state.offPeople.filter((item) => item !== name) : [...state.offPeople, name],
-                        })
-                      }
-                    >
-                      {isOff ? "활성화" : "오프"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
             <div className="chip">사본 보관함</div>
-            {state.generated ? (
-              (state.snapshots[state.generated.monthKey] ?? []).length > 0 ? (
-                (state.snapshots[state.generated.monthKey] ?? []).map((snapshot) => (
-                  <div key={snapshot.id} style={{ padding: 12, borderRadius: 14, border: "1px solid var(--line)" }}>
-                    <strong>{snapshot.label}</strong>
-                    <div className="muted" style={{ marginTop: 6 }}>{snapshot.createdAt}</div>
-                    <button className="btn" style={{ marginTop: 10 }} onClick={() => {
-                      const nextState = openSnapshot(state, snapshot.id);
-                      setState(nextState);
-                      const opened = (nextState.snapshots[nextState.generated?.monthKey ?? ""] ?? []).find((item) => item.id === snapshot.id);
-                      setVisibleMonthKey(opened?.generated.monthKey ?? nextState.generated?.monthKey ?? null);
-                      setMessage({ tone: "ok", text: `${snapshot.label} 사본을 열었습니다.` });
-                    }}>
-                      열기
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="status note">저장된 사본이 없습니다.</div>
-              )
+            {originalSnapshotEntries.length > 0 ? (
+              originalSnapshotEntries.map(({ monthKey, snapshot }) => (
+                <div key={snapshot.id} style={{ padding: 12, borderRadius: 14, border: "1px solid var(--line)", display: "grid", gap: 8 }}>
+                  <strong>{monthKey} 원본</strong>
+                  <div className="muted" style={{ marginTop: 6 }}>{snapshot.createdAt}</div>
+                  <button className="btn" disabled={isEditingDate} style={{ marginTop: 10 }} onClick={() => setOriginalPreviewSnapshot(snapshot)}>
+                    열기
+                  </button>
+                </div>
+              ))
             ) : (
-              <div className="status note">먼저 근무표를 작성하세요.</div>
+              <div className="status note">아직 저장된 원본이 없습니다.</div>
             )}
           </div>
         </section>
 
       </section>
       </div>
+      {originalPreviewSnapshot ? (
+        <div
+          onClick={() => setOriginalPreviewSnapshot(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 58,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            background: "rgba(7,17,31,.78)",
+          }}
+        >
+          <section
+            className="panel"
+            style={{
+              width: "min(1200px, 100%)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              background: "#0b1628",
+              border: "1px solid rgba(255,255,255,.14)",
+              boxShadow: "0 24px 64px rgba(0,0,0,.45)",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div className="chip">근무 원본</div>
+                  <strong>{originalPreviewSnapshot.generated.year}년 {originalPreviewSnapshot.generated.month}월</strong>
+                  <span className="muted">{originalPreviewSnapshot.createdAt}</span>
+                </div>
+                <button type="button" className="btn" onClick={() => setOriginalPreviewSnapshot(null)}>닫기</button>
+              </div>
+              <div style={{ overflowX: "auto", overflowY: "visible" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
+                  {weekdayLabels.map((label) => (
+                    <div key={`preview-${label}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 800, fontSize: 12 }}>
+                      {label}
+                    </div>
+                  ))}
+                  {originalVisibleDays.map((day) => {
+                    const dayCardStyle = getDayCardStyle(day);
+                    const centeredDayLabel = getCenteredDayLabel(day);
+                    const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
+                    const previewAssignments = Object.entries(day.assignments).filter(([, names]) => names.length > 0);
+
+                    return (
+                      <article
+                        key={`preview-${originalPreviewSnapshot.id}-${day.dateKey}`}
+                        className="panel"
+                        style={{
+                          padding: 8,
+                          minHeight: 220,
+                          opacity: day.isOverflowMonth ? 0.55 : 1,
+                          background: dayCardStyle.background,
+                          border: dayCardStyle.border,
+                        }}
+                      >
+                        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <div style={{ fontSize: 17, fontWeight: 900 }}>{day.month}/{day.day}</div>
+                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 24, textAlign: "center", color: "#ffd7d7", fontWeight: 800, fontSize: 12 }}>
+                            {centeredDayLabel}
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          {previewAssignments.map(([category, names]) => (
+                            <article
+                              key={`preview-${day.dateKey}-${category}`}
+                              style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}
+                            >
+                              <strong style={{ fontSize: 12, lineHeight: 1.2, minWidth: 42, paddingTop: 2 }}>
+                                {getScheduleCategoryLabel(category)}
+                              </strong>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginLeft: 48, marginTop: -16, minHeight: 22 }}>
+                                {names.map((name, index) => {
+                                  const assignmentDisplay = getAssignmentDisplay(category, name);
+                                  const conflicted = conflictSet.has(`${category}-${name}`);
+                                  const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
+                                  return (
+                                    <div
+                                      key={`preview-${category}-${name}-${index}`}
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        padding: "2px 6px",
+                                        borderRadius: 999,
+                                        background: conflicted
+                                          ? weekendConflict
+                                            ? "rgba(34,211,238,.28)"
+                                            : "rgba(239,68,68,.22)"
+                                          : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.16)",
+                                        border: conflicted
+                                          ? weekendConflict
+                                            ? "1px solid rgba(103,232,249,.65)"
+                                            : "1px solid rgba(239,68,68,.28)"
+                                          : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                        color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        fontWeight: 700,
+                                        fontSize: 12,
+                                        lineHeight: 1.2,
+                                        boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
+                                      }}
+                                    >
+                                      <span>{assignmentDisplay.name}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {addPersonDialog ? (
+        <div
+          onClick={closeAddPersonDialog}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            background: "rgba(7,17,31,.72)",
+          }}
+        >
+          <section
+            className="panel"
+            style={{
+              width: "min(100%, 420px)",
+              background: "#0b1628",
+              border: "1px solid rgba(255,255,255,.14)",
+              boxShadow: "0 24px 64px rgba(0,0,0,.45)",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <form
+              className="panel-pad"
+              style={{ display: "grid", gap: 14 }}
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitAddPerson();
+              }}
+            >
+              <div style={{ display: "grid", gap: 6 }}>
+                <div className="chip">이름 추가</div>
+                <strong>{addPersonDialog.dayLabel} {getScheduleCategoryLabel(addPersonDialog.category)}</strong>
+                <span className="muted">이름을 입력하고 Enter를 누르면 바로 추가되고 입력창이 초기화됩니다.</span>
+              </div>
+              {addPersonDialog.category === "휴가" ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <span className="muted">휴가 유형</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                    {(["연차", "대휴"] as const).map((type) => {
+                      const selected = addPersonVacationType === type;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          className="btn"
+                          onClick={() => setAddPersonVacationType(type)}
+                          style={{
+                            padding: "8px 12px",
+                            fontWeight: 800,
+                            ...vacationLegendStyles[type],
+                            boxShadow: selected ? "0 0 0 1px rgba(255,255,255,.22) inset" : undefined,
+                            transform: selected ? "translateY(-1px)" : undefined,
+                          }}
+                        >
+                          {type}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <input
+                ref={addPersonInputRef}
+                className="field-input"
+                value={addPersonName}
+                onChange={(event) => setAddPersonName(event.target.value)}
+                placeholder="새 이름 입력"
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                <button type="submit" className="btn primary">추가</button>
+                <button type="button" className="btn" onClick={closeAddPersonDialog}>닫기</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
+
+

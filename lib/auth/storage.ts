@@ -335,3 +335,7 @@ export function updateUserRole(userId: string, role: UserRole) {
   }
   return nextUsers;
 }
+
+export function hasDeskAccess(role: UserRole | null | undefined) {
+  return role === "desk" || role === "admin";
+}

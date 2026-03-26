@@ -35,6 +35,43 @@ function cloneSchedule<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function findRefSlot(schedule: GeneratedSchedule, ref: SchedulePersonRef) {
+  const day = schedule.days.find((item) => item.dateKey === ref.dateKey);
+  if (!day) return null;
+  const list = day.assignments[ref.category];
+  if (!list) return null;
+  const index = list[ref.index] === ref.name ? ref.index : list.findIndex((name) => name === ref.name);
+  if (index < 0) return null;
+  return { day, list, index };
+}
+
+function swapAssignmentsAcrossSchedules(
+  sourceSchedule: GeneratedSchedule,
+  targetSchedule: GeneratedSchedule,
+  request: ScheduleChangeRequest,
+) {
+  const sourceSlot = findRefSlot(sourceSchedule, request.source);
+  const targetSlot = findRefSlot(targetSchedule, request.target);
+  if (!sourceSlot || !targetSlot) return false;
+
+  const sourceName = sourceSlot.list[sourceSlot.index];
+  const targetName = targetSlot.list[targetSlot.index];
+  const sourceWasVacation = sourceSlot.day.vacations.includes(sourceName);
+  const targetWasVacation = targetSlot.day.vacations.includes(targetName);
+
+  sourceSlot.list[sourceSlot.index] = targetName;
+  targetSlot.list[targetSlot.index] = sourceName;
+
+  if (sourceWasVacation) {
+    sourceSlot.day.vacations = [...sourceSlot.list];
+  }
+  if (targetWasVacation) {
+    targetSlot.day.vacations = [...targetSlot.list];
+  }
+
+  return true;
+}
+
 function swapAssignments(schedule: GeneratedSchedule, request: ScheduleChangeRequest) {
   const nextSchedule = cloneSchedule(schedule);
   const sourceDay = nextSchedule.days.find((item) => item.dateKey === request.source.dateKey);
@@ -77,21 +114,21 @@ function applyRequestToScheduleState(request: ScheduleChangeRequest) {
   const current = raw ? sanitizeScheduleState(JSON.parse(raw) as Partial<ScheduleState>) : null;
   if (!current) return false;
 
-  let changed = false;
-  const generatedHistory = current.generatedHistory.map((item) => {
-    if (item.monthKey !== request.monthKey) return item;
-    const nextSchedule = swapAssignments(item, request);
-    if (!nextSchedule) return item;
-    changed = true;
-    return nextSchedule;
-  });
+  const targetMonthKeys = new Set([request.source.monthKey, request.target.monthKey]);
+  const generatedMap = new Map(
+    current.generatedHistory
+      .filter((item) => targetMonthKeys.has(item.monthKey))
+      .map((item) => [item.monthKey, cloneSchedule(item)]),
+  );
+  const sourceSchedule = generatedMap.get(request.source.monthKey);
+  const targetSchedule = generatedMap.get(request.target.monthKey);
+  if (!sourceSchedule || !targetSchedule) return false;
 
-  const generated =
-    current.generated?.monthKey === request.monthKey
-      ? swapAssignments(current.generated, request) ?? current.generated
-      : current.generated;
+  const changed = swapAssignmentsAcrossSchedules(sourceSchedule, targetSchedule, request);
+  if (!changed) return false;
 
-  if (!changed && generated === current.generated) return false;
+  const generatedHistory = current.generatedHistory.map((item) => generatedMap.get(item.monthKey) ?? item);
+  const generated = current.generated ? generatedMap.get(current.generated.monthKey) ?? current.generated : null;
 
   const nextState = sanitizeScheduleState({
     ...current,
@@ -104,15 +141,22 @@ function applyRequestToScheduleState(request: ScheduleChangeRequest) {
 
 function applyRequestToPublishedSchedules(request: ScheduleChangeRequest) {
   const items = getPublishedSchedules();
-  let changed = false;
-  const nextItems = items.map((item) => {
-    if (item.monthKey !== request.monthKey) return item;
-    const nextSchedule = swapAssignments(item.schedule, request);
-    if (!nextSchedule) return item;
-    changed = true;
-    return { ...item, schedule: nextSchedule };
-  });
+  const targetMonthKeys = new Set([request.source.monthKey, request.target.monthKey]);
+  const scheduleMap = new Map(
+    items
+      .filter((item) => targetMonthKeys.has(item.monthKey))
+      .map((item) => [item.monthKey, cloneSchedule(item.schedule)]),
+  );
+  const sourceSchedule = scheduleMap.get(request.source.monthKey);
+  const targetSchedule = scheduleMap.get(request.target.monthKey);
+  if (!sourceSchedule || !targetSchedule) return false;
+
+  const changed = swapAssignmentsAcrossSchedules(sourceSchedule, targetSchedule, request);
   if (!changed) return false;
+  const nextItems = items.map((item) => {
+    const nextSchedule = scheduleMap.get(item.monthKey);
+    return nextSchedule ? { ...item, schedule: nextSchedule } : item;
+  });
   savePublishedSchedules(nextItems);
   return true;
 }
