@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession } from "@/lib/auth/storage";
+import { printHtmlDocument } from "@/lib/print";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS, STORAGE_KEY, categories, defaultScheduleState, getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
   deleteScheduleChangeRequest,
@@ -258,6 +260,7 @@ export function ScheduleApp() {
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
+  const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const session = getSession();
   const isEditingDate = Boolean(state.editDateKey);
 
@@ -438,6 +441,35 @@ export function ScheduleApp() {
     () => requests.filter((item) => item.status !== "pending"),
     [requests],
   );
+
+  const printVisibleSchedule = () => {
+    if (!visibleSchedule) return;
+    const printTitle = `${visibleSchedule.month}월 근무표`;
+    printHtmlDocument({
+      title: printTitle,
+      bodyHtml: renderSchedulePrintHtml({
+        title: printTitle,
+        days: visibleDays,
+      }),
+    });
+  };
+
+  const getOriginalSnapshotPrintDays = (snapshot: SnapshotItem) => {
+    const previousMonth = getAdjacentMonth(snapshot.generated.year, snapshot.generated.month, -1);
+    const previousSchedule = state.generatedHistory.find((item) => item.monthKey === previousMonth.monthKey) ?? null;
+    return getOwnedDisplayDays(snapshot.generated.days, previousSchedule);
+  };
+
+  const printOriginalSnapshot = (snapshot: SnapshotItem) => {
+    const printTitle = `${snapshot.generated.month}월 원본`;
+    printHtmlDocument({
+      title: printTitle,
+      bodyHtml: renderSchedulePrintHtml({
+        title: printTitle,
+        days: getOriginalSnapshotPrintDays(snapshot),
+      }),
+    });
+  };
 
   const updateEditingState = (recipe: (current: ScheduleState) => ScheduleState) => {
     setState((current) => sanitizeScheduleState(recipe(current)));
@@ -1018,11 +1050,52 @@ export function ScheduleApp() {
                 >
                   다음 달
                 </button>
+                <button className="btn" onClick={printVisibleSchedule}>
+                  출력
+                </button>
               </div>
             ) : null}
           </div>
           {visibleSchedule ? (
-            <div style={{ overflowX: "auto", overflowY: "visible" }}>
+            <div ref={printableScheduleRef} data-print-frame="true" style={{ display: "grid", gap: 12 }}>
+              <div data-print-only="true" style={{ display: "none" }}>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <strong style={{ fontSize: 22 }}>{visibleSchedule.year}년 {visibleSchedule.month}월 DESK 근무표</strong>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.연차,
+                      }}
+                    >
+                      연차
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.대휴,
+                      }}
+                    >
+                      대휴
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto", overflowY: "visible" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                 {weekdayLabels.map((label) => (
                   <div key={label} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
@@ -1420,6 +1493,7 @@ export function ScheduleApp() {
                 })}
               </div>
             </div>
+            </div>
           ) : (
             <div className="status note">상단의 작성 버튼을 누르면 근무표가 생성됩니다.</div>
           )}
@@ -1589,9 +1663,14 @@ export function ScheduleApp() {
                 <div key={snapshot.id} style={{ padding: 12, borderRadius: 14, border: "1px solid var(--line)", display: "grid", gap: 8 }}>
                   <strong>{monthKey} 원본</strong>
                   <div className="muted" style={{ marginTop: 6 }}>{snapshot.createdAt}</div>
-                  <button className="btn" disabled={isEditingDate} style={{ marginTop: 10 }} onClick={() => setOriginalPreviewSnapshot(snapshot)}>
-                    열기
-                  </button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <button className="btn" disabled={isEditingDate} onClick={() => setOriginalPreviewSnapshot(snapshot)}>
+                      열기
+                    </button>
+                    <button className="btn" disabled={isEditingDate} onClick={() => printOriginalSnapshot(snapshot)}>
+                      출력
+                    </button>
+                  </div>
                 </div>
               ))
             ) : (
@@ -1691,7 +1770,10 @@ export function ScheduleApp() {
                   <strong>{originalPreviewSnapshot.generated.year}년 {originalPreviewSnapshot.generated.month}월</strong>
                   <span className="muted">{originalPreviewSnapshot.createdAt}</span>
                 </div>
-                <button type="button" className="btn" onClick={() => setOriginalPreviewSnapshot(null)}>닫기</button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" className="btn" onClick={() => printOriginalSnapshot(originalPreviewSnapshot)}>출력</button>
+                  <button type="button" className="btn" onClick={() => setOriginalPreviewSnapshot(null)}>닫기</button>
+                </div>
               </div>
               <div style={{ overflowX: "auto", overflowY: "visible" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>

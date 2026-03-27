@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession, hasDeskAccess } from "@/lib/auth/storage";
+import { printHtmlDocument } from "@/lib/print";
 import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
   createScheduleChangeRequest,
@@ -74,16 +76,17 @@ function getCategoryDisplayLabel(category: string) {
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
-function getDayCardStyle(day: DaySchedule) {
+function getDayCardStyle(day: DaySchedule, sameSheet: boolean) {
+  const useOverflowTone = day.isOverflowMonth && !sameSheet;
   const isRedDay = day.isWeekend || day.isWeekdayHoliday;
   if (isRedDay) {
     return {
-      background: day.isOverflowMonth ? "rgba(248,113,113,.24)" : "rgba(248,113,113,.4)",
+      background: useOverflowTone ? "rgba(248,113,113,.24)" : "rgba(248,113,113,.4)",
       border: "1px solid rgba(252,165,165,.5)",
     };
   }
   return {
-    background: day.isOverflowMonth ? "rgba(255,255,255,.16)" : "rgba(255,255,255,.22)",
+    background: useOverflowTone ? "rgba(255,255,255,.16)" : "rgba(255,255,255,.22)",
     border: "1px solid rgba(255,255,255,.22)",
   };
 }
@@ -356,6 +359,7 @@ export function PublishedSchedulesPanel() {
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
+  const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const session = getSession();
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
@@ -410,7 +414,6 @@ export function PublishedSchedulesPanel() {
 
   const selectedIndex = selectedItem ? items.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const mine = selectedItem && username ? compactAssignments(selectedItem, username) : [];
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(items), [items]);
   const displayDays = useMemo(
@@ -447,6 +450,19 @@ export function PublishedSchedulesPanel() {
     setEditMode((current) => !current);
     setConfirmConflictRequest(false);
     setRequestMessage("");
+  };
+
+  const printSelectedSchedule = () => {
+    if (!selectedItem) return;
+    const printTitle = `${selectedItem.schedule.month}월 근무표`;
+    printHtmlDocument({
+      title: printTitle,
+      bodyHtml: renderSchedulePrintHtml({
+        title: printTitle,
+        days: displayDays,
+        highlightedName: showMine ? username : null,
+      }),
+    });
   };
 
   const handleNameClick = (person: ScheduleNameObject) => {
@@ -605,7 +621,7 @@ export function PublishedSchedulesPanel() {
           <div className="chip">게시된 근무표</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
-            <button className="btn" disabled={!username} onClick={() => setShowMine((current) => !current)}>
+            <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
               {showMine ? "전체 보기" : "내 근무 보기"}
             </button>
             <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
@@ -640,6 +656,9 @@ export function PublishedSchedulesPanel() {
               <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
                 다음 달
               </button>
+              <button className="btn" onClick={printSelectedSchedule}>
+                출력
+              </button>
               {canDelete ? (
                 <button
                   className="btn"
@@ -660,17 +679,16 @@ export function PublishedSchedulesPanel() {
 
         {selectedItem ? (
           <>
-            <div className="muted">게시 {selectedItem.publishedAt}</div>
+            <div ref={printableScheduleRef} data-print-frame="true" style={{ display: "grid", gap: 12 }}>
+              <div data-print-only="true" style={{ display: "none" }}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong style={{ fontSize: 22 }}>{selectedItem.title}</strong>
+                  <div className="muted">게시 {selectedItem.publishedAt}</div>
+                </div>
+              </div>
+              <div className="muted">게시 {selectedItem.publishedAt}</div>
 
-            {showMine && username ? (
-              mine.length > 0 ? (
-                <div className="status ok">{mine.join(" | ")}</div>
-              ) : (
-                <div className="status note">내 이름으로 배정된 근무가 없습니다.</div>
-              )
-            ) : null}
-
-            <div style={{ overflowX: "auto", overflowY: "visible" }}>
+              <div style={{ overflowX: "auto", overflowY: "visible" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                 {weekdayLabels.map((label) => (
                   <div key={label} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
@@ -678,7 +696,8 @@ export function PublishedSchedulesPanel() {
                   </div>
                 ))}
                 {displayDays.map((day) => {
-                  const dayCardStyle = getDayCardStyle(day);
+                  const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
+                  const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const visibleAssignments = Object.entries(day.assignments).filter(([category]) => {
@@ -692,7 +711,7 @@ export function PublishedSchedulesPanel() {
                       style={{
                         padding: 8,
                         minHeight: 232,
-                        opacity: day.isOverflowMonth ? 0.55 : 1,
+                        opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
                       }}
@@ -789,9 +808,11 @@ export function PublishedSchedulesPanel() {
                                     ref,
                                     pending: isPendingRef(allPendingRequests, ref),
                                   };
-                                  const mineHighlighted = Boolean(username) && username === assignmentDisplay.name && (showMine || editMode);
+                                  const isMine = Boolean(username) && username === assignmentDisplay.name;
+                                  const mineHighlighted = isMine && showMine;
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
+                                  const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
                                   return (
                                     <button
                                       key={personObject.key}
@@ -799,13 +820,16 @@ export function PublishedSchedulesPanel() {
                                       onClick={() => handleNameClick(personObject)}
                                       style={{
                                         display: "flex",
+                                        gridColumn: mineHighlighted ? "1 / -1" : "auto",
+                                        justifySelf: mineHighlighted ? "center" : "stretch",
                                         alignItems: "center",
                                         justifyContent: personObject.pending ? "space-between" : "center",
-                                        width: "100%",
+                                        width: mineHighlighted ? "fit-content" : "100%",
+                                        maxWidth: "100%",
                                         gap: 6,
-                                        minHeight: 34,
-                                        padding: "6px 10px",
-                                        borderRadius: 14,
+                                        minHeight: mineHighlighted ? 38 : 34,
+                                        padding: mineHighlighted ? "6px 12px" : "6px 10px",
+                                        borderRadius: mineHighlighted ? 16 : 14,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
                                           : routeSelected
@@ -813,8 +837,10 @@ export function PublishedSchedulesPanel() {
                                               ? "rgba(34,197,94,.28)"
                                               : "rgba(56,189,248,.22)"
                                             : mineHighlighted
-                                              ? "linear-gradient(135deg, rgba(250,204,21,.34), rgba(56,189,248,.28))"
-                                              : assignmentDisplay.isVacation
+                                              ? "rgba(148,163,184,.38)"
+                                              : dimOtherNames
+                                                ? "rgba(255,255,255,.06)"
+                                                : assignmentDisplay.isVacation
                                                 ? assignmentDisplay.chipStyle?.background
                                                 : "rgba(255,255,255,.16)",
                                         border: personObject.pending
@@ -824,13 +850,17 @@ export function PublishedSchedulesPanel() {
                                               ? "1px solid rgba(74,222,128,.7)"
                                               : "1px solid rgba(56,189,248,.75)"
                                             : mineHighlighted
-                                              ? "1px solid rgba(250,204,21,.82)"
+                                              ? "4px solid rgba(226,232,240,.82)"
+                                              : dimOtherNames
+                                                ? "1px solid rgba(255,255,255,.08)"
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: mineHighlighted ? "#fff7c2" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: 700,
-                                        fontSize: mineHighlighted ? 18 : 15,
+                                        color: mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        fontWeight: mineHighlighted ? 800 : 700,
+                                        fontSize: mineHighlighted ? 22 : 15,
                                         lineHeight: 1.3,
-                                        boxShadow: mineHighlighted ? "0 10px 24px rgba(250,204,21,.18), 0 0 0 1px rgba(250,204,21,.14) inset" : undefined,
+                                        boxShadow: mineHighlighted ? "0 10px 24px rgba(15,23,42,.18), 0 0 0 1px rgba(255,255,255,.08) inset" : undefined,
+                                        textShadow: undefined,
+                                        opacity: dimOtherNames ? 0.42 : 1,
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
@@ -851,6 +881,7 @@ export function PublishedSchedulesPanel() {
                   );
                 })}
               </div>
+            </div>
             </div>
           </>
         ) : null}
