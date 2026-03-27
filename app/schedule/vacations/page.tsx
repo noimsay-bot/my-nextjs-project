@@ -9,6 +9,7 @@ import {
   getVacationApplicantsOverview,
   runAnnualVacationLottery,
   runCompensatoryVacationLottery,
+  seedVacationSimulationRequests,
   setVacationCapacity,
   VACATION_EVENT,
   VacationMonthState,
@@ -16,29 +17,46 @@ import {
 } from "@/lib/vacation/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+const VACATION_MANAGEMENT_SELECTION_KEY = "desk-vacation-management-selection-v1";
 
-function buildCalendarCells(year: number, month: number) {
-  const firstDate = new Date(year, month - 1, 1);
-  const monthDays = new Date(year, month, 0).getDate();
-  const leading = firstDate.getDay() === 0 ? 6 : firstDate.getDay() - 1;
-  const total = leading + monthDays;
-  const trailing = (7 - (total % 7)) % 7;
-  const cells: Array<{ dateKey: string | null; day: number | null; isCurrentMonth: boolean }> = [];
+function buildCalendarCells(year: number, month: number, displayDateKeys: string[]) {
+  const firstDisplayDate = displayDateKeys.length > 0
+    ? new Date(`${displayDateKeys[0]}T00:00:00`)
+    : new Date(year, month - 1, 1);
+  const lastDisplayDate = displayDateKeys.length > 0
+    ? new Date(`${displayDateKeys[displayDateKeys.length - 1]}T00:00:00`)
+    : new Date(year, month, 0);
+  const leading = firstDisplayDate.getDay() === 0 ? 6 : firstDisplayDate.getDay() - 1;
+  const cells: Array<{
+    dateKey: string | null;
+    day: number | null;
+    label: string;
+    isCurrentMonth: boolean;
+    isWeekend: boolean;
+    isOverflowMonth: boolean;
+  }> = [];
 
   for (let index = 0; index < leading; index += 1) {
-    cells.push({ dateKey: null, day: null, isCurrentMonth: false });
+    cells.push({ dateKey: null, day: null, label: "", isCurrentMonth: false, isWeekend: false, isOverflowMonth: false });
   }
 
-  for (let day = 1; day <= monthDays; day += 1) {
+  for (const date = new Date(firstDisplayDate); date <= lastDisplayDate; date.setDate(date.getDate() + 1)) {
+    const displayMonth = date.getMonth() + 1;
+    const displayDay = date.getDate();
     cells.push({
-      dateKey: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-      day,
-      isCurrentMonth: true,
+      dateKey: `${date.getFullYear()}-${String(displayMonth).padStart(2, "0")}-${String(displayDay).padStart(2, "0")}`,
+      day: displayDay,
+      label: displayMonth === month ? String(displayDay) : `${displayMonth}/${displayDay}`,
+      isCurrentMonth: displayMonth === month,
+      isWeekend: date.getDay() === 0 || date.getDay() === 6,
+      isOverflowMonth: displayMonth !== month,
     });
   }
 
+  const total = cells.length;
+  const trailing = (7 - (total % 7)) % 7;
   for (let index = 0; index < trailing; index += 1) {
-    cells.push({ dateKey: null, day: null, isCurrentMonth: false });
+    cells.push({ dateKey: null, day: null, label: "", isCurrentMonth: false, isWeekend: false, isOverflowMonth: false });
   }
 
   return cells;
@@ -72,10 +90,7 @@ function highlightStyle(active: boolean, tone: "annual" | "compensatory") {
 
 function formatRequestDates(dateKeys: string[]) {
   return dateKeys
-    .map((dateKey) => {
-      const [, , day] = dateKey.split("-");
-      return `${Number(day)}일`;
-    })
+    .map((dateKey) => `${Number(dateKey.split("-")[2])}일`)
     .join(", ");
 }
 
@@ -83,15 +98,42 @@ export default function ScheduleVacationsPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
+  const [selectionLoaded, setSelectionLoaded] = useState(false);
   const [monthState, setMonthState] = useState<VacationMonthState | null>(null);
+  const [managedDateKeys, setManagedDateKeys] = useState<string[]>([]);
+  const [displayDateKeys, setDisplayDateKeys] = useState<string[]>([]);
+  const [hasGeneratedSchedule, setHasGeneratedSchedule] = useState(false);
   const [annualApplicants, setAnnualApplicants] = useState<Record<string, string[]>>({});
   const [compensatoryApplicants, setCompensatoryApplicants] = useState<Record<string, string[]>>({});
   const [requests, setRequests] = useState<VacationRequest[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(VACATION_MANAGEMENT_SELECTION_KEY);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { year?: number; month?: number };
+        if (typeof parsed.year === "number") setYear(parsed.year);
+        if (typeof parsed.month === "number") setMonth(parsed.month);
+      } catch {
+        // ignore invalid saved selection
+      }
+    }
+    setSelectionLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!selectionLoaded || typeof window === "undefined") return;
+    window.localStorage.setItem(VACATION_MANAGEMENT_SELECTION_KEY, JSON.stringify({ year, month }));
+  }, [selectionLoaded, year, month]);
+
   const loadMonth = () => {
     const overview = getVacationApplicantsOverview(year, month);
     setMonthState(overview.monthState);
+    setManagedDateKeys(overview.managedDateKeys);
+    setDisplayDateKeys(overview.displayDateKeys);
+    setHasGeneratedSchedule(overview.hasGeneratedSchedule);
     setAnnualApplicants(overview.annualApplicants);
     setCompensatoryApplicants(overview.compensatoryApplicants);
     setRequests(overview.requests);
@@ -113,7 +155,10 @@ export default function ScheduleVacationsPage() {
     };
   }, [year, month]);
 
-  const calendarCells = useMemo(() => buildCalendarCells(year, month), [month, year]);
+  const calendarCells = useMemo(() => buildCalendarCells(year, month, displayDateKeys), [displayDateKeys, month, year]);
+  const managedDateSet = useMemo(() => new Set(managedDateKeys), [managedDateKeys]);
+  const annualLotteryDone = Boolean(monthState && Object.values(monthState.annualWinners).some((names) => names.length > 0));
+  const compensatoryLotteryDone = Boolean(monthState && Object.values(monthState.compensatoryWinners).some((names) => names.length > 0));
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -122,8 +167,10 @@ export default function ScheduleVacationsPage() {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ display: "grid", gap: 6 }}>
               <div className="chip">DESK 휴가 관리</div>
-              <strong style={{ fontSize: 22 }}>{year}년 {month}월 휴가 추첨 달력</strong>
-              <span className="muted">기본 휴가 인원은 날짜별 5명입니다. 연차 추첨 후 남은 자리에 대휴 추첨을 진행합니다.</span>
+              <strong style={{ fontSize: 22 }}>{year}년 {month}월 휴가 추첨 현황</strong>
+              <span className="muted">
+                DESK 페이지에서 작성한 근무표 날짜만 휴가 관리에 반영됩니다. 토요일과 일요일은 신청과 추첨에서 제외됩니다.
+              </span>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <Link href="/vacation" className="btn">
@@ -137,7 +184,7 @@ export default function ScheduleVacationsPage() {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(180px, 220px))", gap: 12 }}>
             <label style={{ display: "grid", gap: 8 }}>
-              <span>년도</span>
+              <span>연도</span>
               <select className="field-select" value={year} onChange={(event) => setYear(Number(event.target.value))}>
                 {SCHEDULE_YEARS.map((option) => (
                   <option key={option} value={option}>
@@ -161,8 +208,29 @@ export default function ScheduleVacationsPage() {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button
               className="btn"
+              disabled={!hasGeneratedSchedule}
               onClick={() => {
-                runAnnualVacationLottery(year, month);
+                const result = seedVacationSimulationRequests(year, month);
+                setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
+                loadMonth();
+              }}
+            >
+              시뮬레이션 채우기
+            </button>
+            <button
+              className="btn"
+              disabled={!hasGeneratedSchedule}
+              onClick={() => {
+                if (annualLotteryDone) {
+                  window.alert("이미 연차 추첨했습니다.");
+                  return;
+                }
+                if (!window.confirm("연차 추첨하시겠습니까?")) return;
+                const result = runAnnualVacationLottery(year, month);
+                if (!result) {
+                  setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 없어 연차 추첨을 진행할 수 없습니다.` });
+                  return;
+                }
                 loadMonth();
                 setMessage({ tone: "ok", text: `${year}년 ${month}월 연차 추첨을 완료했습니다.` });
               }}
@@ -171,8 +239,18 @@ export default function ScheduleVacationsPage() {
             </button>
             <button
               className="btn"
+              disabled={!hasGeneratedSchedule}
               onClick={() => {
-                runCompensatoryVacationLottery(year, month);
+                if (compensatoryLotteryDone) {
+                  window.alert("이미 대휴 추첨했습니다.");
+                  return;
+                }
+                if (!window.confirm("대휴 추첨하시겠습니까?")) return;
+                const result = runCompensatoryVacationLottery(year, month);
+                if (!result) {
+                  setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 없어 대휴 추첨을 진행할 수 없습니다.` });
+                  return;
+                }
                 loadMonth();
                 setMessage({ tone: "ok", text: `${year}년 ${month}월 대휴 추첨을 완료했습니다.` });
               }}
@@ -181,6 +259,7 @@ export default function ScheduleVacationsPage() {
             </button>
             <button
               className="btn primary"
+              disabled={!hasGeneratedSchedule}
               onClick={() => {
                 const result = applyVacationMonthToSchedule(year, month);
                 setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
@@ -191,6 +270,12 @@ export default function ScheduleVacationsPage() {
             </button>
             {monthState?.appliedAt ? <span className="muted">최근 반영: {monthState.appliedAt}</span> : null}
           </div>
+
+          {!hasGeneratedSchedule ? (
+            <div className="status note">
+              {year}년 {month}월 DESK 근무표가 아직 작성되지 않았습니다. 먼저 DESK 페이지에서 근무표를 작성하면 같은 날짜의 평일 시트가 자동으로 만들어집니다.
+            </div>
+          ) : null}
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
@@ -217,7 +302,7 @@ export default function ScheduleVacationsPage() {
                 </div>
               ))}
               {calendarCells.map((cell, index) => {
-                if (!cell.isCurrentMonth || !cell.dateKey || !cell.day) {
+                if (!cell.dateKey || !cell.day) {
                   return (
                     <article
                       key={`blank-${index}`}
@@ -232,11 +317,30 @@ export default function ScheduleVacationsPage() {
                   );
                 }
 
+                if (cell.isWeekend || !managedDateSet.has(cell.dateKey)) {
+                  return (
+                    <article
+                      key={cell.dateKey}
+                      className="panel"
+                      style={{
+                        minHeight: 228,
+                        padding: 10,
+                        opacity: cell.isOverflowMonth ? 0.55 : 0.42,
+                        background: "rgba(255,255,255,.05)",
+                        border: "1px solid rgba(255,255,255,.08)",
+                      }}
+                    >
+                      <strong style={{ fontSize: 20 }}>{cell.label}</strong>
+                    </article>
+                  );
+                }
+
                 const capacity = monthState?.limits[cell.dateKey] ?? DEFAULT_VACATION_CAPACITY;
                 const annualNames = annualApplicants[cell.dateKey] ?? [];
                 const compensatoryNames = compensatoryApplicants[cell.dateKey] ?? [];
                 const annualWinners = monthState?.annualWinners[cell.dateKey] ?? [];
                 const compensatoryWinners = monthState?.compensatoryWinners[cell.dateKey] ?? [];
+                const dateKey = cell.dateKey;
 
                 return (
                   <article
@@ -245,12 +349,13 @@ export default function ScheduleVacationsPage() {
                     style={{
                       minHeight: 228,
                       padding: 10,
+                      opacity: cell.isOverflowMonth ? 0.9 : 1,
                       background: "rgba(255,255,255,.18)",
                       border: "1px solid rgba(255,255,255,.2)",
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                      <strong style={{ fontSize: 20 }}>{cell.day}</strong>
+                      <strong style={{ fontSize: cell.isOverflowMonth ? 18 : 20 }}>{cell.label}</strong>
                       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800 }}>
                         <span>휴가 인원</span>
                         <select
@@ -258,7 +363,7 @@ export default function ScheduleVacationsPage() {
                           style={{ minWidth: 68, padding: "8px 10px" }}
                           value={capacity}
                           onChange={(event) => {
-                            setVacationCapacity(year, month, cell.dateKey as string, Number(event.target.value));
+                            setVacationCapacity(year, month, dateKey, Number(event.target.value));
                             loadMonth();
                           }}
                         >
@@ -282,7 +387,7 @@ export default function ScheduleVacationsPage() {
                               const isWinner = annualWinners.includes(name);
                               return (
                                 <span
-                                  key={`annual-${cell.dateKey}-${name}`}
+                                  key={`annual-${dateKey}-${name}`}
                                   style={{
                                     display: "inline-flex",
                                     alignItems: "center",
@@ -314,7 +419,7 @@ export default function ScheduleVacationsPage() {
                               const isWinner = compensatoryWinners.includes(name);
                               return (
                                 <span
-                                  key={`comp-${cell.dateKey}-${name}`}
+                                  key={`comp-${dateKey}-${name}`}
                                   style={{
                                     display: "inline-flex",
                                     alignItems: "center",

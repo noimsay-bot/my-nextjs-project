@@ -7,6 +7,7 @@ import { SCHEDULE_MONTHS, SCHEDULE_YEARS } from "@/lib/schedule/constants";
 import { VacationType } from "@/lib/schedule/types";
 import {
   createVacationRequest,
+  getVacationManagedDateKeys,
   getVacationRequests,
   VACATION_EVENT,
   VacationRequest,
@@ -14,26 +15,28 @@ import {
 
 function formatDateList(dateKeys: string[]) {
   return dateKeys
-    .map((dateKey) => {
-      const [, , day] = dateKey.split("-");
-      return `${Number(day)}일`;
-    })
+    .map((dateKey) => `${Number(dateKey.split("-")[2])}일`)
     .join(", ");
+}
+
+function sanitizeVacationDateInput(value: string) {
+  return value.replace(/[^0-9,]/g, "");
 }
 
 export default function VacationPage() {
   const session = getSession();
   const today = new Date();
-  const [type, setType] = useState<VacationType>("연차");
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
-  const [rawDates, setRawDates] = useState("");
+  const [annualDates, setAnnualDates] = useState("");
+  const [compensatoryDates, setCompensatoryDates] = useState("");
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
   const [requests, setRequests] = useState<VacationRequest[]>([]);
+  const [managedDateKeys, setManagedDateKeys] = useState<string[]>([]);
 
   const loadRequests = () => {
-    const next = getVacationRequests();
-    setRequests(next);
+    setRequests(getVacationRequests());
+    setManagedDateKeys(getVacationManagedDateKeys(year, month));
   };
 
   useEffect(() => {
@@ -47,12 +50,75 @@ export default function VacationPage() {
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(VACATION_EVENT, onRefresh);
     };
-  }, []);
+  }, [year, month]);
 
   const myRequests = useMemo(
     () => requests.filter((request) => request.requesterName === session?.username),
     [requests, session?.username],
   );
+  const hasManagedSchedule = managedDateKeys.length > 0;
+  const allowedDaySummary = managedDateKeys.length > 0
+    ? `${Number(managedDateKeys[0].split("-")[2])}일 ~ ${Number(managedDateKeys[managedDateKeys.length - 1].split("-")[2])}일`
+    : null;
+
+  const submitRequest = (type: VacationType, rawDates: string) => {
+    return createVacationRequest({
+      requesterId: session?.id ?? null,
+      requesterName: session?.username ?? "",
+      type,
+      year,
+      month,
+      rawDates,
+    });
+  };
+
+  const handleSubmit = () => {
+    const annualInput = annualDates.trim();
+    const compensatoryInput = compensatoryDates.trim();
+
+    if (!hasManagedSchedule) {
+      setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 아직 작성되지 않아 휴가를 신청할 수 없습니다.` });
+      return;
+    }
+
+    if (!annualInput && !compensatoryInput) {
+      setMessage({ tone: "warn", text: "연차 또는 대휴 날짜를 입력해 주세요." });
+      return;
+    }
+
+    if (!window.confirm("휴가 신청을 제출하시겠습니까?")) {
+      return;
+    }
+
+    const results: string[] = [];
+    let hasSuccess = false;
+    let hasFailure = false;
+
+    if (annualInput) {
+      const annualResult = submitRequest("연차", annualInput);
+      results.push(`연차: ${annualResult.message}`);
+      hasSuccess = hasSuccess || annualResult.ok;
+      hasFailure = hasFailure || !annualResult.ok;
+      if (annualResult.ok) setAnnualDates("");
+    }
+
+    if (compensatoryInput) {
+      const compensatoryResult = submitRequest("대휴", compensatoryInput);
+      results.push(`대휴: ${compensatoryResult.message}`);
+      hasSuccess = hasSuccess || compensatoryResult.ok;
+      hasFailure = hasFailure || !compensatoryResult.ok;
+      if (compensatoryResult.ok) setCompensatoryDates("");
+    }
+
+    setMessage({
+      tone: hasSuccess && !hasFailure ? "ok" : hasSuccess ? "note" : "warn",
+      text: results.join(" "),
+    });
+
+    if (hasSuccess) {
+      loadRequests();
+    }
+  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -62,7 +128,9 @@ export default function VacationPage() {
             <div style={{ display: "grid", gap: 6 }}>
               <div className="chip">휴가 신청</div>
               <strong style={{ fontSize: 22 }}>연차 / 대휴 신청 접수</strong>
-              <span className="muted">원하는 날짜를 쉼표로 구분해서 입력하면 DESK 휴가 달력으로 바로 전달됩니다.</span>
+              <span className="muted">
+                숫자와 쉼표만 입력할 수 있습니다. 토요일과 일요일은 제외되며, DESK 근무표에 작성된 날짜만 신청할 수 있습니다.
+              </span>
             </div>
             {hasDeskAccess(session?.role) ? (
               <Link href="/schedule/vacations" className="btn">
@@ -71,16 +139,9 @@ export default function VacationPage() {
             ) : null}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
             <label style={{ display: "grid", gap: 8 }}>
-              <span>휴가 종류</span>
-              <select className="field-select" value={type} onChange={(event) => setType(event.target.value as VacationType)}>
-                <option value="연차">연차</option>
-                <option value="대휴">대휴</option>
-              </select>
-            </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span>년도</span>
+              <span>연도</span>
               <select className="field-select" value={year} onChange={(event) => setYear(Number(event.target.value))}>
                 {SCHEDULE_YEARS.map((option) => (
                   <option key={option} value={option}>
@@ -105,39 +166,77 @@ export default function VacationPage() {
             </label>
           </div>
 
-          <label style={{ display: "grid", gap: 8 }}>
-            <span>원하는 날짜</span>
-            <input
-              className="field-input"
-              value={rawDates}
-              onChange={(event) => setRawDates(event.target.value)}
-              placeholder="예: 4, 11, 18 또는 2026-06-04, 2026-06-11"
-            />
-            <span className="muted">입력한 날짜는 선택한 {year}년 {month}월 안에서만 접수됩니다.</span>
-          </label>
+          {hasManagedSchedule ? (
+            <div className="status note">
+              신청 가능 날짜 범위: {allowedDaySummary} 평일만 접수됩니다.
+            </div>
+          ) : (
+            <div className="status note">
+              {year}년 {month}월 DESK 근무표가 아직 작성되지 않았습니다. 먼저 DESK 페이지에서 해당 월 근무표를 작성해 주세요.
+            </div>
+          )}
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              className="btn primary"
-              onClick={() => {
-                const result = createVacationRequest({
-                  requesterId: session?.id ?? null,
-                  requesterName: session?.username ?? "",
-                  type,
-                  year,
-                  month,
-                  rawDates,
-                });
-                setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
-                if (result.ok) {
-                  setRawDates("");
-                  loadRequests();
-                }
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+            <section
+              style={{
+                display: "grid",
+                gap: 12,
+                padding: 16,
+                borderRadius: 18,
+                border: "1px solid rgba(125,211,252,.28)",
+                background: "rgba(59,130,246,.08)",
               }}
             >
+              <div style={{ display: "grid", gap: 4 }}>
+                <strong style={{ fontSize: 18 }}>연차 신청</strong>
+                <span className="muted">연차로 신청할 날짜만 따로 입력해 주세요.</span>
+              </div>
+              <label style={{ display: "grid", gap: 8 }}>
+                <span>연차 날짜</span>
+                <input
+                  className="field-input"
+                  inputMode="numeric"
+                  value={annualDates}
+                  onChange={(event) => setAnnualDates(sanitizeVacationDateInput(event.target.value))}
+                  placeholder="예: 1,3,5"
+                />
+              </label>
+            </section>
+
+            <section
+              style={{
+                display: "grid",
+                gap: 12,
+                padding: 16,
+                borderRadius: 18,
+                border: "1px solid rgba(74,222,128,.28)",
+                background: "rgba(16,185,129,.08)",
+              }}
+            >
+              <div style={{ display: "grid", gap: 4 }}>
+                <strong style={{ fontSize: 18 }}>대휴 신청</strong>
+                <span className="muted">대휴로 신청할 날짜만 따로 입력해 주세요.</span>
+              </div>
+              <label style={{ display: "grid", gap: 8 }}>
+                <span>대휴 날짜</span>
+                <input
+                  className="field-input"
+                  inputMode="numeric"
+                  value={compensatoryDates}
+                  onChange={(event) => setCompensatoryDates(sanitizeVacationDateInput(event.target.value))}
+                  placeholder="예: 1,3,5"
+                />
+              </label>
+            </section>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button className="btn primary" onClick={handleSubmit} disabled={!hasManagedSchedule}>
               휴가 신청
             </button>
-            <span className="muted">날짜별 추첨과 근무 반영은 DESK 휴가 관리 페이지에서 진행됩니다.</span>
+            <span className="muted">
+              입력한 날짜는 {year}년 {month}월 DESK 근무표의 평일 범위 안에서만 접수됩니다.
+            </span>
           </div>
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}

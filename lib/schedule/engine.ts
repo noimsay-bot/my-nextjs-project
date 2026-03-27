@@ -479,7 +479,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
   const nextState = cloneScheduleState(state);
   const monthKey = getMonthKey(nextState.year, nextState.month);
   const holidaySet = parseHolidaySet(nextState.extraHolidays, nextState.year, nextState.month);
-  const vacationMap = parseVacationMap(nextState.vacations);
+  const vacationMap = parseVacationMap("");
   const range = getScheduleRange(nextState.year, nextState.month);
   const startPointers = getMonthStartPointers(nextState, monthKey);
   const pointers = { ...startPointers };

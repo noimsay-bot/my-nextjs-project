@@ -29,21 +29,32 @@ const vacationLegendStyles = {
   },
 } as const;
 
+const dutyLegendStyles = {
+  조근: {
+    background: "rgba(250,204,21,.78)",
+    border: "1px solid rgba(253,224,71,.92)",
+    color: "#fde68a",
+  },
+} as const;
+
 type DisplayDay = DaySchedule & {
   ownerMonthKey: string;
 };
 
 function getAssignmentDisplay(category: string, value: string) {
   if (category !== "휴가") {
+    const label = getScheduleCategoryLabel(category);
     return {
       name: value,
-      chipStyle: null,
+      chipStyle: label === "조근" ? dutyLegendStyles.조근 : null,
+      isVacation: false,
     };
   }
   const parsed = parseVacationEntry(value);
   return {
     name: parsed.name,
     chipStyle: vacationLegendStyles[parsed.type],
+    isVacation: true,
   };
 }
 
@@ -56,6 +67,11 @@ function dayBadge(item: { isCustomHoliday: boolean; isWeekdayHoliday: boolean; i
 function getCenteredDayLabel(day: DaySchedule) {
   if (day.isWeekend) return "";
   return dayBadge(day);
+}
+
+function getCategoryDisplayLabel(category: string) {
+  const label = getScheduleCategoryLabel(category);
+  return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
 function getDayCardStyle(day: DaySchedule) {
@@ -664,26 +680,27 @@ export function PublishedSchedulesPanel() {
                 {displayDays.map((day) => {
                   const dayCardStyle = getDayCardStyle(day);
                   const centeredDayLabel = getCenteredDayLabel(day);
-                  const isToday = day.dateKey === todayKey;
+                  const isWeekendLike = day.isWeekend || day.isHoliday;
+                  const visibleAssignments = Object.entries(day.assignments).filter(([category]) => {
+                    if (isWeekendLike) return category !== "휴가" && category !== "제크";
+                    return !["국회", "청사", "청와대"].includes(category);
+                  });
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}
                       className="panel"
                       style={{
                         padding: 8,
-                        minHeight: 220,
-                        opacity: 1,
-                        background: isToday
-                          ? "linear-gradient(180deg, rgba(34,211,238,.24), rgba(59,130,246,.18) 44%, rgba(255,255,255,.08))"
-                          : dayCardStyle.background,
-                        border: isToday ? "1px solid rgba(34,211,238,.88)" : dayCardStyle.border,
-                        boxShadow: isToday ? "0 0 0 2px rgba(34,211,238,.16), 0 18px 36px rgba(2,132,199,.18)" : undefined,
+                        minHeight: 232,
+                        opacity: day.isOverflowMonth ? 0.55 : 1,
+                        background: dayCardStyle.background,
+                        border: dayCardStyle.border,
                       }}
                     >
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "auto minmax(0, 1fr)",
+                          gridTemplateColumns: "auto 1fr minmax(0, 1fr)",
                           alignItems: "center",
                           gap: 8,
                           marginBottom: 8,
@@ -693,14 +710,23 @@ export function PublishedSchedulesPanel() {
                           style={{
                             fontSize: 21,
                             fontWeight: 900,
-                            padding: isToday ? "4px 10px" : 0,
-                            borderRadius: isToday ? 999 : 0,
-                            background: isToday ? "rgba(8,17,29,.72)" : "transparent",
-                            color: isToday ? "#d8fbff" : undefined,
-                            border: isToday ? "1px solid rgba(125,211,252,.34)" : "none",
                           }}
                         >
                           {day.month}/{day.day}
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            minHeight: 24,
+                            textAlign: "center",
+                            color: "#ffd7d7",
+                            fontWeight: 900,
+                            fontSize: 14,
+                          }}
+                        >
+                          {centeredDayLabel}
                         </div>
                         <div
                           style={{
@@ -715,32 +741,38 @@ export function PublishedSchedulesPanel() {
                             textOverflow: "clip",
                             wordBreak: "keep-all",
                           }}
-                        >
-                          {day.headerName ?? ""}
-                        </div>
+                          >
+                            {day.headerName ?? ""}
+                          </div>
                       </div>
-                      {centeredDayLabel ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            marginBottom: 8,
-                            minHeight: 24,
-                            textAlign: "center",
-                            color: "#ffd7d7",
-                            fontWeight: 900,
-                            fontSize: 14,
-                          }}
-                        >
-                          {centeredDayLabel}
-                        </div>
-                      ) : null}
                       <div style={{ display: "grid", gap: 2 }}>
-                        {Object.entries(day.assignments).map(([category, names]) => (
+                        {visibleAssignments.map(([category, names]) => (
                           <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 7, background: "rgba(9,17,30,.34)" }}>
-                            <strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: 1.2, minWidth: 52 }}>{getScheduleCategoryLabel(category)}</strong>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginLeft: 58, marginTop: -18 }}>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "44px minmax(0, 1fr)",
+                                columnGap: 8,
+                                alignItems: "stretch",
+                              }}
+                            >
+                              <strong
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  alignSelf: "stretch",
+                                  marginBottom: 0,
+                                  fontSize: 14,
+                                  lineHeight: 1.1,
+                                  minHeight: 42,
+                                  textAlign: "center",
+                                  whiteSpace: "pre-line",
+                                }}
+                              >
+                                {getCategoryDisplayLabel(category)}
+                              </strong>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, minHeight: 42 }}>
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
@@ -766,12 +798,14 @@ export function PublishedSchedulesPanel() {
                                       type="button"
                                       onClick={() => handleNameClick(personObject)}
                                       style={{
-                                        display: "inline-flex",
+                                        display: "flex",
                                         alignItems: "center",
-                                        justifyContent: "space-between",
+                                        justifyContent: personObject.pending ? "space-between" : "center",
+                                        width: "100%",
                                         gap: 6,
-                                        padding: mineHighlighted ? "4px 10px" : "2px 6px",
-                                        borderRadius: 999,
+                                        minHeight: 34,
+                                        padding: "6px 10px",
+                                        borderRadius: 14,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
                                           : routeSelected
@@ -780,7 +814,9 @@ export function PublishedSchedulesPanel() {
                                               : "rgba(56,189,248,.22)"
                                             : mineHighlighted
                                               ? "linear-gradient(135deg, rgba(250,204,21,.34), rgba(56,189,248,.28))"
-                                              : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.18)",
+                                              : assignmentDisplay.isVacation
+                                                ? assignmentDisplay.chipStyle?.background
+                                                : "rgba(255,255,255,.16)",
                                         border: personObject.pending
                                           ? "1px solid rgba(245,158,11,.35)"
                                           : routeSelected
@@ -791,14 +827,14 @@ export function PublishedSchedulesPanel() {
                                               ? "1px solid rgba(250,204,21,.82)"
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: mineHighlighted ? "#fff7c2" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: mineHighlighted || routeSelected ? 900 : 700,
-                                        fontSize: mineHighlighted ? 18 : 14,
-                                        lineHeight: 1.25,
+                                        fontWeight: 700,
+                                        fontSize: mineHighlighted ? 18 : 15,
+                                        lineHeight: 1.3,
                                         boxShadow: mineHighlighted ? "0 10px 24px rgba(250,204,21,.18), 0 0 0 1px rgba(250,204,21,.14) inset" : undefined,
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
-                                      <span>{assignmentDisplay.name}</span>
+                                      <span style={{ whiteSpace: "nowrap", textAlign: "center", flex: 1 }}>{assignmentDisplay.name}</span>
                                       {personObject.pending ? <span style={{ fontSize: 12 }}>요청중</span> : null}
                                     </button>
                                   );
@@ -806,6 +842,7 @@ export function PublishedSchedulesPanel() {
                               ) : (
                                 <span style={{ display: "inline-block", minHeight: 22 }} />
                               )}
+                              </div>
                             </div>
                           </div>
                         ))}

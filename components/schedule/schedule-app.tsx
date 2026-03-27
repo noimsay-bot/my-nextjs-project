@@ -12,6 +12,7 @@ import {
   isPendingRef,
   resolveScheduleChangeRequest,
 } from "@/lib/schedule/change-requests";
+import { syncVacationMonthSheetFromGeneratedSchedule } from "@/lib/vacation/storage";
 import {
   addManualField,
   addPersonToCategory,
@@ -75,11 +76,20 @@ const vacationLegendStyles = {
   },
 } as const;
 
+const dutyLegendStyles = {
+  조근: {
+    background: "rgba(250,204,21,.78)",
+    border: "1px solid rgba(253,224,71,.92)",
+    color: "#fde68a",
+  },
+} as const;
+
 function getAssignmentDisplay(category: string, value: string) {
   if (category !== "휴가") {
+    const label = getScheduleCategoryLabel(category);
     return {
       name: value,
-      chipStyle: null,
+      chipStyle: label === "조근" ? dutyLegendStyles.조근 : null,
       isVacation: false,
     };
   }
@@ -140,6 +150,11 @@ function isManualField(category: string) {
 
 function canOpenManualInput(category: string) {
   return isManualField(category) && category !== "오프";
+}
+
+function getCategoryDisplayLabel(category: string) {
+  const label = getScheduleCategoryLabel(category);
+  return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
 function parseScheduleDragPayload(value: string): ScheduleDragPayload | null {
@@ -587,6 +602,9 @@ export function ScheduleApp() {
       return;
     }
     const result = generateSchedule(state);
+    if (result.state.generated) {
+      syncVacationMonthSheetFromGeneratedSchedule(result.state.generated);
+    }
     setState(result.state);
     setVisibleMonthKey(result.state.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
@@ -595,6 +613,9 @@ export function ScheduleApp() {
   const confirmGenerate = () => {
     setOverwriteConfirmOpen(false);
     const result = generateSchedule(state);
+    if (result.state.generated) {
+      syncVacationMonthSheetFromGeneratedSchedule(result.state.generated);
+    }
     setState(result.state);
     setVisibleMonthKey(result.state.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
@@ -1036,9 +1057,10 @@ export function ScheduleApp() {
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "auto 1fr minmax(0, 1fr) auto",
+                          gridTemplateColumns: editMode ? "auto 1fr auto" : "auto 1fr minmax(0, 1fr) auto",
                           alignItems: "center",
                           gap: 8,
+                          rowGap: editMode ? 8 : 0,
                           marginBottom: 8,
                         }}
                       >
@@ -1066,15 +1088,18 @@ export function ScheduleApp() {
                             }
                             placeholder="이름 입력"
                             style={{
-                              padding: 0,
+                              gridColumn: "1 / -1",
                               minWidth: 0,
-                              border: "none",
-                              background: "transparent",
+                              minHeight: 40,
+                              padding: "8px 12px",
+                              border: "1px solid rgba(255,255,255,.18)",
+                              borderRadius: 12,
+                              background: "rgba(7,17,31,.46)",
                               color: "#f8fbff",
-                              fontSize: 21,
+                              fontSize: 20,
                               fontWeight: 900,
-                              lineHeight: 1,
-                              textAlign: "center",
+                              lineHeight: 1.1,
+                              textAlign: "left",
                               boxShadow: "none",
                             }}
                           />
@@ -1096,7 +1121,7 @@ export function ScheduleApp() {
                             {day.headerName ?? ""}
                           </div>
                         )}
-                        <div style={{ display: "flex", gap: 8 }}>
+                        <div style={{ display: "flex", gap: 8, justifySelf: "end" }}>
                           {editMode ? (
                             <>
                               <button type="button" className="btn primary" style={{ padding: "5px 8px", fontSize: 12 }} onClick={confirmDayEdit}>
@@ -1156,12 +1181,32 @@ export function ScheduleApp() {
                               cursor: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? "grab" : "default",
                             }}
                           >
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6, marginBottom: 0 }}>
-                              <strong style={{ fontSize: 14, lineHeight: 1.2, minWidth: 52, paddingTop: 2 }}>
-                                {getScheduleCategoryLabel(category)}
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "44px minmax(0, 1fr)",
+                                columnGap: 8,
+                                rowGap: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? 8 : 0,
+                                alignItems: "stretch",
+                              }}
+                            >
+                              <strong
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  alignSelf: "stretch",
+                                  fontSize: 14,
+                                  lineHeight: 1.1,
+                                  minHeight: 42,
+                                  whiteSpace: "pre-line",
+                                  textAlign: "center",
+                                }}
+                              >
+                                {getCategoryDisplayLabel(category)}
                               </strong>
                               {editMode && state.generated?.monthKey === visibleSchedule.monthKey ? (
-                                <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
+                                <div style={{ display: "grid", gap: 6, justifyItems: "end", gridColumn: 2, gridRow: 1 }}>
                                   <button
                                     className="btn"
                                     style={{ width: 34, padding: "4px 0" }}
@@ -1211,19 +1256,16 @@ export function ScheduleApp() {
                                   ) : null}
                                 </div>
                               ) : null}
-                            </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: 4,
-                                justifyContent: "flex-start",
-                                alignContent: "flex-start",
-                                marginLeft: editMode ? 0 : 58,
-                                marginTop: editMode ? 8 : -18,
-                                minHeight: 24,
-                              }}
-                            >
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                                  gap: 6,
+                                  minHeight: 42,
+                                  gridColumn: editMode ? "1 / -1" : 2,
+                                  gridRow: editMode ? 2 : 1,
+                                }}
+                              >
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
@@ -1250,70 +1292,116 @@ export function ScheduleApp() {
                                   return (
                                     <div
                                       key={personObject.key}
-                                      draggable={editMode}
-                                      onClick={() => {
-                                        if (!editMode) return;
-                                        setState((current) => ({
-                                          ...current,
-                                          selectedPerson: selected ? null : { dateKey: day.dateKey, category, index },
-                                        }));
-                                      }}
-                                      onDragStart={(event) => {
-                                        if (!editMode) return;
-                                        event.stopPropagation();
-                                        event.dataTransfer.effectAllowed = "move";
-                                        event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "person", dateKey: day.dateKey, category, index }));
-                                        setState((current) => ({
-                                          ...current,
-                                          selectedPerson: { dateKey: day.dateKey, category, index },
-                                        }));
-                                      }}
                                       style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "space-between",
-                                        gap: 6,
-                                        padding: "3px 8px",
-                                        borderRadius: 999,
-                                        background: personObject.pending
-                                          ? "rgba(245,158,11,.18)"
-                                          : conflicted
-                                              ? weekendConflict
-                                                ? "rgba(34,211,238,.28)"
-                                                : "rgba(239,68,68,.22)"
-                                              : assignmentDisplay.isVacation
-                                                ? assignmentDisplay.chipStyle?.background
-                                                : highlighted
-                                                  ? "rgba(34,211,238,.22)"
-                                                  : "rgba(255,255,255,.16)",
-                                        border: personObject.pending
-                                          ? "1px solid rgba(245,158,11,.35)"
-                                          : conflicted
-                                            ? weekendConflict
-                                              ? "1px solid rgba(103,232,249,.65)"
-                                              : "1px solid rgba(239,68,68,.28)"
-                                            : highlighted
-                                              ? "1px solid rgba(34,211,238,.35)"
-                                              : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: 700,
-                                        fontSize: 14,
-                                        lineHeight: 1.25,
-                                        boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
+                                        position: "relative",
+                                        width: "100%",
+                                        overflow: "visible",
                                       }}
                                     >
-                                      <span>{assignmentDisplay.name}</span>
-                                      {personObject.pending ? <span style={{ fontSize: 12 }}>근무변경요청중</span> : null}
-                                      {editMode ? (
-                                        <button className="btn" style={{ padding: "2px 7px" }} onClick={(event) => {
+                                      <div
+                                        draggable={editMode}
+                                        onClick={() => {
+                                          if (!editMode) return;
+                                          setState((current) => ({
+                                            ...current,
+                                            selectedPerson: selected ? null : { dateKey: day.dateKey, category, index },
+                                          }));
+                                        }}
+                                        onDragStart={(event) => {
+                                          if (!editMode) return;
                                           event.stopPropagation();
-                                          updateEditingState((current) => removePersonFromCategory(current, day.dateKey, category, index));
-                                        }}>-</button>
+                                          event.dataTransfer.effectAllowed = "move";
+                                          event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "person", dateKey: day.dateKey, category, index }));
+                                          setState((current) => ({
+                                            ...current,
+                                            selectedPerson: { dateKey: day.dateKey, category, index },
+                                          }));
+                                        }}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          gap: 6,
+                                          width: "100%",
+                                          minWidth: 0,
+                                          minHeight: 34,
+                                          padding: editMode ? "5px 8px" : "6px 10px",
+                                          borderRadius: 14,
+                                          background: personObject.pending
+                                            ? "rgba(245,158,11,.18)"
+                                            : conflicted
+                                                ? weekendConflict
+                                                  ? "rgba(34,211,238,.28)"
+                                                  : "rgba(239,68,68,.22)"
+                                                : assignmentDisplay.isVacation
+                                                  ? assignmentDisplay.chipStyle?.background
+                                                  : highlighted
+                                                    ? "rgba(34,211,238,.22)"
+                                                    : "rgba(255,255,255,.16)",
+                                          border: personObject.pending
+                                            ? "1px solid rgba(245,158,11,.35)"
+                                            : conflicted
+                                              ? weekendConflict
+                                                ? "1px solid rgba(103,232,249,.65)"
+                                                : "1px solid rgba(239,68,68,.28)"
+                                              : highlighted
+                                                ? "1px solid rgba(34,211,238,.35)"
+                                                : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                          color: weekendConflict
+                                            ? "#d8fbff"
+                                            : editMode
+                                              ? "#fffbea"
+                                              : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                          fontWeight: 700,
+                                          fontSize: editMode ? 13 : 15,
+                                          lineHeight: 1.3,
+                                          boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            minWidth: editMode ? 0 : undefined,
+                                            flex: 1,
+                                            whiteSpace: "nowrap",
+                                            overflow: editMode ? "hidden" : "visible",
+                                            textOverflow: editMode ? "ellipsis" : "clip",
+                                            textAlign: "center",
+                                          }}
+                                        >
+                                          {assignmentDisplay.name}
+                                        </span>
+                                        {personObject.pending && !editMode ? <span style={{ fontSize: 13 }}>근무변경요청중</span> : null}
+                                      </div>
+                                      {editMode ? (
+                                        <button
+                                          className="btn"
+                                          style={{
+                                            position: "absolute",
+                                            top: -6,
+                                            right: -6,
+                                            width: 22,
+                                            minWidth: 22,
+                                            height: 22,
+                                            padding: 0,
+                                            borderRadius: 999,
+                                            display: "grid",
+                                            placeItems: "center",
+                                            fontSize: 12,
+                                            lineHeight: 1,
+                                          }}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            updateEditingState((current) => removePersonFromCategory(current, day.dateKey, category, index));
+                                          }}
+                                        >
+                                          -
+                                        </button>
                                       ) : null}
                                     </div>
                                   );
                                 })
                               ) : null}
+                              </div>
                             </div>
                           </article>
                         ))}
@@ -1658,10 +1746,30 @@ export function ScheduleApp() {
                               key={`preview-${day.dateKey}-${category}`}
                               style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 7, background: "rgba(9,17,30,.34)" }}
                             >
-                              <strong style={{ fontSize: 14, lineHeight: 1.2, minWidth: 52, paddingTop: 2 }}>
-                                {getScheduleCategoryLabel(category)}
-                              </strong>
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginLeft: 58, marginTop: -18, minHeight: 24 }}>
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "44px minmax(0, 1fr)",
+                                  columnGap: 8,
+                                  alignItems: "stretch",
+                                }}
+                              >
+                                <strong
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    alignSelf: "stretch",
+                                    fontSize: 14,
+                                    lineHeight: 1.1,
+                                    minHeight: 42,
+                                    whiteSpace: "pre-line",
+                                    textAlign: "center",
+                                  }}
+                                >
+                                  {getCategoryDisplayLabel(category)}
+                                </strong>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, minHeight: 42 }}>
                                 {names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const conflicted = conflictSet.has(`${category}-${name}`);
@@ -1670,11 +1778,14 @@ export function ScheduleApp() {
                                     <div
                                       key={`preview-${category}-${name}-${index}`}
                                       style={{
-                                        display: "inline-flex",
+                                        display: "flex",
                                         alignItems: "center",
+                                        justifyContent: "center",
+                                        width: "100%",
                                         gap: 6,
-                                        padding: "3px 8px",
-                                        borderRadius: 999,
+                                        padding: "6px 10px",
+                                        minHeight: 34,
+                                        borderRadius: 14,
                                         background: conflicted
                                           ? weekendConflict
                                             ? "rgba(34,211,238,.28)"
@@ -1687,15 +1798,16 @@ export function ScheduleApp() {
                                           : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
-                                        fontSize: 14,
-                                        lineHeight: 1.25,
+                                        fontSize: 15,
+                                        lineHeight: 1.3,
                                         boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
                                       }}
                                     >
-                                      <span>{assignmentDisplay.name}</span>
+                                      <span style={{ whiteSpace: "nowrap", textAlign: "center" }}>{assignmentDisplay.name}</span>
                                     </div>
                                   );
                                 })}
+                                </div>
                               </div>
                             </article>
                           ))}
