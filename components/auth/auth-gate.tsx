@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getSession } from "@/lib/auth/storage";
+import { getSession, hasDeskAccess } from "@/lib/auth/storage";
 
 const publicPaths = new Set(["/login"]);
 
-function hasAccess(pathname: string, role: string) {
+function hasAccess(pathname: string, role: "member" | "reviewer" | "team_lead" | "admin" | "desk") {
+  if (role === "member") return pathname === "/" || pathname === "/vacation";
+  if (pathname.startsWith("/schedule/vacations")) return hasDeskAccess(role);
   if (pathname.startsWith("/admin")) return role === "admin";
   if (pathname.startsWith("/team-lead")) return role === "team_lead";
   if (pathname.startsWith("/review")) return ["reviewer", "team_lead", "admin"].includes(role);

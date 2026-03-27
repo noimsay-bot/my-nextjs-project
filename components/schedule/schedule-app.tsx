@@ -1,11 +1,14 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession } from "@/lib/auth/storage";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS, STORAGE_KEY, categories, defaultScheduleState, getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import {
   CHANGE_REQUESTS_EVENT,
+  deleteScheduleChangeRequest,
   getScheduleChangeRequests,
+  getRequestRoute,
   isPendingRef,
   resolveScheduleChangeRequest,
 } from "@/lib/schedule/change-requests";
@@ -17,6 +20,7 @@ import {
   formatVacationEntry,
   generateSchedule,
   getCategoryPeople,
+  getEffectiveOffByCategory,
   getMonthKey,
   getStartPointerRawIndex,
   getUniquePeople,
@@ -27,6 +31,7 @@ import {
   removePersonFromCategory,
   sanitizeScheduleState,
   setMonthStartPointer,
+  updateDayHeaderName,
   updateManualAssignment,
 } from "@/lib/schedule/engine";
 import { getPublishedSchedules, publishSchedule, PublishedScheduleItem } from "@/lib/schedule/published";
@@ -91,6 +96,10 @@ interface OrderOffEditorState {
   selectedNames: string[];
 }
 
+interface GlobalOffEditorState {
+  selectedNames: string[];
+}
+
 type ScheduleDragPayload =
   | { kind: "person"; dateKey: string; category: string; index: number }
   | { kind: "category"; dateKey: string; category: string };
@@ -115,13 +124,13 @@ function getDayCardStyle(day: DaySchedule) {
   const isRedDay = day.isWeekend || day.isWeekdayHoliday;
   if (isRedDay) {
     return {
-      background: "rgba(239,68,68,.28)",
-      border: "1px solid rgba(248,113,113,.45)",
+      background: "rgba(248,113,113,.4)",
+      border: "1px solid rgba(252,165,165,.5)",
     };
   }
   return {
-    background: "rgba(255,255,255,.14)",
-    border: "1px solid rgba(255,255,255,.18)",
+    background: "rgba(255,255,255,.22)",
+    border: "1px solid rgba(255,255,255,.22)",
   };
 }
 
@@ -174,6 +183,7 @@ function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], tar
       vacations: [],
       assignments: {},
       manualExtras: [],
+      headerName: "",
       conflicts: [],
     });
   }
@@ -204,7 +214,14 @@ function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null
 }
 
 function describeRequest(request: ScheduleChangeRequest) {
-  return `${request.source.dateKey} ${getScheduleCategoryLabel(request.source.category)} ${request.source.name} ↔ ${request.target.dateKey} ${getScheduleCategoryLabel(request.target.category)} ${request.target.name}`;
+  const route = getRequestRoute(request);
+  const labels = route.map(
+    (ref) => `${ref.dateKey} ${getScheduleCategoryLabel(ref.category)} ${ref.name}`,
+  );
+  if (labels.length <= 2) {
+    return labels.join(" ↔ ");
+  }
+  return `${labels.join(" → ")} → ${labels[0]}`;
 }
 
 export function ScheduleApp() {
@@ -223,6 +240,7 @@ export function ScheduleApp() {
   const [addPersonName, setAddPersonName] = useState("");
   const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴">("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
+  const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
   const session = getSession();
@@ -401,6 +419,10 @@ export function ScheduleApp() {
     () => requests.filter((item) => item.status === "pending"),
     [requests],
   );
+  const resolvedRequests = useMemo(
+    () => requests.filter((item) => item.status !== "pending"),
+    [requests],
+  );
 
   const updateEditingState = (recipe: (current: ScheduleState) => ScheduleState) => {
     setState((current) => sanitizeScheduleState(recipe(current)));
@@ -415,12 +437,22 @@ export function ScheduleApp() {
   const startOrderOffEdit = (categoryKey: CategoryKey) => {
     setOrderOffEditor({
       categoryKey,
-      selectedNames: [...(state.offByCategory[categoryKey] ?? [])],
+      selectedNames: getEffectiveOffByCategory(state, categoryKey),
     });
   };
 
   const cancelOrderOffEdit = () => {
     setOrderOffEditor(null);
+  };
+
+  const startGlobalOffEdit = () => {
+    setGlobalOffEditor({
+      selectedNames: [...state.offPeople],
+    });
+  };
+
+  const cancelGlobalOffEdit = () => {
+    setGlobalOffEditor(null);
   };
 
   const saveOrderOffEdit = () => {
@@ -429,12 +461,19 @@ export function ScheduleApp() {
     const nextSelectedNames = startName
       ? orderOffEditor.selectedNames.filter((name) => name !== startName)
       : orderOffEditor.selectedNames;
+    const globalOffSet = new Set((state.offPeople ?? []).map((name) => name.trim()).filter(Boolean));
+    const categoryOff = nextSelectedNames.filter((name) => !globalOffSet.has(name));
+    const excluded = (state.offPeople ?? []).filter((name) => !nextSelectedNames.includes(name));
     setState((current) =>
       sanitizeScheduleState({
         ...current,
         offByCategory: {
           ...current.offByCategory,
-          [orderOffEditor.categoryKey]: [...nextSelectedNames],
+          [orderOffEditor.categoryKey]: [...categoryOff],
+        },
+        offExcludeByCategory: {
+          ...current.offExcludeByCategory,
+          [orderOffEditor.categoryKey]: [...excluded],
         },
       }),
     );
@@ -445,6 +484,19 @@ export function ScheduleApp() {
         ? `해당 근무유형 오프를 저장했습니다. 시작점 ${startName}은 오프에서 제외했습니다.`
         : "해당 근무유형 오프를 저장했습니다.",
     });
+  };
+
+  const saveGlobalOffEdit = () => {
+    if (!globalOffEditor) return;
+    const nextGlobalOff = Array.from(new Set(globalOffEditor.selectedNames.map((name) => name.trim()).filter(Boolean)));
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        offPeople: nextGlobalOff,
+      }),
+    );
+    setGlobalOffEditor(null);
+    setMessage({ tone: "ok", text: "기본 오프 인원을 저장했습니다." });
   };
 
   const submitAddPerson = () => {
@@ -594,9 +646,10 @@ export function ScheduleApp() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "schedule-integrated-config.json";
+    anchor.download = `schedule-state-${state.year}-${String(state.month).padStart(2, "0")}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
+    setMessage({ tone: "ok", text: "현재 저장 상태 JSON을 내려받았습니다." });
   };
 
   const confirmPublish = () => {
@@ -615,6 +668,7 @@ export function ScheduleApp() {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
             <button className="btn white" disabled={isEditingDate} onClick={onGenerate}>작성</button>
             <button className="btn" disabled={isEditingDate} onClick={onRebalance}>자동 재배치</button>
+            <button className="btn" disabled={isEditingDate} onClick={onDownload}>상태 내보내기</button>
             <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={() => setDeleteConfirmOpen(true)}>삭제</button>
             <button className="btn" onClick={() => {
               setPublishMonthKey(visibleSchedule?.monthKey ?? state.generatedHistory[state.generatedHistory.length - 1]?.monthKey ?? "");
@@ -707,59 +761,179 @@ export function ScheduleApp() {
 
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div className="chip">근무 수정 요청</div>
-            {visibleSchedule ? (
-              pendingRequests.length > 0 ? (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="chip">근무 수정 요청</div>
+              <Link href="/schedule/vacations" className="btn">
+                휴가 관리
+              </Link>
+            </div>
+            <div style={{ display: "grid", gap: 16 }}>
+                {pendingRequests.length > 0 ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {pendingRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        style={{
+                          display: "grid",
+                          gap: 10,
+                          padding: 12,
+                          borderRadius: 16,
+                          border: "1px solid var(--line)",
+                          background: "rgba(255,255,255,.05)",
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <strong>{request.requesterName}</strong>
+                          <span className="muted">{describeRequest(request)}</span>
+                          {request.hasConflictWarning ? (
+                            <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 12 }}>
+                              변경시 충돌이 발생합니다.
+                            </span>
+                          ) : null}
+                          <span className="muted">{request.createdAt}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            className="btn primary"
+                            onClick={() => {
+                              const result = resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
+                              loadRequests();
+                              loadState();
+                              loadPublishedItems();
+                              setMessage({
+                                tone: result.applied ? "ok" : "warn",
+                                text: result.applied
+                                  ? "근무 변경 요청을 승인했고 적용 기록도 저장했습니다."
+                                  : "근무 변경 요청은 승인했지만 실제 반영은 실패했습니다.",
+                              });
+                            }}
+                          >
+                            승인
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
+                              loadRequests();
+                              setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
+                            }}
+                          >
+                            거절
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              const ok = window.confirm("이 근무 수정 요청을 삭제하시겠습니까?");
+                              if (!ok) return;
+                              const result = deleteScheduleChangeRequest(request.id);
+                              if (!result.ok) return;
+                              loadRequests();
+                              setMessage({ tone: "note", text: "근무 변경 요청을 삭제했습니다." });
+                            }}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="status note">현재 대기 중인 근무 수정 요청이 없습니다.</div>
+                )}
+
                 <div style={{ display: "grid", gap: 10 }}>
-                  {pendingRequests.map((request) => (
-                    <div
-                      key={request.id}
-                      style={{
-                        display: "grid",
-                        gap: 10,
-                        padding: 12,
-                        borderRadius: 16,
-                        border: "1px solid var(--line)",
-                        background: "rgba(255,255,255,.05)",
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <strong>{request.requesterName}</strong>
-                        <span className="muted">{describeRequest(request)}</span>
-                        <span className="muted">{request.createdAt}</span>
+                  <strong>처리 기록</strong>
+                  {resolvedRequests.length > 0 ? (
+                    resolvedRequests.map((request) => (
+                      <div
+                        key={`history-${request.id}`}
+                        style={{
+                          display: "grid",
+                          gap: 10,
+                          padding: 12,
+                          borderRadius: 16,
+                          border: "1px solid var(--line)",
+                          background: "rgba(255,255,255,.03)",
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <strong>
+                            {request.requesterName} ·{" "}
+                            {request.status === "accepted"
+                              ? "승인"
+                              : request.status === "rolledBack"
+                                ? "수락 취소"
+                                : "거절"}
+                          </strong>
+                          <span className="muted">{describeRequest(request)}</span>
+                          {request.hasConflictWarning ? (
+                            <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 12 }}>
+                              변경시 충돌이 발생합니다.
+                            </span>
+                          ) : null}
+                          <span className="muted">
+                            요청 {request.createdAt}
+                            {request.resolvedAt ? ` / 처리 ${request.resolvedAt}` : ""}
+                            {request.rolledBackAt ? ` / 롤백 ${request.rolledBackAt}` : ""}
+                          </span>
+                        </div>
+                        {request.status === "accepted" ? (
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                const result = resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
+                                loadRequests();
+                                loadState();
+                                loadPublishedItems();
+                                setMessage({
+                                  tone: result.applied ? "note" : "warn",
+                                  text: result.applied
+                                    ? "승인된 근무 변경을 취소하고 원래 상태로 되돌렸습니다."
+                                    : "수락 취소 기록은 남겼지만 실제 롤백은 실패했습니다.",
+                                });
+                              }}
+                            >
+                              수락 취소
+                            </button>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
+                                if (!ok) return;
+                                const result = deleteScheduleChangeRequest(request.id);
+                                if (!result.ok) return;
+                                loadRequests();
+                                setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                              }}
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
+                                if (!ok) return;
+                                const result = deleteScheduleChangeRequest(request.id);
+                                if (!result.ok) return;
+                                loadRequests();
+                                setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                              }}
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button
-                          className="btn primary"
-                          onClick={() => {
-                            const result = resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
-                            loadRequests();
-                            if (result.applied) loadState();
-                            setMessage({ tone: "ok", text: "근무 변경 요청을 승인했습니다." });
-                          }}
-                        >
-                          승인
-                        </button>
-                        <button
-                          className="btn"
-                          onClick={() => {
-                            resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
-                            loadRequests();
-                            setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
-                          }}
-                        >
-                          거절
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="status note">처리 기록은 아직 없습니다.</div>
+                  )}
                 </div>
-              ) : (
-                <div className="status note">현재 이 월에 들어온 근무 수정 요청이 없습니다.</div>
-              )
-            ) : (
-              <div className="status note">근무표를 먼저 작성하면 요청 목록이 여기에 표시됩니다.</div>
-            )}
+            </div>
           </div>
         </section>
       </div>
@@ -830,7 +1004,7 @@ export function ScheduleApp() {
             <div style={{ overflowX: "auto", overflowY: "visible" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                 {weekdayLabels.map((label) => (
-                  <div key={label} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 800, fontSize: 12 }}>
+                  <div key={label} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -853,7 +1027,7 @@ export function ScheduleApp() {
                       className="panel"
                       style={{
                         padding: 8,
-                        minHeight: 220,
+                        minHeight: 232,
                         opacity: day.isOverflowMonth ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
@@ -862,13 +1036,13 @@ export function ScheduleApp() {
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "auto 1fr auto",
+                          gridTemplateColumns: "auto 1fr minmax(0, 1fr) auto",
                           alignItems: "center",
                           gap: 8,
                           marginBottom: 8,
                         }}
                       >
-                        <div style={{ fontSize: 17, fontWeight: 900 }}>{day.month}/{day.day}</div>
+                        <div style={{ fontSize: 21, fontWeight: 900 }}>{day.month}/{day.day}</div>
                         <div
                           style={{
                             display: "flex",
@@ -877,12 +1051,51 @@ export function ScheduleApp() {
                             minHeight: 24,
                             textAlign: "center",
                             color: "#ffd7d7",
-                            fontWeight: 800,
-                            fontSize: 12,
+                            fontWeight: 900,
+                            fontSize: 14,
                           }}
                         >
                           {centeredDayLabel}
                         </div>
+                        {editMode ? (
+                          <input
+                            className="field-input"
+                            value={day.headerName ?? ""}
+                            onChange={(event) =>
+                              updateEditingState((current) => updateDayHeaderName(current, day.dateKey, event.target.value))
+                            }
+                            placeholder="이름 입력"
+                            style={{
+                              padding: 0,
+                              minWidth: 0,
+                              border: "none",
+                              background: "transparent",
+                              color: "#f8fbff",
+                              fontSize: 21,
+                              fontWeight: 900,
+                              lineHeight: 1,
+                              textAlign: "center",
+                              boxShadow: "none",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              minHeight: 24,
+                              textAlign: "center",
+                              color: "#f8fbff",
+                              fontSize: 21,
+                              fontWeight: 900,
+                              lineHeight: 1.1,
+                              whiteSpace: "normal",
+                              overflow: "visible",
+                              textOverflow: "clip",
+                              wordBreak: "keep-all",
+                            }}
+                          >
+                            {day.headerName ?? ""}
+                          </div>
+                        )}
                         <div style={{ display: "flex", gap: 8 }}>
                           {editMode ? (
                             <>
@@ -938,13 +1151,13 @@ export function ScheduleApp() {
                             style={{
                               border: "1px solid rgba(255,255,255,.16)",
                               borderRadius: 10,
-                              padding: 6,
+                              padding: 7,
                               background: "rgba(9,17,30,.34)",
                               cursor: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? "grab" : "default",
                             }}
                           >
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6, marginBottom: 0 }}>
-                              <strong style={{ fontSize: 12, lineHeight: 1.2, minWidth: 42, paddingTop: 2 }}>
+                              <strong style={{ fontSize: 14, lineHeight: 1.2, minWidth: 52, paddingTop: 2 }}>
                                 {getScheduleCategoryLabel(category)}
                               </strong>
                               {editMode && state.generated?.monthKey === visibleSchedule.monthKey ? (
@@ -1003,12 +1216,12 @@ export function ScheduleApp() {
                               style={{
                                 display: "flex",
                                 flexWrap: "wrap",
-                                gap: 3,
+                                gap: 4,
                                 justifyContent: "flex-start",
                                 alignContent: "flex-start",
-                                marginLeft: editMode ? 0 : 48,
-                                marginTop: editMode ? 6 : -16,
-                                minHeight: 22,
+                                marginLeft: editMode ? 0 : 58,
+                                marginTop: editMode ? 8 : -18,
+                                minHeight: 24,
                               }}
                             >
                               {names.length > 0 ? (
@@ -1060,7 +1273,7 @@ export function ScheduleApp() {
                                         alignItems: "center",
                                         justifyContent: "space-between",
                                         gap: 6,
-                                        padding: "2px 6px",
+                                        padding: "3px 8px",
                                         borderRadius: 999,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
@@ -1084,13 +1297,13 @@ export function ScheduleApp() {
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
-                                        fontSize: 12,
-                                        lineHeight: 1.2,
+                                        fontSize: 14,
+                                        lineHeight: 1.25,
                                         boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
                                       }}
                                     >
                                       <span>{assignmentDisplay.name}</span>
-                                      {personObject.pending ? <span style={{ fontSize: 11 }}>근무변경요청중</span> : null}
+                                      {personObject.pending ? <span style={{ fontSize: 12 }}>근무변경요청중</span> : null}
                                       {editMode ? (
                                         <button className="btn" style={{ padding: "2px 7px" }} onClick={(event) => {
                                           event.stopPropagation();
@@ -1148,7 +1361,8 @@ export function ScheduleApp() {
             {categories.map((category) => {
               const categoryPeople = getCategoryPeople(state, category.key);
               const isOffEditing = orderOffEditor?.categoryKey === category.key;
-              const selectedOffNames = isOffEditing ? orderOffEditor.selectedNames : state.offByCategory[category.key] ?? [];
+              const effectiveOffNames = getEffectiveOffByCategory(state, category.key);
+              const selectedOffNames = isOffEditing ? orderOffEditor.selectedNames : effectiveOffNames;
               const startRawIndex = getStartPointerRawIndex(state, targetMonthKey, category.key);
 
               return (
@@ -1169,7 +1383,7 @@ export function ScheduleApp() {
                 </div>
                 {isOffEditing ? (
                   <div style={{ display: "grid", gap: 10 }}>
-                    <div className="status note">이름을 누르면 오프로 저장됩니다. 아래 순번의 `시작점` 버튼으로 이번 달 시작 사람도 바꿀 수 있습니다.</div>
+                    <div className="status note">이름을 누르면 해당 근무유형의 오프로 저장됩니다. 사본 보관함 아래 기본 오프를 기준으로 더하거나 빼서 조절할 수 있습니다.</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {categoryPeople.length > 0 ? (
                         categoryPeople.map((name) => {
@@ -1218,14 +1432,28 @@ export function ScheduleApp() {
                         padding: 8,
                         borderRadius: 12,
                         border: index === startRawIndex ? "1px solid rgba(74,222,128,.55)" : "1px solid rgba(255,255,255,.08)",
-                        background: index === startRawIndex ? "rgba(34,197,94,.16)" : "rgba(255,255,255,.02)",
+                        background: selectedOffNames.includes((state.orders[category.key][index] ?? "").trim())
+                          ? "rgba(239,68,68,.16)"
+                          : index === startRawIndex
+                            ? "rgba(34,197,94,.16)"
+                            : "rgba(255,255,255,.02)",
                       }}
                     >
                       <span className="muted" style={{ fontSize: 12 }}>{index + 1}번</span>
                       <input
                         className="field-input"
                         disabled={isEditingDate}
-                        style={index === startRawIndex ? { borderColor: "rgba(74,222,128,.55)", background: "rgba(15,23,42,.86)" } : undefined}
+                        style={
+                          selectedOffNames.includes((state.orders[category.key][index] ?? "").trim())
+                            ? {
+                                borderColor: "rgba(248,113,113,.55)",
+                                background: "rgba(61,14,18,.6)",
+                                color: "#ffe4e6",
+                              }
+                            : index === startRawIndex
+                              ? { borderColor: "rgba(74,222,128,.55)", background: "rgba(15,23,42,.86)" }
+                              : undefined
+                        }
                         value={state.orders[category.key][index] ?? ""}
                         onChange={(e) => {
                           const orders = { ...state.orders, [category.key]: [...state.orders[category.key]] };
@@ -1233,6 +1461,9 @@ export function ScheduleApp() {
                           setState({ ...state, orders });
                         }}
                       />
+                      {selectedOffNames.includes((state.orders[category.key][index] ?? "").trim()) ? (
+                        <span style={{ fontSize: 12, fontWeight: 800, color: "#fda4af" }}>오프</span>
+                      ) : null}
                       {index === startRawIndex ? (
                         <span style={{ fontSize: 12, fontWeight: 800, color: "#86efac" }}>이번 달 시작점</span>
                       ) : null}
@@ -1281,6 +1512,63 @@ export function ScheduleApp() {
           </div>
         </section>
 
+        <section className="panel">
+          <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="chip">기본 오프 인원</div>
+              {globalOffEditor ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn primary" disabled={isEditingDate} onClick={saveGlobalOffEdit}>저장</button>
+                  <button className="btn" disabled={isEditingDate} onClick={cancelGlobalOffEdit}>취소</button>
+                </div>
+              ) : (
+                <button className="btn" disabled={isEditingDate} onClick={startGlobalOffEdit}>수정</button>
+              )}
+            </div>
+
+            <div className="status note">여기서 고른 인원은 전체 순번에서 기본 오프로 표시됩니다. 각 근무유형의 `수정`에서 근무별 오프를 따로 조절할 수 있습니다.</div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {uniquePeople.length > 0 ? (
+                uniquePeople.map((name) => {
+                  const selected = (globalOffEditor?.selectedNames ?? state.offPeople).includes(name);
+                  return (
+                    <button
+                      key={`global-off-${name}`}
+                      type="button"
+                      className="btn"
+                      disabled={!globalOffEditor}
+                      onClick={() =>
+                        setGlobalOffEditor((current) =>
+                          current
+                            ? {
+                                ...current,
+                                selectedNames: selected
+                                  ? current.selectedNames.filter((item) => item !== name)
+                                  : [...current.selectedNames, name],
+                              }
+                            : current,
+                        )
+                      }
+                      style={{
+                        padding: "8px 12px",
+                        borderColor: selected ? "rgba(239,68,68,.55)" : undefined,
+                        background: selected ? "rgba(239,68,68,.24)" : undefined,
+                        color: selected ? "#ffd7d7" : undefined,
+                        cursor: globalOffEditor ? "pointer" : "default",
+                      }}
+                    >
+                      {name}
+                    </button>
+                  );
+                })
+              ) : (
+                <span className="muted">순번에 등록된 이름이 없습니다.</span>
+              )}
+            </div>
+          </div>
+        </section>
+
       </section>
       </div>
       {originalPreviewSnapshot ? (
@@ -1320,7 +1608,7 @@ export function ScheduleApp() {
               <div style={{ overflowX: "auto", overflowY: "visible" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                   {weekdayLabels.map((label) => (
-                    <div key={`preview-${label}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 800, fontSize: 12 }}>
+                    <div key={`preview-${label}`} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                       {label}
                     </div>
                   ))}
@@ -1336,28 +1624,44 @@ export function ScheduleApp() {
                         className="panel"
                         style={{
                           padding: 8,
-                          minHeight: 220,
+                          minHeight: 232,
                           opacity: day.isOverflowMonth ? 0.55 : 1,
                           background: dayCardStyle.background,
                           border: dayCardStyle.border,
                         }}
                       >
-                        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <div style={{ fontSize: 17, fontWeight: 900 }}>{day.month}/{day.day}</div>
-                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 24, textAlign: "center", color: "#ffd7d7", fontWeight: 800, fontSize: 12 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <div style={{ fontSize: 21, fontWeight: 900 }}>{day.month}/{day.day}</div>
+                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 24, textAlign: "center", color: "#ffd7d7", fontWeight: 900, fontSize: 14 }}>
                             {centeredDayLabel}
+                          </div>
+                          <div
+                            style={{
+                              minHeight: 24,
+                              textAlign: "center",
+                              color: "#f8fbff",
+                              fontSize: 21,
+                              fontWeight: 900,
+                              lineHeight: 1.1,
+                              whiteSpace: "normal",
+                              overflow: "visible",
+                              textOverflow: "clip",
+                              wordBreak: "keep-all",
+                            }}
+                          >
+                            {day.headerName ?? ""}
                           </div>
                         </div>
                         <div style={{ display: "grid", gap: 2 }}>
                           {previewAssignments.map(([category, names]) => (
                             <article
                               key={`preview-${day.dateKey}-${category}`}
-                              style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}
+                              style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 7, background: "rgba(9,17,30,.34)" }}
                             >
-                              <strong style={{ fontSize: 12, lineHeight: 1.2, minWidth: 42, paddingTop: 2 }}>
+                              <strong style={{ fontSize: 14, lineHeight: 1.2, minWidth: 52, paddingTop: 2 }}>
                                 {getScheduleCategoryLabel(category)}
                               </strong>
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginLeft: 48, marginTop: -16, minHeight: 22 }}>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginLeft: 58, marginTop: -18, minHeight: 24 }}>
                                 {names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const conflicted = conflictSet.has(`${category}-${name}`);
@@ -1369,7 +1673,7 @@ export function ScheduleApp() {
                                         display: "inline-flex",
                                         alignItems: "center",
                                         gap: 6,
-                                        padding: "2px 6px",
+                                        padding: "3px 8px",
                                         borderRadius: 999,
                                         background: conflicted
                                           ? weekendConflict
@@ -1383,8 +1687,8 @@ export function ScheduleApp() {
                                           : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
-                                        fontSize: 12,
-                                        lineHeight: 1.2,
+                                        fontSize: 14,
+                                        lineHeight: 1.25,
                                         boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
                                       }}
                                     >

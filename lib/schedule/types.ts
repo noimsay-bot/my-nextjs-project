@@ -35,6 +35,7 @@ export interface DaySchedule {
   vacations: string[];
   assignments: Record<string, string[]>;
   manualExtras: string[];
+  headerName: string;
   conflicts: Conflict[];
 }
 
@@ -68,7 +69,20 @@ export interface SchedulePersonRef {
   name: string;
 }
 
-export type ScheduleChangeRequestStatus = "pending" | "accepted" | "rejected";
+export type ScheduleChangeRequestStatus = "pending" | "accepted" | "rejected" | "rolledBack";
+
+export type ScheduleChangeRequestAction = "created" | "accepted" | "rejected" | "rolledBack";
+
+export interface ScheduleChangeRequestLogEntry {
+  action: ScheduleChangeRequestAction;
+  at: string;
+  by: string;
+}
+
+export interface ScheduleChangeRequestAppliedState {
+  scheduleMonths: GeneratedSchedule[];
+  publishedMonths: GeneratedSchedule[];
+}
 
 export interface ScheduleChangeRequest {
   id: string;
@@ -77,10 +91,16 @@ export interface ScheduleChangeRequest {
   requesterName: string;
   source: SchedulePersonRef;
   target: SchedulePersonRef;
+  route: SchedulePersonRef[];
+  hasConflictWarning: boolean;
   status: ScheduleChangeRequestStatus;
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  rolledBackAt: string | null;
+  rolledBackBy: string | null;
+  appliedState: ScheduleChangeRequestAppliedState | null;
+  history: ScheduleChangeRequestLogEntry[];
 }
 
 export interface ScheduleNameObject {
@@ -98,6 +118,7 @@ export interface ScheduleState {
   vacations: string;
   offPeople: string[];
   offByCategory: Record<CategoryKey, string[]>;
+  offExcludeByCategory: Record<CategoryKey, string[]>;
   orders: Record<CategoryKey, string[]>;
   pointers: PointerState;
   monthStartPointers: Record<string, PointerState>;

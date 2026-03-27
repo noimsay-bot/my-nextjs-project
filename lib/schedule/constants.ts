@@ -81,6 +81,7 @@ export const defaultScheduleState: ScheduleState = {
   vacations: "",
   offPeople: [],
   offByCategory: createEmptyOffByCategory(),
+  offExcludeByCategory: createEmptyOffByCategory(),
   orders: seedOrders,
   pointers: defaultPointers,
   monthStartPointers: {},

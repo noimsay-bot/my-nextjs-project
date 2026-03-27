@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ReportType, SubmissionCard, SubmissionEntry, submissionStorageKey } from "@/lib/portal/data";
 
 const reportTypes: ReportType[] = ["일반리포트", "기획리포트", "인터뷰리포트", "LIVE"];
 
+function toDateInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function emptyCard(): SubmissionCard {
-  return { id: crypto.randomUUID(), type: "일반리포트", title: "", link: "", date: "", comment: "" };
+  return { id: crypto.randomUUID(), type: "일반리포트", title: "", link: "", date: toDateInputValue(new Date()), comment: "" };
 }
 
 export default function SubmissionsPage() {
@@ -14,6 +18,7 @@ export default function SubmissionsPage() {
   const [cards, setCards] = useState<SubmissionCard[]>([emptyCard()]);
   const [entries, setEntries] = useState<SubmissionEntry[]>([]);
   const [message, setMessage] = useState("");
+  const dateInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
     const raw = window.localStorage.getItem(submissionStorageKey);
@@ -23,6 +28,10 @@ export default function SubmissionsPage() {
   const saveEntries = (next: SubmissionEntry[]) => {
     setEntries(next);
     window.localStorage.setItem(submissionStorageKey, JSON.stringify(next));
+  };
+
+  const updateCard = (cardId: string, patch: Partial<SubmissionCard>) => {
+    setCards(cards.map((item) => (item.id === cardId ? { ...item, ...patch } : item)));
   };
 
   return (
@@ -39,13 +48,37 @@ export default function SubmissionsPage() {
               <strong>{index + 1}번 제출 카드</strong>
               {cards.length > 1 ? <button className="btn" onClick={() => setCards(cards.filter((item) => item.id !== card.id))}>삭제</button> : null}
             </div>
-            <select className="field-select" value={card.type} onChange={(e) => setCards(cards.map((item) => item.id === card.id ? { ...item, type: e.target.value as ReportType } : item))}>
+            <select className="field-select" value={card.type} onChange={(e) => updateCard(card.id, { type: e.target.value as ReportType })}>
               {reportTypes.map((type) => <option key={type}>{type}</option>)}
             </select>
-            <input className="field-input" placeholder="제목" value={card.title} onChange={(e) => setCards(cards.map((item) => item.id === card.id ? { ...item, title: e.target.value } : item))} />
-            <input className="field-input" placeholder="링크" value={card.link} onChange={(e) => setCards(cards.map((item) => item.id === card.id ? { ...item, link: e.target.value } : item))} />
-            <input className="field-input" type="date" value={card.date} onChange={(e) => setCards(cards.map((item) => item.id === card.id ? { ...item, date: e.target.value } : item))} />
-            <textarea className="field-textarea" placeholder="코멘트" value={card.comment} onChange={(e) => setCards(cards.map((item) => item.id === card.id ? { ...item, comment: e.target.value } : item))} />
+            <input className="field-input" placeholder="제목" value={card.title} onChange={(e) => updateCard(card.id, { title: e.target.value })} />
+            <input className="field-input" placeholder="링크" value={card.link} onChange={(e) => updateCard(card.id, { link: e.target.value })} />
+            <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn white"
+                style={{ padding: "12px 16px", minWidth: 68 }}
+                onClick={() => {
+                  const input = dateInputRefs.current[card.id];
+                  if (!input) return;
+                  input.showPicker?.();
+                  input.focus();
+                  input.click();
+                }}
+              >
+                달력
+              </button>
+              <input
+                ref={(element) => {
+                  dateInputRefs.current[card.id] = element;
+                }}
+                className="field-input date-input-no-icon"
+                type="date"
+                value={card.date}
+                onChange={(e) => updateCard(card.id, { date: e.target.value })}
+              />
+            </div>
+            <textarea className="field-textarea" placeholder="코멘트" value={card.comment} onChange={(e) => updateCard(card.id, { comment: e.target.value })} />
           </article>
         ))}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

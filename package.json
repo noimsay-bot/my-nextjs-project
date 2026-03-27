@@ -5,7 +5,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "debug:rebalance": "ts-node --project scripts/tsconfig.debug.json -r tsconfig-paths/register scripts/replay-rebalance.ts"
   },
   "dependencies": {
     "next": "^15.0.0",
@@ -16,6 +17,8 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.6.0"
   }
 }

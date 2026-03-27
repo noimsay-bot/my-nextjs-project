@@ -14,6 +14,7 @@ import { getPublishedSchedules, PublishedScheduleItem, removePublishedSchedule }
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+const MAX_ROUTE_SIZE = 3;
 
 const vacationLegendStyles = {
   연차: {
@@ -27,6 +28,10 @@ const vacationLegendStyles = {
     color: "#d1fae5",
   },
 } as const;
+
+type DisplayDay = DaySchedule & {
+  ownerMonthKey: string;
+};
 
 function getAssignmentDisplay(category: string, value: string) {
   if (category !== "휴가") {
@@ -57,13 +62,13 @@ function getDayCardStyle(day: DaySchedule) {
   const isRedDay = day.isWeekend || day.isWeekdayHoliday;
   if (isRedDay) {
     return {
-      background: day.isOverflowMonth ? "rgba(239,68,68,.18)" : "rgba(239,68,68,.28)",
-      border: "1px solid rgba(248,113,113,.45)",
+      background: day.isOverflowMonth ? "rgba(248,113,113,.24)" : "rgba(248,113,113,.4)",
+      border: "1px solid rgba(252,165,165,.5)",
     };
   }
   return {
-    background: day.isOverflowMonth ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.14)",
-    border: "1px solid rgba(255,255,255,.18)",
+    background: day.isOverflowMonth ? "rgba(255,255,255,.16)" : "rgba(255,255,255,.22)",
+    border: "1px solid rgba(255,255,255,.22)",
   };
 }
 
@@ -79,23 +84,37 @@ function compactAssignments(item: PublishedScheduleItem, currentUser: string) {
     });
 }
 
-function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], targetMonth?: number) {
+function buildDisplayDays(
+  item: PublishedScheduleItem,
+  previousItem?: PublishedScheduleItem | null,
+) {
+  const days: DisplayDay[] = item.schedule.days.map((day) => ({
+    ...day,
+    ownerMonthKey: item.monthKey,
+  }));
   if (days.length === 0) return days;
+
   const first = days[0];
-  if (targetMonth && first.month !== targetMonth) return days;
+  if (first.month !== item.schedule.month) return days;
+
   const firstDate = new Date(first.year, first.month - 1, first.day);
   const firstDow = firstDate.getDay();
   const mondayOffset = firstDow === 0 ? 6 : firstDow - 1;
   if (mondayOffset === 0) return days;
 
-  const leading: DaySchedule[] = [];
+  const leading: DisplayDay[] = [];
   for (let offset = mondayOffset; offset >= 1; offset -= 1) {
     const date = new Date(firstDate);
     date.setDate(firstDate.getDate() - offset);
     const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    const matched = previousDays?.find((item) => item.dateKey === dateKey);
+    const matched = previousItem?.schedule.days.find((candidate) => candidate.dateKey === dateKey);
     if (matched) {
-      leading.push({ ...matched, isOverflowMonth: true });
+      const ownerMonthKey = previousItem?.monthKey ?? item.monthKey;
+      leading.push({
+        ...matched,
+        isOverflowMonth: true,
+        ownerMonthKey,
+      });
       continue;
     }
     leading.push({
@@ -112,7 +131,9 @@ function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], tar
       vacations: [],
       assignments: {},
       manualExtras: [],
+      headerName: "",
       conflicts: [],
+      ownerMonthKey: previousItem?.monthKey ?? item.monthKey,
     });
   }
 
@@ -130,9 +151,95 @@ function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null
   );
 }
 
+function routeIncludes(route: SchedulePersonRef[], ref: SchedulePersonRef) {
+  return route.some((candidate) => sameRef(candidate, ref));
+}
+
+function buildScheduleMap(items: PublishedScheduleItem[], monthKeys: Set<string>) {
+  return new Map(
+    items
+      .filter((item) => monthKeys.has(item.monthKey))
+      .map((item) => [item.monthKey, JSON.parse(JSON.stringify(item.schedule)) as PublishedScheduleItem["schedule"]]),
+  );
+}
+
+function findRefSlot(
+  scheduleMap: Map<string, PublishedScheduleItem["schedule"]>,
+  ref: SchedulePersonRef,
+) {
+  const schedule = scheduleMap.get(ref.monthKey);
+  const day = schedule?.days.find((item) => item.dateKey === ref.dateKey);
+  if (!day) return null;
+  const list = day.assignments[ref.category];
+  if (!list) return null;
+  const index = list[ref.index] === ref.name ? ref.index : list.findIndex((name) => name === ref.name);
+  if (index < 0) return null;
+  return { day, list, index };
+}
+
+function rotateRoutePreview(items: PublishedScheduleItem[], route: SchedulePersonRef[]) {
+  const monthKeys = new Set(route.map((ref) => ref.monthKey));
+  const scheduleMap = buildScheduleMap(items, monthKeys);
+  const slots = route.map((ref) => findRefSlot(scheduleMap, ref));
+  if (slots.some((slot) => !slot)) return null;
+  const resolvedSlots = slots as NonNullable<(typeof slots)[number]>[];
+  const originalNames = resolvedSlots.map((slot) => slot.list[slot.index]);
+
+  resolvedSlots.forEach((slot, index) => {
+    slot.list[slot.index] = originalNames[(index + 1) % originalNames.length];
+  });
+
+  route.forEach((ref, index) => {
+    if (ref.category !== "휴가") return;
+    resolvedSlots[index].day.vacations = [...resolvedSlots[index].list];
+  });
+
+  return scheduleMap;
+}
+
+function hasAssignmentElsewhereOnDay(day: DaySchedule | undefined, ref: SchedulePersonRef, name: string) {
+  if (!day) return false;
+  return Object.entries(day.assignments).some(([category, names]) =>
+    names.some((currentName, index) => {
+      if (currentName !== name) return false;
+      return !(category === ref.category && index === ref.index);
+    }),
+  );
+}
+
+function routeWouldCreateConflict(items: PublishedScheduleItem[], route: SchedulePersonRef[]) {
+  if (route.length < 2) return false;
+  const previewMap = rotateRoutePreview(items, route);
+  if (!previewMap) return true;
+  const dayIndex = new Map<string, DaySchedule>();
+  previewMap.forEach((schedule) => {
+    schedule.days.forEach((day) => {
+      dayIndex.set(day.dateKey, day);
+    });
+  });
+
+  return route.some((ref) => {
+    const day = dayIndex.get(ref.dateKey);
+    const schedule = previewMap.get(ref.monthKey);
+    const previewDay = schedule?.days.find((item) => item.dateKey === ref.dateKey);
+    const name = previewDay?.assignments[ref.category]?.[ref.index];
+    if (!name) return true;
+    if (hasAssignmentElsewhereOnDay(day, ref, name)) return true;
+    if (hadNightShiftPreviousDay(dayIndex, name, ref.dateKey)) return true;
+    if (ref.category === "야근" && hasWorkAfterNightShift(dayIndex, name, ref.dateKey)) return true;
+    return false;
+  });
+}
+
 function describeRef(ref: SchedulePersonRef | null) {
   if (!ref) return "";
   return `${ref.dateKey} ${getScheduleCategoryLabel(ref.category)} ${ref.name}`;
+}
+
+function describeRoute(route: SchedulePersonRef[]) {
+  const labels = route.map((ref) => describeRef(ref));
+  if (labels.length <= 2) return labels.join(" ↔ ");
+  return `${labels.join(" → ")} → ${labels[0]}`;
 }
 
 function toDateKey(date: Date) {
@@ -177,9 +284,13 @@ function isHolidayLikeDay(dayIndex: Map<string, DaySchedule>, dateKey: string) {
   return Boolean(day && (day.isWeekend || day.isHoliday));
 }
 
-function isFridayDay(dayIndex: Map<string, DaySchedule>, dateKey: string) {
+function getNightShiftGroup(dayIndex: Map<string, DaySchedule>, dateKey: string) {
   const day = dayIndex.get(dateKey);
-  return day?.dow === 5;
+  if (!day) return "";
+  if (day.dow === 5) return "friday";
+  if (day.dow === 6) return "saturday";
+  if (day.dow === 0) return "sunday";
+  return "weekday";
 }
 
 function hasWorkAfterNightShift(dayIndex: Map<string, DaySchedule>, name: string, dateKey: string) {
@@ -203,10 +314,10 @@ function isSwapCandidateValid(
   if (source.name === target.name) return false;
   if (source.dateKey <= todayKey || target.dateKey <= todayKey) return false;
   if (source.dateKey === target.dateKey) return false;
-  if ((categoryLabel === "야근" || categoryLabel === "조근") && isHolidayLikeDay(dayIndex, source.dateKey) !== isHolidayLikeDay(dayIndex, target.dateKey)) {
+  if (categoryLabel === "조근" && isHolidayLikeDay(dayIndex, source.dateKey) !== isHolidayLikeDay(dayIndex, target.dateKey)) {
     return false;
   }
-  if (categoryLabel === "야근" && isFridayDay(dayIndex, source.dateKey) !== isFridayDay(dayIndex, target.dateKey)) {
+  if (categoryLabel === "야근" && getNightShiftGroup(dayIndex, source.dateKey) !== getNightShiftGroup(dayIndex, target.dateKey)) {
     return false;
   }
   if (hasAssignmentOnDay(dayIndex.get(source.dateKey), target.name)) return false;
@@ -225,8 +336,8 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [selectedMineRef, setSelectedMineRef] = useState<SchedulePersonRef | null>(null);
-  const [confirmTargetRef, setConfirmTargetRef] = useState<SchedulePersonRef | null>(null);
+  const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
+  const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
   const session = getSession();
@@ -263,6 +374,12 @@ export function PublishedSchedulesPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    setSelectedRoute([]);
+    setConfirmConflictRequest(false);
+    setRequestMessage("");
+  }, [editMode, selectedMonthKey]);
+
   const selectedItem = useMemo(() => {
     if (items.length === 0) return null;
     return items.find((item) => item.monthKey === selectedMonthKey) ?? items[items.length - 1];
@@ -281,90 +398,110 @@ export function PublishedSchedulesPanel() {
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(items), [items]);
   const displayDays = useMemo(
-    () => (selectedItem ? buildDisplayDays(selectedItem.schedule.days, previousSelectedItem?.schedule.days, selectedItem.schedule.month) : []),
+    () => (selectedItem ? buildDisplayDays(selectedItem, previousSelectedItem) : []),
     [previousSelectedItem, selectedItem],
   );
-  const swapCandidates = useMemo(() => {
-    if (!editMode || !selectedMineRef || !username) return [];
-    return items
-      .flatMap((item) =>
-        item.schedule.days.flatMap((day) =>
-          (day.assignments[selectedMineRef.category] ?? []).map((name, index) => ({
-            monthKey: item.monthKey,
+  const firstSelectedRef = selectedRoute[0] ?? null;
+  const hasConflictWarning = useMemo(
+    () => routeWouldCreateConflict(items, selectedRoute),
+    [items, selectedRoute],
+  );
+
+  const recommendedCandidates = useMemo(() => {
+    if (!editMode || !firstSelectedRef) return [];
+    return displayDays
+      .flatMap((day) =>
+        Object.entries(day.assignments).flatMap(([category, names]) =>
+          names.map((name, index) => ({
+            monthKey: day.ownerMonthKey,
             dateKey: day.dateKey,
-            category: selectedMineRef.category,
+            category,
             index,
             name,
           })),
         ),
       )
-      .filter((ref) => !sameRef(selectedMineRef, ref))
+      .filter((ref) => !sameRef(firstSelectedRef, ref))
       .filter((ref) => !isPendingRef(allPendingRequests, ref))
-      .filter((ref) => isSwapCandidateValid(selectedMineRef, ref, publishedDayIndex, todayKey))
+      .filter((ref) => isSwapCandidateValid(firstSelectedRef, ref, publishedDayIndex, todayKey))
       .sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.name.localeCompare(right.name));
-  }, [allPendingRequests, editMode, items, publishedDayIndex, selectedMineRef, todayKey, username]);
+  }, [allPendingRequests, displayDays, editMode, firstSelectedRef, publishedDayIndex, todayKey]);
 
   const toggleEditMode = () => {
-    setEditMode((current) => {
-      const next = !current;
-      if (!next) {
-        setSelectedMineRef(null);
-        setConfirmTargetRef(null);
-      }
-      return next;
-    });
+    setEditMode((current) => !current);
+    setConfirmConflictRequest(false);
     setRequestMessage("");
   };
 
   const handleNameClick = (person: ScheduleNameObject) => {
     if (!editMode || !username || person.pending) return;
-    if (!selectedMineRef) {
-      if (person.name !== username) return;
-      if (person.ref.dateKey <= todayKey) {
-        setRequestMessage("오늘 이후 근무만 변경할 수 있습니다.");
+    if (person.ref.dateKey <= todayKey) {
+      setRequestMessage("오늘 이후 근무만 변경 요청할 수 있습니다.");
+      return;
+    }
+
+    if (selectedRoute.length === 0) {
+      if (person.name !== username) {
+        setRequestMessage("먼저 내 근무를 선택해 주세요.");
         return;
       }
-      setSelectedMineRef(person.ref);
-      setConfirmTargetRef(null);
+      setSelectedRoute([person.ref]);
+      setConfirmConflictRequest(false);
       setRequestMessage("");
       return;
     }
-    if (sameRef(selectedMineRef, person.ref)) {
-      setSelectedMineRef(null);
-      setConfirmTargetRef(null);
-      return;
-    }
-    if (person.name === username) {
-      if (person.ref.dateKey <= todayKey) {
-        setRequestMessage("오늘 이후 근무만 변경할 수 있습니다.");
-        return;
-      }
-      setSelectedMineRef(person.ref);
-      setConfirmTargetRef(null);
+
+    const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
+    if (existingIndex >= 0) {
+      setSelectedRoute(selectedRoute.slice(0, existingIndex + 1));
+      setConfirmConflictRequest(false);
       setRequestMessage("");
       return;
     }
-    if (!isSwapCandidateValid(selectedMineRef, person.ref, publishedDayIndex, todayKey)) {
-      setRequestMessage("같은 유형이고 날짜 충돌이나 야근 다음날 문제가 없는 근무만 바꿀 수 있습니다.");
+
+    if (selectedRoute.length >= MAX_ROUTE_SIZE) {
+      setRequestMessage("게시 근무표 요청은 최대 3명 경로까지 등록할 수 있습니다.");
       return;
     }
-    setConfirmTargetRef(person.ref);
+
+    setSelectedRoute([...selectedRoute, person.ref]);
+    setConfirmConflictRequest(false);
     setRequestMessage("");
   };
 
-  const onConfirmRequest = () => {
-    if (!session || !selectedMineRef || !confirmTargetRef) return;
+  const clearRoute = () => {
+    setSelectedRoute([]);
+    setConfirmConflictRequest(false);
+    setRequestMessage("");
+  };
+
+  const submitRequest = () => {
+    if (!session || !selectedItem || selectedRoute.length < 2) return;
     createScheduleChangeRequest({
-      monthKey: selectedMineRef.monthKey,
+      monthKey: selectedItem.monthKey,
       requesterId: session.id,
       requesterName: session.username,
-      source: selectedMineRef,
-      target: confirmTargetRef,
+      source: selectedRoute[0],
+      target: selectedRoute[selectedRoute.length - 1],
+      route: selectedRoute,
+      hasConflictWarning,
     });
     loadRequests();
-    setRequestMessage("근무 변경 요청이 등록되었습니다.");
-    setSelectedMineRef(null);
-    setConfirmTargetRef(null);
+    setRequestMessage(
+      selectedRoute.length === 2
+        ? "근무 변경 요청을 등록했습니다."
+        : "삼각 트레이드 요청을 등록했습니다.",
+    );
+    setConfirmConflictRequest(false);
+    setSelectedRoute([]);
+  };
+
+  const onConfirmRequest = () => {
+    if (hasConflictWarning) {
+      setConfirmConflictRequest(true);
+      return;
+    }
+    submitRequest();
   };
 
   if (items.length === 0) {
@@ -392,32 +529,58 @@ export function PublishedSchedulesPanel() {
               gap: 10,
             }}
           >
-            <strong>교체 가능 후보</strong>
-            {selectedMineRef ? <div className="muted">{describeRef(selectedMineRef)}</div> : <div className="muted">내 이름을 누르면 후보가 여기에 표시됩니다.</div>}
-            {selectedMineRef ? (
-              swapCandidates.length > 0 ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {swapCandidates.map((candidate) => (
-                    <button
-                      key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        setConfirmTargetRef(candidate);
-                        setRequestMessage("");
-                      }}
-                      style={{
-                        border: sameRef(confirmTargetRef, candidate) ? "1px solid rgba(56,189,248,.75)" : undefined,
-                        background: sameRef(confirmTargetRef, candidate) ? "rgba(56,189,248,.16)" : undefined,
-                      }}
-                    >
-                      {candidate.dateKey} {candidate.name}
-                    </button>
-                  ))}
+            <strong>요청 경로</strong>
+            {selectedRoute.length > 0 ? (
+              <div className="muted">{describeRoute(selectedRoute)}</div>
+            ) : (
+              <div className="muted">먼저 내 이름을 누른 뒤, 같은 게시 시트 안에서 교환 또는 삼각 트레이드 상대를 선택하세요.</div>
+            )}
+
+            {firstSelectedRef ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <span className="muted">추천 직접 교환 후보</span>
+                {recommendedCandidates.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {recommendedCandidates.slice(0, 12).map((candidate) => (
+                      <button
+                        key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          setSelectedRoute((current) => {
+                            if (routeIncludes(current, candidate) || current.length >= MAX_ROUTE_SIZE) return current;
+                            return [...current, candidate];
+                          });
+                          setRequestMessage("");
+                        }}
+                      >
+                        {candidate.dateKey} {getScheduleCategoryLabel(candidate.category)} {candidate.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="status note">추천 후보가 없어도 아래 표에서 다른 근무를 눌러 요청할 수 있습니다.</div>
+                )}
+              </div>
+            ) : null}
+
+            {selectedRoute.length >= 2 ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn primary" onClick={onConfirmRequest}>
+                  {selectedRoute.length === 2 ? "교환 요청" : "삼각 트레이드 요청"}
+                </button>
+                <button className="btn" onClick={clearRoute}>선택 초기화</button>
+              </div>
+            ) : null}
+
+            {confirmConflictRequest ? (
+              <div className="status warn" style={{ display: "grid", gap: 10 }}>
+                <span>변경시 충돌이 발생합니다. 그래도 변경하시겠습니까?</span>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn primary" onClick={submitRequest}>확인</button>
+                  <button className="btn" onClick={() => setConfirmConflictRequest(false)}>취소</button>
                 </div>
-              ) : (
-                <div className="status note">조건에 맞는 교체 가능 근무가 없습니다.</div>
-              )
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -436,19 +599,9 @@ export function PublishedSchedulesPanel() {
         </div>
 
         {editMode && username ? (
-          <div className="status note">먼저 내 이름을 누르고 바꿀 상대 이름을 누르면 변경 요청 확인이 열립니다.</div>
+          <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 근무 유형이 달라도 같은 게시 시트 안의 다른 근무를 요청 경로에 넣을 수 있습니다.</div>
         ) : null}
         {requestMessage ? <div className="status ok">{requestMessage}</div> : null}
-        {confirmTargetRef && selectedMineRef ? (
-          <div className="status warn" style={{ display: "grid", gap: 10 }}>
-            <span>근무변경을 요청하시겠습니까?</span>
-            <span className="muted">{describeRef(selectedMineRef)} ↔ {describeRef(confirmTargetRef)}</span>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn primary" onClick={onConfirmRequest}>확인</button>
-              <button className="btn" onClick={() => setConfirmTargetRef(null)}>취소</button>
-            </div>
-          </div>
-        ) : null}
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -465,7 +618,7 @@ export function PublishedSchedulesPanel() {
           {selectedItem ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
-                이전
+                이전 달
               </button>
               <strong>{selectedItem.title}</strong>
               <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
@@ -475,14 +628,14 @@ export function PublishedSchedulesPanel() {
                 <button
                   className="btn"
                   onClick={() => {
-                    const ok = window.confirm(`${selectedItem.title} 게시를 삭제하시겠습니까?`);
+                    const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
                     if (!ok) return;
                     const next = removePublishedSchedule(selectedItem.monthKey);
                     setItems(next);
                     setSelectedMonthKey(next[next.length - 1]?.monthKey ?? null);
                   }}
                 >
-                  게시 삭제
+                  게시 해제
                 </button>
               ) : null}
             </div>
@@ -504,7 +657,7 @@ export function PublishedSchedulesPanel() {
             <div style={{ overflowX: "auto", overflowY: "visible" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                 {weekdayLabels.map((label) => (
-                  <div key={label} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 800, fontSize: 12 }}>
+                  <div key={label} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -514,12 +667,12 @@ export function PublishedSchedulesPanel() {
                   const isToday = day.dateKey === todayKey;
                   return (
                     <article
-                      key={day.dateKey}
+                      key={`${day.ownerMonthKey}-${day.dateKey}`}
                       className="panel"
                       style={{
                         padding: 8,
-                        minHeight: 210,
-                        opacity: day.isOverflowMonth ? 0.55 : 1,
+                        minHeight: 220,
+                        opacity: 1,
                         background: isToday
                           ? "linear-gradient(180deg, rgba(34,211,238,.24), rgba(59,130,246,.18) 44%, rgba(255,255,255,.08))"
                           : dayCardStyle.background,
@@ -527,10 +680,18 @@ export function PublishedSchedulesPanel() {
                         boxShadow: isToday ? "0 0 0 2px rgba(34,211,238,.16), 0 18px 36px rgba(2,132,199,.18)" : undefined,
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "auto minmax(0, 1fr)",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 8,
+                        }}
+                      >
                         <div
                           style={{
-                            fontSize: 17,
+                            fontSize: 21,
                             fontWeight: 900,
                             padding: isToday ? "4px 10px" : 0,
                             borderRadius: isToday ? 999 : 0,
@@ -540,6 +701,22 @@ export function PublishedSchedulesPanel() {
                           }}
                         >
                           {day.month}/{day.day}
+                        </div>
+                        <div
+                          style={{
+                            minHeight: 24,
+                            textAlign: "center",
+                            color: "#f8fbff",
+                            fontSize: 21,
+                            fontWeight: 900,
+                            lineHeight: 1.1,
+                            whiteSpace: "normal",
+                            overflow: "visible",
+                            textOverflow: "clip",
+                            wordBreak: "keep-all",
+                          }}
+                        >
+                          {day.headerName ?? ""}
                         </div>
                       </div>
                       {centeredDayLabel ? (
@@ -552,8 +729,8 @@ export function PublishedSchedulesPanel() {
                             minHeight: 24,
                             textAlign: "center",
                             color: "#ffd7d7",
-                            fontWeight: 800,
-                            fontSize: 12,
+                            fontWeight: 900,
+                            fontSize: 14,
                           }}
                         >
                           {centeredDayLabel}
@@ -561,28 +738,28 @@ export function PublishedSchedulesPanel() {
                       ) : null}
                       <div style={{ display: "grid", gap: 2 }}>
                         {Object.entries(day.assignments).map(([category, names]) => (
-                          <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
-                            <strong style={{ display: "block", marginBottom: 0, fontSize: 12, lineHeight: 1.2, minWidth: 42 }}>{getScheduleCategoryLabel(category)}</strong>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginLeft: 48, marginTop: -16 }}>
+                          <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 7, background: "rgba(9,17,30,.34)" }}>
+                            <strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: 1.2, minWidth: 52 }}>{getScheduleCategoryLabel(category)}</strong>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginLeft: 58, marginTop: -18 }}>
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const ref: SchedulePersonRef = {
-                                    monthKey: selectedItem.monthKey,
+                                    monthKey: day.ownerMonthKey,
                                     dateKey: day.dateKey,
                                     category,
                                     index,
                                     name,
                                   };
                                   const personObject: ScheduleNameObject = {
-                                    key: `${category}-${name}-${index}`,
+                                    key: `${day.ownerMonthKey}-${category}-${name}-${index}`,
                                     name: assignmentDisplay.name,
                                     ref,
                                     pending: isPendingRef(allPendingRequests, ref),
                                   };
-                                  const mineHighlighted = showMine && username && username === assignmentDisplay.name;
-                                  const highlighted = mineHighlighted || (editMode && username && username === assignmentDisplay.name);
-                                  const selected = sameRef(selectedMineRef, ref);
+                                  const mineHighlighted = Boolean(username) && username === assignmentDisplay.name && (showMine || editMode);
+                                  const routeSelected = routeIncludes(selectedRoute, ref);
+                                  const firstSelected = sameRef(firstSelectedRef, ref);
                                   return (
                                     <button
                                       key={personObject.key}
@@ -597,33 +774,37 @@ export function PublishedSchedulesPanel() {
                                         borderRadius: 999,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
-                                          : highlighted
-                                            ? mineHighlighted
-                                              ? "rgba(56,189,248,.32)"
-                                              : "rgba(34,211,238,.22)"
-                                            : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.16)",
-                                        border: selected
-                                          ? "1px solid rgba(56,189,248,.8)"
-                                          : personObject.pending
-                                            ? "1px solid rgba(245,158,11,.35)"
-                                            : highlighted
-                                              ? "1px solid rgba(34,211,238,.35)"
+                                          : routeSelected
+                                            ? firstSelected
+                                              ? "rgba(34,197,94,.28)"
+                                              : "rgba(56,189,248,.22)"
+                                            : mineHighlighted
+                                              ? "linear-gradient(135deg, rgba(250,204,21,.34), rgba(56,189,248,.28))"
+                                              : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.18)",
+                                        border: personObject.pending
+                                          ? "1px solid rgba(245,158,11,.35)"
+                                          : routeSelected
+                                            ? firstSelected
+                                              ? "1px solid rgba(74,222,128,.7)"
+                                              : "1px solid rgba(56,189,248,.75)"
+                                            : mineHighlighted
+                                              ? "1px solid rgba(250,204,21,.82)"
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: mineHighlighted ? 900 : 700,
-                                        fontSize: mineHighlighted ? 15 : 12,
-                                        lineHeight: 1.2,
-                                        boxShadow: mineHighlighted ? "0 8px 20px rgba(14,165,233,.18)" : undefined,
+                                        color: mineHighlighted ? "#fff7c2" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        fontWeight: mineHighlighted || routeSelected ? 900 : 700,
+                                        fontSize: mineHighlighted ? 18 : 14,
+                                        lineHeight: 1.25,
+                                        boxShadow: mineHighlighted ? "0 10px 24px rgba(250,204,21,.18), 0 0 0 1px rgba(250,204,21,.14) inset" : undefined,
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
                                       <span>{assignmentDisplay.name}</span>
-                                      {personObject.pending ? <span style={{ fontSize: 11 }}>근무변경요청중</span> : null}
+                                      {personObject.pending ? <span style={{ fontSize: 12 }}>요청중</span> : null}
                                     </button>
                                   );
                                 })
                               ) : (
-                                <span style={{ display: "inline-block", minHeight: 18 }} />
+                                <span style={{ display: "inline-block", minHeight: 22 }} />
                               )}
                             </div>
                           </div>

@@ -6,27 +6,31 @@ import { getSession, logoutUser } from "@/lib/auth/storage";
 
 const links = [
   { href: "/", label: "홈" },
+  { href: "/vacation", label: "휴가 신청" },
   { href: "/schedule", label: "DESK" },
   { href: "/submissions", label: "영상평가 제출" },
-  { href: "/review", label: "평가페이지" },
-  { href: "/team-lead", label: "팀장페이지" },
-  { href: "/admin", label: "관리자페이지" },
+  { href: "/review", label: "평가 페이지" },
+  { href: "/team-lead", label: "팀리드" },
+  { href: "/admin", label: "관리자 페이지" },
 ];
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const session = getSession();
   const isLogin = pathname === "/login";
+  const visibleLinks =
+    session?.role === "member"
+      ? links.filter((link) => link.href === "/" || link.href === "/vacation")
+      : links;
 
   return (
     <div className="shell">
       <section className="panel">
         <div className="top-accent" />
         <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
-          <div style={{ display: "flex", justifyContent: "center" }}>
+          <div style={{ display: "flex", justifyContent: "stretch" }}>
             <Link href="/" className="brand-logo" aria-label="홈으로 이동">
-              <span className="brand-logo-mark">J</span>
-              <span className="brand-logo-text">J 특공대</span>
+              <span className="brand-logo-text">JTBC 영상취재팀</span>
             </Link>
           </div>
           {!isLogin ? (
@@ -40,7 +44,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
               }}
             >
               <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
-                {links.map((link) => (
+                {visibleLinks.map((link) => (
                   <Link key={link.href} href={link.href} className={pathname === link.href ? "active" : ""}>
                     {link.label}
                   </Link>

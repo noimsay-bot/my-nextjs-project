@@ -4,7 +4,7 @@ import { AuthGate } from "@/components/auth/auth-gate";
 import { PortalShell } from "@/components/portal-shell";
 
 export const metadata: Metadata = {
-  title: "J특공대 포털",
+  title: "JTBC 영상취재팀 포털",
   description: "근무표와 영상평가 운영용 포털",
 };
 

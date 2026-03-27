@@ -34,12 +34,16 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   if (!input) return base;
   const legacyOffPeople = Array.isArray(input.offPeople) ? input.offPeople : [];
   const nextOffByCategory = createEmptyOffByCategory();
+  const nextOffExcludeByCategory = createEmptyOffByCategory();
   categories.forEach((category) => {
     nextOffByCategory[category.key] = Array.from(
       new Set(
         input.offByCategory?.[category.key] ??
           (legacyOffPeople.length > 0 ? legacyOffPeople : base.offByCategory[category.key]),
       ),
+    );
+    nextOffExcludeByCategory[category.key] = Array.from(
+      new Set(input.offExcludeByCategory?.[category.key] ?? base.offExcludeByCategory[category.key]),
     );
   });
   return {
@@ -48,8 +52,9 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     year: clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year),
     month: clampNumber(input.month ?? base.month, SCHEDULE_MONTHS[0], SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1], base.month),
     jcheckCount: DEFAULT_JCHECK_COUNT,
-    offPeople: [],
+    offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
+    offExcludeByCategory: nextOffExcludeByCategory,
     orders: Object.fromEntries(
       categories.map((category) => [
         category.key,
@@ -258,6 +263,12 @@ export function daysInMonth(year: number, month: number) {
 }
 
 export function getScheduleRange(year: number, month: number) {
+  if (year === 2026 && month === 5) {
+    return {
+      start: new Date(year, month - 1, 4),
+      end: new Date(year, month - 1, 31),
+    };
+  }
   const start = new Date(year, month - 1, 1);
   const startDow = start.getDay();
   const diffToMonday = startDow === 0 ? -6 : 1 - startDow;
@@ -273,8 +284,17 @@ function getOrderPool(state: ScheduleState, key: CategoryKey) {
   return state.orders[key].map((name) => name.trim()).filter(Boolean);
 }
 
+export function getEffectiveOffByCategory(state: ScheduleState, key: CategoryKey) {
+  const globalOff = new Set((state.offPeople ?? []).map((name) => name.trim()).filter(Boolean));
+  const categoryOff = new Set((state.offByCategory[key] ?? []).map((name) => name.trim()).filter(Boolean));
+  const excluded = new Set((state.offExcludeByCategory[key] ?? []).map((name) => name.trim()).filter(Boolean));
+  const merged = new Set<string>([...globalOff, ...categoryOff]);
+  excluded.forEach((name) => merged.delete(name));
+  return Array.from(merged);
+}
+
 function getActiveOrderPool(state: ScheduleState, key: CategoryKey) {
-  const offSet = new Set((state.offByCategory[key] ?? []).map((name) => name.trim()).filter(Boolean));
+  const offSet = new Set(getEffectiveOffByCategory(state, key));
   return getOrderPool(state, key).filter((name) => !offSet.has(name));
 }
 
@@ -393,10 +413,7 @@ function collectConflicts(
 
   categoriesByName.forEach((categoriesForName, name) => {
     if (categoriesForName.length <= 1) return;
-    const movableCategories = categoriesForName.includes("연장")
-      ? categoriesForName.filter((category) => category !== "연장")
-      : categoriesForName.slice(1);
-    movableCategories.forEach((category) => pushConflict(category, name));
+    categoriesForName.forEach((category) => pushConflict(category, name));
   });
 
   return conflicts;
@@ -522,7 +539,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
     }
 
     if (!isWeekend && !isCustomHoliday) {
-      assignments["제크"] = takeSequentialCandidatesByOrder(nextState, "jcheck", nextState.jcheckCount, pointers);
+      assignments["제크"] = [];
     }
 
     if (isCustomHoliday) {
@@ -550,6 +567,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
       vacations,
       assignments,
       manualExtras: [],
+      headerName: "",
       conflicts,
     });
     previousNight = [...(assignments["야근"] ?? [])];
@@ -641,11 +659,13 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
   }
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   const changes: Array<{ sourceDate: string; targetDate: string; category: string; sourceName: string; targetName: string }> = [];
+  const blockedSwapKeys = new Set<string>();
   const allDays = generated.days;
   const generatedIndex = next.generatedHistory.findIndex((item) => item.monthKey === generated.monthKey);
   const previousGenerated = generatedIndex > 0 ? next.generatedHistory[generatedIndex - 1] ?? null : null;
   const rebalanceStartDate = previousGenerated?.nextStartDate ?? allDays[0]?.dateKey ?? "";
   const sheetDays = allDays.filter((day) => day.dateKey >= rebalanceStartDate);
+  const visibleDays = sheetDays;
   const rebalanceDateSet = new Set(sheetDays.map((day) => day.dateKey));
   const indexByDateKey = new Map(allDays.map((day, index) => [day.dateKey, index]));
 
@@ -661,6 +681,13 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
     return allDays[currentIndex + 1] ?? null;
   };
 
+  const getNightShiftGroup = (day: DaySchedule) => {
+    if (day.dow === 5) return "friday";
+    if (day.dow === 6) return "saturday";
+    if (day.dow === 0) return "sunday";
+    return "weekday";
+  };
+
   const getWeekKey = (dateKey: string) => {
     const [year, month, day] = dateKey.split("-").map(Number);
     const date = new Date(year, month - 1, day);
@@ -670,7 +697,7 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
     return fmtDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
   };
 
-  const weekDaysByKey = sheetDays.reduce(
+  const weekDaysByKey = visibleDays.reduce(
     (accumulator, day) => {
       const weekKey = getWeekKey(day.dateKey);
       accumulator.set(weekKey, [...(accumulator.get(weekKey) ?? []), day]);
@@ -705,13 +732,59 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
     );
   };
 
+  const getEquivalentCategories = (category: string) => {
+    if (["주말조근", "주말일반근무", "뉴스대기"].includes(category)) {
+      return ["주말조근", "주말일반근무", "뉴스대기"];
+    }
+    return [category];
+  };
+
+  const createSwapKey = (
+    sourceRef: string,
+    sourceName: string,
+    targetRef: string,
+    targetName: string,
+  ) =>
+    [`${sourceRef}|${sourceName}`, `${targetRef}|${targetName}`]
+      .sort()
+      .join("<->");
+
+  const getAssignmentIndexes = (day: DaySchedule, category: string, name: string) =>
+    (day.assignments[category] ?? [])
+      .map((currentName, index) => ({ currentName, index }))
+      .filter((item) => item.currentName === name)
+      .map((item) => item.index);
+
+  let getVisibleWarningCount = () => 0;
+  let enforceLocalImprovement = true;
+
+  const captureRebalanceSnapshot = () => ({
+    days: allDays.map((day) => ({
+      day,
+      assignments: JSON.parse(JSON.stringify(day.assignments)) as Record<string, string[]>,
+      conflicts: JSON.parse(JSON.stringify(day.conflicts)) as DaySchedule["conflicts"],
+    })),
+    blockedSwapKeys: new Set(blockedSwapKeys),
+  });
+
+  const restoreRebalanceSnapshot = (
+    snapshot: ReturnType<typeof captureRebalanceSnapshot>,
+  ) => {
+    snapshot.days.forEach((item) => {
+      item.day.assignments = JSON.parse(JSON.stringify(item.assignments)) as Record<string, string[]>;
+      item.day.conflicts = JSON.parse(JSON.stringify(item.conflicts)) as DaySchedule["conflicts"];
+    });
+    blockedSwapKeys.clear();
+    snapshot.blockedSwapKeys.forEach((key) => blockedSwapKeys.add(key));
+  };
+
   const trySwapWithinCategory = (
     sourceDay: DaySchedule,
     category: string,
     index: number,
     sourceName: string,
   ) => {
-    for (const candidateDay of sheetDays) {
+    for (const candidateDay of visibleDays) {
       if (candidateDay.dateKey === sourceDay.dateKey) continue;
       const candidateNames = candidateDay.assignments[category] ?? [];
       if (candidateNames.length === 0) continue;
@@ -719,16 +792,39 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
       for (let candidateIndex = 0; candidateIndex < candidateNames.length; candidateIndex += 1) {
         const candidateName = candidateNames[candidateIndex];
         if (!candidateName || candidateName === sourceName) continue;
-        if (category === "야근" && [5, 6, 0].includes(sourceDay.dow) && candidateDay.dow !== sourceDay.dow) continue;
+        if (category === "야근" && getNightShiftGroup(sourceDay) !== getNightShiftGroup(candidateDay)) continue;
         if (hasNightShiftPreviousDay(sourceDay.dateKey, candidateName)) continue;
         if (hasNightShiftPreviousDay(candidateDay.dateKey, sourceName)) continue;
         if (category === "야근" && hasLockedAssignmentNextDay(sourceDay.dateKey, candidateName)) continue;
         if (category === "야근" && hasLockedAssignmentNextDay(candidateDay.dateKey, sourceName)) continue;
         if (!canPlaceNameOnDay(sourceDay, category, index, candidateName)) continue;
         if (!canPlaceNameOnDay(candidateDay, category, candidateIndex, sourceName)) continue;
+        const swapKey = createSwapKey(
+          `${sourceDay.dateKey}|${category}|${index}`,
+          sourceName,
+          `${candidateDay.dateKey}|${category}|${candidateIndex}`,
+          candidateName,
+        );
+        if (blockedSwapKeys.has(swapKey)) continue;
+        const beforeCount = enforceLocalImprovement ? getVisibleWarningCount() : 0;
 
         sourceDay.assignments[category][index] = candidateName;
         candidateDay.assignments[category][candidateIndex] = sourceName;
+        const afterCount = enforceLocalImprovement ? getVisibleWarningCount() : beforeCount - 1;
+        if (enforceLocalImprovement && afterCount >= beforeCount) {
+          sourceDay.assignments[category][index] = sourceName;
+          candidateDay.assignments[category][candidateIndex] = candidateName;
+          getVisibleWarningCount();
+          continue;
+        }
+        blockedSwapKeys.add(
+          createSwapKey(
+            `${sourceDay.dateKey}|${category}|${index}`,
+            candidateName,
+            `${candidateDay.dateKey}|${category}|${candidateIndex}`,
+            sourceName,
+          ),
+        );
         changes.push({
           sourceDate: sourceDay.dateKey,
           targetDate: candidateDay.dateKey,
@@ -777,6 +873,16 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
 
       for (const candidateName of candidateNames) {
         if (!canSwapExtensionWeeks(sourceWeekDays, candidateWeekDays, sourceName, candidateName)) continue;
+        const swapKey = createSwapKey(
+          `${sourceWeekKey}|연장|${sourceName}`,
+          sourceName,
+          `${candidateWeekKey}|연장|${candidateName}`,
+          candidateName,
+        );
+        if (blockedSwapKeys.has(swapKey)) continue;
+        const sourceWeekOriginal = sourceWeekDays.map((weekDay) => [...(weekDay.assignments["연장"] ?? [])]);
+        const candidateWeekOriginal = candidateWeekDays.map((weekDay) => [...(weekDay.assignments["연장"] ?? [])]);
+        const beforeCount = enforceLocalImprovement ? getVisibleWarningCount() : 0;
 
         sourceWeekDays.forEach((weekDay) => {
           weekDay.assignments["연장"] = (weekDay.assignments["연장"] ?? []).map((name) =>
@@ -788,6 +894,25 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
             name === candidateName ? sourceName : name,
           );
         });
+        const afterCount = enforceLocalImprovement ? getVisibleWarningCount() : beforeCount - 1;
+        if (enforceLocalImprovement && afterCount >= beforeCount) {
+          sourceWeekDays.forEach((weekDay, weekIndex) => {
+            weekDay.assignments["연장"] = [...sourceWeekOriginal[weekIndex]];
+          });
+          candidateWeekDays.forEach((weekDay, weekIndex) => {
+            weekDay.assignments["연장"] = [...candidateWeekOriginal[weekIndex]];
+          });
+          getVisibleWarningCount();
+          continue;
+        }
+        blockedSwapKeys.add(
+          createSwapKey(
+            `${sourceWeekKey}|연장|${candidateName}`,
+            candidateName,
+            `${candidateWeekKey}|연장|${sourceName}`,
+            sourceName,
+          ),
+        );
         changes.push({
           sourceDate: sourceWeekDays[0]?.dateKey ?? day.dateKey,
           targetDate: candidateWeekDays[0]?.dateKey ?? day.dateKey,
@@ -797,6 +922,211 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
         });
         return true;
       }
+    }
+
+    return false;
+  };
+
+  const trySwapAcrossEquivalentCategories = (
+    sourceDay: DaySchedule,
+    sourceCategory: string,
+    index: number,
+    sourceName: string,
+  ) => {
+    const candidateCategories = getEquivalentCategories(sourceCategory);
+
+    for (const candidateDay of visibleDays) {
+      for (const candidateCategory of candidateCategories) {
+        const candidateNames = candidateDay.assignments[candidateCategory] ?? [];
+        if (candidateNames.length === 0) continue;
+
+        for (let candidateIndex = 0; candidateIndex < candidateNames.length; candidateIndex += 1) {
+          const candidateName = candidateNames[candidateIndex];
+          if (!candidateName || candidateName === sourceName) continue;
+          if (candidateDay.dateKey === sourceDay.dateKey && candidateCategory === sourceCategory && candidateIndex === index) continue;
+          if (hasNightShiftPreviousDay(sourceDay.dateKey, candidateName)) continue;
+          if (hasNightShiftPreviousDay(candidateDay.dateKey, sourceName)) continue;
+          if (!canPlaceNameOnDay(sourceDay, sourceCategory, index, candidateName)) continue;
+          if (!canPlaceNameOnDay(candidateDay, candidateCategory, candidateIndex, sourceName)) continue;
+          const swapKey = createSwapKey(
+            `${sourceDay.dateKey}|${sourceCategory}|${index}`,
+            sourceName,
+            `${candidateDay.dateKey}|${candidateCategory}|${candidateIndex}`,
+            candidateName,
+          );
+          if (blockedSwapKeys.has(swapKey)) continue;
+          const beforeCount = enforceLocalImprovement ? getVisibleWarningCount() : 0;
+
+          sourceDay.assignments[sourceCategory][index] = candidateName;
+          candidateDay.assignments[candidateCategory][candidateIndex] = sourceName;
+          const afterCount = enforceLocalImprovement ? getVisibleWarningCount() : beforeCount - 1;
+          if (enforceLocalImprovement && afterCount >= beforeCount) {
+            sourceDay.assignments[sourceCategory][index] = sourceName;
+            candidateDay.assignments[candidateCategory][candidateIndex] = candidateName;
+            getVisibleWarningCount();
+            continue;
+          }
+          blockedSwapKeys.add(
+            createSwapKey(
+              `${sourceDay.dateKey}|${sourceCategory}|${index}`,
+              candidateName,
+              `${candidateDay.dateKey}|${candidateCategory}|${candidateIndex}`,
+              sourceName,
+            ),
+          );
+          changes.push({
+            sourceDate: sourceDay.dateKey,
+            targetDate: candidateDay.dateKey,
+            category: sourceCategory === candidateCategory ? sourceCategory : `${sourceCategory}/${candidateCategory}`,
+            sourceName,
+            targetName: candidateName,
+          });
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  const trySwapNameInCategory = (day: DaySchedule, category: string, name: string) => {
+    const indexes = getAssignmentIndexes(day, category, name);
+    for (const index of indexes) {
+      if (trySwapWithinCategory(day, category, index, name)) return true;
+      if (getEquivalentCategories(category).length > 1 && trySwapAcrossEquivalentCategories(day, category, index, name)) return true;
+    }
+    return false;
+  };
+
+  const tryResolvePreviousNightConflict = (day: DaySchedule, name: string) => {
+    const previousDay = getPreviousDay(day.dateKey);
+    if (!previousDay || !rebalanceDateSet.has(previousDay.dateKey)) return false;
+    const previousNightIndex = (previousDay.assignments["야근"] ?? []).findIndex((nightName) => nightName === name);
+    if (previousNightIndex < 0) return false;
+    return trySwapWithinCategory(previousDay, "야근", previousNightIndex, name);
+  };
+
+  const tryResolveByCategoryPriority = (day: DaySchedule, name: string, preferredCategory?: string) => {
+    const priorityCategories = ["조근", "일반", "제크"];
+    const orderedCategories = [
+      ...(preferredCategory && priorityCategories.includes(preferredCategory) ? [preferredCategory] : []),
+      ...priorityCategories.filter((category) => category !== preferredCategory),
+    ];
+
+    for (const category of orderedCategories) {
+      if (!(day.assignments[category] ?? []).includes(name)) continue;
+      if (trySwapNameInCategory(day, category, name)) return true;
+    }
+
+    return false;
+  };
+
+  const tryResolveSameDayDuplicateBeforeNight = (day: DaySchedule, name: string) => {
+    const priorityCategories = ["조근", "일반", "제크", "주말조근", "주말일반근무", "뉴스대기"];
+    const duplicateCategories = priorityCategories.filter(
+      (currentCategory) => currentCategory !== "야근" && (day.assignments[currentCategory] ?? []).includes(name),
+    );
+
+    for (const currentCategory of duplicateCategories) {
+      if (trySwapNameInCategory(day, currentCategory, name)) return true;
+    }
+
+    if ((day.assignments["연장"] ?? []).includes(name) && trySwapExtensionWeek(day, name)) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const trySwapNightThenResolveIntroducedDuplicate = (day: DaySchedule, name: string) => {
+    const nightIndexes = getAssignmentIndexes(day, "야근", name);
+    if (nightIndexes.length === 0) return false;
+
+    for (const nightIndex of nightIndexes) {
+      const beforeCount = getVisibleWarningCount();
+
+      for (const candidateDay of visibleDays) {
+        if (candidateDay.dateKey === day.dateKey) continue;
+        if (getNightShiftGroup(day) !== getNightShiftGroup(candidateDay)) continue;
+        const candidateNames = candidateDay.assignments["야근"] ?? [];
+        if (candidateNames.length === 0) continue;
+
+        for (let candidateIndex = 0; candidateIndex < candidateNames.length; candidateIndex += 1) {
+          const candidateName = candidateNames[candidateIndex];
+          if (!candidateName || candidateName === name) continue;
+          if (hasNightShiftPreviousDay(day.dateKey, candidateName)) continue;
+          if (hasNightShiftPreviousDay(candidateDay.dateKey, name)) continue;
+          if (hasLockedAssignmentNextDay(day.dateKey, candidateName)) continue;
+          if (hasLockedAssignmentNextDay(candidateDay.dateKey, name)) continue;
+          if (getVacationNames(candidateDay.vacations ?? []).includes(name)) continue;
+
+          const snapshot = captureRebalanceSnapshot();
+
+          day.assignments["야근"][nightIndex] = candidateName;
+          candidateDay.assignments["야근"][candidateIndex] = name;
+
+          const previousEnforcement = enforceLocalImprovement;
+          enforceLocalImprovement = false;
+          tryResolveSameDayDuplicateBeforeNight(day, candidateName);
+          tryResolveSameDayDuplicateBeforeNight(candidateDay, name);
+          enforceLocalImprovement = previousEnforcement;
+
+          const afterCount = getVisibleWarningCount();
+          if (afterCount < beforeCount) {
+            blockedSwapKeys.add(
+              createSwapKey(
+                `${day.dateKey}|야근|${nightIndex}`,
+                candidateName,
+                `${candidateDay.dateKey}|야근|${candidateIndex}`,
+                name,
+              ),
+            );
+            changes.push({
+              sourceDate: day.dateKey,
+              targetDate: candidateDay.dateKey,
+              category: "야근",
+              sourceName: name,
+              targetName: candidateName,
+            });
+            return true;
+          }
+
+          restoreRebalanceSnapshot(snapshot);
+        }
+      }
+    }
+
+    return false;
+  };
+
+  const tryResolveConflictWithPriority = (day: DaySchedule, category: string, name: string) => {
+    if (category === "야근") {
+      if (hasNightShiftPreviousDay(day.dateKey, name) && tryResolvePreviousNightConflict(day, name)) {
+        return true;
+      }
+      if (tryResolveSameDayDuplicateBeforeNight(day, name)) {
+        return true;
+      }
+      if (trySwapNightThenResolveIntroducedDuplicate(day, name)) {
+        return true;
+      }
+      return trySwapNameInCategory(day, "야근", name);
+    }
+
+    if (hasNightShiftPreviousDay(day.dateKey, name) && tryResolvePreviousNightConflict(day, name)) {
+      return true;
+    }
+
+    if (category !== "연장" && trySwapNameInCategory(day, category, name)) {
+      return true;
+    }
+
+    if (tryResolveByCategoryPriority(day, name, category)) {
+      return true;
+    }
+
+    if ((day.assignments["연장"] ?? []).includes(name) && trySwapExtensionWeek(day, name)) {
+      return true;
     }
 
     return false;
@@ -820,75 +1150,34 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
     return nextWarnings;
   };
 
+  getVisibleWarningCount = () => recomputeConflicts().filter((warning) => rebalanceDateSet.has(warning.date)).length;
+
   const seenSignatures = new Set<string>();
   let passCount = 0;
 
-  while (passCount < 20) {
+  while (passCount < 100) {
     const beforeSignature = getAssignmentSignature();
     if (seenSignatures.has(beforeSignature)) break;
     seenSignatures.add(beforeSignature);
 
-    let swappedInPass = false;
+    const currentWarnings = recomputeConflicts().filter((warning) => rebalanceDateSet.has(warning.date));
+    if (currentWarnings.length === 0) break;
 
-    for (const day of sheetDays) {
-      const previousDay = getPreviousDay(day.dateKey);
-      const previousNight = previousDay?.assignments["야근"] ?? [];
+    let resolvedInPass = false;
 
-      (day.assignments["연장"] ?? []).forEach((name) => {
-        if (!previousNight.includes(name) || !previousDay) return;
-        const canMovePreviousNight = rebalanceDateSet.has(previousDay.dateKey);
-        const previousNightIndex = (previousDay.assignments["야근"] ?? []).findIndex((nightName) => nightName === name);
-        const swapped =
-          canMovePreviousNight && previousNightIndex >= 0
-            ? trySwapWithinCategory(previousDay, "야근", previousNightIndex, name)
-            : false;
-        const fallbackSwapped = swapped ? false : trySwapExtensionWeek(day, name);
-        if (swapped || fallbackSwapped) swappedInPass = true;
-      });
+    for (const day of visibleDays) {
+      for (const conflict of [...day.conflicts]) {
+        if (tryResolveConflictWithPriority(day, conflict.category, conflict.name)) {
+          resolvedInPass = true;
+          break;
+        }
+      }
 
-      Object.entries(day.assignments).forEach(([category, names]) => {
-        if (category === "휴가") return;
-        if (category === "연장") return;
-
-        names.forEach((name, index) => {
-          if (!previousNight.includes(name)) return;
-          const swapped = trySwapWithinCategory(day, category, index, name);
-          if (swapped) swappedInPass = true;
-        });
-      });
-
-      const sameDayAssignments = new Map<string, string[]>();
-      Object.entries(day.assignments).forEach(([category, names]) => {
-        if (category === "휴가") return;
-        names.forEach((name) => {
-          const current = sameDayAssignments.get(name) ?? [];
-          if (!current.includes(category)) current.push(category);
-          sameDayAssignments.set(name, current);
-        });
-      });
-
-      sameDayAssignments.forEach((categoriesForName, name) => {
-        if (categoriesForName.length <= 1) return;
-        const categoriesToMove = categoriesForName.includes("연장")
-          ? categoriesForName.filter((category) => category !== "연장")
-          : categoriesForName.slice(1);
-
-        categoriesToMove.forEach((category) => {
-          const indexes = (day.assignments[category] ?? [])
-            .map((currentName, index) => ({ currentName, index }))
-            .filter((item) => item.currentName === name)
-            .map((item) => item.index);
-
-          indexes.forEach((index) => {
-            const swapped = trySwapWithinCategory(day, category, index, name);
-            if (swapped) swappedInPass = true;
-          });
-        });
-      });
+      if (resolvedInPass) break;
     }
 
     passCount += 1;
-    if (!swappedInPass) break;
+    if (!resolvedInPass) break;
   }
 
   warnings.splice(0, warnings.length, ...recomputeConflicts());
@@ -931,6 +1220,16 @@ function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule
   next.generated = generated;
   next.generatedHistory = next.generatedHistory.map((item) => (item.monthKey === generated.monthKey ? generated : item));
   return next;
+}
+
+export function updateDayHeaderName(state: ScheduleState, dateKey: string, value: string) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day) return state;
+  day.headerName = value;
+  return syncGeneratedSchedule(next, generated);
 }
 
 export function updateManualAssignment(state: ScheduleState, dateKey: string, category: string, value: string) {
