@@ -1,5 +1,6 @@
 "use client";
 
+import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -12,15 +13,21 @@ import {
 
 type Mode = "login" | "signup" | "reset" | "change";
 
+function getMessageTone(message: string) {
+  return message.includes("없습니다") || message.includes("대기") || message.includes("않")
+    ? "warn"
+    : "ok";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const session = getSession();
   const [forcedMode, setForcedMode] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("login");
   const [message, setMessage] = useState("");
-  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [signupForm, setSignupForm] = useState({ username: "", password: "", email: "", phone: "" });
-  const [resetUser, setResetUser] = useState("");
+  const [loginForm, setLoginForm] = useState({ loginId: "", password: "" });
+  const [signupForm, setSignupForm] = useState({ loginId: "", username: "", password: "", email: "" });
+  const [resetLoginId, setResetLoginId] = useState("");
   const [passwordForm, setPasswordForm] = useState({ password: "", confirm: "" });
 
   useEffect(() => {
@@ -34,65 +41,68 @@ export default function LoginPage() {
     if (forcedMode === "change") setMode("change");
   }, [forcedMode]);
 
+  function handleLoginSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const result = loginUser(loginForm);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setMessage("");
+    router.replace(result.session.mustChangePassword ? "/login?mode=change" : "/");
+  }
+
+  function handleSignupSubmit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const result = registerUser(signupForm);
+    setMessage(result.message);
+    if (result.ok) {
+      setMode("login");
+      setLoginForm({ loginId: signupForm.loginId, password: "" });
+    }
+  }
+
   return (
     <section className="panel" style={{ maxWidth: 760, margin: "0 auto" }}>
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         <div className="chip">로그인 / 회원가입</div>
-        <div className="status note">
-          회원가입 아이디는 반드시 한글 본인이름입니다. 비밀번호는 제한 없이 입력할 수 있고, 이메일과 전화번호를 함께 등록합니다.
-        </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {(["login", "signup", "reset"] as Mode[]).map((item) => (
-            <button key={item} className={`btn ${mode === item ? "white" : ""}`} onClick={() => setMode(item)} disabled={forcedMode === "change"}>
+            <button key={item} type="button" className={`btn ${mode === item ? "white" : ""}`} onClick={() => setMode(item)} disabled={forcedMode === "change"}>
               {item === "login" ? "로그인" : item === "signup" ? "회원가입" : "비밀번호 찾기"}
             </button>
           ))}
-          {forcedMode === "change" ? <button className="btn white">비밀번호 변경</button> : null}
+          {forcedMode === "change" ? <button type="button" className="btn white">비밀번호 변경</button> : null}
         </div>
 
         {mode === "login" ? (
-          <>
-            <input className="field-input" placeholder="아이디(한글 이름)" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} />
+          <form style={{ display: "grid", gap: 16 }} onSubmit={handleLoginSubmit}>
+            <input className="field-input" placeholder="아이디(영문)" value={loginForm.loginId} onChange={(e) => setLoginForm({ ...loginForm, loginId: e.target.value })} />
             <input className="field-input" type="password" placeholder="비밀번호" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
-            <button
-              className="btn primary"
-              onClick={() => {
-                const result = loginUser(loginForm);
-                if (!result.ok) {
-                  setMessage(result.message);
-                  return;
-                }
-                setMessage("");
-                router.replace(result.session.mustChangePassword ? "/login?mode=change" : "/");
-              }}
-            >
+            <button className="btn primary" type="submit">
               로그인
             </button>
-            <button className="btn" onClick={() => setMode("reset")}>비밀번호 찾기</button>
-          </>
+            <button type="button" className="btn" onClick={() => setMode("reset")}>비밀번호 찾기</button>
+          </form>
         ) : null}
 
         {mode === "signup" ? (
-          <>
-            <input className="field-input" placeholder="아이디(한글 이름)" value={signupForm.username} onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })} />
+          <form style={{ display: "grid", gap: 16 }} onSubmit={handleSignupSubmit}>
+            <input className="field-input" placeholder="아이디(영문, 예: honggildong)" value={signupForm.loginId} onChange={(e) => setSignupForm({ ...signupForm, loginId: e.target.value })} />
+            <input className="field-input" placeholder="이름(한글)" value={signupForm.username} onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })} />
             <input className="field-input" type="password" placeholder="비밀번호" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} />
-            <input className="field-input" placeholder="이메일" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} />
-            <input className="field-input" placeholder="전화번호" value={signupForm.phone} onChange={(e) => setSignupForm({ ...signupForm, phone: e.target.value })} />
-            <button className="btn primary" onClick={() => {
-              const result = registerUser(signupForm);
-              setMessage(result.message);
-              if (result.ok) setMode("login");
-            }}>
+            <input className="field-input" placeholder="이메일 (비밀번호 찾기에 활용됩니다)" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} />
+            <button className="btn primary" type="submit">
               회원가입 신청
             </button>
-          </>
+          </form>
         ) : null}
 
         {mode === "reset" ? (
           <>
-            <input className="field-input" placeholder="아이디(한글 이름)" value={resetUser} onChange={(e) => setResetUser(e.target.value)} />
+            <input className="field-input" placeholder="아이디(영문)" value={resetLoginId} onChange={(e) => setResetLoginId(e.target.value)} />
             <button className="btn primary" onClick={() => {
-              const result = issueTemporaryPassword(resetUser);
+              const result = issueTemporaryPassword(resetLoginId);
               setMessage(result.message);
               if (result.ok) setMode("login");
             }}>
@@ -123,10 +133,7 @@ export default function LoginPage() {
           </>
         ) : null}
 
-        {message ? <div className={`status ${message.includes("없습니다") || message.includes("대기") || message.includes("않") ? "warn" : "ok"}`}>{message}</div> : null}
-        <div className="status note">
-          기본 관리자 계정: 아이디 `관리자`, 비밀번호 `admin1234`
-        </div>
+        {message ? <div className={`status ${getMessageTone(message)}`}>{message}</div> : null}
       </div>
     </section>
   );

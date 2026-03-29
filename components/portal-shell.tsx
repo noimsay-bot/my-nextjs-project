@@ -9,19 +9,31 @@ const links = [
   { href: "/vacation", label: "휴가 신청" },
   { href: "/schedule", label: "DESK" },
   { href: "/submissions", label: "영상평가 제출" },
-  { href: "/review", label: "평가 페이지" },
-  { href: "/team-lead", label: "팀리드" },
-  { href: "/admin", label: "관리자 페이지" },
+  { href: "/review", label: "영상평가" },
+  { href: "/team-lead", label: "팀장" },
+  { href: "/admin", label: "관리자" },
 ];
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const session = getSession();
   const isLogin = pathname === "/login";
-  const visibleLinks =
-    session?.role === "member"
-      ? links.filter((link) => link.href === "/" || link.href === "/vacation")
-      : links;
+  const visibleLinks = (() => {
+    switch (session?.role) {
+      case "member":
+        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
+      case "reviewer":
+        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions" || link.href === "/review");
+      case "desk":
+        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions" || link.href === "/schedule");
+      case "team_lead":
+        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions" || link.href === "/team-lead");
+      case "admin":
+        return links;
+      default:
+        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
+    }
+  })();
 
   return (
     <div className="shell">

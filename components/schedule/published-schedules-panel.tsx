@@ -174,6 +174,11 @@ function routeIncludes(route: SchedulePersonRef[], ref: SchedulePersonRef) {
   return route.some((candidate) => sameRef(candidate, ref));
 }
 
+function hasCompatibleVacationType(left: SchedulePersonRef, right: SchedulePersonRef) {
+  if (left.category !== "휴가" || right.category !== "휴가") return true;
+  return parseVacationEntry(left.name).type === parseVacationEntry(right.name).type;
+}
+
 function buildScheduleMap(items: PublishedScheduleItem[], monthKeys: Set<string>) {
   return new Map(
     items
@@ -330,6 +335,7 @@ function isSwapCandidateValid(
 ) {
   const categoryLabel = getScheduleCategoryLabel(source.category);
   if (source.category !== target.category) return false;
+  if (!hasCompatibleVacationType(source, target)) return false;
   if (source.name === target.name) return false;
   if (source.dateKey <= todayKey || target.dateKey <= todayKey) return false;
   if (source.dateKey === target.dateKey) return false;
@@ -428,23 +434,39 @@ export function PublishedSchedulesPanel() {
 
   const recommendedCandidates = useMemo(() => {
     if (!editMode || !firstSelectedRef) return [];
-    return displayDays
+    return items
       .flatMap((day) =>
-        Object.entries(day.assignments).flatMap(([category, names]) =>
-          names.map((name, index) => ({
-            monthKey: day.ownerMonthKey,
-            dateKey: day.dateKey,
-            category,
-            index,
-            name,
-          })),
+        day.schedule.days.flatMap((scheduleDay) =>
+          Object.entries(scheduleDay.assignments).flatMap(([category, names]) =>
+            names.map((name, index) => ({
+              monthKey: day.monthKey,
+              dateKey: scheduleDay.dateKey,
+              category,
+              index,
+              name,
+            })),
+          ),
         ),
+      )
+      .filter((ref) => ref.dateKey > todayKey)
+      .filter((ref) =>
+        items.some((item) => item.monthKey === ref.monthKey && item.schedule.days.some((day) => day.dateKey === ref.dateKey)),
       )
       .filter((ref) => !sameRef(firstSelectedRef, ref))
       .filter((ref) => !isPendingRef(allPendingRequests, ref))
       .filter((ref) => isSwapCandidateValid(firstSelectedRef, ref, publishedDayIndex, todayKey))
       .sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.name.localeCompare(right.name));
-  }, [allPendingRequests, displayDays, editMode, firstSelectedRef, publishedDayIndex, todayKey]);
+  }, [allPendingRequests, editMode, firstSelectedRef, items, publishedDayIndex, todayKey]);
+
+  const routeScopeLabel = useMemo(() => {
+    if (items.length === 0) return "게시된 근무표";
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (first.monthKey === last.monthKey) {
+      return `${first.schedule.year}년 ${first.schedule.month}월 게시 근무표`;
+    }
+    return `${first.schedule.year}년 ${first.schedule.month}월 ~ ${last.schedule.year}년 ${last.schedule.month}월 게시 근무표`;
+  }, [items]);
 
   const toggleEditMode = () => {
     setEditMode((current) => !current);
@@ -485,6 +507,16 @@ export function PublishedSchedulesPanel() {
 
     const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
     if (existingIndex >= 0) {
+      if (selectedRoute.length === 1 && existingIndex === 0) {
+        clearRoute();
+        return;
+      }
+      if (existingIndex === selectedRoute.length - 1) {
+        setSelectedRoute(selectedRoute.slice(0, -1));
+        setConfirmConflictRequest(false);
+        setRequestMessage("");
+        return;
+      }
       setSelectedRoute(selectedRoute.slice(0, existingIndex + 1));
       setConfirmConflictRequest(false);
       setRequestMessage("");
@@ -493,6 +525,12 @@ export function PublishedSchedulesPanel() {
 
     if (selectedRoute.length >= MAX_ROUTE_SIZE) {
       setRequestMessage("게시 근무표 요청은 최대 3명 경로까지 등록할 수 있습니다.");
+      return;
+    }
+
+    const lastSelectedRef = selectedRoute[selectedRoute.length - 1];
+    if (lastSelectedRef && !hasCompatibleVacationType(lastSelectedRef, person.ref)) {
+      setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차와 대휴는 서로 바꿀 수 없습니다.");
       return;
     }
 
@@ -565,15 +603,15 @@ export function PublishedSchedulesPanel() {
             {selectedRoute.length > 0 ? (
               <div className="muted">{describeRoute(selectedRoute)}</div>
             ) : (
-              <div className="muted">먼저 내 이름을 누른 뒤, 같은 게시 시트 안에서 교환 또는 삼각 트레이드 상대를 선택하세요.</div>
+              <div className="muted">먼저 내 이름을 누른 뒤, {routeScopeLabel} 전체에서 미래 날짜의 교환 또는 삼각 트레이드 상대를 선택하세요.</div>
             )}
 
             {firstSelectedRef ? (
               <div style={{ display: "grid", gap: 8 }}>
                 <span className="muted">추천 직접 교환 후보</span>
                 {recommendedCandidates.length > 0 ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {recommendedCandidates.slice(0, 12).map((candidate) => (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: 240, overflowY: "auto", paddingRight: 4 }}>
+                    {recommendedCandidates.map((candidate) => (
                       <button
                         key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
                         type="button"
@@ -591,7 +629,7 @@ export function PublishedSchedulesPanel() {
                     ))}
                   </div>
                 ) : (
-                  <div className="status note">추천 후보가 없어도 아래 표에서 다른 근무를 눌러 요청할 수 있습니다.</div>
+                  <div className="status note">추천 후보가 없어도 현재 보고 있는 달 표에서 다른 근무를 눌러 요청할 수 있습니다.</div>
                 )}
               </div>
             ) : null}
@@ -631,7 +669,7 @@ export function PublishedSchedulesPanel() {
         </div>
 
         {editMode && username ? (
-          <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 근무 유형이 달라도 같은 게시 시트 안의 다른 근무를 요청 경로에 넣을 수 있습니다.</div>
+          <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 {routeScopeLabel} 전체에서 미래 날짜 근무를 요청 경로에 넣을 수 있습니다.</div>
         ) : null}
         {requestMessage ? <div className="status ok">{requestMessage}</div> : null}
 
@@ -649,6 +687,36 @@ export function PublishedSchedulesPanel() {
           </div>
           {selectedItem ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "5px 12px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  lineHeight: 1.2,
+                  ...vacationLegendStyles.연차,
+                }}
+              >
+                연차
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "5px 12px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  lineHeight: 1.2,
+                  ...vacationLegendStyles.대휴,
+                }}
+              >
+                대휴
+              </span>
               <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
                 이전 달
               </button>
@@ -681,8 +749,40 @@ export function PublishedSchedulesPanel() {
           <>
             <div ref={printableScheduleRef} data-print-frame="true" style={{ display: "grid", gap: 12 }}>
               <div data-print-only="true" style={{ display: "none" }}>
-                <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ display: "grid", gap: 8 }}>
                   <strong style={{ fontSize: 22 }}>{selectedItem.title}</strong>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.연차,
+                      }}
+                    >
+                      연차
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.대휴,
+                      }}
+                    >
+                      대휴
+                    </span>
+                  </div>
                   <div className="muted">게시 {selectedItem.publishedAt}</div>
                 </div>
               </div>
@@ -809,7 +909,7 @@ export function PublishedSchedulesPanel() {
                                     pending: isPendingRef(allPendingRequests, ref),
                                   };
                                   const isMine = Boolean(username) && username === assignmentDisplay.name;
-                                  const mineHighlighted = isMine && showMine;
+                                  const mineHighlighted = isMine && (showMine || editMode);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
@@ -834,7 +934,7 @@ export function PublishedSchedulesPanel() {
                                           ? "rgba(245,158,11,.18)"
                                           : routeSelected
                                             ? firstSelected
-                                              ? "rgba(34,197,94,.28)"
+                                              ? "rgba(168,85,247,.28)"
                                               : "rgba(56,189,248,.22)"
                                             : mineHighlighted
                                               ? "rgba(148,163,184,.38)"
@@ -847,18 +947,22 @@ export function PublishedSchedulesPanel() {
                                           ? "1px solid rgba(245,158,11,.35)"
                                           : routeSelected
                                             ? firstSelected
-                                              ? "1px solid rgba(74,222,128,.7)"
+                                              ? "1px solid rgba(192,132,252,.78)"
                                               : "1px solid rgba(56,189,248,.75)"
                                             : mineHighlighted
                                               ? "4px solid rgba(226,232,240,.82)"
                                               : dimOtherNames
                                                 ? "1px solid rgba(255,255,255,.08)"
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
                                         fontSize: mineHighlighted ? 22 : 15,
                                         lineHeight: 1.3,
-                                        boxShadow: mineHighlighted ? "0 10px 24px rgba(15,23,42,.18), 0 0 0 1px rgba(255,255,255,.08) inset" : undefined,
+                                        boxShadow: routeSelected && firstSelected
+                                          ? "0 10px 24px rgba(88,28,135,.28), 0 0 0 1px rgba(255,255,255,.08) inset"
+                                          : mineHighlighted
+                                            ? "0 10px 24px rgba(15,23,42,.18), 0 0 0 1px rgba(255,255,255,.08) inset"
+                                            : undefined,
                                         textShadow: undefined,
                                         opacity: dimOtherNames ? 0.42 : 1,
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",

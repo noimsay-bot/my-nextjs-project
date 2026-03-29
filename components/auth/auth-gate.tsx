@@ -7,12 +7,20 @@ import { getSession, hasDeskAccess } from "@/lib/auth/storage";
 const publicPaths = new Set(["/login"]);
 
 function hasAccess(pathname: string, role: "member" | "reviewer" | "team_lead" | "admin" | "desk") {
-  if (role === "member") return pathname === "/" || pathname === "/vacation";
+  if (role === "admin") return true;
   if (pathname.startsWith("/schedule/vacations")) return hasDeskAccess(role);
-  if (pathname.startsWith("/admin")) return role === "admin";
-  if (pathname.startsWith("/team-lead")) return role === "team_lead";
-  if (pathname.startsWith("/review")) return ["reviewer", "team_lead", "admin"].includes(role);
-  return true;
+  switch (role) {
+    case "member":
+      return pathname === "/" || pathname === "/vacation" || pathname.startsWith("/submissions");
+    case "reviewer":
+      return pathname === "/" || pathname === "/vacation" || pathname.startsWith("/submissions") || pathname.startsWith("/review");
+    case "desk":
+      return pathname === "/" || pathname === "/vacation" || pathname.startsWith("/submissions") || pathname.startsWith("/schedule");
+    case "team_lead":
+      return pathname === "/" || pathname === "/vacation" || pathname.startsWith("/submissions") || pathname.startsWith("/team-lead");
+    default:
+      return false;
+  }
 }
 
 export function AuthGate({ children }: { children: React.ReactNode }) {

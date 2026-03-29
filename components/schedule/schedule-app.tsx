@@ -41,6 +41,7 @@ import { getPublishedSchedules, publishSchedule, PublishedScheduleItem } from "@
 import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
+const ALL_DAYS_EDIT_KEY = "__all_days__";
 
 function getAdjacentMonth(year: number, month: number, offset: number) {
   const date = new Date(year, month - 1 + offset, 1);
@@ -262,6 +263,7 @@ export function ScheduleApp() {
   const editBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const session = getSession();
+  const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
 
   const loadState = () => {
@@ -351,11 +353,11 @@ export function ScheduleApp() {
 
   useEffect(() => {
     if (!addPersonDialog) return;
-    if (state.editDateKey === addPersonDialog.dateKey && state.generated?.monthKey === visibleMonthKey) return;
+    if (state.generated?.monthKey === visibleMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
     setAddPersonDialog(null);
     setAddPersonName("");
     setAddPersonVacationType("연차");
-  }, [addPersonDialog, state.editDateKey, state.generated?.monthKey, visibleMonthKey]);
+  }, [addPersonDialog, isAllDaysEditMode, state.editDateKey, state.generated?.monthKey, visibleMonthKey]);
 
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
   const totalCount = uniquePeople.length;
@@ -585,6 +587,24 @@ export function ScheduleApp() {
     closeAddPersonDialog();
   };
 
+  const startAllDaysEdit = () => {
+    if (!visibleSchedule || isEditingDate) return;
+    editBackupRef.current = cloneScheduleState(state);
+    const visibleScheduleClone = JSON.parse(JSON.stringify(visibleSchedule));
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generated: visibleScheduleClone,
+        generatedHistory: current.generatedHistory.map((item) =>
+          item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
+        ),
+        editDateKey: ALL_DAYS_EDIT_KEY,
+        selectedPerson: null,
+      }),
+    );
+    closeAddPersonDialog();
+  };
+
   const cancelDayEdit = () => {
     const backup = editBackupRef.current ? cloneScheduleState(editBackupRef.current) : null;
     setState((current) =>
@@ -602,6 +622,7 @@ export function ScheduleApp() {
 
   const confirmDayEdit = () => {
     if (!isEditingDate) return;
+    const messageText = isAllDaysEditMode ? "근무표 수정 내용이 반영되었습니다." : "날짜 수정 내용이 반영되었습니다.";
     setState((current) =>
       sanitizeScheduleState({
         ...current,
@@ -611,7 +632,7 @@ export function ScheduleApp() {
     );
     editBackupRef.current = null;
     closeAddPersonDialog();
-    setMessage({ tone: "ok", text: "날짜 수정 내용이 반영되었습니다." });
+    setMessage({ tone: "ok", text: messageText });
   };
 
   const saveCurrent = () => {
@@ -731,7 +752,7 @@ export function ScheduleApp() {
             </button>
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
-          {isEditingDate ? <div className="status note">날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요.</div> : null}
+          {isEditingDate ? <div className="status note">{isAllDaysEditMode ? "근무표 전체 수정 중입니다. 수정 완료 또는 취소 후 다른 작업을 진행해 주세요." : "날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요."}</div> : null}
           {overwriteConfirmOpen ? (
             <div className="status warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <span>이미 작성된 {state.month}월 근무표가 있습니다. 다시 작성하시겠습니까?</span>
@@ -1002,10 +1023,10 @@ export function ScheduleApp() {
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    padding: "2px 6px",
+                    padding: "5px 12px",
                     borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 700,
+                    fontSize: 14,
+                    fontWeight: 800,
                     lineHeight: 1.2,
                     ...vacationLegendStyles.연차,
                   }}
@@ -1017,30 +1038,44 @@ export function ScheduleApp() {
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    padding: "2px 6px",
+                    padding: "5px 12px",
                     borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 700,
+                    fontSize: 14,
+                    fontWeight: 800,
                     lineHeight: 1.2,
                     ...vacationLegendStyles.대휴,
                   }}
                 >
                   대휴
                 </span>
-                <button
-                  className="btn"
-                  disabled={isEditingDate || !hasPreviousVisibleMonth}
+              <button
+                className="btn"
+                disabled={isEditingDate || !hasPreviousVisibleMonth}
                   onClick={() => {
                     if (!previousVisibleMonth) return;
                     setVisibleMonthKey(previousVisibleMonth.monthKey);
                     setState((current) => sanitizeScheduleState({ ...current, year: previousVisibleMonth.year, month: previousVisibleMonth.month }));
                   }}
-                >
-                  이전 달
+              >
+                이전 달
+              </button>
+              {isAllDaysEditMode ? (
+                <>
+                  <button className="btn white" onClick={confirmDayEdit}>
+                    수정 완료
+                  </button>
+                  <button className="btn" onClick={cancelDayEdit}>
+                    수정 취소
+                  </button>
+                </>
+              ) : (
+                <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={startAllDaysEdit}>
+                  수정 모드
                 </button>
-                <strong>{visibleSchedule.year}년 {visibleSchedule.month}월</strong>
-                <button
-                  className="btn"
+              )}
+              <strong>{visibleSchedule.year}년 {visibleSchedule.month}월</strong>
+              <button
+                className="btn"
                   disabled={isEditingDate || !hasNextVisibleMonth}
                   onClick={() => {
                     if (!nextVisibleMonth) return;
@@ -1067,10 +1102,10 @@ export function ScheduleApp() {
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "2px 6px",
+                        padding: "5px 12px",
                         borderRadius: 999,
-                        fontSize: 12,
-                        fontWeight: 700,
+                        fontSize: 14,
+                        fontWeight: 800,
                         lineHeight: 1.2,
                         ...vacationLegendStyles.연차,
                       }}
@@ -1082,10 +1117,10 @@ export function ScheduleApp() {
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        padding: "2px 6px",
+                        padding: "5px 12px",
                         borderRadius: 999,
-                        fontSize: 12,
-                        fontWeight: 700,
+                        fontSize: 14,
+                        fontWeight: 800,
                         lineHeight: 1.2,
                         ...vacationLegendStyles.대휴,
                       }}
@@ -1103,9 +1138,11 @@ export function ScheduleApp() {
                   </div>
                 ))}
                 {visibleDays.map((day) => {
-                  const editMode = state.generated?.monthKey === visibleSchedule.monthKey && state.editDateKey === day.dateKey;
+                  const editMode =
+                    state.generated?.monthKey === visibleSchedule.monthKey &&
+                    (isAllDaysEditMode || state.editDateKey === day.dateKey);
                   const currentUser = state.currentUser.trim();
-                  const editLocked = Boolean(state.editDateKey && state.editDateKey !== day.dateKey);
+                  const editLocked = Boolean(state.editDateKey && !isAllDaysEditMode && state.editDateKey !== day.dateKey);
                   const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
                   const dayCardStyle = getDayCardStyle(day);
                   const centeredDayLabel = getCenteredDayLabel(day);
@@ -1195,7 +1232,7 @@ export function ScheduleApp() {
                           </div>
                         )}
                         <div style={{ display: "flex", gap: 8, justifySelf: "end" }}>
-                          {editMode ? (
+                          {editMode && !isAllDaysEditMode ? (
                             <>
                               <button type="button" className="btn primary" style={{ padding: "5px 8px", fontSize: 12 }} onClick={confirmDayEdit}>
                                 확인
@@ -1204,7 +1241,7 @@ export function ScheduleApp() {
                                 취소
                               </button>
                             </>
-                          ) : (
+                          ) : !editMode ? (
                             <button
                               className="btn"
                               style={{ padding: "5px 8px", fontSize: 12 }}
@@ -1214,7 +1251,7 @@ export function ScheduleApp() {
                             >
                               수정
                             </button>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                       <div style={{ display: "grid", gap: 2 }}>
@@ -1359,7 +1396,10 @@ export function ScheduleApp() {
                                     state.selectedPerson?.dateKey === day.dateKey &&
                                     state.selectedPerson?.category === category &&
                                     state.selectedPerson?.index === index;
-                                  const highlighted = state.showMyWork && currentUser && currentUser === assignmentDisplay.name;
+                                  const highlighted =
+                                    Boolean(currentUser) &&
+                                    currentUser === assignmentDisplay.name &&
+                                    (state.showMyWork || (editMode && !isAllDaysEditMode));
                                   const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending;
                                   const weekendConflict = conflicted && isWeekendLike;
                                   return (

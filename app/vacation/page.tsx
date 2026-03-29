@@ -53,8 +53,12 @@ export default function VacationPage() {
   }, [year, month]);
 
   const myRequests = useMemo(
-    () => requests.filter((request) => request.requesterName === session?.username),
-    [requests, session?.username],
+    () => requests.filter((request) => (
+      session?.id
+        ? request.requesterId === session.id
+        : request.requesterName === session?.username
+    )),
+    [requests, session?.id, session?.username],
   );
   const hasManagedSchedule = managedDateKeys.length > 0;
   const allowedDaySummary = managedDateKeys.length > 0
