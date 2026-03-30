@@ -18,6 +18,8 @@ export interface ScheduleAssignmentEntry {
   schedules: string[];
   travelType: AssignmentTravelType;
   exclusiveVideo: boolean[];
+  coverageScore: number;
+  coverageNote: string;
 }
 
 export interface ScheduleAssignmentRow {
@@ -51,6 +53,46 @@ export interface TeamLeadTripPersonCard {
   items: TeamLeadTripItem[];
 }
 
+export interface ContributionPeriod {
+  startMonthKey: string;
+  endMonthKey: string;
+  startLabel: string;
+  endLabel: string;
+}
+
+export interface ContributionScoreItem {
+  monthKey: string;
+  dateKey: string;
+  duty: string;
+  clockIn: string;
+  clockOut: string;
+  schedules: string[];
+  clockInScore: number;
+  clockOutScore: number;
+  coverageScore: number;
+  coverageNote: string;
+  totalScore: number;
+}
+
+export interface ContributionManualItem {
+  id: string;
+  label: string;
+  score: number;
+}
+
+export interface ContributionPersonCard {
+  name: string;
+  totalScore: number;
+  autoScore: number;
+  manualScore: number;
+  clockInScore: number;
+  clockOutScore: number;
+  coverageScore: number;
+  itemCount: number;
+  items: ContributionScoreItem[];
+  manualItems: ContributionManualItem[];
+}
+
 export interface ScheduleAssignmentDayRows {
   addedRows: ScheduleAssignmentCustomRow[];
   deletedRowKeys: string[];
@@ -67,6 +109,9 @@ export interface ScheduleAssignmentDataStore {
 }
 
 const TEAM_LEAD_SCHEDULE_ASSIGNMENT_KEY = "j-team-lead-schedule-assignment-v1";
+export const TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT = "j-team-lead-schedule-assignment-updated";
+const TEAM_LEAD_CONTRIBUTION_KEY = "j-team-lead-contribution-v1";
+export const TEAM_LEAD_CONTRIBUTION_EVENT = "j-team-lead-contribution-updated";
 
 export function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
   return `${dateKey}::${category}::${index}::${name}`;
@@ -87,6 +132,8 @@ export function createDefaultScheduleAssignmentEntry(): ScheduleAssignmentEntry 
     schedules: [""],
     travelType: "",
     exclusiveVideo: [false],
+    coverageScore: 0,
+    coverageNote: "",
   };
 }
 
@@ -128,6 +175,8 @@ function normalizeScheduleAssignmentEntry(
     schedules,
     travelType: entry?.travelType ?? defaultEntry.travelType,
     exclusiveVideo,
+    coverageScore: [0, 0.5, 1, 2].includes(Number(entry?.coverageScore)) ? Number(entry?.coverageScore) : 0,
+    coverageNote: typeof entry?.coverageNote === "string" ? entry.coverageNote : "",
   };
 }
 
@@ -225,6 +274,175 @@ export function getScheduleAssignmentStore(): ScheduleAssignmentDataStore {
 export function saveScheduleAssignmentStore(store: ScheduleAssignmentDataStore) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(TEAM_LEAD_SCHEDULE_ASSIGNMENT_KEY, JSON.stringify(store));
+  window.dispatchEvent(new Event(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT));
+}
+
+function parseTimeMinutes(value: string) {
+  const trimmed = value.trim();
+  if (!/^\d{2}:\d{2}$/.test(trimmed)) return null;
+  const [hoursText, minutesText] = trimmed.split(":");
+  const hours = Number(hoursText);
+  const minutes = Number(minutesText);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+  return hours * 60 + minutes;
+}
+
+function normalizeDutyLabel(value: string) {
+  return value.replace(/\s+/g, "").trim();
+}
+
+function isWeekendDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const dayOfWeek = date.getDay();
+  return dayOfWeek === 0 || dayOfWeek === 6;
+}
+
+function isWeekendDutyDay(day: DaySchedule | null, dateKey: string) {
+  if (!day) return isWeekendDateKey(dateKey);
+  return day.isWeekend;
+}
+
+function getDutyBaseTimes(duty: string, dateKey: string, day: DaySchedule | null) {
+  const normalized = normalizeDutyLabel(duty);
+  switch (normalized) {
+    case "조근":
+      return isWeekendDutyDay(day, dateKey)
+        ? { clockIn: 9 * 60, clockOut: 18 * 60 }
+        : { clockIn: 7 * 60, clockOut: 16 * 60 };
+    case "일반":
+      return { clockIn: 9 * 60, clockOut: 18 * 60 };
+    case "연장":
+      return { clockIn: 10 * 60, clockOut: 19 * 60 };
+    case "석근":
+      return { clockIn: 13 * 60, clockOut: 21 * 60 };
+    case "야근":
+      return { clockIn: 16 * 60 + 30, clockOut: 7 * 60 + 30 };
+    case "뉴스대기":
+      return { clockIn: 11 * 60, clockOut: 20 * 60 };
+    default:
+      return null;
+  }
+}
+
+function toScoreByHalfHour(minutes: number) {
+  if (minutes < 30) return 0;
+  return Math.floor(minutes / 30) * 0.1;
+}
+
+function roundScore(score: number) {
+  return Math.round(score * 10) / 10;
+}
+
+function normalizeContributionManualItem(item: Partial<ContributionManualItem> | undefined): ContributionManualItem | null {
+  if (!item) return null;
+  const label = typeof item.label === "string" ? item.label.trim() : "";
+  const score = roundScore(Number(item.score) || 0);
+  if (!label) return null;
+  return {
+    id: typeof item.id === "string" && item.id ? item.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    label,
+    score,
+  };
+}
+
+function normalizeContributionManualStore(store: unknown) {
+  if (!store || typeof store !== "object") return {} as Record<string, ContributionManualItem[]>;
+  return Object.fromEntries(
+    Object.entries(store as Record<string, unknown>).map(([name, items]) => [
+      name,
+      Array.isArray(items)
+        ? items
+            .map((item) => normalizeContributionManualItem(item as Partial<ContributionManualItem> | undefined))
+            .filter((item): item is ContributionManualItem => Boolean(item))
+        : [],
+    ]),
+  ) as Record<string, ContributionManualItem[]>;
+}
+
+export function getContributionManualStore() {
+  if (typeof window === "undefined") return {} as Record<string, ContributionManualItem[]>;
+  const raw = window.localStorage.getItem(TEAM_LEAD_CONTRIBUTION_KEY);
+  if (!raw) return {} as Record<string, ContributionManualItem[]>;
+  try {
+    return normalizeContributionManualStore(JSON.parse(raw));
+  } catch {
+    return {} as Record<string, ContributionManualItem[]>;
+  }
+}
+
+export function saveContributionManualStore(store: Record<string, ContributionManualItem[]>) {
+  if (typeof window === "undefined") return;
+  const normalized = normalizeContributionManualStore(store);
+  window.localStorage.setItem(TEAM_LEAD_CONTRIBUTION_KEY, JSON.stringify(normalized));
+  window.dispatchEvent(new Event(TEAM_LEAD_CONTRIBUTION_EVENT));
+}
+
+export function updateContributionManualItems(name: string, items: ContributionManualItem[]) {
+  const trimmedName = name.trim();
+  if (!trimmedName) return;
+  const store = getContributionManualStore();
+  const next = {
+    ...store,
+    [trimmedName]: items
+      .map((item) => normalizeContributionManualItem(item))
+      .filter((item): item is ContributionManualItem => Boolean(item)),
+  };
+  saveContributionManualStore(next);
+}
+
+export function getContributionPeriod(baseDate = new Date()): ContributionPeriod {
+  const year = baseDate.getFullYear();
+  const startMonthKey = `${year - 1}-12`;
+  const endMonthKey = `${year}-11`;
+  return {
+    startMonthKey,
+    endMonthKey,
+    startLabel: `${year - 1}년 12월`,
+    endLabel: `${year}년 11월`,
+  };
+}
+
+function isMonthKeyInContributionPeriod(monthKey: string, period: ContributionPeriod) {
+  return monthKey >= period.startMonthKey && monthKey <= period.endMonthKey;
+}
+
+function buildContributionItem(
+  monthKey: string,
+  dateKey: string,
+  duty: string,
+  entry: ScheduleAssignmentEntry,
+  day: DaySchedule | null,
+): ContributionScoreItem | null {
+  const baseTimes = getDutyBaseTimes(duty, dateKey, day);
+  const coverageScore = roundScore(entry.coverageScore ?? 0);
+  if (!baseTimes && coverageScore <= 0) return null;
+
+  const clockInMinutes = baseTimes ? parseTimeMinutes(entry.clockIn) : null;
+  const clockOutMinutes = baseTimes ? parseTimeMinutes(entry.clockOut) : null;
+  const clockInScore =
+    !baseTimes || clockInMinutes === null ? 0 : toScoreByHalfHour(Math.max(0, baseTimes.clockIn - clockInMinutes));
+  const clockOutScore =
+    !baseTimes || clockOutMinutes === null ? 0 : toScoreByHalfHour(Math.max(0, clockOutMinutes - baseTimes.clockOut));
+  const totalScore = roundScore(clockInScore + clockOutScore + coverageScore);
+
+  if (totalScore <= 0) return null;
+
+  return {
+    monthKey,
+    dateKey,
+    duty,
+    clockIn: entry.clockIn,
+    clockOut: entry.clockOut,
+    schedules: entry.schedules.map((item) => item.trim()).filter(Boolean),
+    clockInScore: roundScore(clockInScore),
+    clockOutScore: roundScore(clockOutScore),
+    coverageScore,
+    coverageNote: entry.coverageNote.trim(),
+    totalScore,
+  };
 }
 
 function getGeneratedHistorySchedules() {
@@ -316,4 +534,64 @@ export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
       items: [...items].sort((left, right) => left.dateKey.localeCompare(right.dateKey)),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, "ko"));
+}
+
+export function getContributionCards(baseDate = new Date()) {
+  const period = getContributionPeriod(baseDate);
+  const schedules = getTeamLeadSchedules().filter((schedule) => isMonthKeyInContributionPeriod(schedule.monthKey, period));
+  const store = getScheduleAssignmentStore();
+  const manualStore = getContributionManualStore();
+  const personMap = new Map<string, ContributionScoreItem[]>();
+
+  schedules.forEach((monthSchedule) => {
+    const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
+    const monthRows = store.rows[monthSchedule.monthKey] ?? {};
+
+    monthSchedule.days
+      .filter((day) => day.month === monthSchedule.month)
+      .forEach((day) => {
+        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows());
+        rows.forEach((row) => {
+          const personName = row.name.trim();
+          if (!personName) return;
+          const entry = monthEntries[row.key];
+          if (!entry) return;
+          const item = buildContributionItem(monthSchedule.monthKey, day.dateKey, row.duty, entry, day);
+          if (!item) return;
+          const current = personMap.get(personName) ?? [];
+          current.push(item);
+          personMap.set(personName, current);
+        });
+      });
+  });
+
+  const allNames = new Set([...personMap.keys(), ...Object.keys(manualStore)]);
+
+  return Array.from(allNames)
+    .map((name) => {
+      const items = personMap.get(name) ?? [];
+      const sortedItems = [...items].sort((left, right) =>
+        left.dateKey.localeCompare(right.dateKey) || left.duty.localeCompare(right.duty, "ko"),
+      );
+      const manualItems = [...(manualStore[name] ?? [])];
+      const clockInScore = roundScore(sortedItems.reduce((sum, item) => sum + item.clockInScore, 0));
+      const clockOutScore = roundScore(sortedItems.reduce((sum, item) => sum + item.clockOutScore, 0));
+      const coverageScore = roundScore(sortedItems.reduce((sum, item) => sum + item.coverageScore, 0));
+      const autoScore = roundScore(sortedItems.reduce((sum, item) => sum + item.totalScore, 0));
+      const manualScore = roundScore(manualItems.reduce((sum, item) => sum + item.score, 0));
+      const totalScore = roundScore(autoScore + manualScore);
+      return {
+        name,
+        totalScore,
+        autoScore,
+        manualScore,
+        clockInScore,
+        clockOutScore,
+        coverageScore,
+        itemCount: sortedItems.length,
+        items: sortedItems,
+        manualItems,
+      } satisfies ContributionPersonCard;
+    })
+    .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"));
 }

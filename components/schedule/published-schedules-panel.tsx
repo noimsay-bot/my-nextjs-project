@@ -791,7 +791,7 @@ export function PublishedSchedulesPanel() {
               <div style={{ overflowX: "auto", overflowY: "visible" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                 {weekdayLabels.map((label) => (
-                  <div key={label} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -809,21 +809,21 @@ export function PublishedSchedulesPanel() {
                       key={`${day.ownerMonthKey}-${day.dateKey}`}
                       className="panel"
                       style={{
-                        padding: 8,
-                        minHeight: 232,
+                        padding: 6,
+                        minHeight: 216,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
                       }}
                     >
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "auto 1fr minmax(0, 1fr)",
-                          alignItems: "center",
-                          gap: 8,
-                          marginBottom: 8,
-                        }}
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "auto minmax(0, 1fr)",
+                            alignItems: "center",
+                            gap: 6,
+                            marginBottom: 6,
+                          }}
                       >
                         <div
                           style={{
@@ -835,38 +835,52 @@ export function PublishedSchedulesPanel() {
                         </div>
                         <div
                           style={{
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            minHeight: 24,
+                            display: "grid",
+                            gap: centeredDayLabel ? 4 : 0,
+                            justifyItems: "center",
+                            alignContent: "center",
+                            alignSelf: "stretch",
+                            minHeight: 42,
                             textAlign: "center",
-                            color: "#ffd7d7",
-                            fontWeight: 900,
-                            fontSize: 14,
                           }}
                         >
-                          {centeredDayLabel}
-                        </div>
-                        <div
-                          style={{
-                            minHeight: 24,
-                            textAlign: "center",
-                            color: "#f8fbff",
-                            fontSize: 21,
-                            fontWeight: 900,
-                            lineHeight: 1.1,
-                            whiteSpace: "normal",
-                            overflow: "visible",
-                            textOverflow: "clip",
-                            wordBreak: "keep-all",
-                          }}
+                          {centeredDayLabel ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                minHeight: 24,
+                                textAlign: "center",
+                                color: "#ffd7d7",
+                                fontWeight: 900,
+                                fontSize: 14,
+                              }}
+                            >
+                              {centeredDayLabel}
+                            </div>
+                          ) : null}
+                          <div
+                            style={{
+                              minHeight: 24,
+                              textAlign: "center",
+                              color: "#f8fbff",
+                              fontSize: 21,
+                              fontWeight: 900,
+                              lineHeight: 1.1,
+                              whiteSpace: "normal",
+                              overflow: "visible",
+                              textOverflow: "clip",
+                              wordBreak: "keep-all",
+                            }}
                           >
                             {day.headerName ?? ""}
                           </div>
+                        </div>
                       </div>
-                      <div style={{ display: "grid", gap: 2 }}>
+                      <div style={{ display: "grid", gap: 1 }}>
                         {visibleAssignments.map(([category, names]) => (
-                          <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 7, background: "rgba(9,17,30,.34)" }}>
+                          <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
                             <div
                               style={{
                                 display: "grid",
@@ -884,14 +898,14 @@ export function PublishedSchedulesPanel() {
                                   marginBottom: 0,
                                   fontSize: 14,
                                   lineHeight: 1.1,
-                                  minHeight: 42,
+                                  minHeight: 38,
                                   textAlign: "center",
                                   whiteSpace: "pre-line",
                                 }}
                               >
                                 {getCategoryDisplayLabel(category)}
                               </strong>
-                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, minHeight: 42 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, minHeight: 38 }}>
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
@@ -926,9 +940,9 @@ export function PublishedSchedulesPanel() {
                                         justifyContent: personObject.pending ? "space-between" : "center",
                                         width: mineHighlighted ? "fit-content" : "100%",
                                         maxWidth: "100%",
-                                        gap: 6,
-                                        minHeight: mineHighlighted ? 38 : 34,
-                                        padding: mineHighlighted ? "6px 12px" : "6px 10px",
+                                        gap: 5,
+                                        minHeight: mineHighlighted ? 36 : 32,
+                                        padding: mineHighlighted ? "5px 11px" : "5px 9px",
                                         borderRadius: mineHighlighted ? 16 : 14,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"

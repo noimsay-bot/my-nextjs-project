@@ -1,6 +1,7 @@
 import { STORAGE_KEY } from "@/lib/schedule/constants";
 import { sanitizeScheduleState } from "@/lib/schedule/engine";
 import { getPublishedSchedules, savePublishedSchedules } from "@/lib/schedule/published";
+import { saveScheduleState } from "@/lib/schedule/storage";
 import {
   GeneratedSchedule,
   ScheduleChangeRequest,
@@ -191,7 +192,7 @@ function applyRequestToScheduleState(request: ScheduleChangeRequest) {
     generated,
     generatedHistory,
   });
-  writeJson(STORAGE_KEY, nextState);
+  saveScheduleState(nextState);
   return { applied: true, snapshots };
 }
 
@@ -232,7 +233,7 @@ function restoreScheduleStateSnapshots(appliedState: ScheduleChangeRequestApplie
     generated,
     generatedHistory,
   });
-  writeJson(STORAGE_KEY, nextState);
+  saveScheduleState(nextState);
   return true;
 }
 

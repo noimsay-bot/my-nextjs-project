@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { parseVacationEntry } from "@/lib/schedule/engine";
+import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
+import { SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   AssignmentTimeColor,
   AssignmentTravelType,
@@ -37,6 +40,71 @@ const removeScheduleAt = (schedules: string[], index: number) => getSafeSchedule
 const getSafeExclusiveVideo = (values: boolean[], count: number) => Array.from({ length: Math.max(count, 1) }, (_, i) => values[i] ?? false);
 const removeExclusiveVideoAt = (values: boolean[], index: number, nextCount: number) => getSafeExclusiveVideo(values.filter((_, i) => i !== index), nextCount);
 const createCustomRowId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const coverageScoreSteps = [0, 0.5, 1, 2] as const;
+const vacationBadgeStyles = {
+  연차: {
+    borderColor: "rgba(96,165,250,.45)",
+    background: "rgba(59,130,246,.16)",
+    color: "#dbeafe",
+  },
+  대휴: {
+    borderColor: "rgba(52,211,153,.45)",
+    background: "rgba(16,185,129,.16)",
+    color: "#d1fae5",
+  },
+} as const;
+const jcheckBadgeStyle = {
+  borderColor: "rgba(255,255,255,.92)",
+  background: "#ffffff",
+  color: "#0f172a",
+} as const;
+const nightOffBadgeStyle = {
+  borderColor: "rgba(203,213,225,.45)",
+  background: "rgba(226,232,240,.16)",
+  color: "#e2e8f0",
+} as const;
+
+function getCoverageScoreStyle(score: number) {
+  if (score === 0.5) {
+    return {
+      borderColor: "rgba(132,204,22,.72)",
+      background: "rgba(217,249,157,.95)",
+      color: "#365314",
+    };
+  }
+  if (score === 1) {
+    return {
+      borderColor: "rgba(96,165,250,.72)",
+      background: "rgba(219,234,254,.95)",
+      color: "#1d4ed8",
+    };
+  }
+  if (score === 2) {
+    return {
+      borderColor: "rgba(248,113,113,.72)",
+      background: "rgba(254,226,226,.95)",
+      color: "#991b1b",
+    };
+  }
+  return {
+    borderColor: "rgba(203,213,225,.95)",
+    background: "#ffffff",
+    color: "#94a3b8",
+  };
+}
+
+function cycleCoverageScore(score: number) {
+  const currentIndex = coverageScoreSteps.findIndex((item) => item === score);
+  const nextIndex = currentIndex < 0 || currentIndex === coverageScoreSteps.length - 1 ? 0 : currentIndex + 1;
+  return coverageScoreSteps[nextIndex];
+}
+
+function getPreviousDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() - 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 function formatManualTime(value: string) {
   const trimmed = value.trim();
@@ -72,16 +140,41 @@ export function ScheduleAssignmentPage() {
   const [selectedDeleteRowKey, setSelectedDeleteRowKey] = useState<string | null>(null);
 
   useEffect(() => {
-    const nextSchedules = getTeamLeadSchedules();
-    setSchedules(nextSchedules);
-    setStore(getScheduleAssignmentStore());
-    setSelectedMonthKey((current) => current || nextSchedules[0]?.monthKey || "");
+    const refreshSchedules = () => {
+      const nextSchedules = getTeamLeadSchedules();
+      setSchedules(nextSchedules);
+      setStore(getScheduleAssignmentStore());
+      setSelectedMonthKey((current) =>
+        nextSchedules.some((schedule) => schedule.monthKey === current)
+          ? current
+          : nextSchedules[0]?.monthKey || "",
+      );
+      setSelectedDeleteRowKey(null);
+    };
+    refreshSchedules();
+    const onRefresh = () => {
+      refreshSchedules();
+    };
+    window.addEventListener("storage", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
+    window.addEventListener(SCHEDULE_STATE_EVENT, onRefresh);
+    return () => {
+      window.removeEventListener("storage", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, onRefresh);
+    };
   }, []);
 
   const selectedMonth = useMemo(() => schedules.find((schedule) => schedule.monthKey === selectedMonthKey) ?? null, [schedules, selectedMonthKey]);
   const monthEntries = store.entries[selectedMonthKey] ?? {};
   const monthRows = store.rows[selectedMonthKey] ?? {};
   const monthDays = useMemo(() => selectedMonth?.days.filter((day) => day.month === selectedMonth.month) ?? [], [selectedMonth]);
+  const selectedMonthDayIndex = useMemo(
+    () => new Map((selectedMonth?.days ?? []).map((day) => [day.dateKey, day])),
+    [selectedMonth],
+  );
 
   const dutyOptions = useMemo(() => {
     const set = new Set<string>();
@@ -207,16 +300,102 @@ export function ScheduleAssignmentPage() {
         const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
         const rows = getScheduleAssignmentRows(day, dayRows);
         const selectedRow = rows.find((row) => row.key === selectedDeleteRowKey) ?? null;
+        const vacationPeople = day.vacations.map((entry) => parseVacationEntry(entry)).filter((item) => item.name);
+        const jcheckPeople = day.assignments["제크"] ?? [];
+        const previousDay = selectedMonthDayIndex.get(getPreviousDateKey(day.dateKey));
+        const nightOffPeople =
+          day.isWeekend || day.isWeekdayHoliday || day.isCustomHoliday
+            ? []
+            : (previousDay?.assignments["야근"] ?? []);
 
         return (
           <article key={day.dateKey} className="panel">
             <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                <div style={{ display: "grid", gap: 4 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(220px, auto) minmax(0, 1fr) auto",
+                  gap: 12,
+                  alignItems: "center",
+                }}
+              >
+                <div style={{ display: "grid", gap: 4, justifySelf: "start" }}>
                   <div className="chip">{day.dateKey}</div>
                   <strong style={{ fontSize: 22 }}>{day.month}월 {day.day}일 일정배정</strong>
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+                  {vacationPeople.length > 0 || jcheckPeople.length > 0 || nightOffPeople.length > 0 ? (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
+                        {vacationPeople.map((vacation, index) => (
+                          <span
+                            key={`${day.dateKey}-vacation-${vacation.type}-${vacation.name}-${index}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 5,
+                              padding: "7px 16px",
+                              borderRadius: 999,
+                              border: "1px solid",
+                              fontSize: 16,
+                              fontWeight: 800,
+                              lineHeight: 1.2,
+                              textAlign: "center",
+                              ...vacationBadgeStyles[vacation.type],
+                            }}
+                          >
+                            <span>{vacation.type}</span>
+                            <span>{vacation.name}</span>
+                          </span>
+                        ))}
+                        {jcheckPeople.map((name, index) => (
+                          <span
+                            key={`${day.dateKey}-jcheck-${name}-${index}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 5,
+                              padding: "7px 16px",
+                              borderRadius: 999,
+                              border: "1px solid",
+                              fontSize: 16,
+                              fontWeight: 800,
+                              lineHeight: 1.2,
+                              textAlign: "center",
+                              ...jcheckBadgeStyle,
+                            }}
+                          >
+                            <span>제크</span>
+                            <span>{name}</span>
+                          </span>
+                        ))}
+                        {nightOffPeople.map((name, index) => (
+                          <span
+                            key={`${day.dateKey}-night-off-${name}-${index}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 5,
+                              padding: "7px 16px",
+                              borderRadius: 999,
+                              border: "1px solid",
+                              fontSize: 16,
+                              fontWeight: 800,
+                              lineHeight: 1.2,
+                              textAlign: "center",
+                              ...nightOffBadgeStyle,
+                            }}
+                          >
+                            <span>야퇴</span>
+                            <span>{name}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifySelf: "end" }}>
                   <span className="muted">{rows.length}명</span>
                   <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => addRow(day.dateKey)}>
                     사람 추가
@@ -240,6 +419,7 @@ export function ScheduleAssignmentPage() {
                   <tbody>
                     {rows.length > 0 ? rows.map((row) => {
                       const entry = monthEntries[row.key] ?? createDefaultScheduleAssignmentEntry();
+                      const coverageScore = entry.coverageScore ?? 0;
                       const safeSchedules = getSafeSchedules(entry.schedules);
                       const safeExclusiveVideo = getSafeExclusiveVideo(entry.exclusiveVideo, safeSchedules.length);
                       const scheduleCount = safeSchedules.filter((item) => item.trim()).length;
@@ -252,6 +432,39 @@ export function ScheduleAssignmentPage() {
                       return (
                         <tr key={row.key}>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "38px minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+                              <button
+                                type="button"
+                                className="btn"
+                                title="가산점"
+                                onClick={() =>
+                                  updateMonthEntry(row.key, (current) => {
+                                    const nextCoverageScore = cycleCoverageScore(current.coverageScore ?? 0);
+                                    return {
+                                      ...current,
+                                      coverageScore: nextCoverageScore,
+                                      coverageNote: nextCoverageScore > 0 ? current.coverageNote : "",
+                                    };
+                                  })
+                                }
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  width: 38,
+                                  minWidth: 38,
+                                  height: 38,
+                                  padding: 0,
+                                  borderRadius: 10,
+                                  border: "1px solid",
+                                  fontSize: 13,
+                                  fontWeight: 900,
+                                  lineHeight: 1,
+                                  ...getCoverageScoreStyle(coverageScore),
+                                }}
+                              >
+                                {coverageScore === 0 ? "" : coverageScore}
+                              </button>
                             <button
                               type="button"
                               className="field-input"
@@ -267,6 +480,21 @@ export function ScheduleAssignmentPage() {
                             >
                               {row.name || "이름 없음"}
                             </button>
+                            {coverageScore > 0 ? (
+                              <input
+                                className="field-input"
+                                value={entry.coverageNote}
+                                placeholder="가점 사유 입력"
+                                style={{ gridColumn: "1 / -1" }}
+                                onChange={(event) =>
+                                  updateMonthEntry(row.key, (current) => ({
+                                    ...current,
+                                    coverageNote: event.target.value,
+                                  }))
+                                }
+                              />
+                            ) : null}
+                            </div>
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <select className="field-select" value={row.duty} onChange={(event) => updateRowDuty(day.dateKey, row, event.target.value)}>

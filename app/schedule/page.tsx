@@ -1,5 +1,5 @@
-import { ScheduleApp } from "@/components/schedule/schedule-app";
+import { redirect } from "next/navigation";
 
 export default function SchedulePage() {
-  return <ScheduleApp />;
+  redirect("/schedule/schedule-assignment");
 }

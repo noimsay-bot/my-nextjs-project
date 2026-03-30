@@ -1,14 +1,13 @@
 "use client";
 
-import { defaultScheduleState, STORAGE_KEY } from "@/lib/schedule/constants";
 import {
   formatVacationEntry,
   getMonthKey,
   getUniquePeople,
   parseVacationMap,
-  sanitizeScheduleState,
 } from "@/lib/schedule/engine";
-import { GeneratedSchedule, ScheduleState, VacationType } from "@/lib/schedule/types";
+import { readStoredScheduleState, saveScheduleState } from "@/lib/schedule/storage";
+import { GeneratedSchedule, VacationType } from "@/lib/schedule/types";
 
 export const VACATION_STORAGE_KEY = "j-special-force-vacations-v1";
 export const VACATION_EVENT = "j-special-force-vacations-changed";
@@ -169,13 +168,7 @@ function writeStore(store: VacationStore) {
 }
 
 function readScheduleState() {
-  if (typeof window === "undefined") return sanitizeScheduleState(defaultScheduleState);
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  try {
-    return sanitizeScheduleState(raw ? (JSON.parse(raw) as Partial<ScheduleState>) : defaultScheduleState);
-  } catch {
-    return sanitizeScheduleState(defaultScheduleState);
-  }
+  return readStoredScheduleState();
 }
 
 function getGeneratedScheduleForMonth(year: number, month: number, scheduleState = readScheduleState()) {
@@ -822,7 +815,7 @@ export function applyVacationMonthToSchedule(year: number, month: number) {
       : applyVacationEntriesToGeneratedSchedule(scheduleState.generated, approvedMap, scheduleMonthDateSet);
   }
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(scheduleState));
+  saveScheduleState(scheduleState);
 
   monthState.appliedAt = nowLabel();
   monthState.updatedAt = nowLabel();

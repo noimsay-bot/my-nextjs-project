@@ -4,11 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/team-lead/schedule-assignment", label: "일정배정" },
   { href: "/team-lead/contribution", label: "기여도" },
   { href: "/team-lead/domestic-trip", label: "국내출장" },
   { href: "/team-lead/international-trip", label: "해외출장" },
-  { href: "/team-lead/final-cut", label: "정제본" },
+  { href: "/team-lead/final-cut", label: "최종보도" },
   { href: "/team-lead/special-report", label: "기획취재" },
 ];
 

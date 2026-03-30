@@ -38,6 +38,7 @@ import {
   updateManualAssignment,
 } from "@/lib/schedule/engine";
 import { getPublishedSchedules, publishSchedule, PublishedScheduleItem } from "@/lib/schedule/published";
+import { saveScheduleState } from "@/lib/schedule/storage";
 import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -302,7 +303,7 @@ export function ScheduleApp() {
 
   useEffect(() => {
     if (!loaded || typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    saveScheduleState(state);
   }, [loaded, state]);
 
   useEffect(() => {
@@ -740,6 +741,9 @@ export function ScheduleApp() {
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <Link href="/schedule/schedule-assignment" className="btn">
+              일정배정
+            </Link>
             <button className="btn white" disabled={isEditingDate} onClick={onGenerate}>작성</button>
             <button className="btn" disabled={isEditingDate} onClick={onRebalance}>자동 재배치</button>
             <button className="btn" disabled={isEditingDate} onClick={onDownload}>상태 내보내기</button>
@@ -750,6 +754,9 @@ export function ScheduleApp() {
             }} disabled={isEditingDate}>
               근무표 게시
             </button>
+            <Link href="/schedule/vacations" className="btn">
+              휴가 관리
+            </Link>
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
           {isEditingDate ? <div className="status note">{isAllDaysEditMode ? "근무표 전체 수정 중입니다. 수정 완료 또는 취소 후 다른 작업을 진행해 주세요." : "날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요."}</div> : null}
@@ -835,12 +842,7 @@ export function ScheduleApp() {
 
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <div className="chip">근무 수정 요청</div>
-              <Link href="/schedule/vacations" className="btn">
-                휴가 관리
-              </Link>
-            </div>
+            <div className="chip">근무 수정 요청</div>
             <div style={{ display: "grid", gap: 16 }}>
                 {pendingRequests.length > 0 ? (
                   <div style={{ display: "grid", gap: 10 }}>
@@ -1133,7 +1135,7 @@ export function ScheduleApp() {
               <div style={{ overflowX: "auto", overflowY: "visible" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
                 {weekdayLabels.map((label) => (
-                  <div key={label} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -1157,8 +1159,8 @@ export function ScheduleApp() {
                       key={day.dateKey}
                       className="panel"
                       style={{
-                        padding: 8,
-                        minHeight: 232,
+                        padding: 6,
+                        minHeight: 216,
                         opacity: day.isOverflowMonth ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
@@ -1167,27 +1169,59 @@ export function ScheduleApp() {
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: editMode ? "auto 1fr auto" : "auto 1fr minmax(0, 1fr) auto",
+                          gridTemplateColumns: editMode ? "auto 1fr auto" : "auto minmax(0, 1fr) auto",
                           alignItems: "center",
-                          gap: 8,
+                          gap: 6,
                           rowGap: editMode ? 8 : 0,
-                          marginBottom: 8,
+                          marginBottom: 6,
                         }}
                       >
                         <div style={{ fontSize: 21, fontWeight: 900 }}>{day.month}/{day.day}</div>
                         <div
                           style={{
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            minHeight: 24,
+                            display: "grid",
+                            gap: centeredDayLabel ? 4 : 0,
+                            justifyItems: "center",
+                            alignContent: "center",
+                            alignSelf: "stretch",
+                            minHeight: 42,
                             textAlign: "center",
-                            color: "#ffd7d7",
-                            fontWeight: 900,
-                            fontSize: 14,
                           }}
                         >
-                          {centeredDayLabel}
+                          {centeredDayLabel ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "center",
+                                alignItems: "center",
+                                minHeight: 24,
+                                textAlign: "center",
+                                color: "#ffd7d7",
+                                fontWeight: 900,
+                                fontSize: 14,
+                              }}
+                            >
+                              {centeredDayLabel}
+                            </div>
+                          ) : null}
+                          {!editMode ? (
+                            <div
+                              style={{
+                                minHeight: 24,
+                                textAlign: "center",
+                                color: "#f8fbff",
+                                fontSize: 21,
+                                fontWeight: 900,
+                                lineHeight: 1.1,
+                                whiteSpace: "normal",
+                                overflow: "visible",
+                                textOverflow: "clip",
+                                wordBreak: "keep-all",
+                              }}
+                            >
+                              {day.headerName ?? ""}
+                            </div>
+                          ) : null}
                         </div>
                         {editMode ? (
                           <input
@@ -1201,7 +1235,7 @@ export function ScheduleApp() {
                               gridColumn: "1 / -1",
                               minWidth: 0,
                               minHeight: 40,
-                              padding: "8px 12px",
+                              padding: "7px 12px",
                               border: "1px solid rgba(255,255,255,.18)",
                               borderRadius: 12,
                               background: "rgba(7,17,31,.46)",
@@ -1209,28 +1243,11 @@ export function ScheduleApp() {
                               fontSize: 20,
                               fontWeight: 900,
                               lineHeight: 1.1,
-                              textAlign: "left",
+                              textAlign: "center",
                               boxShadow: "none",
                             }}
                           />
-                        ) : (
-                          <div
-                            style={{
-                              minHeight: 24,
-                              textAlign: "center",
-                              color: "#f8fbff",
-                              fontSize: 21,
-                              fontWeight: 900,
-                              lineHeight: 1.1,
-                              whiteSpace: "normal",
-                              overflow: "visible",
-                              textOverflow: "clip",
-                              wordBreak: "keep-all",
-                            }}
-                          >
-                            {day.headerName ?? ""}
-                          </div>
-                        )}
+                        ) : null}
                         <div style={{ display: "flex", gap: 8, justifySelf: "end" }}>
                           {editMode && !isAllDaysEditMode ? (
                             <>
@@ -1254,7 +1271,7 @@ export function ScheduleApp() {
                           ) : null}
                         </div>
                       </div>
-                      <div style={{ display: "grid", gap: 2 }}>
+                      <div style={{ display: "grid", gap: 1 }}>
                         {visibleAssignments.map(([category, names]) => (
                           <article
                             key={`${day.dateKey}-${category}`}
@@ -1286,7 +1303,7 @@ export function ScheduleApp() {
                             style={{
                               border: "1px solid rgba(255,255,255,.16)",
                               borderRadius: 10,
-                              padding: 7,
+                              padding: 6,
                               background: "rgba(9,17,30,.34)",
                               cursor: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? "grab" : "default",
                             }}
@@ -1308,7 +1325,7 @@ export function ScheduleApp() {
                                   alignSelf: "stretch",
                                   fontSize: 14,
                                   lineHeight: 1.1,
-                                  minHeight: 42,
+                                  minHeight: 38,
                                   whiteSpace: "pre-line",
                                   textAlign: "center",
                                 }}
@@ -1370,8 +1387,8 @@ export function ScheduleApp() {
                                 style={{
                                   display: "grid",
                                   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                                  gap: 6,
-                                  minHeight: 42,
+                                  gap: 5,
+                                  minHeight: 38,
                                   gridColumn: editMode ? "1 / -1" : 2,
                                   gridRow: editMode ? 2 : 1,
                                 }}
@@ -1434,11 +1451,11 @@ export function ScheduleApp() {
                                           display: "flex",
                                           alignItems: "center",
                                           justifyContent: "center",
-                                          gap: 6,
+                                          gap: 5,
                                           width: "100%",
                                           minWidth: 0,
-                                          minHeight: 34,
-                                          padding: editMode ? "5px 8px" : "6px 10px",
+                                          minHeight: 32,
+                                          padding: editMode ? "4px 8px" : "5px 9px",
                                           borderRadius: 14,
                                           background: personObject.pending
                                             ? "rgba(245,158,11,.18)"
@@ -1840,26 +1857,40 @@ export function ScheduleApp() {
                           border: dayCardStyle.border,
                         }}
                       >
-                        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>
                           <div style={{ fontSize: 21, fontWeight: 900 }}>{day.month}/{day.day}</div>
-                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 24, textAlign: "center", color: "#ffd7d7", fontWeight: 900, fontSize: 14 }}>
-                            {centeredDayLabel}
-                          </div>
                           <div
                             style={{
-                              minHeight: 24,
                               textAlign: "center",
-                              color: "#f8fbff",
-                              fontSize: 21,
-                              fontWeight: 900,
-                              lineHeight: 1.1,
-                              whiteSpace: "normal",
-                              overflow: "visible",
-                              textOverflow: "clip",
-                              wordBreak: "keep-all",
+                              display: "grid",
+                              gap: centeredDayLabel ? 4 : 0,
+                              justifyItems: "center",
+                              alignContent: "center",
+                              alignSelf: "stretch",
+                              minHeight: 48,
                             }}
                           >
-                            {day.headerName ?? ""}
+                            {centeredDayLabel ? (
+                              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 24, textAlign: "center", color: "#ffd7d7", fontWeight: 900, fontSize: 14 }}>
+                                {centeredDayLabel}
+                              </div>
+                            ) : null}
+                            <div
+                              style={{
+                                minHeight: 24,
+                                textAlign: "center",
+                                color: "#f8fbff",
+                                fontSize: 21,
+                                fontWeight: 900,
+                                lineHeight: 1.1,
+                                whiteSpace: "normal",
+                                overflow: "visible",
+                                textOverflow: "clip",
+                                wordBreak: "keep-all",
+                              }}
+                            >
+                              {day.headerName ?? ""}
+                            </div>
                           </div>
                         </div>
                         <div style={{ display: "grid", gap: 2 }}>

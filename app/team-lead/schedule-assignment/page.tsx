@@ -1,5 +1,5 @@
-import { ScheduleAssignmentPage } from "@/components/team-lead/schedule-assignment-page";
+import { redirect } from "next/navigation";
 
 export default function TeamLeadScheduleAssignmentPage() {
-  return <ScheduleAssignmentPage />;
+  redirect("/schedule/schedule-assignment");
 }

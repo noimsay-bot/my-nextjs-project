@@ -8,6 +8,7 @@ export interface PublishedScheduleItem {
 }
 
 export const PUBLISHED_SCHEDULES_KEY = "j-special-force-published-schedules-v1";
+export const PUBLISHED_SCHEDULES_EVENT = "j-special-force-published-schedules-updated";
 
 export function getPublishedSchedules(): PublishedScheduleItem[] {
   if (typeof window === "undefined") return [];
@@ -23,6 +24,7 @@ export function getPublishedSchedules(): PublishedScheduleItem[] {
 export function savePublishedSchedules(items: PublishedScheduleItem[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(PUBLISHED_SCHEDULES_KEY, JSON.stringify(items));
+  window.dispatchEvent(new Event(PUBLISHED_SCHEDULES_EVENT));
 }
 
 export function publishSchedule(schedule: GeneratedSchedule) {
