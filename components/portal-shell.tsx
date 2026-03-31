@@ -8,8 +8,8 @@ const links = [
   { href: "/", label: "홈" },
   { href: "/vacation", label: "휴가 신청" },
   { href: "/schedule", label: "DESK" },
-  { href: "/submissions", label: "영상평가 제출" },
-  { href: "/review", label: "영상평가" },
+  { href: "/submissions", label: "영상평가심사 제출" },
+  { href: "/review", label: "영상평가심사" },
   { href: "/team-lead", label: "팀장" },
   { href: "/admin", label: "관리자" },
 ];

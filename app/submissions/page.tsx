@@ -37,7 +37,7 @@ export default function SubmissionsPage() {
   return (
     <section className="panel">
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-        <div className="chip">영상평가 제출</div>
+        <div className="chip">영상평가심사 제출</div>
         <label>
           <div style={{ marginBottom: 8 }}>제출자</div>
           <input className="field-input" value={submitter} onChange={(e) => setSubmitter(e.target.value)} />

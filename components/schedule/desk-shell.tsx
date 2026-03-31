@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const items = [
   { href: "/schedule/schedule-assignment", label: "일정배정" },
   { href: "/schedule/write", label: "근무표 작성" },
+  { href: "/schedule/final-cut", label: "정제본" },
 ];
 
 export function DeskShell({ children }: { children: React.ReactNode }) {

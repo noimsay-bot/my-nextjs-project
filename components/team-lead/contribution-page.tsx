@@ -14,19 +14,25 @@ import {
   updateContributionManualItems,
 } from "@/lib/team-lead/storage";
 
+interface ManualDraftItem {
+  id: string;
+  label: string;
+  scoreText: string;
+}
+
 interface ManualEditorState {
-  [name: string]: ContributionManualItem[];
+  [name: string]: ManualDraftItem[];
 }
 
 function formatScore(score: number) {
   return score.toFixed(1);
 }
 
-function createManualItem(): ContributionManualItem {
+function createManualItem(): ManualDraftItem {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     label: "",
-    score: 0,
+    scoreText: "",
   };
 }
 
@@ -36,6 +42,18 @@ function normalizeScoreInput(value: string) {
   const parsed = Number(trimmed);
   if (!Number.isFinite(parsed)) return 0;
   return Math.round(parsed * 10) / 10;
+}
+
+function toManualDraftItem(item: ContributionManualItem): ManualDraftItem {
+  return {
+    id: item.id,
+    label: item.label,
+    scoreText: item.score.toFixed(1),
+  };
+}
+
+function isValidScoreText(value: string) {
+  return /^\d*(\.\d?)?$/.test(value);
 }
 
 function createEmptyCard(name: string): ContributionPersonCard {
@@ -53,6 +71,15 @@ function createEmptyCard(name: string): ContributionPersonCard {
   };
 }
 
+function getHiddenContributionCardNames() {
+  return new Set(
+    getUsers()
+      .filter((user) => user.role === "team_lead" || user.role === "desk")
+      .map((user) => user.username.trim())
+      .filter(Boolean),
+  );
+}
+
 export function ContributionPage() {
   const [cards, setCards] = useState<ContributionPersonCard[]>([]);
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
@@ -62,17 +89,22 @@ export function ContributionPage() {
 
   useEffect(() => {
     const refresh = () => {
+      const users = getUsers();
+      const hiddenNames = getHiddenContributionCardNames();
       const contributionCards = getContributionCards();
       const cardMap = new Map(contributionCards.map((card) => [card.name, card] as const));
 
-      const merged = getUsers()
-        .map((user) => user.username)
+      const merged = users
+        .map((user) => user.username.trim())
         .filter(Boolean)
+        .filter((name) => !hiddenNames.has(name))
         .sort((left, right) => left.localeCompare(right, "ko"))
         .map((name) => cardMap.get(name) ?? createEmptyCard(name));
 
       const extraCards = contributionCards.filter(
-        (card) => !merged.some((mergedCard) => mergedCard.name === card.name),
+        (card) =>
+          !hiddenNames.has(card.name.trim()) &&
+          !merged.some((mergedCard) => mergedCard.name === card.name),
       );
 
       setCards(
@@ -111,7 +143,10 @@ export function ContributionPage() {
     setExpandedNames((current) => (current.includes(card.name) ? current : [...current, card.name]));
     setManualDrafts((current) => ({
       ...current,
-      [card.name]: card.manualItems.map((item) => ({ ...item })),
+      [card.name]:
+        editingName === card.name
+          ? [...(current[card.name] ?? []), createManualItem()]
+          : [...card.manualItems.map((item) => toManualDraftItem(item)), createManualItem()],
     }));
   };
 
@@ -130,9 +165,9 @@ export function ContributionPage() {
 
     const items = (manualDrafts[editingName] ?? [])
       .map((item) => ({
-        ...item,
+        id: item.id,
         label: item.label.trim(),
-        score: Math.round(item.score * 10) / 10,
+        score: normalizeScoreInput(item.scoreText),
       }))
       .filter((item) => item.label);
 
@@ -168,7 +203,7 @@ export function ContributionPage() {
         {cards.map((card) => {
           const isExpanded = expandedNames.includes(card.name);
           const isEditing = editingName === card.name;
-          const manualItems = isEditing ? (manualDrafts[card.name] ?? []) : card.manualItems;
+          const draftItems = manualDrafts[card.name] ?? [];
 
           return (
             <article key={card.name} className="panel">
@@ -222,7 +257,7 @@ export function ContributionPage() {
                     >
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <span className="muted">자동합계 {formatScore(card.autoScore)}</span>
-                        <span className="muted">수동합계 {formatScore(card.manualScore)}</span>
+                        <span className="muted">추가합계 {formatScore(card.manualScore)}</span>
                         <span className="muted">출근 {formatScore(card.clockInScore)}</span>
                         <span className="muted">퇴근 {formatScore(card.clockOutScore)}</span>
                         <span className="muted">가점 {formatScore(card.coverageScore)}</span>
@@ -240,7 +275,7 @@ export function ContributionPage() {
                           </>
                         ) : (
                           <button type="button" className="btn" onClick={() => startEdit(card)}>
-                            수정
+                            항목추가
                           </button>
                         )}
                       </div>
@@ -256,7 +291,7 @@ export function ContributionPage() {
                           flexWrap: "wrap",
                         }}
                       >
-                        <strong style={{ fontSize: 15 }}>수동 항목</strong>
+                        <strong style={{ fontSize: 15 }}>추가 항목</strong>
                         {isEditing ? (
                           <button
                             type="button"
@@ -269,15 +304,15 @@ export function ContributionPage() {
                               }))
                             }
                           >
-                            항목 추가
+                            항목추가
                           </button>
                         ) : null}
                       </div>
 
-                      {manualItems.length > 0 ? (
+                      {(isEditing ? draftItems.length > 0 : card.manualItems.length > 0) ? (
                         <div style={{ display: "grid", gap: 8 }}>
-                          {manualItems.map((item) =>
-                            isEditing ? (
+                          {isEditing
+                            ? draftItems.map((item) => (
                               <div
                                 key={item.id}
                                 style={{
@@ -305,20 +340,22 @@ export function ContributionPage() {
                                 <input
                                   className="field-input"
                                   inputMode="decimal"
-                                  value={String(item.score)}
+                                  value={item.scoreText}
                                   placeholder="점수"
                                   onChange={(event) =>
-                                    setManualDrafts((current) => ({
-                                      ...current,
-                                      [card.name]: (current[card.name] ?? []).map((currentItem) =>
-                                        currentItem.id === item.id
-                                          ? {
-                                              ...currentItem,
-                                              score: normalizeScoreInput(event.target.value),
-                                            }
-                                          : currentItem,
-                                      ),
-                                    }))
+                                    isValidScoreText(event.target.value)
+                                      ? setManualDrafts((current) => ({
+                                          ...current,
+                                          [card.name]: (current[card.name] ?? []).map((currentItem) =>
+                                            currentItem.id === item.id
+                                              ? {
+                                                  ...currentItem,
+                                                  scoreText: event.target.value,
+                                                }
+                                              : currentItem,
+                                          ),
+                                        }))
+                                      : null
                                   }
                                 />
                                 <button
@@ -337,7 +374,8 @@ export function ContributionPage() {
                                   삭제
                                 </button>
                               </div>
-                            ) : (
+                            ))
+                            : card.manualItems.map((item) => (
                               <div
                                 key={item.id}
                                 style={{
@@ -354,8 +392,7 @@ export function ContributionPage() {
                                 <span>{item.label}</span>
                                 <strong>{formatScore(item.score)}점</strong>
                               </div>
-                            ),
-                          )}
+                            ))}
                         </div>
                       ) : (
                         <div
@@ -369,7 +406,7 @@ export function ContributionPage() {
                           <span className="muted">
                             {isEditing
                               ? "항목 추가 버튼으로 점수를 입력하세요."
-                              : "수동 입력된 항목이 없습니다."}
+                              : "추가된 항목이 없습니다."}
                           </span>
                         </div>
                       )}

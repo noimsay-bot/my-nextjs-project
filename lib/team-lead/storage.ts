@@ -1,5 +1,6 @@
 "use client";
 
+import { getUsers } from "@/lib/auth/storage";
 import { STORAGE_KEY, getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import { sanitizeScheduleState } from "@/lib/schedule/engine";
 import { getPublishedSchedules } from "@/lib/schedule/published";
@@ -93,6 +94,21 @@ export interface ContributionPersonCard {
   manualItems: ContributionManualItem[];
 }
 
+export type FinalCutDecision = "" | "circle" | "triangle" | "cross";
+
+export interface FinalCutScheduleItem {
+  id: string;
+  dateKey: string;
+  duty: string;
+  schedule: string;
+  decision: FinalCutDecision;
+}
+
+export interface FinalCutPersonCard {
+  name: string;
+  items: FinalCutScheduleItem[];
+}
+
 export interface ScheduleAssignmentDayRows {
   addedRows: ScheduleAssignmentCustomRow[];
   deletedRowKeys: string[];
@@ -112,6 +128,8 @@ const TEAM_LEAD_SCHEDULE_ASSIGNMENT_KEY = "j-team-lead-schedule-assignment-v1";
 export const TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT = "j-team-lead-schedule-assignment-updated";
 const TEAM_LEAD_CONTRIBUTION_KEY = "j-team-lead-contribution-v1";
 export const TEAM_LEAD_CONTRIBUTION_EVENT = "j-team-lead-contribution-updated";
+const TEAM_LEAD_FINAL_CUT_KEY = "j-team-lead-final-cut-v1";
+export const TEAM_LEAD_FINAL_CUT_EVENT = "j-team-lead-final-cut-updated";
 
 export function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
   return `${dateKey}::${category}::${index}::${name}`;
@@ -393,6 +411,49 @@ export function updateContributionManualItems(name: string, items: ContributionM
   saveContributionManualStore(next);
 }
 
+function normalizeFinalCutDecision(value: unknown): FinalCutDecision {
+  return value === "circle" || value === "triangle" || value === "cross" ? value : "";
+}
+
+function normalizeFinalCutStore(store: unknown) {
+  if (!store || typeof store !== "object") return {} as Record<string, FinalCutDecision>;
+  return Object.fromEntries(
+    Object.entries(store as Record<string, unknown>).map(([key, value]) => [key, normalizeFinalCutDecision(value)]),
+  ) as Record<string, FinalCutDecision>;
+}
+
+export function getFinalCutStore() {
+  if (typeof window === "undefined") return {} as Record<string, FinalCutDecision>;
+  const raw = window.localStorage.getItem(TEAM_LEAD_FINAL_CUT_KEY);
+  if (!raw) return {} as Record<string, FinalCutDecision>;
+  try {
+    return normalizeFinalCutStore(JSON.parse(raw));
+  } catch {
+    return {} as Record<string, FinalCutDecision>;
+  }
+}
+
+export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
+  if (typeof window === "undefined") return;
+  const normalized = normalizeFinalCutStore(store);
+  window.localStorage.setItem(TEAM_LEAD_FINAL_CUT_KEY, JSON.stringify(normalized));
+  window.dispatchEvent(new Event(TEAM_LEAD_FINAL_CUT_EVENT));
+}
+
+export function updateFinalCutDecision(itemId: string, decision: FinalCutDecision) {
+  const trimmedId = itemId.trim();
+  if (!trimmedId) return;
+  const store = getFinalCutStore();
+  const normalizedDecision = normalizeFinalCutDecision(decision);
+  const next = { ...store };
+  if (!normalizedDecision) {
+    delete next[trimmedId];
+  } else {
+    next[trimmedId] = normalizedDecision;
+  }
+  saveFinalCutStore(next);
+}
+
 export function getContributionPeriod(baseDate = new Date()): ContributionPeriod {
   const year = baseDate.getFullYear();
   const startMonthKey = `${year - 1}-12`;
@@ -459,8 +520,19 @@ function getGeneratedHistorySchedules() {
 
 export function getTeamLeadSchedules() {
   const published = getPublishedSchedules().map((item) => item.schedule);
-  const source = published.length > 0 ? published : getGeneratedHistorySchedules();
-  return [...source].sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  const generated = getGeneratedHistorySchedules();
+  const merged = new Map<string, GeneratedSchedule>();
+
+  published.forEach((schedule) => {
+    merged.set(schedule.monthKey, schedule);
+  });
+  generated.forEach((schedule) => {
+    if (!merged.has(schedule.monthKey)) {
+      merged.set(schedule.monthKey, schedule);
+    }
+  });
+
+  return Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
 }
 
 export function getScheduleAssignmentRows(
@@ -536,12 +608,11 @@ export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
     .sort((left, right) => left.name.localeCompare(right.name, "ko"));
 }
 
-export function getContributionCards(baseDate = new Date()) {
-  const period = getContributionPeriod(baseDate);
-  const schedules = getTeamLeadSchedules().filter((schedule) => isMonthKeyInContributionPeriod(schedule.monthKey, period));
+export function getFinalCutCards(monthKey?: string) {
+  const schedules = getTeamLeadSchedules().filter((schedule) => !monthKey || schedule.monthKey === monthKey);
   const store = getScheduleAssignmentStore();
-  const manualStore = getContributionManualStore();
-  const personMap = new Map<string, ContributionScoreItem[]>();
+  const finalCutStore = getFinalCutStore();
+  const personMap = new Map<string, FinalCutScheduleItem[]>();
 
   schedules.forEach((monthSchedule) => {
     const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
@@ -556,6 +627,62 @@ export function getContributionCards(baseDate = new Date()) {
           if (!personName) return;
           const entry = monthEntries[row.key];
           if (!entry) return;
+
+          entry.schedules
+            .map((schedule) => schedule.trim())
+            .filter(Boolean)
+            .forEach((schedule, index) => {
+              const id = `${monthSchedule.monthKey}::${row.key}::${index}`;
+              const item: FinalCutScheduleItem = {
+                id,
+                dateKey: day.dateKey,
+                duty: row.duty,
+                schedule,
+                decision: finalCutStore[id] ?? "",
+              };
+              const current = personMap.get(personName) ?? [];
+              current.push(item);
+              personMap.set(personName, current);
+            });
+        });
+      });
+  });
+
+  return Array.from(personMap.entries())
+    .map(([name, items]) => ({
+      name,
+      items: [...items].sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.schedule.localeCompare(right.schedule, "ko")),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "ko"));
+}
+
+export function getContributionCards(baseDate = new Date()) {
+  const period = getContributionPeriod(baseDate);
+  const schedules = getTeamLeadSchedules().filter((schedule) => isMonthKeyInContributionPeriod(schedule.monthKey, period));
+  const store = getScheduleAssignmentStore();
+  const manualStore = getContributionManualStore();
+  const hiddenNames = new Set(
+    getUsers()
+      .filter((user) => user.role === "team_lead" || user.role === "desk")
+      .map((user) => user.username.trim())
+      .filter(Boolean),
+  );
+  const personMap = new Map<string, ContributionScoreItem[]>();
+
+  schedules.forEach((monthSchedule) => {
+    const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
+    const monthRows = store.rows[monthSchedule.monthKey] ?? {};
+
+    monthSchedule.days
+      .filter((day) => day.month === monthSchedule.month)
+      .forEach((day) => {
+        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows());
+        rows.forEach((row) => {
+          const personName = row.name.trim();
+          if (!personName) return;
+          if (hiddenNames.has(personName)) return;
+          const entry = monthEntries[row.key];
+          if (!entry) return;
           const item = buildContributionItem(monthSchedule.monthKey, day.dateKey, row.duty, entry, day);
           if (!item) return;
           const current = personMap.get(personName) ?? [];
@@ -565,7 +692,11 @@ export function getContributionCards(baseDate = new Date()) {
       });
   });
 
-  const allNames = new Set([...personMap.keys(), ...Object.keys(manualStore)]);
+  const allNames = new Set(
+    [...personMap.keys(), ...Object.keys(manualStore).map((name) => name.trim()).filter(Boolean)].filter(
+      (name) => !hiddenNames.has(name),
+    ),
+  );
 
   return Array.from(allNames)
     .map((name) => {

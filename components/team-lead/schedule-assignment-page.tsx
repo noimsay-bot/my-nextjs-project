@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
+import { defaultPointers } from "@/lib/schedule/constants";
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
-import { SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { readStoredScheduleState, saveScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import {
   AssignmentTimeColor,
   AssignmentTravelType,
@@ -41,6 +44,47 @@ const getSafeExclusiveVideo = (values: boolean[], count: number) => Array.from({
 const removeExclusiveVideoAt = (values: boolean[], index: number, nextCount: number) => getSafeExclusiveVideo(values.filter((_, i) => i !== index), nextCount);
 const createCustomRowId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const coverageScoreSteps = [0, 0.5, 1, 2] as const;
+const csvTemplateHeaders = [
+  "monthKey",
+  "dateKey",
+  "name",
+  "duty",
+  "clockIn",
+  "clockOut",
+  "schedules",
+  "travelType",
+  "exclusiveVideoFlags",
+  "coverageScore",
+  "coverageNote",
+  "rowType",
+] as const;
+
+type ImportMessageTone = "ok" | "warn" | "note";
+
+interface ImportMessage {
+  tone: ImportMessageTone;
+  text: string;
+}
+
+interface ScheduleAssignmentImportRow {
+  monthKey: string;
+  dateKey: string;
+  name: string;
+  duty: string;
+  clockIn: string;
+  clockOut: string;
+  schedules: string[];
+  travelType: AssignmentTravelType;
+  exclusiveVideoFlags: boolean[];
+  coverageScore: number;
+  coverageNote: string;
+  rowType: "base" | "custom";
+}
+
+interface ParsedCsvRow {
+  values: string[];
+  lineNumber: number;
+}
 const vacationBadgeStyles = {
   연차: {
     borderColor: "rgba(96,165,250,.45)",
@@ -132,12 +176,224 @@ function formatManualTime(value: string) {
   return null;
 }
 
+function parseCsvLine(line: string) {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === "\"") {
+      if (inQuotes && line[index + 1] === "\"") {
+        current += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      values.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  values.push(current);
+  return values.map((value) => value.trim());
+}
+
+function parseCsvRows(text: string) {
+  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const rawLines = normalized.split("\n");
+  const rows: ParsedCsvRow[] = [];
+
+  rawLines.forEach((line, index) => {
+    if (!line.trim()) return;
+    rows.push({
+      values: parseCsvLine(line),
+      lineNumber: index + 1,
+    });
+  });
+
+  return rows;
+}
+
+function parseWorksheetRows(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [] as ParsedCsvRow[];
+  const sheet = workbook.Sheets[sheetName];
+  const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, {
+    header: 1,
+    raw: false,
+    defval: "",
+  });
+
+  return matrix
+    .filter((row) => row.some((cell) => String(cell ?? "").trim()))
+    .map((row, index) => ({
+      values: row.map((cell) => String(cell ?? "").trim()),
+      lineNumber: index + 1,
+    }));
+}
+
+function normalizeHeader(value: string) {
+  return value.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function getImportValue(record: Record<string, string>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[normalizeHeader(key)];
+    if (typeof value === "string") return value.trim();
+  }
+  return "";
+}
+
+function normalizeTravelType(value: string): AssignmentTravelType {
+  if (value === "국내출장" || value === "해외출장" || value === "기획출장") return value as AssignmentTravelType;
+  return "";
+}
+
+function normalizeCoverageScore(value: string) {
+  const parsed = Number(value.trim());
+  return coverageScoreSteps.includes(parsed as (typeof coverageScoreSteps)[number]) ? parsed : 0;
+}
+
+function normalizeExclusiveVideoFlags(values: string[], scheduleCount: number) {
+  const normalized = Array.from({ length: Math.max(scheduleCount, 1) }, (_, index) => {
+    const value = values[index]?.trim().toLowerCase() ?? "";
+    return value === "1" || value === "true" || value === "y" || value === "yes";
+  });
+  return normalized;
+}
+
+function parseScheduleAssignmentImportRow(parsedRow: ParsedCsvRow, headerMap: string[]) {
+  const record = Object.fromEntries(
+    headerMap.map((header, index) => [header, parsedRow.values[index] ?? ""]),
+  );
+  const monthKey = getImportValue(record, "monthKey", "month", "월");
+  const dateKey = getImportValue(record, "dateKey", "date", "날짜");
+  const name = getImportValue(record, "name", "person", "username", "이름");
+  const duty = getImportValue(record, "duty", "근무", "근무유형");
+  const clockIn = getImportValue(record, "clockIn", "출근");
+  const clockOut = getImportValue(record, "clockOut", "퇴근");
+  const schedules = getImportValue(record, "schedules", "schedule", "일정")
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const travelType = normalizeTravelType(getImportValue(record, "travelType", "출장"));
+  const exclusiveVideoFlags = normalizeExclusiveVideoFlags(
+    getImportValue(record, "exclusiveVideoFlags", "exclusiveVideo", "단독", "단독여부")
+      .split("|")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    schedules.length,
+  );
+  const coverageScore = normalizeCoverageScore(getImportValue(record, "coverageScore", "가점"));
+  const coverageNote = getImportValue(record, "coverageNote", "가점사유");
+  const rowTypeValue = getImportValue(record, "rowType", "행구분").toLowerCase();
+
+  if (!dateKey || !name) {
+    throw new Error(`${parsedRow.lineNumber}행: dateKey와 name은 필수입니다.`);
+  }
+
+  const normalizedClockIn = clockIn ? formatManualTime(clockIn) : "";
+  const normalizedClockOut = clockOut ? formatManualTime(clockOut) : "";
+
+  if (normalizedClockIn === null) {
+    throw new Error(`${parsedRow.lineNumber}행: clockIn 형식이 올바르지 않습니다.`);
+  }
+  if (normalizedClockOut === null) {
+    throw new Error(`${parsedRow.lineNumber}행: clockOut 형식이 올바르지 않습니다.`);
+  }
+
+  return {
+    monthKey: monthKey || dateKey.slice(0, 7),
+    dateKey,
+    name,
+    duty,
+    clockIn: normalizedClockIn,
+    clockOut: normalizedClockOut,
+    schedules,
+    travelType,
+    exclusiveVideoFlags,
+    coverageScore,
+    coverageNote,
+    rowType: rowTypeValue === "custom" ? "custom" : "base",
+  } satisfies ScheduleAssignmentImportRow;
+}
+
+function createEmptyDaySchedule(date: Date): DaySchedule {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const dow = date.getDay();
+
+  return {
+    dateKey: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    day,
+    month,
+    year,
+    dow,
+    isWeekend: dow === 0 || dow === 6,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: {},
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  };
+}
+
+function createEmptyGeneratedSchedule(monthKey: string): GeneratedSchedule {
+  const [year, month] = monthKey.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+
+  return {
+    year,
+    month,
+    monthKey,
+    days: Array.from({ length: lastDay }, (_, index) => createEmptyDaySchedule(new Date(year, month - 1, index + 1))),
+    nextPointers: { ...defaultPointers },
+    nextStartDate: `${monthKey}-01`,
+  };
+}
+
+function ensureImportedMonthsExist(monthKeys: string[]) {
+  if (monthKeys.length === 0 || typeof window === "undefined") return false;
+
+  const state = readStoredScheduleState();
+  const existing = new Set([
+    ...(state.generated ? [state.generated.monthKey] : []),
+    ...state.generatedHistory.map((schedule) => schedule.monthKey),
+  ]);
+  const missingMonthKeys = Array.from(new Set(monthKeys.filter((monthKey) => monthKey && !existing.has(monthKey))));
+  if (missingMonthKeys.length === 0) return false;
+
+  const nextState = {
+    ...state,
+    generatedHistory: [...state.generatedHistory, ...missingMonthKeys.map(createEmptyGeneratedSchedule)].sort((left, right) =>
+      left.monthKey.localeCompare(right.monthKey),
+    ),
+  };
+
+  saveScheduleState(nextState);
+  return true;
+}
+
 export function ScheduleAssignmentPage() {
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
   const [selectedDeleteRowKey, setSelectedDeleteRowKey] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const refreshSchedules = () => {
@@ -271,6 +527,208 @@ export function ScheduleAssignmentPage() {
     }));
   };
 
+  const downloadXlsxTemplate = () => {
+    const rows = [
+      [...csvTemplateHeaders],
+      [
+        "2025-12",
+        "2025-12-03",
+        "홍길동",
+        "조근",
+        "07:30",
+        "16:10",
+        "국회 백브리핑|대통령실 브리핑",
+        "국내출장",
+        "0|1",
+        "1",
+        "현장 대응",
+        "base",
+      ],
+    ];
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "schedule-assignment");
+    XLSX.writeFile(workbook, "schedule-assignment-template.xlsx");
+    setImportMessage({
+      tone: "note",
+      text: "XLSX 양식을 다운로드했습니다. monthKey,dateKey,name,duty는 반드시 채워 주세요.",
+    });
+  };
+
+  const importParsedRows = (parsedRows: ParsedCsvRow[]) => {
+    if (parsedRows.length < 2) {
+      throw new Error("헤더와 데이터가 포함된 파일이 필요합니다.");
+    }
+
+    const headerMap = parsedRows[0].values.map((value) => normalizeHeader(value));
+    const validRows: ScheduleAssignmentImportRow[] = [];
+    const skippedMessages: string[] = [];
+
+    parsedRows.slice(1).forEach((row) => {
+      try {
+        validRows.push(parseScheduleAssignmentImportRow(row, headerMap));
+      } catch (error) {
+        skippedMessages.push(error instanceof Error ? error.message : `${row.lineNumber}행: 형식을 읽을 수 없습니다.`);
+      }
+    });
+
+    const createdMissingMonths = ensureImportedMonthsExist(validRows.map((row) => row.monthKey));
+    const nextSchedules = createdMissingMonths ? getTeamLeadSchedules() : schedules;
+    const scheduleMap = new Map(nextSchedules.map((schedule) => [schedule.monthKey, schedule] as const));
+
+    if (createdMissingMonths) {
+      setSchedules(nextSchedules);
+      setSelectedMonthKey((current) =>
+        nextSchedules.some((schedule) => schedule.monthKey === current)
+          ? current
+          : nextSchedules[0]?.monthKey || "",
+      );
+    }
+
+    let nextStore = store;
+    let importedCount = 0;
+
+    validRows.forEach((row) => {
+      try {
+        const monthSchedule = scheduleMap.get(row.monthKey);
+        if (!monthSchedule) {
+          throw new Error(`${row.dateKey}: 근무표가 없는 monthKey입니다. (${row.monthKey})`);
+        }
+
+        const day = monthSchedule.days.find((item) => item.dateKey === row.dateKey);
+        if (!day) {
+          throw new Error(`${row.dateKey}: 해당 날짜가 ${row.monthKey} 근무표에 없습니다.`);
+        }
+
+        const currentMonthRows = nextStore.rows[row.monthKey] ?? {};
+        const currentDayRows = currentMonthRows[row.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+        const existingRows = getScheduleAssignmentRows(day, currentDayRows);
+        const normalizedName = row.name.trim();
+        const normalizedDuty = row.duty.trim();
+        const exactMatch = existingRows.find(
+          (item) => item.name.trim() === normalizedName && (!normalizedDuty || item.duty.trim() === normalizedDuty),
+        );
+        const sameNameRows = existingRows.filter((item) => item.name.trim() === normalizedName);
+
+        let targetRow = exactMatch ?? (sameNameRows.length === 1 && row.rowType !== "custom" ? sameNameRows[0] : null);
+        let nextDayRows = currentDayRows;
+
+        if (!targetRow) {
+          const customId = createCustomRowId();
+          nextDayRows = {
+            ...currentDayRows,
+            addedRows: [
+              ...currentDayRows.addedRows,
+              { id: customId, name: normalizedName, duty: normalizedDuty },
+            ],
+          };
+          targetRow = {
+            key: `${row.dateKey}::custom::${customId}`,
+            name: normalizedName,
+            duty: normalizedDuty,
+            isCustom: true,
+          };
+        } else if (!targetRow.isCustom && (normalizedName !== targetRow.name || (normalizedDuty && normalizedDuty !== targetRow.duty))) {
+          nextDayRows = {
+            ...currentDayRows,
+            rowOverrides: {
+              ...currentDayRows.rowOverrides,
+              [targetRow.key]: {
+                name: normalizedName,
+                duty: normalizedDuty || targetRow.duty,
+              },
+            },
+          };
+        }
+
+        const currentMonthEntries = nextStore.entries[row.monthKey] ?? {};
+        const currentEntry = currentMonthEntries[targetRow.key] ?? createDefaultScheduleAssignmentEntry();
+        const nextSchedules = row.schedules.length > 0 ? row.schedules : [""];
+        const nextExclusiveVideo = Array.from(
+          { length: Math.max(nextSchedules.length, 1) },
+          (_, index) => row.exclusiveVideoFlags[index] ?? false,
+        );
+
+        nextStore = {
+          entries: {
+            ...nextStore.entries,
+            [row.monthKey]: {
+              ...currentMonthEntries,
+              [targetRow.key]: {
+                ...currentEntry,
+                clockIn: row.clockIn,
+                clockInConfirmed: Boolean(row.clockIn),
+                clockInColor: row.clockIn ? currentEntry.clockInColor : "",
+                clockOut: row.clockOut,
+                clockOutConfirmed: Boolean(row.clockOut),
+                clockOutColor: row.clockOut ? (currentEntry.clockOutColor || "yellow") : "",
+                schedules: nextSchedules,
+                travelType: row.travelType,
+                exclusiveVideo: nextExclusiveVideo,
+                coverageScore: row.coverageScore,
+                coverageNote: row.coverageScore > 0 ? row.coverageNote : "",
+              },
+            },
+          },
+          rows: {
+            ...nextStore.rows,
+            [row.monthKey]: {
+              ...currentMonthRows,
+              [row.dateKey]: nextDayRows,
+            },
+          },
+        };
+        importedCount += 1;
+      } catch (error) {
+        skippedMessages.push(error instanceof Error ? error.message : `${row.dateKey}: 가져오지 못했습니다.`);
+      }
+    });
+
+    if (importedCount > 0) {
+      saveScheduleAssignmentStore(nextStore);
+      setStore(nextStore);
+    }
+
+    const skippedPreview = skippedMessages.slice(0, 3).join(" / ");
+    if (importedCount === 0) {
+      setImportMessage({
+        tone: "warn",
+        text: skippedMessages.length > 0
+          ? `반영된 행이 없습니다. 제외 ${skippedMessages.length}건. ${skippedPreview}`
+          : "반영된 행이 없습니다.",
+      });
+      return;
+    }
+
+    setImportMessage({
+      tone: skippedMessages.length > 0 ? "warn" : "ok",
+      text:
+        skippedMessages.length > 0
+          ? `${importedCount}건 반영, ${skippedMessages.length}건 제외했습니다. ${skippedPreview}`
+          : `${importedCount}건을 반영했습니다.`,
+    });
+  };
+
+  const handleSpreadsheetUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const lowerName = file.name.toLowerCase();
+      const parsedRows = lowerName.endsWith(".csv")
+        ? parseCsvRows(await file.text())
+        : parseWorksheetRows(await file.arrayBuffer());
+      importParsedRows(parsedRows);
+    } catch (error) {
+      setImportMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "업로드 중 오류가 발생했습니다.",
+      });
+    } finally {
+      event.target.value = "";
+    }
+  };
+
   if (schedules.length === 0) {
     return <section className="panel"><div className="panel-pad"><div className="status note">게시되었거나 작성된 근무표가 없어 일정배정표를 만들 수 없습니다.</div></div></section>;
   }
@@ -284,7 +742,20 @@ export function ScheduleAssignmentPage() {
               <div className="chip">일정배정</div>
               <strong style={{ fontSize: 24 }}>월별 일정배정</strong>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button type="button" className="btn" onClick={downloadXlsxTemplate}>
+                XLSX 양식
+              </button>
+              <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
+                XLSX 업로드
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv,text/csv"
+                style={{ display: "none" }}
+                onChange={handleSpreadsheetUpload}
+              />
               {schedules.map((schedule) => (
                 <button key={schedule.monthKey} type="button" className={`btn ${selectedMonthKey === schedule.monthKey ? "white" : ""}`} onClick={() => setSelectedMonthKey(schedule.monthKey)}>
                   {schedule.year}년 {schedule.month}월
@@ -293,6 +764,7 @@ export function ScheduleAssignmentPage() {
             </div>
           </div>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 사람 추가와 삭제, 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
+          {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>
 

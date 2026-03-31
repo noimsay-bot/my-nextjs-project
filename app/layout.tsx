@@ -5,7 +5,7 @@ import { PortalShell } from "@/components/portal-shell";
 
 export const metadata: Metadata = {
   title: "JTBC 영상취재팀 포털",
-  description: "근무표와 영상평가 운영용 포털",
+  description: "근무표와 영상평가심사 운영용 포털",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
