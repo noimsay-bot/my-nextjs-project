@@ -11,7 +11,6 @@ import {
 } from "@/lib/portal/data";
 import {
   getSession,
-  initializeAuth,
   subscribeToAuth,
   type SessionUser,
 } from "@/lib/auth/storage";
@@ -28,11 +27,6 @@ export default function SubmissionsPage() {
 
   useEffect(() => {
     let mounted = true;
-
-    void initializeAuth().then((nextSession) => {
-      if (!mounted) return;
-      setSession(nextSession);
-    });
 
     const unsubscribe = subscribeToAuth((nextSession) => {
       if (!mounted) return;

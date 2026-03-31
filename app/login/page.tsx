@@ -18,6 +18,14 @@ import { hasSupabaseEnv } from "@/lib/supabase/client";
 
 type Mode = "login" | "signup" | "forgot" | "reset-password";
 
+function normalizeNextPath(value: string | null) {
+  if (!value || !value.startsWith("/")) {
+    return "/";
+  }
+
+  return value;
+}
+
 function getMessageTone(message: string) {
   return /실패|오류|확인|없습니다|못했습니다/.test(message) ? "warn" : "ok";
 }
@@ -28,9 +36,10 @@ export default function LoginPage() {
   const [session, setSession] = useState(() => getSession());
   const [mode, setMode] = useState<Mode>("login");
   const [message, setMessage] = useState("");
-  const [queryState, setQueryState] = useState<{ mode: string | null; reason: string | null }>({
+  const [queryState, setQueryState] = useState<{ mode: string | null; reason: string | null; next: string | null }>({
     mode: null,
     reason: null,
+    next: null,
   });
   const [loginForm, setLoginForm] = useState({ loginId: "", password: "" });
   const [signupForm, setSignupForm] = useState({
@@ -47,6 +56,7 @@ export default function LoginPage() {
   const forcedMode = useMemo(() => {
     return queryState.mode === "reset-password" ? "reset-password" : null;
   }, [queryState.mode]);
+  const nextPath = useMemo(() => normalizeNextPath(queryState.next), [queryState.next]);
 
   useEffect(() => {
     let mounted = true;
@@ -56,6 +66,7 @@ export default function LoginPage() {
       setQueryState({
         mode: params.get("mode"),
         reason: params.get("reason"),
+        next: params.get("next"),
       });
     }
 
@@ -98,8 +109,8 @@ export default function LoginPage() {
     if (forcedMode === "reset-password") return;
     if (!session?.approved) return;
     if (!session) return;
-    router.replace("/");
-  }, [forcedMode, router, session]);
+    window.location.replace(nextPath);
+  }, [forcedMode, nextPath, session]);
 
   async function handleLoginSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -121,8 +132,9 @@ export default function LoginPage() {
       return;
     }
 
+    setSession(result.session);
     setMessage("");
-    router.replace("/");
+    window.location.replace(nextPath);
   }
 
   async function handleSignupSubmit(event?: FormEvent<HTMLFormElement>) {

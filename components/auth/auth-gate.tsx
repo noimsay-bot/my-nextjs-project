@@ -54,19 +54,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(publicPaths.has(pathname));
   const [session, setSession] = useState(() => getSession());
+  const [checkingSession, setCheckingSession] = useState(!publicPaths.has(pathname));
 
   useEffect(() => {
     let mounted = true;
 
-    if (!publicPaths.has(pathname)) {
-      setReady(false);
-    } else {
-      setReady(true);
-    }
-
     void initializeAuth().then((nextSession) => {
       if (!mounted) return;
       setSession(nextSession);
+      setCheckingSession(false);
     });
 
     const unsubscribe = subscribeToAuth((nextSession) => {
@@ -78,7 +74,36 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       mounted = false;
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!publicPaths.has(pathname)) {
+      setReady(false);
+      setCheckingSession(true);
+      return;
+    }
+
+    setReady(true);
+    setCheckingSession(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (publicPaths.has(pathname) || session) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void initializeAuth().then((nextSession) => {
+      if (cancelled) return;
+      setSession(nextSession);
+      setCheckingSession(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, session]);
 
   useEffect(() => {
     if (publicPaths.has(pathname)) {
@@ -86,12 +111,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (session === undefined) {
+    if (checkingSession || session === undefined) {
       return;
     }
 
     if (!session) {
-      router.replace("/login");
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
 
@@ -106,7 +131,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     setReady(true);
-  }, [pathname, router, session]);
+  }, [checkingSession, pathname, router, session]);
 
   if (publicPaths.has(pathname)) return <>{children}</>;
   if (!ready) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;

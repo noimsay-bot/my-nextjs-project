@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   getSession,
-  initializeAuth,
   logoutUser,
   subscribeToAuth,
 } from "@/lib/auth/storage";
@@ -27,11 +26,6 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-
-    void initializeAuth().then((nextSession) => {
-      if (!mounted) return;
-      setSession(nextSession);
-    });
 
     const unsubscribe = subscribeToAuth((nextSession) => {
       if (!mounted) return;

@@ -63,6 +63,7 @@ let cachedSession = readJson<SessionUser | null>(AUTH_CACHE_KEY, null);
 let cachedUsers = readJson<UserAccount[]>(USERS_CACHE_KEY, []);
 let authInitialized = false;
 let refreshPromise: Promise<SessionUser | null> | null = null;
+let initializePromise: Promise<SessionUser | null> | null = null;
 const listeners = new Set<AuthListener>();
 let profileChannel: BrowserRealtimeChannel | null = null;
 let profileSubscriptionUserId: string | null = null;
@@ -343,8 +344,12 @@ function initAuthListener() {
 
   const supabase = getSupabaseClient();
   initSessionRefreshListeners();
-  supabase.auth.onAuthStateChange((_event, session) => {
+  supabase.auth.onAuthStateChange((event, session) => {
     if (!session?.user) {
+      if (event === "INITIAL_SESSION" && cachedSession) {
+        return;
+      }
+
       clearProfileSubscription();
       setCachedSession(null);
       setCachedUsers([]);
@@ -388,7 +393,24 @@ async function resolveLoginEmail(identifier: string) {
 export async function initializeAuth() {
   try {
     initAuthListener();
-    return await refreshSession();
+    if (cachedSession) {
+      if (!refreshPromise && !initializePromise) {
+        initializePromise = refreshSession().finally(() => {
+          initializePromise = null;
+        });
+      }
+      return cachedSession;
+    }
+
+    if (initializePromise) {
+      return initializePromise;
+    }
+
+    initializePromise = refreshSession().finally(() => {
+      initializePromise = null;
+    });
+
+    return await initializePromise;
   } catch (error) {
     if (isSupabaseEnvError(error)) {
       setCachedSession(null);
@@ -407,10 +429,11 @@ export async function refreshSession() {
     try {
       const supabase = getSupabaseClient();
       const {
-        data: { user },
+        data: { session },
         error,
-      } = await supabase.auth.getUser();
+      } = await supabase.auth.getSession();
 
+      const user = session?.user ?? null;
       if (error || !user) {
         setCachedSession(null);
         return null;
