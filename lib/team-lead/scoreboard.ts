@@ -1,6 +1,12 @@
 import { getUsers } from "@/lib/auth/storage";
-import { reportTemplates, reviewStorageKey, submissionStorageKey, SubmissionEntry } from "@/lib/portal/data";
 import {
+  getPortalSession,
+  getPortalSupabaseClient,
+  getSupabaseStorageErrorMessage,
+  isSupabaseSchemaMissingError,
+} from "@/lib/supabase/portal";
+import {
+  emitTeamLeadStorageStatus,
   ContributionPersonCard,
   FinalCutPersonCard,
   getContributionCards,
@@ -9,7 +15,7 @@ import {
 } from "@/lib/team-lead/storage";
 
 export const TEAM_LEAD_SCOREBOARD_EVENT = "j-team-lead-scoreboard-updated";
-const TEAM_LEAD_SCOREBOARD_KEY = "j-team-lead-scoreboard-v1";
+const TEAM_LEAD_SCOREBOARD_STATE_KEY = "scoreboard_v1";
 export const TEAM_LEAD_SCORE_BASE = 20;
 
 export type TeamLeadManualScoreCategory = "broadcastAccident" | "liveSafety";
@@ -61,12 +67,28 @@ interface TeamLeadScoreboardStore {
   selectedFinalCutQuarterKeys: string[];
 }
 
-interface ReviewStateEntry {
-  checked?: string[];
-  bonus?: number;
-  bonusComment?: string;
-  done?: boolean;
+interface TeamLeadStateRow {
+  key: string;
+  state: unknown;
 }
+
+interface ReviewScoreRow {
+  reviewer_id: string;
+  total: number | null;
+  completed_at: string | null;
+  submission: {
+    author_id: string;
+  } | null;
+}
+
+interface ProfileRow {
+  id: string;
+  name: string;
+}
+
+let scoreboardCache = createEmptyScoreboardStore();
+let videoReviewScoreCache = new Map<string, number>();
+let scoreboardRefreshPromise: Promise<void> | null = null;
 
 function roundScore(score: number) {
   return Math.round(score * 10) / 10;
@@ -84,6 +106,7 @@ function normalizeScoreItem(item: Partial<TeamLeadScoreItem> | undefined): TeamL
   if (!item) return null;
   const label = typeof item.label === "string" ? item.label.trim() : "";
   if (!label) return null;
+
   return {
     id: typeof item.id === "string" && item.id ? item.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     label,
@@ -93,6 +116,7 @@ function normalizeScoreItem(item: Partial<TeamLeadScoreItem> | undefined): TeamL
 
 function normalizeManualScoreStore(store: unknown) {
   if (!store || typeof store !== "object") return {} as Record<string, TeamLeadScoreItem[]>;
+
   return Object.fromEntries(
     Object.entries(store as Record<string, unknown>).map(([name, items]) => [
       name,
@@ -107,6 +131,7 @@ function normalizeManualScoreStore(store: unknown) {
 
 function normalizeSelectedQuarterKeys(value: unknown) {
   if (!Array.isArray(value)) return [] as string[];
+
   return value
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
@@ -115,6 +140,7 @@ function normalizeSelectedQuarterKeys(value: unknown) {
 
 function normalizeScoreboardStore(store: unknown): TeamLeadScoreboardStore {
   if (!store || typeof store !== "object") return createEmptyScoreboardStore();
+
   const record = store as Partial<TeamLeadScoreboardStore>;
   return {
     broadcastAccident: normalizeManualScoreStore(record.broadcastAccident),
@@ -124,21 +150,131 @@ function normalizeScoreboardStore(store: unknown): TeamLeadScoreboardStore {
 }
 
 function getScoreboardStore() {
-  if (typeof window === "undefined") return createEmptyScoreboardStore();
-  const raw = window.localStorage.getItem(TEAM_LEAD_SCOREBOARD_KEY);
-  if (!raw) return createEmptyScoreboardStore();
-  try {
-    return normalizeScoreboardStore(JSON.parse(raw));
-  } catch {
-    return createEmptyScoreboardStore();
-  }
+  return normalizeScoreboardStore(scoreboardCache);
 }
 
 function saveScoreboardStore(store: TeamLeadScoreboardStore) {
-  if (typeof window === "undefined") return;
   const normalized = normalizeScoreboardStore(store);
-  window.localStorage.setItem(TEAM_LEAD_SCOREBOARD_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
+  const previous = normalizeScoreboardStore(scoreboardCache);
+  scoreboardCache = normalized;
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
+  }
+
+  void (async () => {
+    try {
+      const session = await getPortalSession();
+      if (!session?.approved) {
+        throw new Error("승인된 로그인 세션이 필요합니다.");
+      }
+
+      const supabase = await getPortalSupabaseClient();
+      const { error } = await supabase.from("team_lead_state").upsert({
+        key: TEAM_LEAD_SCOREBOARD_STATE_KEY,
+        state: normalized,
+        updated_by: session.id,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    } catch (error) {
+      emitTeamLeadStorageStatus({
+        ok: false,
+        message: error instanceof Error ? error.message : "종합 점수 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+      });
+      scoreboardCache = previous;
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
+      }
+
+      await refreshScoreboardState();
+    }
+  })();
+}
+
+export async function refreshScoreboardState() {
+  if (scoreboardRefreshPromise) {
+    return scoreboardRefreshPromise;
+  }
+
+  scoreboardRefreshPromise = (async () => {
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      scoreboardCache = createEmptyScoreboardStore();
+      videoReviewScoreCache = new Map();
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
+      }
+      return;
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const [{ data: stateRow, error: stateError }, { data: reviewRows, error: reviewError }, { data: profiles, error: profileError }] =
+      await Promise.all([
+        supabase
+          .from("team_lead_state")
+          .select("key, state")
+          .eq("key", TEAM_LEAD_SCOREBOARD_STATE_KEY)
+          .maybeSingle<TeamLeadStateRow>(),
+        supabase
+          .from("reviews")
+          .select("reviewer_id, total, completed_at, submission:submissions(author_id)")
+          .not("completed_at", "is", null)
+          .returns<ReviewScoreRow[]>(),
+        supabase.from("profiles").select("id, name").returns<ProfileRow[]>(),
+      ]);
+
+    if (stateError || reviewError || profileError) {
+      const schemaError = stateError ?? reviewError ?? profileError;
+
+      if (isSupabaseSchemaMissingError(schemaError)) {
+        console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_state / reviews / profiles"));
+        scoreboardCache = createEmptyScoreboardStore();
+        videoReviewScoreCache = new Map();
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
+        }
+        return;
+      }
+
+      if (stateError) {
+        throw new Error(stateError.message);
+      }
+      if (reviewError) {
+        throw new Error(reviewError.message);
+      }
+      throw new Error(profileError?.message ?? "점수판 데이터를 불러오지 못했습니다.");
+    }
+
+    scoreboardCache = normalizeScoreboardStore(stateRow?.state);
+    const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile.name.trim()] as const));
+    const nextVideoMap = new Map<string, number>();
+
+    (reviewRows ?? []).forEach((row) => {
+      if (!row.completed_at || !row.submission?.author_id) return;
+
+      const authorName = profileMap.get(row.submission.author_id)?.trim();
+      if (!authorName) return;
+
+      const current = nextVideoMap.get(authorName) ?? 0;
+      nextVideoMap.set(authorName, roundScore(current + (Number(row.total) || 0)));
+    });
+
+    videoReviewScoreCache = nextVideoMap;
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
+    }
+  })().finally(() => {
+    scoreboardRefreshPromise = null;
+  });
+
+  return scoreboardRefreshPromise;
 }
 
 function getManualStoreByCategory(store: TeamLeadScoreboardStore, category: TeamLeadManualScoreCategory) {
@@ -199,6 +335,7 @@ function getManualScoreCards(category: TeamLeadManualScoreCategory) {
   return names.map((name) => {
     const items = [...(manualStore[name] ?? [])];
     const manualScore = roundScore(items.reduce((sum, item) => sum + item.score, 0));
+
     return {
       name,
       baseScore: TEAM_LEAD_SCORE_BASE,
@@ -253,10 +390,12 @@ export function getFinalCutQuarterGroups() {
     const meta = getQuarterMeta(monthKey);
     const key = getQuarterKey(monthKey);
     const current = quarterMap.get(key);
+
     if (current) {
       current.monthKeys.push(monthKey);
       return;
     }
+
     quarterMap.set(key, {
       key,
       year: meta.year,
@@ -284,8 +423,10 @@ export function getSelectedFinalCutQuarterKeys() {
 export function addSelectedFinalCutQuarter(quarterKey: string) {
   const trimmedKey = quarterKey.trim();
   if (!trimmedKey) return;
+
   const store = getScoreboardStore();
   if (store.selectedFinalCutQuarterKeys.includes(trimmedKey)) return;
+
   saveScoreboardStore({
     ...store,
     selectedFinalCutQuarterKeys: [...store.selectedFinalCutQuarterKeys, trimmedKey],
@@ -295,6 +436,7 @@ export function addSelectedFinalCutQuarter(quarterKey: string) {
 export function removeSelectedFinalCutQuarter(quarterKey: string) {
   const trimmedKey = quarterKey.trim();
   if (!trimmedKey) return;
+
   const store = getScoreboardStore();
   saveScoreboardStore({
     ...store,
@@ -331,46 +473,11 @@ function getFinalCutQuarterScoreItems(card: FinalCutPersonCard | undefined, sele
 }
 
 function getContributionScoreMap() {
-  return new Map(
-    getContributionCards().map((card) => [card.name.trim(), card] as const),
-  );
+  return new Map(getContributionCards().map((card) => [card.name.trim(), card] as const));
 }
 
 function getVideoReviewScoreMap() {
-  if (typeof window === "undefined") return new Map<string, number>();
-
-  const rawSubmissions = window.localStorage.getItem(submissionStorageKey);
-  const rawReviews = window.localStorage.getItem(reviewStorageKey);
-  if (!rawSubmissions || !rawReviews) return new Map<string, number>();
-
-  try {
-    const submissions = JSON.parse(rawSubmissions) as SubmissionEntry[];
-    const reviewState = JSON.parse(rawReviews) as Record<string, ReviewStateEntry>;
-    const scoreMap = new Map<string, number>();
-
-    submissions.forEach((entry) => {
-      const state = reviewState[entry.submitter];
-      if (!state?.done) return;
-
-      const checked = Array.isArray(state.checked) ? state.checked : [];
-      const baseScore = entry.cards.reduce((total, card) => {
-        const sections = reportTemplates[card.type] ?? [];
-        return (
-          total +
-          sections
-            .flatMap((section) => section.criteria)
-            .filter((criterion) => checked.includes(criterion.id))
-            .reduce((sum, criterion) => sum + criterion.score, 0)
-        );
-      }, 0);
-
-      scoreMap.set(entry.submitter.trim(), roundScore(baseScore + (Number(state.bonus) || 0)));
-    });
-
-    return scoreMap;
-  } catch {
-    return new Map<string, number>();
-  }
+  return new Map(videoReviewScoreCache);
 }
 
 export function getOverallScoreCards() {
@@ -407,4 +514,3 @@ export function getOverallScoreCards() {
     })
     .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"));
 }
-

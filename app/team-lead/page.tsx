@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function TeamLeadPage() {
-  redirect("/team-lead/contribution");
+  redirect("/team-lead/special-report");
 }

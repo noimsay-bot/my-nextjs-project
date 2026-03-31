@@ -8,9 +8,16 @@ import {
 } from "@/lib/schedule/engine";
 import { readStoredScheduleState, saveScheduleState } from "@/lib/schedule/storage";
 import { GeneratedSchedule, VacationType } from "@/lib/schedule/types";
+import {
+  getPortalSession,
+  getPortalSupabaseClient,
+  getSupabaseStorageErrorMessage,
+  isSupabaseSchemaMissingError,
+} from "@/lib/supabase/portal";
 
 export const VACATION_STORAGE_KEY = "j-special-force-vacations-v1";
 export const VACATION_EVENT = "j-special-force-vacations-changed";
+export const VACATION_STATUS_EVENT = "j-special-force-vacations-status";
 export const DEFAULT_VACATION_CAPACITY = 5;
 
 export interface VacationRequest {
@@ -38,10 +45,47 @@ export interface VacationMonthState {
   appliedAt: string | null;
 }
 
+export interface VacationLotteryResult {
+  ok: boolean;
+  monthState: VacationMonthState | null;
+  applicantCount: number;
+  winnerCount: number;
+  message: string;
+}
+
 export interface VacationStore {
   requests: VacationRequest[];
   months: Record<string, VacationMonthState>;
 }
+
+interface VacationRequestRow {
+  id: string;
+  requester_id: string;
+  requester_name: string;
+  type: VacationType;
+  year: number;
+  month: number;
+  month_key: string;
+  requested_dates: string[] | null;
+  raw_dates: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface VacationMonthRow {
+  month_key: string;
+  managed_date_keys: string[] | null;
+  limits: Record<string, number> | null;
+  annual_winners: Record<string, string[]> | null;
+  compensatory_winners: Record<string, string[]> | null;
+  applied_at: string | null;
+  updated_at: string;
+}
+
+let vacationStoreCache = createEmptyStore();
+let vacationRefreshPromise: Promise<VacationStore> | null = null;
+let vacationPersistPromise: Promise<{ ok: boolean; message?: string }> | null = null;
 
 function nowLabel() {
   return new Date().toLocaleString("ko-KR");
@@ -149,22 +193,201 @@ function sanitizeVacationStore(input?: Partial<VacationStore> | null): VacationS
 }
 
 function readStore() {
-  if (typeof window === "undefined") return createEmptyStore();
-  const raw = window.localStorage.getItem(VACATION_STORAGE_KEY);
-  if (!raw) return createEmptyStore();
+  return sanitizeVacationStore(vacationStoreCache);
+}
 
-  try {
-    return sanitizeVacationStore(JSON.parse(raw) as Partial<VacationStore>);
-  } catch {
-    return createEmptyStore();
+function emitVacationEvent() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(VACATION_EVENT));
+}
+
+function emitVacationStatus(detail: { ok: boolean; message: string }) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(VACATION_STATUS_EVENT, { detail }));
+}
+
+function rowToVacationRequest(row: VacationRequestRow): VacationRequest {
+  return {
+    id: row.id,
+    requesterId: row.requester_id,
+    requesterName: row.requester_name,
+    type: row.type,
+    year: row.year,
+    month: row.month,
+    monthKey: row.month_key,
+    dates: uniqueDateKeys(Array.isArray(row.requested_dates) ? row.requested_dates : []),
+    rawDates: row.raw_dates,
+    createdAt: row.created_at,
+  };
+}
+
+function rowToVacationMonthState(row: VacationMonthRow) {
+  const [yearText, monthText] = row.month_key.split("-");
+  return sanitizeMonthState(
+    {
+      monthKey: row.month_key,
+      managedDateKeys: row.managed_date_keys ?? [],
+      limits: row.limits ?? {},
+      annualWinners: row.annual_winners ?? {},
+      compensatoryWinners: row.compensatory_winners ?? {},
+      appliedAt: row.applied_at,
+      updatedAt: row.updated_at,
+    },
+    Number(yearText),
+    Number(monthText),
+  );
+}
+
+function cloneVacationStore(store: VacationStore) {
+  const sanitized = sanitizeVacationStore(store);
+  return JSON.parse(JSON.stringify(sanitized)) as VacationStore;
+}
+
+async function persistVacationStore(store: VacationStore) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
   }
+
+  const supabase = await getPortalSupabaseClient();
+  const sanitized = sanitizeVacationStore(store);
+
+  const requestRows = sanitized.requests.map((request) => ({
+    id: request.id,
+    requester_id: request.requesterId ?? session.id,
+    requester_name: request.requesterName,
+    type: request.type,
+    year: request.year,
+    month: request.month,
+    month_key: request.monthKey,
+    requested_dates: request.dates,
+    raw_dates: request.rawDates,
+    status: "submitted",
+  }));
+
+  const monthRows = Object.values(sanitized.months).map((month) => ({
+    month_key: month.monthKey,
+    managed_date_keys: month.managedDateKeys,
+    limits: month.limits,
+    annual_winners: month.annualWinners,
+    compensatory_winners: month.compensatoryWinners,
+    applied_at: month.appliedAt,
+  }));
+
+  const [{ data: existingRequests, error: requestSelectError }, { error: requestUpsertError }, { error: monthUpsertError }] =
+    await Promise.all([
+      supabase.from("vacation_requests").select("id"),
+      requestRows.length > 0 ? supabase.from("vacation_requests").upsert(requestRows) : Promise.resolve({ error: null }),
+      monthRows.length > 0 ? supabase.from("vacation_months").upsert(monthRows) : Promise.resolve({ error: null }),
+    ]);
+
+  if (requestSelectError) {
+    throw new Error(getSupabaseStorageErrorMessage(requestSelectError, "vacation_requests"));
+  }
+  if (requestUpsertError) {
+    throw new Error(getSupabaseStorageErrorMessage(requestUpsertError, "vacation_requests"));
+  }
+  if (monthUpsertError) {
+    throw new Error(getSupabaseStorageErrorMessage(monthUpsertError, "vacation_months"));
+  }
+
+  const staleRequestIds = (existingRequests ?? [])
+    .map((row) => row.id as string)
+    .filter((id) => !requestRows.some((request) => request.id === id));
+
+  if (staleRequestIds.length > 0) {
+    const { error: deleteError } = await supabase.from("vacation_requests").delete().in("id", staleRequestIds);
+    if (deleteError) {
+      throw new Error(getSupabaseStorageErrorMessage(deleteError, "vacation_requests"));
+    }
+  }
+
+  return cloneVacationStore(sanitized);
 }
 
 function writeStore(store: VacationStore) {
-  if (typeof window === "undefined") return;
-  const sanitized = sanitizeVacationStore(store);
-  window.localStorage.setItem(VACATION_STORAGE_KEY, JSON.stringify(sanitized));
-  window.dispatchEvent(new Event(VACATION_EVENT));
+  const previous = cloneVacationStore(vacationStoreCache);
+  vacationStoreCache = cloneVacationStore(store);
+  emitVacationEvent();
+
+  vacationPersistPromise = persistVacationStore(vacationStoreCache)
+    .then((persistedStore) => {
+      vacationStoreCache = cloneVacationStore(persistedStore);
+      emitVacationEvent();
+      return { ok: true as const };
+    })
+    .catch(async () => {
+      const message = "휴가 데이터 저장에 실패했습니다. DB 기준 상태로 복구합니다.";
+      emitVacationStatus({
+        ok: false,
+        message,
+      });
+      vacationStoreCache = previous;
+      emitVacationEvent();
+      await refreshVacationStore();
+      return { ok: false as const, message };
+    })
+    .finally(() => {
+      vacationPersistPromise = null;
+    });
+}
+
+export async function waitForVacationStoreWrite() {
+  return vacationPersistPromise ?? { ok: true as const };
+}
+
+export async function refreshVacationStore() {
+  if (vacationRefreshPromise) {
+    return vacationRefreshPromise;
+  }
+
+  vacationRefreshPromise = (async () => {
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      vacationStoreCache = createEmptyStore();
+      emitVacationEvent();
+      return cloneVacationStore(vacationStoreCache);
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const [{ data: requestRows, error: requestError }, { data: monthRows, error: monthError }] = await Promise.all([
+      supabase
+        .from("vacation_requests")
+        .select("id, requester_id, requester_name, type, year, month, month_key, requested_dates, raw_dates, status, created_at, updated_at")
+        .order("created_at", { ascending: false })
+        .returns<VacationRequestRow[]>(),
+      supabase
+        .from("vacation_months")
+        .select("month_key, managed_date_keys, limits, annual_winners, compensatory_winners, applied_at, updated_at")
+        .returns<VacationMonthRow[]>(),
+    ]);
+
+    if (requestError || monthError) {
+      const schemaError = requestError ?? monthError;
+      if (isSupabaseSchemaMissingError(schemaError)) {
+        console.warn(getSupabaseStorageErrorMessage(schemaError, "vacation_requests / vacation_months"));
+        vacationStoreCache = createEmptyStore();
+        emitVacationEvent();
+        return cloneVacationStore(vacationStoreCache);
+      }
+
+      if (requestError) {
+        throw new Error(requestError.message);
+      }
+      throw new Error(monthError?.message ?? "휴가 데이터를 불러오지 못했습니다.");
+    }
+
+    vacationStoreCache = sanitizeVacationStore({
+      requests: (requestRows ?? []).map((row) => rowToVacationRequest(row)),
+      months: Object.fromEntries((monthRows ?? []).map((row) => [row.month_key, rowToVacationMonthState(row)])),
+    });
+    emitVacationEvent();
+    return cloneVacationStore(vacationStoreCache);
+  })().finally(() => {
+    vacationRefreshPromise = null;
+  });
+
+  return vacationRefreshPromise;
 }
 
 function readScheduleState() {
@@ -407,6 +630,10 @@ function hasLotteryResults(winners: Record<string, string[]>) {
   return Object.values(winners).some((names) => names.length > 0);
 }
 
+function countWinnerMapEntries(winners: Record<string, string[]>) {
+  return Object.values(winners).reduce((sum, names) => sum + uniqueNames(names ?? []).length, 0);
+}
+
 function serializeVacationMap(map: Record<string, string[]>) {
   return Object.keys(map)
     .sort((left, right) => left.localeCompare(right))
@@ -610,10 +837,10 @@ export function seedVacationSimulationRequests(year: number, month: number) {
 
   synced.managedDateKeys.forEach((dateKey) => {
     const shuffledNames = shuffleList(people);
-    const annualCount = Math.min(randomBetween(2, 4), shuffledNames.length);
+    const annualCount = Math.min(randomBetween(1, 5), shuffledNames.length);
     const annualNames = shuffledNames.slice(0, annualCount);
     const remainingNames = shuffledNames.filter((name) => !annualNames.includes(name));
-    const compensatoryCount = Math.min(randomBetween(4, 9), remainingNames.length);
+    const compensatoryCount = Math.min(10, remainingNames.length);
     const compensatoryNames = remainingNames.slice(0, compensatoryCount);
 
     annualNames.forEach((name) => {
@@ -747,9 +974,9 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
   const nextCompensatoryWinners: Record<string, string[]> = {};
 
   monthState.managedDateKeys.forEach((dateKey) => {
-    const annualWinners = uniqueNames(nextAnnualWinners[dateKey] ?? annualApplicants[dateKey] ?? []);
+    const annualWinners = uniqueNames(nextAnnualWinners[dateKey] ?? []);
     const remainingCapacity = Math.max(0, getMonthCapacity(monthState, dateKey) - annualWinners.length);
-    const applicants = compensatoryApplicants[dateKey] ?? [];
+    const applicants = uniqueNames((compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name)));
 
     if (remainingCapacity === 0) {
       nextCompensatoryWinners[dateKey] = [];
@@ -764,6 +991,56 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
     nextCompensatoryWinners[dateKey] = shuffleNames(applicants)
       .slice(0, remainingCapacity)
       .sort((left, right) => left.localeCompare(right));
+  });
+
+  monthState.annualWinners = nextAnnualWinners;
+  monthState.compensatoryWinners = nextCompensatoryWinners;
+  monthState.updatedAt = nowLabel();
+  writeStore(store);
+  return monthState;
+}
+
+export function runVacationLottery(year: number, month: number) {
+  const store = readStore();
+  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const monthState = synced.monthState;
+  if (!monthState) return null;
+  if (hasLotteryResults(monthState.annualWinners) || hasLotteryResults(monthState.compensatoryWinners)) {
+    return monthState;
+  }
+
+  const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
+  const compensatoryApplicants = getApplicantsByType(store, monthState.monthKey, "대휴");
+  const nextAnnualWinners: Record<string, string[]> = {};
+  const nextCompensatoryWinners: Record<string, string[]> = {};
+
+  monthState.managedDateKeys.forEach((dateKey) => {
+    const annualCandidates = uniqueNames(annualApplicants[dateKey] ?? []);
+    const capacity = getMonthCapacity(monthState, dateKey);
+
+    const annualWinners =
+      annualCandidates.length <= capacity
+        ? [...annualCandidates]
+        : shuffleNames(annualCandidates)
+            .slice(0, capacity)
+            .sort((left, right) => left.localeCompare(right));
+
+    nextAnnualWinners[dateKey] = annualWinners;
+
+    const remainingCapacity = Math.max(0, capacity - annualWinners.length);
+    const compensatoryCandidates = uniqueNames((compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name)));
+
+    if (remainingCapacity === 0) {
+      nextCompensatoryWinners[dateKey] = [];
+      return;
+    }
+
+    nextCompensatoryWinners[dateKey] =
+      compensatoryCandidates.length <= remainingCapacity
+        ? [...compensatoryCandidates]
+        : shuffleNames(compensatoryCandidates)
+            .slice(0, remainingCapacity)
+            .sort((left, right) => left.localeCompare(right));
   });
 
   monthState.annualWinners = nextAnnualWinners;
@@ -815,7 +1092,12 @@ export function applyVacationMonthToSchedule(year: number, month: number) {
       : applyVacationEntriesToGeneratedSchedule(scheduleState.generated, approvedMap, scheduleMonthDateSet);
   }
 
-  saveScheduleState(scheduleState);
+  void saveScheduleState(scheduleState).catch((error) => {
+    emitVacationStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "휴가 반영 후 근무표 저장에 실패했습니다. 다시 불러와 주세요.",
+    });
+  });
 
   monthState.appliedAt = nowLabel();
   monthState.updatedAt = nowLabel();

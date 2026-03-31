@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { SCHEDULE_MONTHS, SCHEDULE_YEARS, STORAGE_KEY, categories, defaultScheduleState, getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getScheduleCategoryLabel, orderCategories } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -12,6 +12,7 @@ import {
   getScheduleChangeRequests,
   getRequestRoute,
   isPendingRef,
+  refreshScheduleChangeRequests,
   resolveScheduleChangeRequest,
 } from "@/lib/schedule/change-requests";
 import { syncVacationMonthSheetFromGeneratedSchedule } from "@/lib/vacation/storage";
@@ -37,8 +38,11 @@ import {
   updateDayHeaderName,
   updateManualAssignment,
 } from "@/lib/schedule/engine";
-import { getPublishedSchedules, publishSchedule, PublishedScheduleItem } from "@/lib/schedule/published";
-import { saveScheduleState } from "@/lib/schedule/storage";
+import { getPublishedSchedules, publishSchedule, PublishedScheduleItem, refreshPublishedSchedules } from "@/lib/schedule/published";
+import { PUBLISHED_SCHEDULES_STATUS_EVENT } from "@/lib/schedule/published";
+import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
+import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
+import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
 import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -267,44 +271,69 @@ export function ScheduleApp() {
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
 
-  const loadState = () => {
-    if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        editBackupRef.current = null;
-        setState(sanitizeScheduleState(JSON.parse(raw) as Partial<ScheduleState>));
-        return;
-      } catch {
-        editBackupRef.current = null;
-        setState(defaultScheduleState);
-        return;
-      }
+  const loadState = async () => {
+    try {
+      const nextState = await refreshScheduleState();
+      editBackupRef.current = null;
+      setState(nextState);
+    } catch {
+      editBackupRef.current = null;
+      setState(readStoredScheduleState() ?? defaultScheduleState);
     }
-    editBackupRef.current = null;
-    setState(defaultScheduleState);
   };
 
-  const loadRequests = () => {
-    setRequests(getScheduleChangeRequests());
+  const loadRequests = async () => {
+    try {
+      await refreshScheduleChangeRequests();
+    } finally {
+      setRequests(getScheduleChangeRequests());
+    }
   };
 
-  const loadPublishedItems = () => {
-    setPublishedItems(getPublishedSchedules());
+  const loadPublishedItems = async () => {
+    try {
+      await refreshPublishedSchedules();
+    } finally {
+      setPublishedItems(getPublishedSchedules());
+    }
   };
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    loadState();
-    loadRequests();
-    loadPublishedItems();
-    setLoaded(true);
+    let active = true;
+    void Promise.all([loadState(), loadRequests(), loadPublishedItems()]).finally(() => {
+      if (active) {
+        setLoaded(true);
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!loaded || typeof window === "undefined") return;
-    saveScheduleState(state);
+    void saveScheduleState(state).catch(() => undefined);
   }, [loaded, state]);
+
+  useEffect(() => {
+    const handleStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
+
+    window.addEventListener(SCHEDULE_PERSIST_STATUS_EVENT, handleStatus);
+    window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, handleStatus);
+    window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, handleStatus);
+    window.addEventListener(VACATION_STATUS_EVENT, handleStatus);
+
+    return () => {
+      window.removeEventListener(SCHEDULE_PERSIST_STATUS_EVENT, handleStatus);
+      window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, handleStatus);
+      window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, handleStatus);
+      window.removeEventListener(VACATION_STATUS_EVENT, handleStatus);
+    };
+  }, []);
 
   useEffect(() => {
     if (!session?.username) return;
@@ -316,15 +345,11 @@ export function ScheduleApp() {
 
   useEffect(() => {
     const onRefresh = () => {
-      loadRequests();
-      loadState();
-      loadPublishedItems();
+      void Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
     };
-    window.addEventListener("storage", onRefresh);
     window.addEventListener("focus", onRefresh);
     window.addEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
     return () => {
-      window.removeEventListener("storage", onRefresh);
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
     };
@@ -727,11 +752,11 @@ export function ScheduleApp() {
     setMessage({ tone: "ok", text: "현재 저장 상태 JSON을 내려받았습니다." });
   };
 
-  const confirmPublish = () => {
+  const confirmPublish = async () => {
     const target = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
-    const published = publishSchedule(target);
-    loadPublishedItems();
+    const published = await publishSchedule(target);
+    await loadPublishedItems();
     setPublishOpen(false);
     setMessage({ tone: "ok", text: `${published.title}를 홈화면에 게시했습니다.` });
   };
@@ -872,16 +897,16 @@ export function ScheduleApp() {
                           <button
                             className="btn primary"
                             onClick={() => {
-                              const result = resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
-                              loadRequests();
-                              loadState();
-                              loadPublishedItems();
-                              setMessage({
-                                tone: result.applied ? "ok" : "warn",
-                                text: result.applied
-                                  ? "근무 변경 요청을 승인했고 적용 기록도 저장했습니다."
-                                  : "근무 변경 요청은 승인했지만 실제 반영은 실패했습니다.",
-                              });
+                              void (async () => {
+                                const result = await resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
+                                await Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+                                setMessage({
+                                  tone: result.applied ? "ok" : "warn",
+                                  text: result.applied
+                                    ? "근무 변경 요청을 승인했고 적용 기록도 저장했습니다."
+                                    : "근무 변경 요청은 승인했지만 실제 반영은 실패했습니다.",
+                                });
+                              })();
                             }}
                           >
                             승인
@@ -889,9 +914,11 @@ export function ScheduleApp() {
                           <button
                             className="btn"
                             onClick={() => {
-                              resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
-                              loadRequests();
-                              setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
+                              void (async () => {
+                                await resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
+                                await loadRequests();
+                                setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
+                              })();
                             }}
                           >
                             거절
@@ -901,10 +928,12 @@ export function ScheduleApp() {
                             onClick={() => {
                               const ok = window.confirm("이 근무 수정 요청을 삭제하시겠습니까?");
                               if (!ok) return;
-                              const result = deleteScheduleChangeRequest(request.id);
-                              if (!result.ok) return;
-                              loadRequests();
-                              setMessage({ tone: "note", text: "근무 변경 요청을 삭제했습니다." });
+                              void (async () => {
+                                const result = await deleteScheduleChangeRequest(request.id);
+                                if (!result.ok) return;
+                                await loadRequests();
+                                setMessage({ tone: "note", text: "근무 변경 요청을 삭제했습니다." });
+                              })();
                             }}
                           >
                             삭제
@@ -958,16 +987,16 @@ export function ScheduleApp() {
                             <button
                               className="btn"
                               onClick={() => {
-                                const result = resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
-                                loadRequests();
-                                loadState();
-                                loadPublishedItems();
-                                setMessage({
-                                  tone: result.applied ? "note" : "warn",
-                                  text: result.applied
-                                    ? "승인된 근무 변경을 취소하고 원래 상태로 되돌렸습니다."
-                                    : "수락 취소 기록은 남겼지만 실제 롤백은 실패했습니다.",
-                                });
+                                void (async () => {
+                                  const result = await resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
+                                  await Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+                                  setMessage({
+                                    tone: result.applied ? "note" : "warn",
+                                    text: result.applied
+                                      ? "승인된 근무 변경을 취소하고 원래 상태로 되돌렸습니다."
+                                      : "수락 취소 기록은 남겼지만 실제 롤백은 실패했습니다.",
+                                  });
+                                })();
                               }}
                             >
                               수락 취소
@@ -977,10 +1006,12 @@ export function ScheduleApp() {
                               onClick={() => {
                                 const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
                                 if (!ok) return;
-                                const result = deleteScheduleChangeRequest(request.id);
-                                if (!result.ok) return;
-                                loadRequests();
-                                setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                                void (async () => {
+                                  const result = await deleteScheduleChangeRequest(request.id);
+                                  if (!result.ok) return;
+                                  await loadRequests();
+                                  setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                                })();
                               }}
                             >
                               삭제
@@ -993,10 +1024,12 @@ export function ScheduleApp() {
                               onClick={() => {
                                 const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
                                 if (!ok) return;
-                                const result = deleteScheduleChangeRequest(request.id);
-                                if (!result.ok) return;
-                                loadRequests();
-                                setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                                void (async () => {
+                                  const result = await deleteScheduleChangeRequest(request.id);
+                                  if (!result.ok) return;
+                                  await loadRequests();
+                                  setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                                })();
                               }}
                             >
                               삭제
@@ -1577,7 +1610,7 @@ export function ScheduleApp() {
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
             <div className="chip">순번 입력</div>
-            {categories.map((category) => {
+            {orderCategories.map((category) => {
               const categoryPeople = getCategoryPeople(state, category.key);
               const isOffEditing = orderOffEditor?.categoryKey === category.key;
               const effectiveOffNames = getEffectiveOffByCategory(state, category.key);
@@ -1602,7 +1635,7 @@ export function ScheduleApp() {
                 </div>
                 {isOffEditing ? (
                   <div style={{ display: "grid", gap: 10 }}>
-                    <div className="status note">이름을 누르면 해당 근무유형의 오프로 저장됩니다. 사본 보관함 아래 기본 오프를 기준으로 더하거나 빼서 조절할 수 있습니다.</div>
+                    <div className="status note">이름을 누르면 해당 근무유형의 오프로 저장됩니다. 아래 기본 오프 인원을 기준으로 더하거나 빼서 조절할 수 있습니다.</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {categoryPeople.length > 0 ? (
                         categoryPeople.map((name) => {
@@ -1711,48 +1744,44 @@ export function ScheduleApp() {
         </section>
       </section>
 
-      <section style={{ display: "grid", gap: 16 }}>
-        <section className="panel">
-          <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div className="chip">사본 보관함</div>
-            {originalSnapshotEntries.length > 0 ? (
-              originalSnapshotEntries.map(({ monthKey, snapshot }) => (
-                <div key={snapshot.id} style={{ padding: 12, borderRadius: 14, border: "1px solid var(--line)", display: "grid", gap: 8 }}>
-                  <strong>{monthKey} 원본</strong>
-                  <div className="muted" style={{ marginTop: 6 }}>{snapshot.createdAt}</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                    <button className="btn" disabled={isEditingDate} onClick={() => setOriginalPreviewSnapshot(snapshot)}>
-                      열기
-                    </button>
-                    <button className="btn" disabled={isEditingDate} onClick={() => printOriginalSnapshot(snapshot)}>
-                      출력
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="status note">아직 저장된 원본이 없습니다.</div>
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <section style={{ display: "grid", gap: 10, width: "756px", maxWidth: "100%", justifySelf: "start" }}>
+        <section className="panel" style={{ width: "100%" }}>
+          <div className="panel-pad" style={{ display: "grid", gap: 4, padding: "8px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <div className="chip">기본 오프 인원</div>
               {globalOffEditor ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn primary" disabled={isEditingDate} onClick={saveGlobalOffEdit}>저장</button>
-                  <button className="btn" disabled={isEditingDate} onClick={cancelGlobalOffEdit}>취소</button>
+                  <button className="btn primary" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={saveGlobalOffEdit}>저장</button>
+                  <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={cancelGlobalOffEdit}>취소</button>
                 </div>
               ) : (
-                <button className="btn" disabled={isEditingDate} onClick={startGlobalOffEdit}>수정</button>
+                <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={startGlobalOffEdit}>수정</button>
               )}
             </div>
 
-            <div className="status note">여기서 고른 인원은 전체 순번에서 기본 오프로 표시됩니다. 각 근무유형의 `수정`에서 근무별 오프를 따로 조절할 수 있습니다.</div>
+            <div
+              style={{
+                padding: "12px 16px",
+                borderRadius: 20,
+                border: "1px solid rgba(255,255,255,.08)",
+                background: "rgba(255,255,255,.04)",
+                color: "#e5edf7",
+                fontSize: 14,
+                fontWeight: 700,
+                lineHeight: 1.55,
+              }}
+            >
+              여기서 고른 인원은 전체 순번에서 기본 오프로 표시됩니다. 각 근무유형의 `수정`에서 근무별 오프를 따로 조절할 수 있습니다.
+            </div>
 
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+                alignContent: "flex-start",
+              }}
+            >
               {uniquePeople.length > 0 ? (
                 uniquePeople.map((name) => {
                   const selected = (globalOffEditor?.selectedNames ?? state.offPeople).includes(name);
@@ -1776,6 +1805,8 @@ export function ScheduleApp() {
                       }
                       style={{
                         padding: "8px 12px",
+                        fontSize: 13,
+                        lineHeight: 1.2,
                         borderColor: selected ? "rgba(239,68,68,.55)" : undefined,
                         background: selected ? "rgba(239,68,68,.24)" : undefined,
                         color: selected ? "#ffd7d7" : undefined,
@@ -1790,6 +1821,30 @@ export function ScheduleApp() {
                 <span className="muted">순번에 등록된 이름이 없습니다.</span>
               )}
             </div>
+          </div>
+        </section>
+
+        <section className="panel" style={{ width: "100%" }}>
+          <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
+            <div className="chip">사본 보관함</div>
+            {originalSnapshotEntries.length > 0 ? (
+              originalSnapshotEntries.map(({ monthKey, snapshot }) => (
+                <div key={snapshot.id} style={{ padding: 12, borderRadius: 14, border: "1px solid var(--line)", display: "grid", gap: 8 }}>
+                  <strong>{monthKey} 원본</strong>
+                  <div className="muted" style={{ marginTop: 6 }}>{snapshot.createdAt}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                    <button className="btn" disabled={isEditingDate} onClick={() => setOriginalPreviewSnapshot(snapshot)}>
+                      열기
+                    </button>
+                    <button className="btn" disabled={isEditingDate} onClick={() => printOriginalSnapshot(snapshot)}>
+                      출력
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="status note">아직 저장된 원본이 없습니다.</div>
+            )}
           </div>
         </section>
 

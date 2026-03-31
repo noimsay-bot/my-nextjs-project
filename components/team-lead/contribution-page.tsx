@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
-import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
-import { SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
+import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   ContributionManualItem,
   ContributionPersonCard,
@@ -11,6 +11,8 @@ import {
   getContributionPeriod,
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+  TEAM_LEAD_STORAGE_STATUS_EVENT,
+  refreshTeamLeadState,
   updateContributionManualItems,
 } from "@/lib/team-lead/storage";
 
@@ -85,10 +87,12 @@ export function ContributionPage() {
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [manualDrafts, setManualDrafts] = useState<ManualEditorState>({});
+  const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
   const period = useMemo(() => getContributionPeriod(), []);
 
   useEffect(() => {
-    const refresh = () => {
+    const refresh = async () => {
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
       const users = getUsers();
       const hiddenNames = getHiddenContributionCardNames();
       const contributionCards = getContributionCards();
@@ -114,21 +118,26 @@ export function ContributionPage() {
       );
     };
 
-    refresh();
-    window.addEventListener("storage", refresh);
+    void refresh();
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
     window.addEventListener("focus", refresh);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
     window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("storage", refresh);
       window.removeEventListener("focus", refresh);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
       window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, []);
 
@@ -172,6 +181,7 @@ export function ContributionPage() {
       .filter((item) => item.label);
 
     updateContributionManualItems(editingName, items);
+    setMessage({ tone: "ok", text: "기여도 수동 점수를 저장했습니다." });
     setEditingName(null);
     setManualDrafts((current) => {
       const next = { ...current };
@@ -190,6 +200,7 @@ export function ContributionPage() {
             기준 기간은 {period.startLabel}부터 {period.endLabel}까지입니다. 자동 점수는 일정배정의
             출근/퇴근 시간과 가점을 합산해 반영합니다.
           </div>
+          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
 

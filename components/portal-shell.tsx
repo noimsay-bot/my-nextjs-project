@@ -1,33 +1,79 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { getSession, logoutUser } from "@/lib/auth/storage";
+import {
+  getSession,
+  initializeAuth,
+  logoutUser,
+  subscribeToAuth,
+} from "@/lib/auth/storage";
 
 const links = [
   { href: "/", label: "홈" },
-  { href: "/vacation", label: "휴가 신청" },
+  { href: "/vacation", label: "휴가 요청" },
+  { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/schedule", label: "DESK" },
-  { href: "/submissions", label: "영상평가심사 제출" },
-  { href: "/review", label: "영상평가심사" },
+  { href: "/review", label: "베스트리포트 평가" },
   { href: "/team-lead", label: "팀장" },
   { href: "/admin", label: "관리자" },
 ];
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const session = getSession();
   const isLogin = pathname === "/login";
+  const [session, setSession] = useState(() => getSession());
+
+  useEffect(() => {
+    let mounted = true;
+
+    void initializeAuth().then((nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession);
+    });
+
+    const unsubscribe = subscribeToAuth((nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession);
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
   const visibleLinks = (() => {
     switch (session?.role) {
       case "member":
         return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
       case "reviewer":
-        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions" || link.href === "/review");
+        return links.filter(
+          (link) =>
+            link.href === "/" ||
+            link.href === "/vacation" ||
+            link.href === "/submissions" ||
+            link.href === "/review",
+        );
       case "desk":
-        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions" || link.href === "/schedule");
+        return links.filter(
+          (link) =>
+            link.href === "/" ||
+            link.href === "/vacation" ||
+            link.href === "/submissions" ||
+            link.href === "/review" ||
+            link.href === "/schedule",
+        );
       case "team_lead":
-        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions" || link.href === "/team-lead");
+        return links.filter(
+          (link) =>
+            link.href === "/" ||
+            link.href === "/vacation" ||
+            link.href === "/submissions" ||
+            link.href === "/review" ||
+            link.href === "/team-lead",
+        );
       case "admin":
         return links;
       default:
@@ -68,8 +114,8 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                 </span>
                 <button
                   className="btn"
-                  onClick={() => {
-                    logoutUser();
+                  onClick={async () => {
+                    await logoutUser();
                     window.location.href = "/login";
                   }}
                 >

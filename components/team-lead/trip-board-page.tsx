@@ -2,9 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
+import { refreshScheduleState } from "@/lib/schedule/storage";
 import {
   AssignmentTravelType,
   getTeamLeadTripCards,
+  TEAM_LEAD_CONTRIBUTION_EVENT,
+  TEAM_LEAD_FINAL_CUT_EVENT,
+  TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+  refreshTeamLeadState,
   TeamLeadTripPersonCard,
 } from "@/lib/team-lead/storage";
 
@@ -29,20 +34,35 @@ export function TripBoardPage({
   const [cards, setCards] = useState<TeamLeadTripPersonCard[]>([]);
 
   useEffect(() => {
-    const tripCards = getTeamLeadTripCards(travelTypes);
-    if (!showAllUsers) {
-      setCards(tripCards);
-      return;
-    }
+    const refresh = async () => {
+      await Promise.all([refreshScheduleState(), refreshTeamLeadState()]);
+      const tripCards = getTeamLeadTripCards(travelTypes);
+      if (!showAllUsers) {
+        setCards(tripCards);
+        return;
+      }
 
-    const cardMap = new Map(tripCards.map((card) => [card.name, card] as const));
-    const merged = getUsers()
-      .map((user) => user.username)
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right, "ko"))
-      .map((name) => cardMap.get(name) ?? { name, items: [] });
+      const cardMap = new Map(tripCards.map((card) => [card.name, card] as const));
+      const merged = getUsers()
+        .map((user) => user.username)
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right, "ko"))
+        .map((name) => cardMap.get(name) ?? { name, items: [] });
 
-    setCards(merged);
+      setCards(merged);
+    };
+
+    void refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+    };
   }, [showAllUsers, travelTypes]);
 
   return (

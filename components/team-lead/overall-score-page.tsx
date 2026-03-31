@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
-import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
-import { SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
+import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   addSelectedFinalCutQuarter,
   FinalCutQuarterGroup,
@@ -11,6 +11,7 @@ import {
   getOverallScoreCards,
   getSelectedFinalCutQuarterKeys,
   removeSelectedFinalCutQuarter,
+  refreshScoreboardState,
   TEAM_LEAD_SCOREBOARD_EVENT,
   TeamLeadOverallScoreCard,
 } from "@/lib/team-lead/scoreboard";
@@ -18,6 +19,8 @@ import {
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_FINAL_CUT_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+  TEAM_LEAD_STORAGE_STATUS_EVENT,
+  refreshTeamLeadState,
 } from "@/lib/team-lead/storage";
 
 function formatScore(score: number) {
@@ -29,16 +32,22 @@ export function OverallScorePage() {
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [quarterGroups, setQuarterGroups] = useState<FinalCutQuarterGroup[]>([]);
   const [selectedQuarterKeys, setSelectedQuarterKeys] = useState<string[]>([]);
+  const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   useEffect(() => {
-    const refresh = () => {
+    const refresh = async () => {
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState(), refreshScoreboardState()]);
       setCards(getOverallScoreCards());
       setQuarterGroups(getFinalCutQuarterGroups());
       setSelectedQuarterKeys(getSelectedFinalCutQuarterKeys());
     };
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
 
-    refresh();
-    window.addEventListener("storage", refresh);
+    void refresh();
     window.addEventListener("focus", refresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
@@ -46,9 +55,9 @@ export function OverallScorePage() {
     window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
     window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
     window.addEventListener(TEAM_LEAD_SCOREBOARD_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("storage", refresh);
       window.removeEventListener("focus", refresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
@@ -56,6 +65,7 @@ export function OverallScorePage() {
       window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
       window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
       window.removeEventListener(TEAM_LEAD_SCOREBOARD_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, []);
 
@@ -72,8 +82,10 @@ export function OverallScorePage() {
           <div className="chip">종합 점수</div>
           <strong style={{ fontSize: 24 }}>종합 점수</strong>
           <div className="status note">
-            회원가입된 인원을 기준으로 기여도, 영상평가, 정제본, 방송사고, LIVE무사고 점수를 합산합니다. 정제본은 선택한 분기만 반영됩니다.
+            활성 사용자 기준으로 기여도, 베스트리포트 평가, 정제본, 방송사고, LIVE 무사고 점수를 합산합니다.
+            정제본 점수는 선택한 분기만 반영됩니다.
           </div>
+          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
 
@@ -148,9 +160,14 @@ export function OverallScorePage() {
                             type="button"
                             className={`btn ${selected ? "white" : ""}`}
                             style={{ padding: "6px 10px", fontSize: 12 }}
-                            onClick={() =>
-                              selected ? removeSelectedFinalCutQuarter(group.key) : addSelectedFinalCutQuarter(group.key)
-                            }
+                            onClick={() => {
+                              if (selected) {
+                                removeSelectedFinalCutQuarter(group.key);
+                              } else {
+                                addSelectedFinalCutQuarter(group.key);
+                              }
+                              setMessage({ tone: "ok", text: "정제본 반영 분기를 저장했습니다." });
+                            }}
                           >
                             {selected ? "제외" : "추가"} | {formatFinalCutQuarterLabel(group)}
                           </button>
@@ -195,7 +212,7 @@ export function OverallScorePage() {
                       background: "rgba(15,23,42,.16)",
                     }}
                   >
-                    <strong>영상평가</strong>
+                    <strong>베스트리포트 평가</strong>
                     <strong>{formatScore(card.videoReviewScore)}점</strong>
                   </div>
 
@@ -255,3 +272,4 @@ export function OverallScorePage() {
     </section>
   );
 }
+

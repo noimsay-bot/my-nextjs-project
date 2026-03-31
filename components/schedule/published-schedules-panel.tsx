@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession, hasDeskAccess } from "@/lib/auth/storage";
@@ -7,12 +7,21 @@ import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
+  CHANGE_REQUESTS_STATUS_EVENT,
   createScheduleChangeRequest,
   getScheduleChangeRequests,
   isPendingRef,
+  refreshScheduleChangeRequests,
 } from "@/lib/schedule/change-requests";
 import { parseVacationEntry } from "@/lib/schedule/engine";
-import { getPublishedSchedules, PublishedScheduleItem, removePublishedSchedule } from "@/lib/schedule/published";
+import {
+  getPublishedSchedules,
+  PUBLISHED_SCHEDULES_EVENT,
+  PUBLISHED_SCHEDULES_STATUS_EVENT,
+  PublishedScheduleItem,
+  refreshPublishedSchedules,
+  removePublishedSchedule,
+} from "@/lib/schedule/published";
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -365,38 +374,53 @@ export function PublishedSchedulesPanel() {
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
+  const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const session = getSession();
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
 
-  const loadItems = () => {
+  const loadItems = async () => {
+    await refreshPublishedSchedules();
     const nextItems = getPublishedSchedules();
     setItems(nextItems);
     setSelectedMonthKey((current) => current ?? nextItems[nextItems.length - 1]?.monthKey ?? null);
   };
 
-  const loadRequests = () => {
+  const loadRequests = async () => {
+    await refreshScheduleChangeRequests();
     setRequests(getScheduleChangeRequests());
   };
 
   useEffect(() => {
-    loadItems();
-    loadRequests();
+    void loadItems();
+    void loadRequests();
   }, []);
 
   useEffect(() => {
     const onRefresh = () => {
-      loadItems();
-      loadRequests();
+      void loadItems();
+      void loadRequests();
+    };
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setRequestMessage(detail.message);
+      setRequestMessageTone("warn");
     };
     window.addEventListener("storage", onRefresh);
     window.addEventListener("focus", onRefresh);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
     window.addEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+    window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
+    window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     return () => {
       window.removeEventListener("storage", onRefresh);
       window.removeEventListener("focus", onRefresh);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
       window.removeEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+      window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
+      window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     };
   }, []);
 
@@ -404,6 +428,7 @@ export function PublishedSchedulesPanel() {
     setSelectedRoute([]);
     setConfirmConflictRequest(false);
     setRequestMessage("");
+    setRequestMessageTone("ok");
   }, [editMode, selectedMonthKey]);
 
   const selectedItem = useMemo(() => {
@@ -472,6 +497,7 @@ export function PublishedSchedulesPanel() {
     setEditMode((current) => !current);
     setConfirmConflictRequest(false);
     setRequestMessage("");
+    setRequestMessageTone("ok");
   };
 
   const printSelectedSchedule = () => {
@@ -491,17 +517,20 @@ export function PublishedSchedulesPanel() {
     if (!editMode || !username || person.pending) return;
     if (person.ref.dateKey <= todayKey) {
       setRequestMessage("오늘 이후 근무만 변경 요청할 수 있습니다.");
+      setRequestMessageTone("warn");
       return;
     }
 
     if (selectedRoute.length === 0) {
       if (person.name !== username) {
         setRequestMessage("먼저 내 근무를 선택해 주세요.");
+        setRequestMessageTone("warn");
         return;
       }
       setSelectedRoute([person.ref]);
       setConfirmConflictRequest(false);
       setRequestMessage("");
+      setRequestMessageTone("ok");
       return;
     }
 
@@ -515,55 +544,67 @@ export function PublishedSchedulesPanel() {
         setSelectedRoute(selectedRoute.slice(0, -1));
         setConfirmConflictRequest(false);
         setRequestMessage("");
+        setRequestMessageTone("ok");
         return;
       }
       setSelectedRoute(selectedRoute.slice(0, existingIndex + 1));
       setConfirmConflictRequest(false);
       setRequestMessage("");
+      setRequestMessageTone("ok");
       return;
     }
 
     if (selectedRoute.length >= MAX_ROUTE_SIZE) {
       setRequestMessage("게시 근무표 요청은 최대 3명 경로까지 등록할 수 있습니다.");
+      setRequestMessageTone("warn");
       return;
     }
 
     const lastSelectedRef = selectedRoute[selectedRoute.length - 1];
     if (lastSelectedRef && !hasCompatibleVacationType(lastSelectedRef, person.ref)) {
       setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차와 대휴는 서로 바꿀 수 없습니다.");
+      setRequestMessageTone("warn");
       return;
     }
 
     setSelectedRoute([...selectedRoute, person.ref]);
     setConfirmConflictRequest(false);
     setRequestMessage("");
+    setRequestMessageTone("ok");
   };
 
   const clearRoute = () => {
     setSelectedRoute([]);
     setConfirmConflictRequest(false);
     setRequestMessage("");
+    setRequestMessageTone("ok");
   };
 
-  const submitRequest = () => {
+  const submitRequest = async () => {
     if (!session || !selectedItem || selectedRoute.length < 2) return;
-    createScheduleChangeRequest({
-      monthKey: selectedItem.monthKey,
-      requesterId: session.id,
-      requesterName: session.username,
-      source: selectedRoute[0],
-      target: selectedRoute[selectedRoute.length - 1],
-      route: selectedRoute,
-      hasConflictWarning,
-    });
-    loadRequests();
-    setRequestMessage(
-      selectedRoute.length === 2
-        ? "근무 변경 요청을 등록했습니다."
-        : "삼각 트레이드 요청을 등록했습니다.",
-    );
-    setConfirmConflictRequest(false);
-    setSelectedRoute([]);
+    try {
+      await createScheduleChangeRequest({
+        monthKey: selectedItem.monthKey,
+        requesterId: session.id,
+        requesterName: session.username,
+        source: selectedRoute[0],
+        target: selectedRoute[selectedRoute.length - 1],
+        route: selectedRoute,
+        hasConflictWarning,
+      });
+      await loadRequests();
+      setRequestMessage(
+        selectedRoute.length === 2
+          ? "근무 변경 요청을 등록했습니다."
+          : "삼각 트레이드 요청을 등록했습니다.",
+      );
+      setRequestMessageTone("ok");
+      setConfirmConflictRequest(false);
+      setSelectedRoute([]);
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : "근무 변경 요청을 저장하지 못했습니다.");
+      setRequestMessageTone("warn");
+    }
   };
 
   const onConfirmRequest = () => {
@@ -571,7 +612,7 @@ export function PublishedSchedulesPanel() {
       setConfirmConflictRequest(true);
       return;
     }
-    submitRequest();
+    void submitRequest();
   };
 
   if (items.length === 0) {
@@ -647,7 +688,7 @@ export function PublishedSchedulesPanel() {
               <div className="status warn" style={{ display: "grid", gap: 10 }}>
                 <span>변경시 충돌이 발생합니다. 그래도 변경하시겠습니까?</span>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn primary" onClick={submitRequest}>확인</button>
+                  <button className="btn primary" onClick={() => void submitRequest()}>확인</button>
                   <button className="btn" onClick={() => setConfirmConflictRequest(false)}>취소</button>
                 </div>
               </div>
@@ -671,7 +712,7 @@ export function PublishedSchedulesPanel() {
         {editMode && username ? (
           <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 {routeScopeLabel} 전체에서 미래 날짜 근무를 요청 경로에 넣을 수 있습니다.</div>
         ) : null}
-        {requestMessage ? <div className="status ok">{requestMessage}</div> : null}
+        {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

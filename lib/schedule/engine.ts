@@ -35,6 +35,19 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   const legacyOffPeople = Array.isArray(input.offPeople) ? input.offPeople : [];
   const nextOffByCategory = createEmptyOffByCategory();
   const nextOffExcludeByCategory = createEmptyOffByCategory();
+  const nextOrders = Object.fromEntries(
+    categories.map((category) => {
+      const inputOrder = input.orders?.[category.key] ?? [];
+      const hasAnyNames = inputOrder.some((name) => typeof name === "string" && name.trim().length > 0);
+      const sourceOrder = hasAnyNames ? inputOrder : base.orders[category.key];
+
+      return [
+        category.key,
+        Array.from({ length: 30 }, (_, index) => sourceOrder[index] ?? base.orders[category.key][index] ?? ""),
+      ];
+    }),
+  ) as Record<CategoryKey, string[]>;
+
   categories.forEach((category) => {
     nextOffByCategory[category.key] = Array.from(
       new Set(
@@ -55,12 +68,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
     offExcludeByCategory: nextOffExcludeByCategory,
-    orders: Object.fromEntries(
-      categories.map((category) => [
-        category.key,
-        Array.from({ length: 30 }, (_, index) => input.orders?.[category.key]?.[index] ?? base.orders[category.key][index] ?? ""),
-      ]),
-    ) as Record<CategoryKey, string[]>,
+    orders: nextOrders,
     pointers: { ...defaultPointers, ...(input.pointers ?? {}) },
     monthStartPointers: Object.fromEntries(
       Object.entries(input.monthStartPointers ?? {}).map(([monthKey, pointerState]) => [

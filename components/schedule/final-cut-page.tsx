@@ -1,15 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
-import { readStoredScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
+import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   FinalCutDecision,
   FinalCutPersonCard,
   TEAM_LEAD_FINAL_CUT_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+  TEAM_LEAD_STORAGE_STATUS_EVENT,
   getFinalCutCards,
   getTeamLeadSchedules,
+  refreshTeamLeadState,
   updateFinalCutDecision,
 } from "@/lib/team-lead/storage";
 
@@ -20,7 +22,7 @@ const decisionButtons: Array<{
 }> = [
   {
     value: "circle",
-    label: "○",
+    label: "동그라미",
     activeStyle: {
       borderColor: "rgba(74,222,128,.82)",
       background: "rgba(34,197,94,.22)",
@@ -29,7 +31,7 @@ const decisionButtons: Array<{
   },
   {
     value: "triangle",
-    label: "△",
+    label: "세모",
     activeStyle: {
       borderColor: "rgba(250,204,21,.82)",
       background: "rgba(250,204,21,.22)",
@@ -38,7 +40,7 @@ const decisionButtons: Array<{
   },
   {
     value: "cross",
-    label: "×",
+    label: "횞",
     activeStyle: {
       borderColor: "rgba(248,113,113,.82)",
       background: "rgba(239,68,68,.22)",
@@ -164,9 +166,11 @@ export function FinalCutPage() {
   const [selectedQuarterKey, setSelectedQuarterKey] = useState("");
   const [cards, setCards] = useState<FinalCutPersonCard[]>([]);
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
+  const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   useEffect(() => {
-    const refresh = () => {
+    const refresh = async () => {
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
       const schedules = getTeamLeadSchedules();
       const generatedState = readStoredScheduleState();
       const generatedMonthKeys = generatedState.generatedHistory.map((schedule) => schedule.monthKey);
@@ -183,22 +187,27 @@ export function FinalCutPage() {
       );
       setCards(getFinalCutCards());
     };
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
 
-    refresh();
-    window.addEventListener("storage", refresh);
+    void refresh();
     window.addEventListener("focus", refresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
     window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("storage", refresh);
       window.removeEventListener("focus", refresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
       window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, []);
 
@@ -257,8 +266,9 @@ export function FinalCutPage() {
             </div>
           </div>
           <div className="status note">
-            일정배정에 입력된 일정만 사람별 카드로 모읍니다. 분기 탭은 12월~2월, 3월~5월, 6월~8월, 9월~11월 기준으로 합쳐서 보여줍니다.
+            ?쇱젙諛곗젙???낅젰???쇱젙留??щ엺蹂?移대뱶濡?紐⑥쓭?덈떎. 遺꾧린 ??? 12??2?? 3??5?? 6??8?? 9??11??湲곗??쇰줈 ?⑹퀜??蹂댁뿬以띾땲??
           </div>
+          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
 
@@ -307,9 +317,9 @@ export function FinalCutPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    <span style={{ color: "#4ade80" }}>○ {summary.circle}</span>
-                    <span style={{ color: "#facc15" }}>△ {summary.triangle}</span>
-                    <span style={{ color: "#f87171" }}>× {summary.cross}</span>
+                    <span style={{ color: "#4ade80" }}>??{summary.circle}</span>
+                    <span style={{ color: "#facc15" }}>??{summary.triangle}</span>
+                    <span style={{ color: "#f87171" }}>횞 {summary.cross}</span>
                   </span>
                   <span className="chip">{card.items.length}건</span>
                 </button>
@@ -343,7 +353,10 @@ export function FinalCutPage() {
                                 key={`${item.id}-${button.value}`}
                                 type="button"
                                 className="btn"
-                                onClick={() => updateFinalCutDecision(item.id, active ? "" : button.value)}
+                                onClick={() => {
+                                  updateFinalCutDecision(item.id, active ? "" : button.value);
+                                  setMessage({ tone: "ok", text: "?뺤젣蹂??먯젙????ν뻽?듬땲??" });
+                                }}
                                 style={{
                                   minWidth: 52,
                                   padding: "8px 12px",
@@ -368,7 +381,7 @@ export function FinalCutPage() {
       ) : (
         <section className="panel">
           <div className="panel-pad">
-            <div className="status note">선택한 분기에 일정배정으로 넘어온 정제본 카드가 없습니다.</div>
+            <div className="status note">?좏깮??遺꾧린???쇱젙諛곗젙?쇰줈 ?섏뼱???뺤젣蹂?移대뱶媛 ?놁뒿?덈떎.</div>
           </div>
         </section>
       )}

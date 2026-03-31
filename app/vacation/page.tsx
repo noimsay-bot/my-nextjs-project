@@ -9,9 +9,12 @@ import {
   createVacationRequest,
   getVacationManagedDateKeys,
   getVacationRequests,
+  refreshVacationStore,
   VACATION_EVENT,
+  VACATION_STATUS_EVENT,
   VacationRequest,
 } from "@/lib/vacation/storage";
+import { refreshScheduleState } from "@/lib/schedule/storage";
 
 function formatDateList(dateKeys: string[]) {
   return dateKeys
@@ -34,21 +37,27 @@ export default function VacationPage() {
   const [requests, setRequests] = useState<VacationRequest[]>([]);
   const [managedDateKeys, setManagedDateKeys] = useState<string[]>([]);
 
-  const loadRequests = () => {
+  const loadRequests = async () => {
+    await Promise.all([refreshScheduleState(), refreshVacationStore()]);
     setRequests(getVacationRequests());
     setManagedDateKeys(getVacationManagedDateKeys(year, month));
   };
 
   useEffect(() => {
-    loadRequests();
-    const onRefresh = () => loadRequests();
-    window.addEventListener("storage", onRefresh);
+    void loadRequests();
+    const onRefresh = () => void loadRequests();
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
     window.addEventListener("focus", onRefresh);
     window.addEventListener(VACATION_EVENT, onRefresh);
+    window.addEventListener(VACATION_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("storage", onRefresh);
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(VACATION_EVENT, onRefresh);
+      window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
     };
   }, [year, month]);
 
@@ -120,7 +129,7 @@ export default function VacationPage() {
     });
 
     if (hasSuccess) {
-      loadRequests();
+      void loadRequests();
     }
   };
 

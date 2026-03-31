@@ -1,10 +1,16 @@
 "use client";
 
 import { getUsers } from "@/lib/auth/storage";
-import { STORAGE_KEY, getScheduleCategoryLabel } from "@/lib/schedule/constants";
-import { sanitizeScheduleState } from "@/lib/schedule/engine";
+import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import { getPublishedSchedules } from "@/lib/schedule/published";
-import { DaySchedule, GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
+import { readStoredScheduleState } from "@/lib/schedule/storage";
+import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
+import {
+  getPortalSession,
+  getPortalSupabaseClient,
+  getSupabaseStorageErrorMessage,
+  isSupabaseSchemaMissingError,
+} from "@/lib/supabase/portal";
 
 export type AssignmentTimeColor = "" | "red" | "blue" | "yellow";
 export type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
@@ -130,6 +136,25 @@ const TEAM_LEAD_CONTRIBUTION_KEY = "j-team-lead-contribution-v1";
 export const TEAM_LEAD_CONTRIBUTION_EVENT = "j-team-lead-contribution-updated";
 const TEAM_LEAD_FINAL_CUT_KEY = "j-team-lead-final-cut-v1";
 export const TEAM_LEAD_FINAL_CUT_EVENT = "j-team-lead-final-cut-updated";
+export const TEAM_LEAD_STORAGE_STATUS_EVENT = "j-team-lead-storage-status";
+const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
+const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
+
+interface TeamLeadScheduleAssignmentRow {
+  month_key: string;
+  entries: ScheduleAssignmentMonthStore | null;
+  rows: Record<string, ScheduleAssignmentDayRows> | null;
+}
+
+interface TeamLeadStateRow {
+  key: string;
+  state: unknown;
+}
+
+let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} };
+let contributionManualCache = {} as Record<string, ContributionManualItem[]>;
+let finalCutCache = {} as Record<string, FinalCutDecision>;
+let teamLeadRefreshPromise: Promise<void> | null = null;
 
 export function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
   return `${dateKey}::${category}::${index}::${name}`;
@@ -259,6 +284,26 @@ function normalizeRowsStore(store: unknown): ScheduleAssignmentRowStore {
   return nextStore;
 }
 
+function normalizeMonthEntries(value: unknown) {
+  if (!value || typeof value !== "object") return {} as ScheduleAssignmentMonthStore;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([rowKey, entry]) => [
+      rowKey,
+      normalizeScheduleAssignmentEntry(entry as Partial<ScheduleAssignmentEntry> | undefined),
+    ]),
+  ) as ScheduleAssignmentMonthStore;
+}
+
+function normalizeMonthRows(value: unknown) {
+  if (!value || typeof value !== "object") return {} as Record<string, ScheduleAssignmentDayRows>;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([dateKey, dayRows]) => [
+      dateKey,
+      normalizeDayRows(dayRows as Partial<ScheduleAssignmentDayRows> | undefined),
+    ]),
+  ) as Record<string, ScheduleAssignmentDayRows>;
+}
+
 function normalizeScheduleAssignmentDataStore(store: unknown): ScheduleAssignmentDataStore {
   if (!store || typeof store !== "object") {
     return { entries: {}, rows: {} };
@@ -279,20 +324,167 @@ function normalizeScheduleAssignmentDataStore(store: unknown): ScheduleAssignmen
 }
 
 export function getScheduleAssignmentStore(): ScheduleAssignmentDataStore {
-  if (typeof window === "undefined") return { entries: {}, rows: {} };
-  const raw = window.localStorage.getItem(TEAM_LEAD_SCHEDULE_ASSIGNMENT_KEY);
-  if (!raw) return { entries: {}, rows: {} };
-  try {
-    return normalizeScheduleAssignmentDataStore(JSON.parse(raw));
-  } catch {
-    return { entries: {}, rows: {} };
+  return normalizeScheduleAssignmentDataStore(assignmentStoreCache);
+}
+
+function emitTeamLeadEvent(eventName: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(eventName));
+}
+
+export function emitTeamLeadStorageStatus(detail: { ok: boolean; message: string }) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(TEAM_LEAD_STORAGE_STATUS_EVENT, { detail }));
+}
+
+async function persistScheduleAssignmentStore(store: ScheduleAssignmentDataStore) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const normalized = normalizeScheduleAssignmentDataStore(store);
+  const rows = Object.keys({ ...normalized.entries, ...normalized.rows }).map((monthKey) => ({
+    month_key: monthKey,
+    entries: normalized.entries[monthKey] ?? {},
+    rows: normalized.rows[monthKey] ?? {},
+    updated_by: session.id,
+  }));
+
+  const { data: existingRows, error: selectError } = await supabase
+    .from("team_lead_schedule_assignments")
+    .select("month_key")
+    .returns<Array<{ month_key: string }>>();
+
+  if (selectError) {
+    throw new Error(selectError.message);
+  }
+
+  if (rows.length > 0) {
+    const { error: upsertError } = await supabase.from("team_lead_schedule_assignments").upsert(rows);
+    if (upsertError) {
+      throw new Error(upsertError.message);
+    }
+  }
+
+  const staleMonthKeys = (existingRows ?? [])
+    .map((row) => row.month_key)
+    .filter((monthKey) => !rows.some((row) => row.month_key === monthKey));
+
+  if (staleMonthKeys.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("team_lead_schedule_assignments")
+      .delete()
+      .in("month_key", staleMonthKeys);
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
   }
 }
 
+async function persistTeamLeadState(key: string, state: unknown) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.from("team_lead_state").upsert({
+    key,
+    state,
+    updated_by: session.id,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function refreshTeamLeadState() {
+  if (teamLeadRefreshPromise) {
+    return teamLeadRefreshPromise;
+  }
+
+  teamLeadRefreshPromise = (async () => {
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      assignmentStoreCache = { entries: {}, rows: {} };
+      contributionManualCache = {};
+      finalCutCache = {};
+      emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+      emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+      emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+      return;
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const [{ data: assignmentRows, error: assignmentError }, { data: stateRows, error: stateError }] = await Promise.all([
+      supabase
+        .from("team_lead_schedule_assignments")
+        .select("month_key, entries, rows")
+        .returns<TeamLeadScheduleAssignmentRow[]>(),
+      supabase
+        .from("team_lead_state")
+        .select("key, state")
+        .in("key", [TEAM_LEAD_CONTRIBUTION_STATE_KEY, TEAM_LEAD_FINAL_CUT_STATE_KEY])
+        .returns<TeamLeadStateRow[]>(),
+    ]);
+
+    if (assignmentError || stateError) {
+      const schemaError = assignmentError ?? stateError;
+      if (isSupabaseSchemaMissingError(schemaError)) {
+        console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_schedule_assignments / team_lead_state"));
+        assignmentStoreCache = { entries: {}, rows: {} };
+        contributionManualCache = {};
+        finalCutCache = {};
+        emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+        emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+        emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+        return;
+      }
+
+      if (assignmentError) {
+        throw new Error(assignmentError.message);
+      }
+      throw new Error(stateError?.message ?? "팀장 데이터를 불러오지 못했습니다.");
+    }
+
+    assignmentStoreCache = {
+      entries: Object.fromEntries(
+        (assignmentRows ?? []).map((row) => [row.month_key, normalizeMonthEntries(row.entries ?? {})]),
+      ),
+      rows: Object.fromEntries(
+        (assignmentRows ?? []).map((row) => [row.month_key, normalizeMonthRows(row.rows ?? {})]),
+      ),
+    };
+
+    const stateMap = new Map((stateRows ?? []).map((row) => [row.key, row.state] as const));
+    contributionManualCache = normalizeContributionManualStore(stateMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY));
+    finalCutCache = normalizeFinalCutStore(stateMap.get(TEAM_LEAD_FINAL_CUT_STATE_KEY));
+    emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+    emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+    emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+  })().finally(() => {
+    teamLeadRefreshPromise = null;
+  });
+
+  return teamLeadRefreshPromise;
+}
+
 export function saveScheduleAssignmentStore(store: ScheduleAssignmentDataStore) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(TEAM_LEAD_SCHEDULE_ASSIGNMENT_KEY, JSON.stringify(store));
-  window.dispatchEvent(new Event(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT));
+  const previous = normalizeScheduleAssignmentDataStore(assignmentStoreCache);
+  assignmentStoreCache = normalizeScheduleAssignmentDataStore(store);
+  emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+  return persistScheduleAssignmentStore(assignmentStoreCache).catch(async (error) => {
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "일정배정 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+    });
+    assignmentStoreCache = previous;
+    emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+    await refreshTeamLeadState();
+  });
 }
 
 function parseTimeMinutes(value: string) {
@@ -381,21 +573,23 @@ function normalizeContributionManualStore(store: unknown) {
 }
 
 export function getContributionManualStore() {
-  if (typeof window === "undefined") return {} as Record<string, ContributionManualItem[]>;
-  const raw = window.localStorage.getItem(TEAM_LEAD_CONTRIBUTION_KEY);
-  if (!raw) return {} as Record<string, ContributionManualItem[]>;
-  try {
-    return normalizeContributionManualStore(JSON.parse(raw));
-  } catch {
-    return {} as Record<string, ContributionManualItem[]>;
-  }
+  return normalizeContributionManualStore(contributionManualCache);
 }
 
 export function saveContributionManualStore(store: Record<string, ContributionManualItem[]>) {
-  if (typeof window === "undefined") return;
   const normalized = normalizeContributionManualStore(store);
-  window.localStorage.setItem(TEAM_LEAD_CONTRIBUTION_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new Event(TEAM_LEAD_CONTRIBUTION_EVENT));
+  const previous = normalizeContributionManualStore(contributionManualCache);
+  contributionManualCache = normalized;
+  emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+  return persistTeamLeadState(TEAM_LEAD_CONTRIBUTION_STATE_KEY, normalized).catch(async (error) => {
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "기여도 수동 점수 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+    });
+    contributionManualCache = previous;
+    emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+    await refreshTeamLeadState();
+  });
 }
 
 export function updateContributionManualItems(name: string, items: ContributionManualItem[]) {
@@ -423,21 +617,23 @@ function normalizeFinalCutStore(store: unknown) {
 }
 
 export function getFinalCutStore() {
-  if (typeof window === "undefined") return {} as Record<string, FinalCutDecision>;
-  const raw = window.localStorage.getItem(TEAM_LEAD_FINAL_CUT_KEY);
-  if (!raw) return {} as Record<string, FinalCutDecision>;
-  try {
-    return normalizeFinalCutStore(JSON.parse(raw));
-  } catch {
-    return {} as Record<string, FinalCutDecision>;
-  }
+  return normalizeFinalCutStore(finalCutCache);
 }
 
 export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
-  if (typeof window === "undefined") return;
   const normalized = normalizeFinalCutStore(store);
-  window.localStorage.setItem(TEAM_LEAD_FINAL_CUT_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new Event(TEAM_LEAD_FINAL_CUT_EVENT));
+  const previous = normalizeFinalCutStore(finalCutCache);
+  finalCutCache = normalized;
+  emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+  return persistTeamLeadState(TEAM_LEAD_FINAL_CUT_STATE_KEY, normalized).catch(async (error) => {
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "정제본 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+    });
+    finalCutCache = previous;
+    emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+    await refreshTeamLeadState();
+  });
 }
 
 export function updateFinalCutDecision(itemId: string, decision: FinalCutDecision) {
@@ -507,15 +703,7 @@ function buildContributionItem(
 }
 
 function getGeneratedHistorySchedules() {
-  if (typeof window === "undefined") return [] as GeneratedSchedule[];
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return [] as GeneratedSchedule[];
-  try {
-    const parsed = sanitizeScheduleState(JSON.parse(raw) as Partial<ScheduleState>);
-    return parsed.generatedHistory;
-  } catch {
-    return [] as GeneratedSchedule[];
-  }
+  return readStoredScheduleState().generatedHistory;
 }
 
 export function getTeamLeadSchedules() {
@@ -725,4 +913,382 @@ export function getContributionCards(baseDate = new Date()) {
       } satisfies ContributionPersonCard;
     })
     .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"));
+}
+
+interface ReviewManagementProfileRow {
+  id: string;
+  email: string;
+  login_id?: string | null;
+  name: string;
+  role: "member" | "reviewer" | "desk" | "team_lead" | "admin";
+  approved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ReviewManagementSubmissionRow {
+  id: string;
+  author_id: string;
+  type: string;
+  title: string;
+  link: string;
+  date: string | null;
+  notes: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ReviewManagementAssignmentRow {
+  id: string;
+  submission_id: string;
+  reviewer_id: string;
+  assigned_by: string | null;
+  assigned_at: string;
+  reset_at: string | null;
+  created_at: string;
+}
+
+interface ReviewManagementReviewRow {
+  id: string;
+  submission_id: string;
+  reviewer_id: string;
+  comment: string | null;
+  total: number | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewerCandidate {
+  id: string;
+  name: string;
+  email: string;
+  role: "reviewer";
+  approved: boolean;
+}
+
+export interface ReviewManagementReviewItem {
+  id: string;
+  reviewerId: string;
+  reviewerName: string;
+  total: number | null;
+  comment: string;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+export interface ReviewManagementItem {
+  submissionId: string;
+  authorId: string;
+  authorName: string;
+  type: string;
+  title: string;
+  link: string;
+  date: string;
+  notes: string;
+  status: string;
+  updatedAt: string;
+  assignmentId: string | null;
+  reviewerId: string | null;
+  reviewerName: string;
+  assignedAt: string | null;
+  reviews: ReviewManagementReviewItem[];
+}
+
+export interface ReviewManagementWorkspace {
+  candidates: ReviewerCandidate[];
+  items: ReviewManagementItem[];
+}
+
+export interface AdminProfileItem {
+  id: string;
+  email: string;
+  loginId: string;
+  name: string;
+  role: "member" | "reviewer" | "desk" | "team_lead" | "admin";
+  approved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminWorkspace {
+  profiles: AdminProfileItem[];
+  reviewManagement: ReviewManagementWorkspace;
+}
+
+const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
+  "id, email, login_id, name, role, approved, created_at, updated_at";
+
+async function getPrivilegedPortalSession() {
+  const authModule = await import("@/lib/auth/storage");
+  return authModule.getSession() ?? authModule.getSessionAsync();
+}
+
+async function getPrivilegedSupabaseClient() {
+  const supabaseModule = await import("@/lib/supabase/client");
+  return supabaseModule.createClient();
+}
+
+function formatReviewCandidate(row: ReviewManagementProfileRow): ReviewerCandidate {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: "reviewer",
+    approved: row.approved,
+  };
+}
+
+function formatAdminProfile(row: ReviewManagementProfileRow): AdminProfileItem {
+  return {
+    id: row.id,
+    email: row.email,
+    loginId: row.login_id ?? "",
+    name: row.name,
+    role: row.role,
+    approved: row.approved,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementWorkspace> {
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data: candidates, error: candidateError } = await supabase
+    .from("profiles")
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+    .eq("role", "reviewer")
+    .eq("approved", true)
+    .order("name", { ascending: true })
+    .returns<ReviewManagementProfileRow[]>();
+
+  if (candidateError) {
+    throw new Error(candidateError.message);
+  }
+
+  const { data: submissionRows, error: submissionError } = await supabase
+    .from("submissions")
+    .select("id, author_id, type, title, link, date, notes, status, created_at, updated_at")
+    .order("updated_at", { ascending: false })
+    .returns<ReviewManagementSubmissionRow[]>();
+
+  if (submissionError) {
+    throw new Error(submissionError.message);
+  }
+
+  const submissionIds = (submissionRows ?? []).map((row) => row.id);
+
+  const { data: assignmentRows, error: assignmentError } = await supabase
+    .from("review_assignments")
+    .select("id, submission_id, reviewer_id, assigned_by, assigned_at, reset_at, created_at")
+    .is("reset_at", null)
+    .order("assigned_at", { ascending: false })
+    .returns<ReviewManagementAssignmentRow[]>();
+
+  if (assignmentError) {
+    throw new Error(assignmentError.message);
+  }
+
+  const reviewQuery = supabase
+    .from("reviews")
+    .select("id, submission_id, reviewer_id, comment, total, completed_at, created_at, updated_at")
+    .order("updated_at", { ascending: false });
+  const { data: reviewRows, error: reviewError } =
+    submissionIds.length > 0
+      ? await reviewQuery.in("submission_id", submissionIds).returns<ReviewManagementReviewRow[]>()
+      : await reviewQuery.limit(0).returns<ReviewManagementReviewRow[]>();
+
+  if (reviewError) {
+    throw new Error(reviewError.message);
+  }
+
+  const profileIds = Array.from(
+    new Set([
+      ...(submissionRows ?? []).map((row) => row.author_id),
+      ...(assignmentRows ?? []).map((row) => row.reviewer_id),
+      ...(reviewRows ?? []).map((row) => row.reviewer_id),
+    ]),
+  );
+
+  const profileQuery = supabase
+    .from("profiles")
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS);
+  const { data: profileRows, error: profileError } =
+    profileIds.length > 0
+      ? await profileQuery.in("id", profileIds).returns<ReviewManagementProfileRow[]>()
+      : await profileQuery.limit(0).returns<ReviewManagementProfileRow[]>();
+
+  if (profileError) {
+    throw new Error(profileError.message);
+  }
+
+  const profileMap = new Map((profileRows ?? []).map((row) => [row.id, row] as const));
+  const activeAssignmentMap = new Map(
+    (assignmentRows ?? []).map((row) => [row.submission_id, row] as const),
+  );
+  const reviewMap = new Map<string, ReviewManagementReviewItem[]>();
+
+  (reviewRows ?? []).forEach((row) => {
+    const current = reviewMap.get(row.submission_id) ?? [];
+    current.push({
+      id: row.id,
+      reviewerId: row.reviewer_id,
+      reviewerName: profileMap.get(row.reviewer_id)?.name ?? row.reviewer_id,
+      total: row.total,
+      comment: row.comment ?? "",
+      completedAt: row.completed_at,
+      updatedAt: row.updated_at,
+    });
+    reviewMap.set(row.submission_id, current);
+  });
+
+  return {
+    candidates: (candidates ?? []).map(formatReviewCandidate),
+    items: (submissionRows ?? []).map((row) => {
+      const assignment = activeAssignmentMap.get(row.id);
+      return {
+        submissionId: row.id,
+        authorId: row.author_id,
+        authorName: profileMap.get(row.author_id)?.name ?? row.author_id,
+        type: row.type,
+        title: row.title,
+        link: row.link,
+        date: row.date ?? "",
+        notes: row.notes ?? "",
+        status: row.status,
+        updatedAt: row.updated_at,
+        assignmentId: assignment?.id ?? null,
+        reviewerId: assignment?.reviewer_id ?? null,
+        reviewerName: assignment ? (profileMap.get(assignment.reviewer_id)?.name ?? assignment.reviewer_id) : "",
+        assignedAt: assignment?.assigned_at ?? null,
+        reviews: reviewMap.get(row.id) ?? [],
+      } satisfies ReviewManagementItem;
+    }),
+  };
+}
+
+export async function getTeamLeadReviewManagementWorkspace() {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    throw new Error("review assignment 관리 권한이 없습니다.");
+  }
+
+  return getReviewManagementWorkspaceInternal();
+}
+
+export async function assignReviewerToSubmission(submissionId: string, reviewerId: string) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "assignment 관리 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const resetAt = new Date().toISOString();
+  const { error: resetError } = await supabase
+    .from("review_assignments")
+    .update({ reset_at: resetAt })
+    .eq("submission_id", submissionId)
+    .is("reset_at", null);
+
+  if (resetError) {
+    return { ok: false as const, message: resetError.message };
+  }
+
+  const assignedAt = new Date().toISOString();
+  const { error: assignError } = await supabase
+    .from("review_assignments")
+    .upsert(
+      {
+        submission_id: submissionId,
+        reviewer_id: reviewerId,
+        assigned_by: session.id,
+        assigned_at: assignedAt,
+        reset_at: null,
+      },
+      { onConflict: "submission_id,reviewer_id" },
+    );
+
+  if (assignError) {
+    return { ok: false as const, message: assignError.message };
+  }
+
+  return { ok: true as const, message: "reviewer assignment를 저장했습니다." };
+}
+
+export async function resetSubmissionAssignment(submissionId: string) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "assignment 초기화 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const { error } = await supabase
+    .from("review_assignments")
+    .update({ reset_at: new Date().toISOString() })
+    .eq("submission_id", submissionId)
+    .is("reset_at", null);
+
+  if (error) {
+    return { ok: false as const, message: error.message };
+  }
+
+  return { ok: true as const, message: "assignment를 초기화했습니다." };
+}
+
+export async function getAdminWorkspace(): Promise<AdminWorkspace> {
+  const session = await getPrivilegedPortalSession();
+  if (!session || session.role !== "admin") {
+    throw new Error("admin 권한이 없습니다.");
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data: profiles, error: profileError } = await supabase
+    .from("profiles")
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+    .order("created_at", { ascending: false })
+    .returns<ReviewManagementProfileRow[]>();
+
+  if (profileError) {
+    throw new Error(profileError.message);
+  }
+
+  return {
+    profiles: (profiles ?? []).map(formatAdminProfile),
+    reviewManagement: await getReviewManagementWorkspaceInternal(),
+  };
+}
+
+export async function updateAdminProfileAccess(
+  profileId: string,
+  input: {
+    role: AdminProfileItem["role"];
+    approved: boolean;
+  },
+) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || session.role !== "admin") {
+    return { ok: false as const, message: "admin 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      role: input.role,
+      approved: input.approved,
+    })
+    .eq("id", profileId)
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+    .single<ReviewManagementProfileRow>();
+
+  if (error || !data) {
+    return { ok: false as const, message: error?.message ?? "프로필을 저장하지 못했습니다." };
+  }
+
+  return {
+    ok: true as const,
+    message: "사용자 권한을 저장했습니다.",
+    profile: formatAdminProfile(data),
+  };
 }

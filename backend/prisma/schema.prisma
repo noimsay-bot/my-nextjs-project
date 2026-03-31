@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  REVIEWER
+  TEAM_LEAD
+  DESK
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum MailTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum VacationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                String            @id @default(cuid())
+  loginId           String            @unique
+  name              String
+  email             String            @unique
+  phone             String?
+  passwordHash      String
+  role              Role              @default(USER)
+  status            UserStatus        @default(PENDING)
+  emailVerifiedAt   DateTime?
+  mustChangePassword Boolean          @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  refreshTokens     RefreshToken[]
+  mailTokens        MailToken[]
+  submissions       Submission[]
+  reviews           Review[]
+  vacationRequests  VacationRequest[]
+  auditLogs         AuditLog[]
+}
+
+model RefreshToken {
+  id          String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  userAgent   String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model MailToken {
+  id         String        @id @default(cuid())
+  userId     String
+  type       MailTokenType
+  tokenHash  String        @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime      @default(now())
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+}
+
+model Submission {
+  id         String           @id @default(cuid())
+  ownerId    String           @unique
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  owner      User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  cards      SubmissionCard[]
+
+  @@index([ownerId])
+}
+
+model SubmissionCard {
+  id         String      @id @default(cuid())
+  submissionId String
+  reportType String
+  title      String
+  link       String
+  date       DateTime?
+  comment    String
+  sortOrder  Int
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  submission Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reviews    Review[]
+
+  @@index([submissionId])
+}
+
+model Review {
+  id               String   @id @default(cuid())
+  cardId           String
+  reviewerId       String
+  selectedCriteria Json
+  bonusScore       Int      @default(0)
+  bonusComment     String?
+  totalScore       Int      @default(0)
+  isFinal          Boolean  @default(false)
+  finalizedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  card             SubmissionCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  reviewer         User           @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, reviewerId])
+  @@index([reviewerId])
+}
+
+model VacationRequest {
+  id            String                @id @default(cuid())
+  requesterId   String
+  type          String
+  year          Int
+  month         Int
+  requestedDates Json
+  rawDates      String
+  status        VacationRequestStatus @default(PENDING)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  requester     User                  @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId])
+  @@index([year, month])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([targetType, targetId])
+}

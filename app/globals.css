@@ -244,6 +244,13 @@ textarea {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.schedule-side-panels {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  align-items: start;
+}
+
 .kpi {
   padding: 16px;
   border-radius: 18px;
@@ -277,10 +284,30 @@ textarea {
   vertical-align: top;
 }
 
+.review-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: start;
+}
+
+.review-main-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1.15fr);
+  align-items: start;
+}
+
 @media (max-width: 1100px) {
   .subgrid-4,
   .subgrid-3,
-  .subgrid-2 {
+  .subgrid-2,
+  .schedule-side-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .review-layout,
+  .review-main-grid {
     grid-template-columns: 1fr;
   }
 

@@ -4,8 +4,8 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { defaultPointers } from "@/lib/schedule/constants";
 import { parseVacationEntry } from "@/lib/schedule/engine";
-import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
-import { readStoredScheduleState, saveScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
+import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import {
   AssignmentTimeColor,
@@ -15,7 +15,9 @@ import {
   getScheduleAssignmentRows,
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
+  refreshTeamLeadState,
   saveScheduleAssignmentStore,
+  TEAM_LEAD_STORAGE_STATUS_EVENT,
   ScheduleAssignmentDataStore,
   ScheduleAssignmentDayRows,
   ScheduleAssignmentEntry,
@@ -382,7 +384,7 @@ function ensureImportedMonthsExist(monthKeys: string[]) {
     ),
   };
 
-  saveScheduleState(nextState);
+  void saveScheduleState(nextState).catch(() => undefined);
   return true;
 }
 
@@ -396,7 +398,8 @@ export function ScheduleAssignmentPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    const refreshSchedules = () => {
+    const refreshSchedules = async () => {
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
       const nextSchedules = getTeamLeadSchedules();
       setSchedules(nextSchedules);
       setStore(getScheduleAssignmentStore());
@@ -407,19 +410,24 @@ export function ScheduleAssignmentPage() {
       );
       setSelectedDeleteRowKey(null);
     };
-    refreshSchedules();
-    const onRefresh = () => {
-      refreshSchedules();
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setImportMessage({ tone: "warn", text: detail.message });
     };
-    window.addEventListener("storage", onRefresh);
+    void refreshSchedules();
+    const onRefresh = () => {
+      void refreshSchedules();
+    };
     window.addEventListener("focus", onRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, onRefresh);
+    window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("storage", onRefresh);
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, onRefresh);
+      window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, []);
 

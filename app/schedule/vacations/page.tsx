@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -7,14 +7,17 @@ import {
   applyVacationMonthToSchedule,
   DEFAULT_VACATION_CAPACITY,
   getVacationApplicantsOverview,
-  runAnnualVacationLottery,
-  runCompensatoryVacationLottery,
+  refreshVacationStore,
+  runVacationLottery,
   seedVacationSimulationRequests,
   setVacationCapacity,
   VACATION_EVENT,
+  VACATION_STATUS_EVENT,
   VacationMonthState,
   VacationRequest,
+  waitForVacationStoreWrite,
 } from "@/lib/vacation/storage";
+import { refreshScheduleState } from "@/lib/schedule/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const VACATION_MANAGEMENT_SELECTION_KEY = "desk-vacation-management-selection-v1";
@@ -88,6 +91,10 @@ function highlightStyle(active: boolean, tone: "annual" | "compensatory") {
   };
 }
 
+function countNamesByDateMap(map: Record<string, string[]>) {
+  return Object.values(map).reduce((sum, names) => sum + names.length, 0);
+}
+
 function formatRequestDates(dateKeys: string[]) {
   return dateKeys
     .map((dateKey) => `${Number(dateKey.split("-")[2])}일`)
@@ -128,7 +135,8 @@ export default function ScheduleVacationsPage() {
     window.localStorage.setItem(VACATION_MANAGEMENT_SELECTION_KEY, JSON.stringify({ year, month }));
   }, [selectionLoaded, year, month]);
 
-  const loadMonth = () => {
+  const loadMonth = async () => {
+    await Promise.all([refreshScheduleState(), refreshVacationStore()]);
     const overview = getVacationApplicantsOverview(year, month);
     setMonthState(overview.monthState);
     setManagedDateKeys(overview.managedDateKeys);
@@ -140,18 +148,23 @@ export default function ScheduleVacationsPage() {
   };
 
   useEffect(() => {
-    loadMonth();
+    void loadMonth();
   }, [year, month]);
 
   useEffect(() => {
-    const onRefresh = () => loadMonth();
-    window.addEventListener("storage", onRefresh);
+    const onRefresh = () => void loadMonth();
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
     window.addEventListener("focus", onRefresh);
     window.addEventListener(VACATION_EVENT, onRefresh);
+    window.addEventListener(VACATION_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("storage", onRefresh);
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(VACATION_EVENT, onRefresh);
+      window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
     };
   }, [year, month]);
 
@@ -159,6 +172,7 @@ export default function ScheduleVacationsPage() {
   const managedDateSet = useMemo(() => new Set(managedDateKeys), [managedDateKeys]);
   const annualLotteryDone = Boolean(monthState && Object.values(monthState.annualWinners).some((names) => names.length > 0));
   const compensatoryLotteryDone = Boolean(monthState && Object.values(monthState.compensatoryWinners).some((names) => names.length > 0));
+  const vacationLotteryDone = annualLotteryDone || compensatoryLotteryDone;
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -209,10 +223,14 @@ export default function ScheduleVacationsPage() {
             <button
               className="btn"
               disabled={!hasGeneratedSchedule}
-              onClick={() => {
+              onClick={async () => {
                 const result = seedVacationSimulationRequests(year, month);
-                setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
-                loadMonth();
+                const persistResult = await waitForVacationStoreWrite();
+                await loadMonth();
+                setMessage({
+                  tone: result.ok && persistResult.ok ? "ok" : "warn",
+                  text: persistResult.ok ? result.message : persistResult.message ?? result.message,
+                });
               }}
             >
               시뮬레이션 채우기
@@ -220,50 +238,55 @@ export default function ScheduleVacationsPage() {
             <button
               className="btn"
               disabled={!hasGeneratedSchedule}
-              onClick={() => {
-                if (annualLotteryDone) {
-                  window.alert("이미 연차 추첨했습니다.");
+              onClick={async () => {
+                if (vacationLotteryDone) {
+                  window.alert("이미 휴가 추첨했습니다.");
                   return;
                 }
-                if (!window.confirm("연차 추첨하시겠습니까?")) return;
-                const result = runAnnualVacationLottery(year, month);
+                if (!window.confirm("휴가 추첨하시겠습니까?")) return;
+                const annualApplicantCount = countNamesByDateMap(annualApplicants);
+                const compensatoryApplicantCount = countNamesByDateMap(compensatoryApplicants);
+                const result = runVacationLottery(year, month);
                 if (!result) {
-                  setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 없어 연차 추첨을 진행할 수 없습니다.` });
+                  setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 없어 휴가 추첨을 진행할 수 없습니다.` });
                   return;
                 }
-                loadMonth();
-                setMessage({ tone: "ok", text: `${year}년 ${month}월 연차 추첨을 완료했습니다.` });
+                const annualWinnerCount = countNamesByDateMap(result.annualWinners ?? {});
+                const compensatoryWinnerCount = countNamesByDateMap(result.compensatoryWinners ?? {});
+                const persistResult = await waitForVacationStoreWrite();
+                await loadMonth();
+                if (!persistResult.ok) {
+                  setMessage({ tone: "warn", text: persistResult.message ?? "휴가 추첨 저장에 실패했습니다." });
+                  return;
+                }
+                if (annualApplicantCount === 0 && compensatoryApplicantCount === 0) {
+                  setMessage({ tone: "warn", text: `${year}년 ${month}월에는 휴가 신청자가 없어 추첨할 내용이 없습니다.` });
+                  return;
+                }
+                if (annualWinnerCount === 0 && compensatoryWinnerCount === 0) {
+                  setMessage({ tone: "warn", text: `${year}년 ${month}월 휴가 추첨 결과 당첨자가 없습니다.` });
+                  return;
+                }
+                setMessage({
+                  tone: "ok",
+                  text: `${year}년 ${month}월 휴가 추첨이 완료되었습니다. 연차 ${annualWinnerCount}명, 대휴 ${compensatoryWinnerCount}명이 당첨되었습니다.`,
+                });
               }}
             >
-              연차 추첨
-            </button>
-            <button
-              className="btn"
-              disabled={!hasGeneratedSchedule}
-              onClick={() => {
-                if (compensatoryLotteryDone) {
-                  window.alert("이미 대휴 추첨했습니다.");
-                  return;
-                }
-                if (!window.confirm("대휴 추첨하시겠습니까?")) return;
-                const result = runCompensatoryVacationLottery(year, month);
-                if (!result) {
-                  setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 없어 대휴 추첨을 진행할 수 없습니다.` });
-                  return;
-                }
-                loadMonth();
-                setMessage({ tone: "ok", text: `${year}년 ${month}월 대휴 추첨을 완료했습니다.` });
-              }}
-            >
-              대휴 추첨
+              휴가 추첨
             </button>
             <button
               className="btn primary"
               disabled={!hasGeneratedSchedule}
-              onClick={() => {
+              onClick={async () => {
                 const result = applyVacationMonthToSchedule(year, month);
                 setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
-                loadMonth();
+                const persistResult = await waitForVacationStoreWrite();
+                await loadMonth();
+                if (!persistResult.ok) {
+                  setMessage({ tone: "warn", text: persistResult.message ?? "휴가 반영 저장에 실패했습니다." });
+                  return;
+                }
               }}
             >
               근무 반영
@@ -364,7 +387,7 @@ export default function ScheduleVacationsPage() {
                           value={capacity}
                           onChange={(event) => {
                             setVacationCapacity(year, month, dateKey, Number(event.target.value));
-                            loadMonth();
+                            void loadMonth();
                           }}
                         >
                           {Array.from({ length: 10 }, (_, optionIndex) => optionIndex + 1).map((option) => (
@@ -480,3 +503,4 @@ export default function ScheduleVacationsPage() {
     </div>
   );
 }
+
