@@ -5,9 +5,11 @@ import {
   getMonthKey,
   getUniquePeople,
   parseVacationMap,
+  parseVacationEntry,
 } from "@/lib/schedule/engine";
 import { readStoredScheduleState, saveScheduleState } from "@/lib/schedule/storage";
 import { GeneratedSchedule, VacationType } from "@/lib/schedule/types";
+import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -670,16 +672,26 @@ function applyVacationEntriesToGeneratedSchedule(
 
 function getApprovedEntriesForMonth(store: VacationStore, monthKey: string) {
   const monthState = store.months[monthKey];
-  if (!monthState) return {} as Record<string, string[]>;
+  const priorityMap = getDeskPriorityVacationMap(monthKey);
+  if (!monthState) return priorityMap;
 
   return Object.fromEntries(
-    monthState.managedDateKeys.map((dateKey) => [
-      dateKey,
-      uniqueNames([
-        ...(monthState.annualWinners[dateKey] ?? []).map((name) => formatVacationEntry("연차", name)),
-        ...(monthState.compensatoryWinners[dateKey] ?? []).map((name) => formatVacationEntry("대휴", name)),
-      ]),
-    ]),
+    monthState.managedDateKeys.map((dateKey) => {
+      const priorityEntries = priorityMap[dateKey] ?? [];
+      const priorityNames = new Set(priorityEntries.map((entry) => parseVacationEntry(entry).name));
+      return [
+        dateKey,
+        uniqueNames([
+          ...priorityEntries,
+          ...(monthState.annualWinners[dateKey] ?? [])
+            .filter((name) => !priorityNames.has(name))
+            .map((name) => formatVacationEntry("연차", name)),
+          ...(monthState.compensatoryWinners[dateKey] ?? [])
+            .filter((name) => !priorityNames.has(name))
+            .map((name) => formatVacationEntry("대휴", name)),
+        ]),
+      ];
+    }),
   ) as Record<string, string[]>;
 }
 
@@ -937,11 +949,13 @@ export function runAnnualVacationLottery(year: number, month: number) {
   }
 
   const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
+  const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
   const nextAnnualWinners: Record<string, string[]> = {};
 
   monthState.managedDateKeys.forEach((dateKey) => {
-    const applicants = annualApplicants[dateKey] ?? [];
-    const capacity = getMonthCapacity(monthState, dateKey);
+    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
+    const applicants = (annualApplicants[dateKey] ?? []).filter((name) => !blockedNames.has(name));
+    const capacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size);
     if (applicants.length <= capacity) {
       nextAnnualWinners[dateKey] = [...applicants];
       return;
@@ -969,14 +983,18 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
 
   const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
   const compensatoryApplicants = getApplicantsByType(store, monthState.monthKey, "대휴");
+  const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
   const nextAnnualWinners =
     hasLotteryResults(monthState.annualWinners) ? monthState.annualWinners : runAnnualVacationLottery(year, month)?.annualWinners ?? {};
   const nextCompensatoryWinners: Record<string, string[]> = {};
 
   monthState.managedDateKeys.forEach((dateKey) => {
+    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
     const annualWinners = uniqueNames(nextAnnualWinners[dateKey] ?? []);
-    const remainingCapacity = Math.max(0, getMonthCapacity(monthState, dateKey) - annualWinners.length);
-    const applicants = uniqueNames((compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name)));
+    const remainingCapacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size - annualWinners.length);
+    const applicants = uniqueNames(
+      (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name) && !blockedNames.has(name)),
+    );
 
     if (remainingCapacity === 0) {
       nextCompensatoryWinners[dateKey] = [];
@@ -1011,12 +1029,14 @@ export function runVacationLottery(year: number, month: number) {
 
   const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
   const compensatoryApplicants = getApplicantsByType(store, monthState.monthKey, "대휴");
+  const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
   const nextAnnualWinners: Record<string, string[]> = {};
   const nextCompensatoryWinners: Record<string, string[]> = {};
 
   monthState.managedDateKeys.forEach((dateKey) => {
-    const annualCandidates = uniqueNames(annualApplicants[dateKey] ?? []);
-    const capacity = getMonthCapacity(monthState, dateKey);
+    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
+    const annualCandidates = uniqueNames((annualApplicants[dateKey] ?? []).filter((name) => !blockedNames.has(name)));
+    const capacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size);
 
     const annualWinners =
       annualCandidates.length <= capacity
@@ -1028,7 +1048,9 @@ export function runVacationLottery(year: number, month: number) {
     nextAnnualWinners[dateKey] = annualWinners;
 
     const remainingCapacity = Math.max(0, capacity - annualWinners.length);
-    const compensatoryCandidates = uniqueNames((compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name)));
+    const compensatoryCandidates = uniqueNames(
+      (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name) && !blockedNames.has(name)),
+    );
 
     if (remainingCapacity === 0) {
       nextCompensatoryWinners[dateKey] = [];

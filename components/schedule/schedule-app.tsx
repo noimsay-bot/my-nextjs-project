@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getScheduleCategoryLabel, orderCategories } from "@/lib/schedule/constants";
+import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, orderCategories } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -81,6 +81,21 @@ const vacationLegendStyles = {
     background: "rgba(16,185,129,.22)",
     border: "1px solid rgba(52,211,153,.5)",
     color: "#d1fae5",
+  },
+  근속휴가: {
+    background: "rgba(251,191,36,.22)",
+    border: "1px solid rgba(252,211,77,.5)",
+    color: "#fde68a",
+  },
+  건강검진: {
+    background: "rgba(244,114,182,.2)",
+    border: "1px solid rgba(251,113,133,.48)",
+    color: "#ffe4e6",
+  },
+  경조: {
+    background: "rgba(167,139,250,.2)",
+    border: "1px solid rgba(196,181,253,.48)",
+    color: "#ede9fe",
   },
 } as const;
 
@@ -261,7 +276,7 @@ export function ScheduleApp() {
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [addPersonDialog, setAddPersonDialog] = useState<AddPersonDialogState | null>(null);
   const [addPersonName, setAddPersonName] = useState("");
-  const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴">("연차");
+  const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴" | "경조">("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
@@ -740,18 +755,6 @@ export function ScheduleApp() {
     setMessage({ tone: "ok", text: `${visibleSchedule.year}년 ${visibleSchedule.month}월 근무표를 삭제했습니다.` });
   };
 
-  const onDownload = () => {
-    if (typeof window === "undefined") return;
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `schedule-state-${state.year}-${String(state.month).padStart(2, "0")}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setMessage({ tone: "ok", text: "현재 저장 상태 JSON을 내려받았습니다." });
-  };
-
   const confirmPublish = async () => {
     const target = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
@@ -771,7 +774,6 @@ export function ScheduleApp() {
             </Link>
             <button className="btn white" disabled={isEditingDate} onClick={onGenerate}>작성</button>
             <button className="btn" disabled={isEditingDate} onClick={onRebalance}>자동 재배치</button>
-            <button className="btn" disabled={isEditingDate} onClick={onDownload}>상태 내보내기</button>
             <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={() => setDeleteConfirmOpen(true)}>삭제</button>
             <button className="btn" onClick={() => {
               setPublishMonthKey(visibleSchedule?.monthKey ?? state.generatedHistory[state.generatedHistory.length - 1]?.monthKey ?? "");
@@ -779,9 +781,6 @@ export function ScheduleApp() {
             }} disabled={isEditingDate}>
               근무표 게시
             </button>
-            <Link href="/schedule/vacations" className="btn">
-              휴가 관리
-            </Link>
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
           {isEditingDate ? <div className="status note">{isAllDaysEditMode ? "근무표 전체 수정 중입니다. 수정 완료 또는 취소 후 다른 작업을 진행해 주세요." : "날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요."}</div> : null}
@@ -1083,6 +1082,51 @@ export function ScheduleApp() {
                 >
                   대휴
                 </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.근속휴가,
+                  }}
+                >
+                  근속
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.건강검진,
+                  }}
+                >
+                  검진
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.경조,
+                  }}
+                >
+                  경조
+                </span>
               <button
                 className="btn"
                 disabled={isEditingDate || !hasPreviousVisibleMonth}
@@ -1162,6 +1206,51 @@ export function ScheduleApp() {
                     >
                       대휴
                     </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.근속휴가,
+                      }}
+                    >
+                      근속
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.건강검진,
+                      }}
+                    >
+                      검진
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.경조,
+                      }}
+                    >
+                      경조
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1182,10 +1271,12 @@ export function ScheduleApp() {
                   const dayCardStyle = getDayCardStyle(day);
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
-                  const visibleAssignments = Object.entries(day.assignments).filter(([category]) => {
-                    if (isWeekendLike) return category !== "휴가" && category !== "제크";
-                    return !["국회", "청사", "청와대"].includes(category);
-                  });
+                  const visibleAssignments = Object.entries(day.assignments)
+                    .filter(([category]) => {
+                      if (isWeekendLike) return category !== "휴가" && category !== "제크";
+                      return !["국회", "청사", "청와대"].includes(category);
+                    })
+                    .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory));
 
                   return (
                     <article
@@ -1898,7 +1989,9 @@ export function ScheduleApp() {
                     const dayCardStyle = getDayCardStyle(day);
                     const centeredDayLabel = getCenteredDayLabel(day);
                     const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
-                    const previewAssignments = Object.entries(day.assignments).filter(([, names]) => names.length > 0);
+                    const previewAssignments = Object.entries(day.assignments)
+                      .filter(([, names]) => names.length > 0)
+                      .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory));
 
                     return (
                       <article
@@ -2068,8 +2161,8 @@ export function ScheduleApp() {
               {addPersonDialog.category === "휴가" ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <span className="muted">휴가 유형</span>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-                    {(["연차", "대휴"] as const).map((type) => {
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                    {(["연차", "대휴", "경조"] as const).map((type) => {
                       const selected = addPersonVacationType === type;
                       return (
                         <button

@@ -17,6 +17,30 @@ export function getScheduleCategoryLabel(category: string) {
   return category;
 }
 
+const assignmentDisplayOrder = [
+  "조근",
+  "연장",
+  "일반",
+  "석근",
+  "야근",
+  "제크",
+  "휴가",
+  "국회",
+  "청사",
+  "청와대",
+  "주말조근",
+  "주말일반근무",
+  "뉴스대기",
+] as const;
+
+export function getAssignmentDisplayRank(category: string) {
+  const normalized = getScheduleCategoryLabel(category);
+  const index = assignmentDisplayOrder.indexOf(normalized as (typeof assignmentDisplayOrder)[number]);
+  if (index >= 0) return index;
+  const rawIndex = assignmentDisplayOrder.indexOf(category as (typeof assignmentDisplayOrder)[number]);
+  return rawIndex >= 0 ? rawIndex : assignmentDisplayOrder.length + 1;
+}
+
 export const categories: CategoryDefinition[] = [
   { key: "morning", label: "조근" },
   { key: "extension", label: "연장" },

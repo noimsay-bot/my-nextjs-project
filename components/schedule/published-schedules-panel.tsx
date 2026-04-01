@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSession, hasDeskAccess } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { getAssignmentDisplayRank, getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -37,6 +37,21 @@ const vacationLegendStyles = {
     background: "rgba(16,185,129,.22)",
     border: "1px solid rgba(52,211,153,.5)",
     color: "#d1fae5",
+  },
+  근속휴가: {
+    background: "rgba(251,191,36,.22)",
+    border: "1px solid rgba(252,211,77,.5)",
+    color: "#fde68a",
+  },
+  건강검진: {
+    background: "rgba(244,114,182,.2)",
+    border: "1px solid rgba(251,113,133,.48)",
+    color: "#ffe4e6",
+  },
+  경조: {
+    background: "rgba(167,139,250,.2)",
+    border: "1px solid rgba(196,181,253,.48)",
+    color: "#ede9fe",
   },
 } as const;
 
@@ -106,6 +121,7 @@ function compactAssignments(item: PublishedScheduleItem, currentUser: string) {
     .map((day) => {
       const categories = Object.entries(day.assignments)
         .filter(([, names]) => names.includes(currentUser))
+        .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory))
         .map(([category]) => getScheduleCategoryLabel(category))
         .join(", ");
       return `${day.month}/${day.day} - ${categories}`;
@@ -841,10 +857,12 @@ export function PublishedSchedulesPanel() {
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
-                  const visibleAssignments = Object.entries(day.assignments).filter(([category]) => {
-                    if (isWeekendLike) return category !== "휴가" && category !== "제크";
-                    return !["국회", "청사", "청와대"].includes(category);
-                  });
+                  const visibleAssignments = Object.entries(day.assignments)
+                    .filter(([category]) => {
+                      if (isWeekendLike) return category !== "휴가" && category !== "제크";
+                      return !["국회", "청사", "청와대"].includes(category);
+                    })
+                    .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory));
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}

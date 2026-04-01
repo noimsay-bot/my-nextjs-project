@@ -7,6 +7,7 @@ import {
   initializeAuth,
   subscribeToAuth,
   type UserRole,
+  type SessionUser,
 } from "@/lib/auth/storage";
 
 const publicPaths = new Set(["/login"]);
@@ -52,22 +53,19 @@ function hasAccess(pathname: string, role: UserRole) {
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [ready, setReady] = useState(publicPaths.has(pathname));
-  const [session, setSession] = useState(() => getSession());
-  const [checkingSession, setCheckingSession] = useState(!publicPaths.has(pathname));
+  const isPublicPath = publicPaths.has(pathname);
+  const [session, setSession] = useState<SessionUser | null | undefined>(() =>
+    isPublicPath ? getSession() : undefined,
+  );
+  const [checkingSession, setCheckingSession] = useState(!isPublicPath);
 
   useEffect(() => {
     let mounted = true;
 
-    void initializeAuth().then((nextSession) => {
-      if (!mounted) return;
-      setSession(nextSession);
-      setCheckingSession(false);
-    });
-
     const unsubscribe = subscribeToAuth((nextSession) => {
       if (!mounted) return;
       setSession(nextSession);
+      setCheckingSession(false);
     });
 
     return () => {
@@ -77,22 +75,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!publicPaths.has(pathname)) {
-      setReady(false);
-      setCheckingSession(true);
-      return;
-    }
-
-    setReady(true);
-    setCheckingSession(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (publicPaths.has(pathname) || session) {
-      return;
+    if (isPublicPath) {
+      setSession(getSession());
+      setCheckingSession(false);
+      return undefined;
     }
 
     let cancelled = false;
+    setCheckingSession(true);
 
     void initializeAuth().then((nextSession) => {
       if (cancelled) return;
@@ -103,15 +93,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, session]);
+  }, [isPublicPath, pathname]);
 
   useEffect(() => {
-    if (publicPaths.has(pathname)) {
-      setReady(true);
-      return;
-    }
-
-    if (checkingSession || session === undefined) {
+    if (isPublicPath || checkingSession) {
       return;
     }
 
@@ -129,11 +114,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace("/");
       return;
     }
+  }, [checkingSession, isPublicPath, pathname, router, session]);
 
-    setReady(true);
-  }, [checkingSession, pathname, router, session]);
+  const content = (
+    <div key={pathname} style={{ display: "contents" }}>
+      {children}
+    </div>
+  );
 
-  if (publicPaths.has(pathname)) return <>{children}</>;
-  if (!ready) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
-  return <>{children}</>;
+  if (isPublicPath) return content;
+  if (checkingSession || session === undefined) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
+  if (!session || !session.approved || !hasAccess(pathname, session.role)) return null;
+  return content;
 }

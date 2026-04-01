@@ -1,5 +1,6 @@
 import { defaultScheduleState } from "@/lib/schedule/constants";
 import { getMonthKey, sanitizeScheduleState } from "@/lib/schedule/engine";
+import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 import {
   getPortalSession,
@@ -74,10 +75,16 @@ function mergeScheduleRows(
   currentUser?: string,
 ) {
   const base = sanitizeScheduleState(settingsRow?.state ?? defaultScheduleState);
-  const generatedHistory = monthRows
+  const storedMonths = monthRows
     .map((row) => row.draft_state)
     .filter((row): row is GeneratedSchedule => Boolean(row))
     .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  const generatedHistory = Array.from(
+    [...presetScheduleMonths, ...storedMonths].reduce((map, schedule) => {
+      map.set(schedule.monthKey, schedule);
+      return map;
+    }, new Map<string, GeneratedSchedule>()).values(),
+  ).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
   const targetMonthKey = getMonthKey(base.year, base.month);
   const generated =
     generatedHistory.find((item) => item.monthKey === targetMonthKey) ??

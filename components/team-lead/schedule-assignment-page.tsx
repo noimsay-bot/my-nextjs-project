@@ -98,6 +98,21 @@ const vacationBadgeStyles = {
     background: "rgba(16,185,129,.16)",
     color: "#d1fae5",
   },
+  근속휴가: {
+    borderColor: "rgba(252,211,77,.45)",
+    background: "rgba(251,191,36,.16)",
+    color: "#fde68a",
+  },
+  건강검진: {
+    borderColor: "rgba(251,113,133,.45)",
+    background: "rgba(244,114,182,.14)",
+    color: "#ffe4e6",
+  },
+  경조: {
+    borderColor: "rgba(196,181,253,.45)",
+    background: "rgba(167,139,250,.14)",
+    color: "#ede9fe",
+  },
 } as const;
 const jcheckBadgeStyle = {
   borderColor: "rgba(255,255,255,.92)",

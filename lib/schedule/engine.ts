@@ -9,6 +9,7 @@
   SCHEDULE_YEAR_END,
   SCHEDULE_YEAR_START,
 } from "@/lib/schedule/constants";
+import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
 import {
   CategoryKey,
   DaySchedule,
@@ -112,7 +113,7 @@ export function splitNames(value: string) {
 
 export function parseVacationEntry(value: string): { type: VacationType; name: string } {
   const trimmed = value.trim();
-  const matched = /^(연차|대휴)\s*:(.+)$/.exec(trimmed);
+  const matched = /^(연차|대휴|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
   if (matched) {
     return {
       type: matched[1] as VacationType,
@@ -131,6 +132,24 @@ export function formatVacationEntry(type: VacationType, name: string) {
 
 function getVacationNames(entries: string[]) {
   return entries.map((entry) => parseVacationEntry(entry).name).filter(Boolean);
+}
+
+function mergeVacationMaps(...maps: Array<Record<string, string[]>>) {
+  const merged: Record<string, string[]> = {};
+  maps.forEach((map) => {
+    Object.entries(map).forEach(([dateKey, entries]) => {
+      const current = merged[dateKey] ?? [];
+      const currentNames = new Set(current.map((entry) => parseVacationEntry(entry).name));
+      entries.forEach((entry) => {
+        const parsed = parseVacationEntry(entry);
+        if (!parsed.name || currentNames.has(parsed.name)) return;
+        current.push(entry);
+        currentNames.add(parsed.name);
+      });
+      merged[dateKey] = current;
+    });
+  });
+  return merged;
 }
 
 export function parseHolidaySet(text: string, year?: number, month?: number) {
@@ -487,7 +506,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
   const nextState = cloneScheduleState(state);
   const monthKey = getMonthKey(nextState.year, nextState.month);
   const holidaySet = parseHolidaySet(nextState.extraHolidays, nextState.year, nextState.month);
-  const vacationMap = parseVacationMap("");
+  const vacationMap = mergeVacationMaps(getDeskPriorityVacationMap(), parseVacationMap(nextState.vacations));
   const range = getScheduleRange(nextState.year, nextState.month);
   const startPointers = getMonthStartPointers(nextState, monthKey);
   const pointers = { ...startPointers };
@@ -509,7 +528,9 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
     const isCustomHoliday = isHoliday;
     const isWeekdayHoliday = isHoliday && !isWeekend;
     const vacations = vacationMap[dateKey] ?? [];
+    const vacationNames = getVacationNames(vacations);
     const assignments: Record<string, string[]> = {};
+    const desiredCounts: Record<string, number> = {};
 
     if (isCustomHoliday) {
       assignments["조근"] = [];
@@ -556,9 +577,48 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
       assignments["국회"] = [];
       assignments["청사"] = [];
       assignments["청와대"] = [];
-    } else {
+    }
+
+    if (vacations.length > 0) {
       assignments["휴가"] = [...vacations];
     }
+
+    Object.entries(assignments).forEach(([category, names]) => {
+      if (category === "휴가") return;
+      desiredCounts[category] = names.length;
+      assignments[category] = names.filter((name) => !vacationNames.includes(name));
+    });
+
+    const blockedNames = new Set(
+      Object.entries(assignments)
+        .filter(([category]) => category !== "휴가")
+        .flatMap(([, names]) => names),
+    );
+
+    const refillCategory = (category: string, key: CategoryKey) => {
+      const targetCount = desiredCounts[category] ?? 0;
+      const currentNames = assignments[category] ?? [];
+      if (targetCount <= currentNames.length) return;
+      const nextNames = nextCandidatesByOrder(
+        nextState,
+        key,
+        targetCount - currentNames.length,
+        blockedNames,
+        [],
+        vacationNames,
+        pointers,
+      );
+      nextNames.forEach((name) => blockedNames.add(name));
+      assignments[category] = [...currentNames, ...nextNames];
+    };
+
+    refillCategory("조근", "morning");
+    refillCategory("연장", "extension");
+    refillCategory("일반", "evening");
+    refillCategory("야근", dow === 5 ? "nightFriday" : dow === 6 ? "nightSaturday" : dow === 0 ? "nightSunday" : "nightWeekday");
+    refillCategory("주말조근", "holidayDuty");
+    refillCategory("주말일반근무", "holidayDuty");
+    refillCategory("뉴스대기", "holidayDuty");
 
     const conflicts = collectConflicts(assignments, previousNight, warnings, dateKey);
     days.push({
