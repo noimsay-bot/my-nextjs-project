@@ -55,7 +55,7 @@ export async function subscribeToReviewWorkspaceChanges(onChange: () => void | P
 
   const supabase = await getPortalSupabaseClient();
   const channels: Array<ReturnType<typeof supabase.channel>> = [];
-  const subscribe = (name: string, table: "review_assignments" | "reviews", filter?: string) => {
+  const subscribe = (name: string, table: "submissions" | "reviews", filter?: string) => {
     const channelName = `${name}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
     const channel = supabase
       .channel(channelName)
@@ -76,11 +76,11 @@ export async function subscribeToReviewWorkspaceChanges(onChange: () => void | P
     channels.push(channel);
   };
 
+  subscribe(`submissions:${session.id}`, "submissions");
+
   if (session.role === "reviewer") {
-    subscribe(`review-assignments:${session.id}`, "review_assignments", `reviewer_id=eq.${session.id}`);
     subscribe(`reviews:${session.id}`, "reviews", `reviewer_id=eq.${session.id}`);
   } else {
-    subscribe(`review-assignments:${session.id}`, "review_assignments");
     subscribe(`reviews:${session.id}`, "reviews");
   }
 
@@ -109,6 +109,17 @@ function reviewRowToCardState(row: ReviewRow | undefined): ReviewCardState {
 
 function buildReviewRowsMap(rows: ReviewRow[]) {
   return new Map(rows.map((row) => [`${row.submission_id}::${row.reviewer_id}`, row] as const));
+}
+
+function buildLatestReviewRowsMap(rows: ReviewRow[]) {
+  const latestRows = new Map<string, ReviewRow>();
+  rows.forEach((row) => {
+    const current = latestRows.get(row.submission_id);
+    if (!current || row.updated_at > current.updated_at) {
+      latestRows.set(row.submission_id, row);
+    }
+  });
+  return latestRows;
 }
 
 function formatEntryUpdatedAt(rows: SubmissionRow[]) {
@@ -141,30 +152,26 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     };
   }
 
-  const canEdit = role === "reviewer";
+  const canEdit = role === "reviewer" || role === "admin";
   const readOnlyReason =
-    role === "reviewer"
+    role === "reviewer" || role === "admin"
       ? null
       : role === "desk"
         ? "DESK 권한은 현재 조회 전용입니다."
         : "현재 권한은 조회 전용입니다.";
 
   const supabase = await getPortalSupabaseClient();
-  let assignmentQuery = supabase
-    .from("review_assignments")
-    .select("id, submission_id, reviewer_id, assigned_by, assigned_at, reset_at, created_at")
-    .is("reset_at", null);
+  const { data: submissionRows, error: submissionError } = await supabase
+    .from("submissions")
+    .select(SUBMISSION_COLUMNS)
+    .order("updated_at", { ascending: false })
+    .returns<SubmissionRow[]>();
 
-  if (role === "reviewer") {
-    assignmentQuery = assignmentQuery.eq("reviewer_id", session.id);
+  if (submissionError) {
+    throw new Error(submissionError.message);
   }
 
-  const { data: assignments, error: assignmentError } = await assignmentQuery.returns<ReviewAssignmentRow[]>();
-  if (assignmentError) {
-    throw new Error(assignmentError.message);
-  }
-
-  if (!assignments || assignments.length === 0) {
+  if (!submissionRows || submissionRows.length === 0) {
     return {
       entries: [],
       reviewState: {},
@@ -173,26 +180,20 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     };
   }
 
-  const submissionIds = Array.from(new Set(assignments.map((item) => item.submission_id)));
-  const reviewerIds = Array.from(new Set(assignments.map((item) => item.reviewer_id)));
-
-  const { data: submissionRows, error: submissionError } = await supabase
-    .from("submissions")
-    .select(SUBMISSION_COLUMNS)
-    .in("id", submissionIds)
-    .returns<SubmissionRow[]>();
-
-  if (submissionError) {
-    throw new Error(submissionError.message);
-  }
-
-  const authorIds = Array.from(new Set((submissionRows ?? []).map((row) => row.author_id)));
-  const profileIds = Array.from(new Set([...authorIds, ...reviewerIds]));
+  const submissionIds = Array.from(new Set(submissionRows.map((row) => row.id)));
 
   const { data: profiles, error: profileError } = await supabase
     .from("profiles")
     .select("id, name")
-    .in("id", profileIds)
+    .in(
+      "id",
+      Array.from(
+        new Set([
+          ...submissionRows.map((row) => row.author_id),
+          session.id,
+        ]),
+      ),
+    )
     .returns<ProfileNameRow[]>();
 
   if (profileError) {
@@ -209,18 +210,13 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     throw new Error(reviewError.message);
   }
 
-  const submissionMap = new Map((submissionRows ?? []).map((row) => [row.id, row] as const));
   const profileMap = new Map((profiles ?? []).map((row) => [row.id, row.name] as const));
   const reviewMap = buildReviewRowsMap(reviewRows ?? []);
+  const latestReviewMap = buildLatestReviewRowsMap(reviewRows ?? []);
   const grouped = new Map<string, { entry: SubmissionEntry; rows: SubmissionRow[] }>();
-
-  assignments.forEach((assignment) => {
-    const submission = submissionMap.get(assignment.submission_id);
-    if (!submission) return;
-
+  submissionRows.forEach((submission) => {
     const authorName = profileMap.get(submission.author_id) ?? submission.author_id;
-    const reviewerName = profileMap.get(assignment.reviewer_id) ?? assignment.reviewer_id;
-    const groupKey = `${submission.author_id}::${assignment.reviewer_id}`;
+    const groupKey = submission.author_id;
     const current = grouped.get(groupKey);
 
     if (current) {
@@ -236,8 +232,8 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
         groupKey,
         submitter: authorName,
         submissionIds: [submission.id],
-        reviewerId: assignment.reviewer_id,
-        reviewerName,
+        reviewerId: canEdit ? session.id : undefined,
+        reviewerName: canEdit ? (profileMap.get(session.id) ?? session.username) : undefined,
         readOnly: !canEdit,
         cards: [rowToSubmissionCard(submission)],
         updatedAt: formatSubmissionUpdatedAt(submission.updated_at),
@@ -251,25 +247,20 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
       cards: [...group.entry.cards],
       updatedAt: formatEntryUpdatedAt(group.rows),
     }))
-    .sort(
-      (left, right) =>
-        left.submitter.localeCompare(right.submitter, "ko") ||
-        (left.reviewerName ?? "").localeCompare(right.reviewerName ?? "", "ko"),
-    );
+    .sort((left, right) => left.submitter.localeCompare(right.submitter, "ko"));
 
   const reviewState = Object.fromEntries(
     entries.map((entry) => {
-      const reviewerId = entry.reviewerId ?? "";
       const cards = Object.fromEntries(
         entry.cards.map((card) => {
-          const row = reviewMap.get(`${card.id}::${reviewerId}`);
+          const row = canEdit ? reviewMap.get(`${card.id}::${session.id}`) : latestReviewMap.get(card.id);
           return [card.id, reviewRowToCardState(row)];
         }),
       );
       const done =
         entry.cards.length > 0 &&
         entry.cards.every((card) => {
-          const row = reviewMap.get(`${card.id}::${reviewerId}`);
+          const row = canEdit ? reviewMap.get(`${card.id}::${session.id}`) : latestReviewMap.get(card.id);
           return Boolean(row?.completed_at);
         });
 
@@ -297,16 +288,18 @@ export async function saveReviewEntry(entry: SubmissionEntry, state: ReviewState
     return { ok: false as const, message: "로그인이 필요합니다." };
   }
 
-  if (session.role !== "reviewer") {
+  if (session.role !== "reviewer" && session.role !== "admin") {
     return { ok: false as const, message: "현재 권한은 review 저장이 불가능합니다." };
   }
+
+  const reviewerId = session.id;
 
   const supabase = await getPortalSupabaseClient();
   const payload = entry.cards.map((card) => {
     const cardState = state.cards[card.id] ?? createEmptyReviewCardState();
     return {
       submission_id: card.id,
-      reviewer_id: session.id,
+      reviewer_id: reviewerId,
       scores: {
         checked: cardState.checked,
         bonusScore: cardState.bonusScore,

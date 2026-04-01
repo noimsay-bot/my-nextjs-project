@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/team-lead/special-report", label: "평가 배정" },
   { href: "/team-lead/contribution", label: "기여도" },
   { href: "/team-lead/domestic-trip", label: "국내출장" },
   { href: "/team-lead/international-trip", label: "해외출장" },

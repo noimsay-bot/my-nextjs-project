@@ -246,8 +246,8 @@ export default function ReviewPage() {
             <div className="chip">Review queue</div>
             <div className="muted" style={{ lineHeight: 1.6 }}>
               {canEdit
-                ? "배정된 제출만 볼 수 있습니다. 왼쪽 목록에서 제출자를 선택한 뒤 카드별로 평가해 주세요."
-                : "현재 계정은 조회 전용입니다. 배정된 평가 결과를 확인할 수 있지만 수정은 할 수 없습니다."}
+                ? "제출된 베스트리포트가 자동으로 이 화면에 표시됩니다. 왼쪽 목록에서 제출자를 선택한 뒤 카드별로 평가해 주세요."
+                : "현재 계정은 조회 전용입니다. 제출된 평가 결과를 확인할 수 있지만 수정은 할 수 없습니다."}
             </div>
             {readOnlyReason ? <div className="status note">{readOnlyReason}</div> : null}
           </div>
@@ -282,7 +282,7 @@ export default function ReviewPage() {
           </div>
           {!submissions.length ? (
             <div className="status note">
-              {loading ? "평가 대상을 불러오는 중입니다." : "현재 계정에 배정된 평가 대상이 없습니다."}
+              {loading ? "평가 대상을 불러오는 중입니다." : "표시할 제출 데이터가 없습니다."}
             </div>
           ) : null}
         </div>
@@ -654,7 +654,7 @@ export default function ReviewPage() {
             </>
           ) : (
             <div className="status note">
-              {loading ? "review 화면을 불러오는 중입니다." : "review 대상이 없거나 아직 배정되지 않았습니다."}
+              {loading ? "review 화면을 불러오는 중입니다." : "review 대상이 없습니다."}
             </div>
           )}
         </div>

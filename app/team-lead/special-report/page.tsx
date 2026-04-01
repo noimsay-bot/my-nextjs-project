@@ -1,5 +1,5 @@
-import { ReviewAssignmentPage } from "@/components/team-lead/review-assignment-page";
+import { redirect } from "next/navigation";
 
 export default function TeamLeadSpecialReportPage() {
-  return <ReviewAssignmentPage />;
+  redirect("/review");
 }
