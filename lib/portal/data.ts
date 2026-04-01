@@ -317,7 +317,10 @@ export async function saveReviewEntry(entry: SubmissionEntry, state: ReviewState
     return { ok: false as const, message: error.message };
   }
 
-  return { ok: true as const, message: "평가가 저장되었습니다." };
+  return {
+    ok: true as const,
+    message: state.done ? "평가를 팀장 페이지로 전송했습니다." : "평가가 저장되었습니다.",
+  };
 }
 
 export interface SubmissionEntry {

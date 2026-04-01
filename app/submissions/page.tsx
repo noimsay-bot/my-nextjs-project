@@ -24,6 +24,8 @@ export default function SubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const dateInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const hasLocalDraftRef = useRef(false);
+  const loadedSessionIdRef = useRef<string | null>(session?.id ?? null);
 
   useEffect(() => {
     let mounted = true;
@@ -45,11 +47,18 @@ export default function SubmissionsPage() {
     async function loadEntry() {
       if (!session) {
         if (!mounted) return;
+        hasLocalDraftRef.current = false;
+        loadedSessionIdRef.current = null;
         setSubmitter("");
         setEntries([]);
         setCards([createEmptySubmissionCard()]);
         setLoading(false);
         return;
+      }
+
+      if (loadedSessionIdRef.current !== session.id) {
+        hasLocalDraftRef.current = false;
+        loadedSessionIdRef.current = session.id;
       }
 
       setLoading(true);
@@ -61,10 +70,14 @@ export default function SubmissionsPage() {
 
         if (entry) {
           setEntries([entry]);
-          setCards(entry.cards.length > 0 ? entry.cards : [createEmptySubmissionCard()]);
+          if (!hasLocalDraftRef.current) {
+            setCards(entry.cards.length > 0 ? entry.cards : [createEmptySubmissionCard()]);
+          }
         } else {
           setEntries([]);
-          setCards([createEmptySubmissionCard()]);
+          if (!hasLocalDraftRef.current) {
+            setCards([createEmptySubmissionCard()]);
+          }
         }
       } catch (error) {
         if (!mounted) return;
@@ -84,6 +97,7 @@ export default function SubmissionsPage() {
   }, [session]);
 
   const updateCard = (cardId: string, patch: Partial<SubmissionCard>) => {
+    hasLocalDraftRef.current = true;
     setCards((current) => current.map((item) => (item.id === cardId ? { ...item, ...patch } : item)));
   };
 
@@ -99,6 +113,7 @@ export default function SubmissionsPage() {
     setMessage(result.message);
 
     if (result.ok && result.entry) {
+      hasLocalDraftRef.current = false;
       setEntries([result.entry]);
       setCards(result.entry.cards.length > 0 ? result.entry.cards : [createEmptySubmissionCard()]);
     }
@@ -135,7 +150,14 @@ export default function SubmissionsPage() {
             >
               <strong>{index + 1}번 리포트</strong>
               {cards.length > 1 ? (
-                <button className="btn" onClick={() => setCards((current) => current.filter((item) => item.id !== card.id))}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    hasLocalDraftRef.current = true;
+                    setCards((current) => current.filter((item) => item.id !== card.id));
+                  }}
+                >
                   삭제
                 </button>
               ) : null}
@@ -213,9 +235,13 @@ export default function SubmissionsPage() {
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
+            type="button"
             className="btn"
             disabled={cards.length >= 3 || loading || saving}
-            onClick={() => setCards((current) => [...current, createEmptySubmissionCard()])}
+            onClick={() => {
+              hasLocalDraftRef.current = true;
+              setCards((current) => [...current, createEmptySubmissionCard()]);
+            }}
           >
             리포트 추가
           </button>

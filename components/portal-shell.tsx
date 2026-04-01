@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { AppRouteBoundary } from "@/components/app-route-boundary";
 import {
   getSession,
   logoutUser,
@@ -120,7 +121,13 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
           ) : null}
         </div>
       </section>
-      <main style={{ marginTop: 20 }}>{children}</main>
+      <main style={{ marginTop: 20 }}>
+        <AppRouteBoundary resetKey={pathname}>
+          <div key={pathname} style={{ display: "contents" }}>
+            {children}
+          </div>
+        </AppRouteBoundary>
+      </main>
     </div>
   );
 }

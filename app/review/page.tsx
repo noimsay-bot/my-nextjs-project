@@ -5,12 +5,12 @@ import {
   additionalBonusOptions,
   cardNeedsBonusComment,
   createEmptyReviewCardState,
-  createEmptyReviewStateEntry,
+  getCardSections,
   getReviewCardScore,
   getReviewEntryScore,
   getReviewWorkspace,
   getSubmissionEntryKey,
-  reportTemplates,
+  normalizeReviewStateEntry,
   ReviewCardState,
   ReviewStateStore,
   saveReviewEntry,
@@ -143,7 +143,7 @@ export default function ReviewPage() {
 
   const current = submissions.find((entry) => getSubmissionEntryKey(entry) === selectedEntryKey);
   const currentKey = current ? getSubmissionEntryKey(current) : "";
-  const currentState = current ? (reviewState[currentKey] ?? createEmptyReviewStateEntry(current)) : createEmptyReviewStateEntry();
+  const currentState = normalizeReviewStateEntry(current ? reviewState[currentKey] : null, current);
 
   useEffect(() => {
     if (!current?.cards.length) {
@@ -181,8 +181,6 @@ export default function ReviewPage() {
     if (!current) return 0;
     return getReviewEntryScore(current, currentState);
   }, [current, currentState]);
-
-  const activeCardScore = activeCard ? getReviewCardScore(activeCard, activeCardState) : 0;
 
   const missingBonusCommentCards = current
     ? current.cards.filter((card) => {
@@ -239,57 +237,55 @@ export default function ReviewPage() {
   };
 
   return (
-    <section className="review-layout">
-      <article className="panel review-sidebar">
-        <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
-          <div style={{ display: "grid", gap: 8 }}>
+    <section style={{ display: "grid", gap: 16 }}>
+      <article className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "grid", gap: 10 }}>
             <div className="chip">Review queue</div>
             <div className="muted" style={{ lineHeight: 1.6 }}>
               {canEdit
-                ? "제출된 베스트리포트가 자동으로 이 화면에 표시됩니다. 왼쪽 목록에서 제출자를 선택한 뒤 카드별로 평가해 주세요."
+                ? "제출된 베스트리포트가 자동으로 이 화면에 표시됩니다. 아래 사람 목록을 선택한 뒤 카드별로 평가해 주세요."
                 : "현재 계정은 조회 전용입니다. 제출된 평가 결과를 확인할 수 있지만 수정은 할 수 없습니다."}
             </div>
             {readOnlyReason ? <div className="status note">{readOnlyReason}</div> : null}
+            {submissions.length > 0 ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignContent: "flex-start" }}>
+                {submissions.map((entry) => {
+                  const entryKey = getSubmissionEntryKey(entry);
+                  const selected = selectedEntryKey === entryKey;
+                  const done = reviewState[entryKey]?.done;
+                  return (
+                    <button
+                      key={entryKey}
+                      type="button"
+                      className={`btn ${selected ? "white" : ""}`}
+                      style={{
+                        display: "grid",
+                        gap: 4,
+                        padding: "9px 12px",
+                        minWidth: 140,
+                        justifyContent: "flex-start",
+                        textAlign: "left",
+                        borderColor: done && !selected ? "rgba(16,185,129,.35)" : undefined,
+                        background: done && !selected ? "rgba(16,185,129,.12)" : undefined,
+                      }}
+                      onClick={() => setSelectedEntryKey(entryKey)}
+                    >
+                      <span style={{ fontWeight: 800 }}>{entry.submitter}</span>
+                      {!canEdit && entry.reviewerName ? (
+                        <span style={{ fontSize: 12, opacity: 0.8 }}>reviewer: {entry.reviewerName}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="status note">
+                {loading ? "평가 대상을 불러오는 중입니다." : "표시할 제출 데이터가 없습니다."}
+              </div>
+            )}
           </div>
-          <div style={{ display: "grid", gap: 8, alignContent: "start" }}>
-            {submissions.map((entry) => {
-              const entryKey = getSubmissionEntryKey(entry);
-              const selected = selectedEntryKey === entryKey;
-              const done = reviewState[entryKey]?.done;
-              return (
-                <button
-                  key={entryKey}
-                  type="button"
-                  className={`btn ${selected ? "white" : ""}`}
-                  style={{
-                    padding: "7px 10px",
-                    fontSize: 14,
-                    lineHeight: 1.15,
-                    justifyContent: "flex-start",
-                    textAlign: "left",
-                    borderColor: done && !selected ? "rgba(16,185,129,.35)" : undefined,
-                    background: done && !selected ? "rgba(16,185,129,.12)" : undefined,
-                  }}
-                  onClick={() => setSelectedEntryKey(entryKey)}
-                >
-                  <span>{entry.submitter}</span>
-                  {!canEdit && entry.reviewerName ? (
-                    <span style={{ display: "block", fontSize: 12, opacity: 0.8 }}>reviewer: {entry.reviewerName}</span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-          {!submissions.length ? (
-            <div className="status note">
-              {loading ? "평가 대상을 불러오는 중입니다." : "표시할 제출 데이터가 없습니다."}
-            </div>
-          ) : null}
-        </div>
-      </article>
 
-      <article className="panel">
-        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="chip">영상 평가</div>
           {saveMessage ? <div className="status note">{saveMessage}</div> : null}
           {current && activeCard ? (
@@ -308,7 +304,24 @@ export default function ReviewPage() {
                     <strong style={{ fontSize: 24 }}>{current.submitter}</strong>
                     {!canEdit && current.reviewerName ? <span className="muted">reviewer {current.reviewerName}</span> : null}
                   </div>
-                  <span className="muted">마지막 제출 업데이트: {current.updatedAt}</span>
+                  <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+                    <span className="muted">마지막 제출 업데이트: {current.updatedAt}</span>
+                    {canEdit ? (
+                      <button
+                        className="btn primary"
+                        disabled={missingBonusCommentCards.length > 0}
+                        onClick={() => {
+                          if (missingBonusCommentCards.length > 0) return;
+                          const confirmed = window.confirm("평가를 종료하시겠습니까?");
+                          if (!confirmed) return;
+                          updateEntryDone(true);
+                        }}
+                      >
+                        모든 평가 제출
+                      </button>
+                    ) : null}
+                    {currentState.done ? <div className="status ok">현재 제출자의 평가가 완료 상태로 저장되었습니다.</div> : null}
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {current.cards.map((card, index) => {
@@ -347,58 +360,9 @@ export default function ReviewPage() {
                     style={{
                       border: "1px solid var(--line)",
                       borderRadius: 20,
-                      padding: 18,
+                      padding: 16,
                       display: "grid",
-                      gap: 12,
-                      background: "rgba(255,255,255,.03)",
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <span className="chip" style={{ letterSpacing: "normal" }}>{activeCard.type}</span>
-                      <span className="muted">{activeCard.date || "-"}</span>
-                    </div>
-                    <strong style={{ fontSize: 24, lineHeight: 1.35 }}>{activeCard.title || "(제목 없음)"}</strong>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div className="muted" style={{ fontSize: 12, letterSpacing: ".08em" }}>설명</div>
-                      <div style={{ lineHeight: 1.7 }}>{activeCard.comment?.trim() || "제출자가 남긴 설명이 없습니다."}</div>
-                    </div>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div className="muted" style={{ fontSize: 12, letterSpacing: ".08em" }}>링크</div>
-                      {activeCard.link.trim() ? (
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                          <button
-                            type="button"
-                            onClick={() => setPreview({ url: activeCard.link, title: activeCard.title || activeCard.type })}
-                            style={{
-                              padding: 0,
-                              border: "none",
-                              background: "transparent",
-                              color: "#8fe7ff",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              textDecoration: "underline",
-                              wordBreak: "break-all",
-                            }}
-                          >
-                            {activeCard.link}
-                          </button>
-                          <a href={activeCard.link} target="_blank" rel="noreferrer" className="muted">
-                            새 창 열기
-                          </a>
-                        </div>
-                      ) : (
-                        <div className="muted">미리보기를 열 수 있는 링크가 없습니다. 제출자가 링크를 입력했는지 확인해 주세요.</div>
-                      )}
-                    </div>
-                  </section>
-
-                  <section
-                    style={{
-                      border: "1px solid var(--line)",
-                      borderRadius: 20,
-                      padding: 18,
-                      display: "grid",
-                      gap: 16,
+                      gap: 14,
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -406,25 +370,15 @@ export default function ReviewPage() {
                         <strong style={{ fontSize: 22 }}>평가 기준</strong>
                         <span className="muted">기본 항목을 체크하고, 필요하면 추가 가점을 선택한 뒤 사유를 적어 주세요.</span>
                       </div>
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <div className="kpi" style={{ minWidth: 120 }}>
-                          <div className="kpi-label">현재 카드</div>
-                          <div className="kpi-value" style={{ fontSize: 24 }}>{activeCardScore}점</div>
-                        </div>
-                        <div className="kpi" style={{ minWidth: 120 }}>
-                          <div className="kpi-label">총점</div>
-                          <div className="kpi-value" style={{ fontSize: 24 }}>{totalScore}점</div>
-                        </div>
-                      </div>
                     </div>
 
-                    {reportTemplates[activeCard.type].map((section) => (
+                    {getCardSections(activeCard).map((section) => (
                       <article
                         key={section.title}
                         style={{
                           display: "grid",
-                          gap: 12,
-                          padding: 16,
+                          gap: 10,
+                          padding: 14,
                           borderRadius: 18,
                           border: section.isBonus ? "1px solid rgba(248,113,113,.28)" : "1px solid rgba(255,255,255,.08)",
                           background: section.isBonus ? "rgba(127,29,29,.16)" : "rgba(255,255,255,.03)",
@@ -468,7 +422,7 @@ export default function ReviewPage() {
                                   gap: 12,
                                   alignItems: "center",
                                   width: "100%",
-                                  padding: "14px 16px",
+                                  padding: "11px 14px",
                                   borderRadius: 16,
                                   border: checked
                                     ? "1px solid rgba(34,197,94,.55)"
@@ -500,8 +454,8 @@ export default function ReviewPage() {
                     <article
                       style={{
                         display: "grid",
-                        gap: 12,
-                        padding: 16,
+                        gap: 10,
+                        padding: 14,
                         borderRadius: 18,
                         border: "1px solid rgba(248,113,113,.28)",
                         background: "rgba(127,29,29,.14)",
@@ -528,7 +482,7 @@ export default function ReviewPage() {
                                 }));
                               }}
                               style={{
-                                padding: "12px 16px",
+                                padding: "10px 14px",
                                 minWidth: 74,
                                 borderRadius: 14,
                                 border: selected ? "1px solid rgba(34,197,94,.55)" : "1px solid rgba(248,113,113,.32)",
@@ -564,23 +518,9 @@ export default function ReviewPage() {
                       ) : null}
                     </article>
 
-                    {canEdit ? (
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                        <button
-                          className="btn primary"
-                          disabled={missingBonusCommentCards.length > 0}
-                          onClick={() => {
-                            if (missingBonusCommentCards.length > 0) return;
-                            updateEntryDone(true);
-                          }}
-                        >
-                          평가 완료 처리
-                        </button>
-                        {currentState.done ? <div className="status ok">현재 제출자의 평가가 완료 상태로 저장되었습니다.</div> : null}
-                      </div>
-                    ) : (
+                    {!canEdit ? (
                       <div className="status note">현재 화면은 조회 전용입니다. 평가 결과를 확인할 수 있지만 수정할 수는 없습니다.</div>
-                    )}
+                    ) : null}
 
                     {missingBonusCommentCards.length > 0 ? (
                       <div className="status warn">
@@ -590,65 +530,119 @@ export default function ReviewPage() {
                   </section>
                 </div>
 
-                <aside
-                  style={{
-                    display: "grid",
-                    gap: 12,
-                    alignContent: "start",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                    <strong style={{ fontSize: 20 }}>Preview</strong>
-                    {preview ? <span className="muted">{preview.title}</span> : null}
-                  </div>
-                  <div
-                    style={{
-                      border: "1px solid var(--line)",
-                      borderRadius: 20,
-                      overflow: "hidden",
-                      background: "rgba(0,0,0,.24)",
-                      minHeight: 520,
-                    }}
-                  >
-                    {preview && previewSource ? (
-                      previewSource.kind === "video" ? (
-                        <video
-                          controls
-                          src={previewSource.src}
-                          style={{ width: "100%", height: "100%", minHeight: 520, background: "#000" }}
-                        />
-                      ) : (
-                        <iframe
-                          title={preview.title || "Preview"}
-                          src={previewSource.src}
-                          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                          allowFullScreen
-                          style={{ width: "100%", height: 680, border: "none", background: "#000" }}
-                        />
-                      )
-                    ) : (
-                      <div
-                        className="muted"
-                        style={{
-                          minHeight: 520,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          textAlign: "center",
-                          padding: 24,
-                          lineHeight: 1.7,
-                        }}
-                      >
-                        링크를 선택하면 이 영역에서 미리보기를 확인할 수 있습니다. 지원하지 않는 링크는 새 창에서 확인해 주세요.
+                    <aside
+                      style={{
+                        display: "grid",
+                        gap: 12,
+                        alignContent: "start",
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: 12, marginTop: 0 }}>
+                        <section
+                          style={{
+                            border: "1px solid var(--line)",
+                            borderRadius: 20,
+                            padding: 18,
+                            display: "grid",
+                            gap: 12,
+                            background: "rgba(255,255,255,.03)",
+                          }}
+                        >
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <span className="chip" style={{ letterSpacing: "normal" }}>{activeCard.type}</span>
+                            <span className="muted">{activeCard.date || "-"}</span>
+                          </div>
+                          <strong style={{ fontSize: 24, lineHeight: 1.35 }}>{activeCard.title || "(제목 없음)"}</strong>
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <div className="muted" style={{ fontSize: 12, letterSpacing: ".08em" }}>설명</div>
+                            <div style={{ lineHeight: 1.7 }}>{activeCard.comment?.trim() || "제출자가 남긴 설명이 없습니다."}</div>
+                          </div>
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <div className="muted" style={{ fontSize: 12, letterSpacing: ".08em" }}>링크</div>
+                            {activeCard.link.trim() ? (
+                              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setPreview({ url: activeCard.link, title: activeCard.title || activeCard.type })}
+                                  style={{
+                                    padding: 0,
+                                    border: "none",
+                                    background: "transparent",
+                                    color: "#8fe7ff",
+                                    cursor: "pointer",
+                                    textAlign: "left",
+                                    textDecoration: "underline",
+                                    wordBreak: "break-all",
+                                  }}
+                                >
+                                  {activeCard.link}
+                                </button>
+                                <a href={activeCard.link} target="_blank" rel="noreferrer" className="muted">
+                                  새 창 열기
+                                </a>
+                              </div>
+                            ) : (
+                              <div className="muted">미리보기를 열 수 있는 링크가 없습니다. 제출자가 링크를 입력했는지 확인해 주세요.</div>
+                            )}
+                          </div>
+                        </section>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                          <strong style={{ fontSize: 20 }}>Preview</strong>
+                          {preview ? <span className="muted">{preview.title}</span> : null}
+                        </div>
+                        <div
+                          style={{
+                            border: "1px solid var(--line)",
+                            borderRadius: 20,
+                            overflow: "hidden",
+                            background: "rgba(0,0,0,.24)",
+                            minHeight: 520,
+                          }}
+                        >
+                          {preview && previewSource ? (
+                            previewSource.kind === "video" ? (
+                              <video
+                                controls
+                                src={previewSource.src}
+                                style={{ width: "100%", height: "100%", minHeight: 520, background: "#000" }}
+                              />
+                            ) : (
+                              <iframe
+                                title={preview.title || "Preview"}
+                                src={previewSource.src}
+                                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                                allowFullScreen
+                                style={{ width: "100%", height: 680, border: "none", background: "#000" }}
+                              />
+                            )
+                          ) : (
+                            <div
+                              className="muted"
+                              style={{
+                                minHeight: 520,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                textAlign: "center",
+                                padding: 24,
+                                lineHeight: 1.7,
+                              }}
+                            >
+                              링크를 선택하면 이 영역에서 미리보기를 확인할 수 있습니다. 지원하지 않는 링크는 새 창에서 확인해 주세요.
+                            </div>
+                          )}
+                        </div>
+                        {preview && !previewSource ? <div className="status warn">이 링크는 내부 미리보기를 지원하지 않습니다. 새 창 열기로 직접 확인해 주세요.</div> : null}
+                        {previewSource?.kind === "iframe" ? (
+                          <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
+                            일부 서비스는 보안 정책 때문에 내부 미리보기 대신 새 창에서만 정상 재생될 수 있습니다.
+                          </div>
+                        ) : null}
+                        <div className="kpi" style={{ minWidth: 160 }}>
+                          <div className="kpi-label">총점</div>
+                          <div className="kpi-value" style={{ fontSize: 26 }}>{totalScore}점</div>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                  {preview && !previewSource ? <div className="status warn">이 링크는 내부 미리보기를 지원하지 않습니다. 새 창 열기로 직접 확인해 주세요.</div> : null}
-                  {previewSource?.kind === "iframe" ? (
-                    <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
-                      일부 서비스는 보안 정책 때문에 내부 미리보기 대신 새 창에서만 정상 재생될 수 있습니다.
-                    </div>
-                  ) : null}
                 </aside>
               </div>
             </>
