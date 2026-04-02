@@ -1017,6 +1017,19 @@ export interface AdminWorkspace {
   reviewManagement: ReviewManagementWorkspace;
 }
 
+export interface ReviewerRoleProfileItem {
+  id: string;
+  name: string;
+  email: string;
+  loginId: string;
+  role: "member" | "reviewer";
+  approved: boolean;
+}
+
+export interface ReviewerRoleWorkspace {
+  profiles: ReviewerRoleProfileItem[];
+}
+
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
   "id, email, login_id, name, role, approved, created_at, updated_at";
 
@@ -1050,6 +1063,17 @@ function formatAdminProfile(row: ReviewManagementProfileRow): AdminProfileItem {
     approved: row.approved,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function formatReviewerRoleProfile(row: ReviewManagementProfileRow): ReviewerRoleProfileItem {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    loginId: row.login_id ?? "",
+    role: row.role === "reviewer" ? "reviewer" : "member",
+    approved: row.approved,
   };
 }
 
@@ -1175,6 +1199,83 @@ export async function getTeamLeadReviewManagementWorkspace() {
   }
 
   return getReviewManagementWorkspaceInternal();
+}
+
+export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWorkspace> {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    throw new Error("평가자 지정 권한이 없습니다.");
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+    .eq("approved", true)
+    .in("role", ["member", "reviewer"])
+    .order("name", { ascending: true })
+    .returns<ReviewManagementProfileRow[]>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    profiles: (data ?? []).map(formatReviewerRoleProfile),
+  };
+}
+
+export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "평가자 지정 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const selectedSet = new Set(selectedProfileIds);
+  const { data: profiles, error: profileError } = await supabase
+    .from("profiles")
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+    .eq("approved", true)
+    .in("role", ["member", "reviewer"])
+    .returns<ReviewManagementProfileRow[]>();
+
+  if (profileError) {
+    return { ok: false as const, message: profileError.message };
+  }
+
+  const targets = (profiles ?? []).filter((profile) => {
+    const nextRole = selectedSet.has(profile.id) ? "reviewer" : "member";
+    return profile.role !== nextRole;
+  });
+
+  if (targets.length === 0) {
+    return { ok: true as const, message: "변경할 평가자 권한이 없습니다." };
+  }
+
+  for (const profile of targets) {
+    const nextRole = selectedSet.has(profile.id) ? "reviewer" : "member";
+    const { error } = await supabase
+      .from("profiles")
+      .update({ role: nextRole })
+      .eq("id", profile.id);
+
+    if (error) {
+      return { ok: false as const, message: error.message };
+    }
+  }
+
+  try {
+    const authModule = await import("@/lib/auth/storage");
+    await authModule.refreshUsers();
+  } catch {
+    // Best effort: live UI will re-fetch from Supabase where needed.
+  }
+
+  return {
+    ok: true as const,
+    message: "평가자 권한을 저장했습니다.",
+  };
 }
 
 export async function assignReviewerToSubmission(submissionId: string, reviewerId: string) {

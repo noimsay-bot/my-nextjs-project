@@ -390,6 +390,9 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [displayMode, setDisplayMode] = useState<"daily" | "monthly">("daily");
+  const [monthZoom, setMonthZoom] = useState(0.85);
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
@@ -450,6 +453,18 @@ export function PublishedSchedulesPanel() {
     setRequestMessage("");
     setRequestMessageTone("ok");
   }, [editMode, selectedMonthKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(max-width: 720px)");
+    const syncViewport = () => setIsMobileViewport(mediaQuery.matches);
+
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => {
+      mediaQuery.removeEventListener("change", syncViewport);
+    };
+  }, []);
 
   const selectedItem = useMemo(() => {
     if (items.length === 0) return null;
@@ -519,6 +534,12 @@ export function PublishedSchedulesPanel() {
     setRequestMessage("");
     setRequestMessageTone("ok");
   };
+
+  const isMonthlyView = !isMobileViewport || displayMode === "monthly";
+  const isCompactMonthlyView = isMobileViewport && displayMode === "monthly";
+  const zoomOut = () => setMonthZoom((current) => Math.max(0.65, Number((current - 0.1).toFixed(2))));
+  const zoomIn = () => setMonthZoom((current) => Math.min(1.35, Number((current + 0.1).toFixed(2))));
+  const resetZoom = () => setMonthZoom(0.85);
 
   const printSelectedSchedule = () => {
     if (!selectedItem) return;
@@ -734,6 +755,28 @@ export function PublishedSchedulesPanel() {
         ) : null}
         {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
 
+        {isMobileViewport ? (
+          <div className="schedule-toolbar">
+            <div className="schedule-toolbar-actions">
+              <span className="muted">보기 방식</span>
+              <button className={`btn ${displayMode === "daily" ? "white" : ""}`} onClick={() => setDisplayMode("daily")}>
+                일별 보기
+              </button>
+              <button className={`btn ${displayMode === "monthly" ? "white" : ""}`} onClick={() => setDisplayMode("monthly")}>
+                월별 보기
+              </button>
+            </div>
+            {isCompactMonthlyView ? (
+              <div className="schedule-toolbar-actions">
+                <span className="muted">확대 {Math.round(monthZoom * 100)}%</span>
+                <button className="btn" onClick={zoomOut}>축소</button>
+                <button className="btn" onClick={resetZoom}>기본</button>
+                <button className="btn" onClick={zoomIn}>확대</button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="schedule-toolbar">
           <div className="schedule-toolbar-actions">
             {items.map((item) => (
@@ -777,6 +820,51 @@ export function PublishedSchedulesPanel() {
                 }}
               >
                 대휴
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "5px 12px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  lineHeight: 1.2,
+                  ...vacationLegendStyles.근속휴가,
+                }}
+              >
+                근속
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "5px 12px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  lineHeight: 1.2,
+                  ...vacationLegendStyles.건강검진,
+                }}
+              >
+                검진
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "5px 12px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  lineHeight: 1.2,
+                  ...vacationLegendStyles.경조,
+                }}
+              >
+                경조
               </span>
               <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
                 이전 달
@@ -843,6 +931,51 @@ export function PublishedSchedulesPanel() {
                     >
                       대휴
                     </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.근속휴가,
+                      }}
+                    >
+                      근속
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.건강검진,
+                      }}
+                    >
+                      검진
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.경조,
+                      }}
+                    >
+                      경조
+                    </span>
                   </div>
                   <div className="muted">게시 {selectedItem.publishedAt}</div>
                 </div>
@@ -850,9 +983,10 @@ export function PublishedSchedulesPanel() {
               <div className="muted">게시 {selectedItem.publishedAt}</div>
 
               <div className="schedule-calendar-scroll">
-              <div className="schedule-calendar-grid">
+              <div className="schedule-calendar-zoom" style={isCompactMonthlyView ? { zoom: monthZoom } : undefined}>
+              <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : ""}`}>
                 {weekdayLabels.map((label) => (
-                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -870,17 +1004,17 @@ export function PublishedSchedulesPanel() {
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}
-                      className="panel schedule-day-card"
+                      className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
                       style={{
                         padding: 6,
-                        minHeight: 216,
+                        minHeight: isCompactMonthlyView ? 148 : 216,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
                       }}
                     >
                         <div
-                          className="schedule-day-head"
+                          className={`schedule-day-head ${isCompactMonthlyView ? "schedule-day-head--monthly" : ""}`}
                           style={{
                             display: "grid",
                             gridTemplateColumns: "auto minmax(0, 1fr)",
@@ -966,7 +1100,7 @@ export function PublishedSchedulesPanel() {
                               >
                                 {getCategoryDisplayLabel(category)}
                               </strong>
-                              <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, minHeight: 38 }}>
+                              <div className={`schedule-name-grid ${isCompactMonthlyView ? "schedule-name-grid--monthly" : ""}`} style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, minHeight: 38 }}>
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
@@ -1002,8 +1136,8 @@ export function PublishedSchedulesPanel() {
                                         width: mineHighlighted ? "fit-content" : "100%",
                                         maxWidth: "100%",
                                         gap: 5,
-                                        minHeight: mineHighlighted ? 36 : 32,
-                                        padding: mineHighlighted ? "5px 11px" : "5px 9px",
+                                        minHeight: mineHighlighted ? (isCompactMonthlyView ? 30 : 36) : isCompactMonthlyView ? 28 : 32,
+                                        padding: mineHighlighted ? (isCompactMonthlyView ? "4px 9px" : "5px 11px") : isCompactMonthlyView ? "4px 7px" : "5px 9px",
                                         borderRadius: mineHighlighted ? 16 : 14,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
@@ -1031,7 +1165,7 @@ export function PublishedSchedulesPanel() {
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
-                                        fontSize: mineHighlighted ? 22 : 15,
+                                        fontSize: mineHighlighted ? (isCompactMonthlyView ? 16 : 22) : isCompactMonthlyView ? 12 : 15,
                                         lineHeight: 1.3,
                                         boxShadow: routeSelected && firstSelected
                                           ? "0 10px 24px rgba(88,28,135,.28), 0 0 0 1px rgba(255,255,255,.08) inset"
@@ -1043,8 +1177,8 @@ export function PublishedSchedulesPanel() {
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
-                                      <span style={{ whiteSpace: "nowrap", textAlign: "center", flex: 1 }}>{assignmentDisplay.name}</span>
-                                      {personObject.pending ? <span style={{ fontSize: 12 }}>요청중</span> : null}
+                                      <span style={{ whiteSpace: "nowrap", textAlign: "center", flex: 1, overflow: isCompactMonthlyView ? "hidden" : "visible", textOverflow: isCompactMonthlyView ? "ellipsis" : "clip" }}>{assignmentDisplay.name}</span>
+                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 12 }}>요청중</span> : null}
                                     </button>
                                   );
                                 })
@@ -1059,6 +1193,7 @@ export function PublishedSchedulesPanel() {
                     </article>
                   );
                 })}
+              </div>
               </div>
             </div>
             </div>

@@ -98,7 +98,17 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             >
               <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
                 {visibleLinks.map((link) => (
-                  <Link key={link.href} href={link.href} className={pathname === link.href ? "active" : ""}>
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={
+                      pathname === link.href ||
+                      (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
+                      (link.href === "/team-lead" && pathname.startsWith("/team-lead"))
+                        ? "active"
+                        : ""
+                    }
+                  >
                     {link.label}
                   </Link>
                 ))}

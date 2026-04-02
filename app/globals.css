@@ -329,6 +329,10 @@ textarea {
   gap: 6px;
 }
 
+.schedule-calendar-zoom {
+  width: max-content;
+}
+
 .schedule-day-date {
   display: grid;
   gap: 2px;
@@ -424,8 +428,17 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .schedule-calendar-grid--monthly {
+    grid-template-columns: repeat(7, minmax(120px, 1fr)) !important;
+    min-width: 840px;
+  }
+
   .schedule-weekday {
     display: none;
+  }
+
+  .schedule-weekday--monthly {
+    display: block !important;
   }
 
   .schedule-day-card {
@@ -433,9 +446,19 @@ textarea {
     padding: 10px !important;
   }
 
+  .schedule-day-card--monthly {
+    min-height: 148px !important;
+    padding: 6px !important;
+  }
+
   .schedule-day-head {
     grid-template-columns: auto minmax(0, 1fr) !important;
     row-gap: 6px !important;
+  }
+
+  .schedule-day-head--monthly {
+    row-gap: 4px !important;
+    margin-bottom: 4px !important;
   }
 
   .schedule-day-date {
@@ -450,6 +473,11 @@ textarea {
   .schedule-name-grid {
     grid-template-columns: 1fr !important;
     min-height: auto !important;
+  }
+
+  .schedule-name-grid--monthly {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 4px !important;
   }
 
   .schedule-order-grid {
