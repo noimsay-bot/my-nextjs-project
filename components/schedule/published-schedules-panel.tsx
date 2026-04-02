@@ -619,6 +619,7 @@ export function PublishedSchedulesPanel() {
 
   const isMonthlyView = !isMobileViewport || displayMode === "monthly";
   const isCompactMonthlyView = isMobileViewport && displayMode === "monthly";
+  const isCompactDailyView = isMobileViewport && displayMode === "daily";
 
   useEffect(() => {
     if (!isCompactMonthlyView) {
@@ -1265,8 +1266,8 @@ export function PublishedSchedulesPanel() {
                                         width: mineHighlighted ? "fit-content" : "100%",
                                         maxWidth: "100%",
                                         gap: 5,
-                                        minHeight: mineHighlighted ? (isCompactMonthlyView ? 30 : 36) : isCompactMonthlyView ? 28 : 32,
-                                        padding: mineHighlighted ? (isCompactMonthlyView ? "4px 9px" : "5px 11px") : isCompactMonthlyView ? "4px 7px" : "5px 9px",
+                                        minHeight: mineHighlighted ? (isCompactMonthlyView ? 30 : isCompactDailyView ? 34 : 36) : isCompactMonthlyView ? 28 : isCompactDailyView ? 30 : 32,
+                                        padding: mineHighlighted ? (isCompactMonthlyView ? "4px 9px" : isCompactDailyView ? "5px 9px" : "5px 11px") : isCompactMonthlyView ? "4px 7px" : isCompactDailyView ? "5px 8px" : "5px 9px",
                                         borderRadius: mineHighlighted ? 16 : 14,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
@@ -1294,7 +1295,7 @@ export function PublishedSchedulesPanel() {
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
-                                        fontSize: mineHighlighted ? (isCompactMonthlyView ? 16 : 22) : isCompactMonthlyView ? 12 : 15,
+                                        fontSize: mineHighlighted ? (isCompactMonthlyView ? 16 : isCompactDailyView ? 18 : 22) : isCompactMonthlyView ? 12 : isCompactDailyView ? 13 : 15,
                                         lineHeight: 1.3,
                                         boxShadow: routeSelected && firstSelected
                                           ? "0 10px 24px rgba(88,28,135,.28), 0 0 0 1px rgba(255,255,255,.08) inset"
@@ -1306,7 +1307,18 @@ export function PublishedSchedulesPanel() {
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
-                                      <span style={{ whiteSpace: "nowrap", textAlign: "center", flex: 1, overflow: isCompactMonthlyView ? "hidden" : "visible", textOverflow: isCompactMonthlyView ? "ellipsis" : "clip" }}>{assignmentDisplay.name}</span>
+                                      <span
+                                        style={{
+                                          whiteSpace: "nowrap",
+                                          textAlign: "center",
+                                          flex: 1,
+                                          minWidth: 0,
+                                          overflow: isMobileViewport ? "hidden" : "visible",
+                                          textOverflow: isMobileViewport ? "ellipsis" : "clip",
+                                        }}
+                                      >
+                                        {assignmentDisplay.name}
+                                      </span>
                                       {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 12 }}>요청중</span> : null}
                                     </button>
                                   );
