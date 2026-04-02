@@ -18,9 +18,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/schedule/write") ||
     pathname === "/schedule/vacations" ||
     pathname === "/schedule/long-service-leave" ||
-    pathname === "/schedule/health-checks" ||
-    pathname === "/schedule/domestic-trip" ||
-    pathname === "/schedule/international-trip";
+    pathname === "/schedule/health-checks";
 
   return (
     <section style={{ display: "grid", gap: 16 }}>

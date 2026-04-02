@@ -49,7 +49,7 @@ export interface ReviewWorkspaceResult {
 
 export async function subscribeToReviewWorkspaceChanges(onChange: () => void | Promise<void>) {
   const session = await getPortalSession();
-  if (!session || session.role === "member") {
+  if (!session || (session.role === "member" && !session.canReview)) {
     return () => {};
   }
 
@@ -78,7 +78,7 @@ export async function subscribeToReviewWorkspaceChanges(onChange: () => void | P
 
   subscribe(`submissions:${session.id}`, "submissions");
 
-  if (session.role === "reviewer") {
+  if (session.canReview) {
     subscribe(`reviews:${session.id}`, "reviews", `reviewer_id=eq.${session.id}`);
   } else {
     subscribe(`reviews:${session.id}`, "reviews");
@@ -143,7 +143,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
   }
 
   const role = session.role;
-  if (role === "member") {
+  if (role === "member" && !session.canReview) {
     return {
       entries: [],
       reviewState: {},
@@ -152,9 +152,9 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     };
   }
 
-  const canEdit = role === "reviewer" || role === "admin";
+  const canEdit = session.canReview;
   const readOnlyReason =
-    role === "reviewer" || role === "admin"
+    canEdit
       ? null
       : role === "desk"
         ? "DESK 권한은 현재 조회 전용입니다."
@@ -288,7 +288,7 @@ export async function saveReviewEntry(entry: SubmissionEntry, state: ReviewState
     return { ok: false as const, message: "로그인이 필요합니다." };
   }
 
-  if (session.role !== "reviewer" && session.role !== "admin") {
+  if (!session.canReview) {
     return { ok: false as const, message: "현재 권한은 review 저장이 불가능합니다." };
   }
 

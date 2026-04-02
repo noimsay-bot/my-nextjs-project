@@ -7,24 +7,119 @@ import {
   saveTeamLeadReviewerRoles,
 } from "@/lib/team-lead/storage";
 
+const REVIEWER_NAME_CHIP_STORAGE_KEY = "j-special-force-reviewer-role-name-chips";
+const DEFAULT_REVIEWER_NAME_CHIPS = [
+  "주수영",
+  "이동현",
+  "반일훈",
+  "박재현",
+  "이주현",
+  "김재식",
+  "신동환",
+  "구본준",
+  "이학진",
+  "장후원",
+  "황현우",
+  "김미란",
+  "유규열",
+  "김준택",
+  "방극철",
+  "이주원",
+  "이경",
+  "공영수",
+  "신승규",
+  "정상원",
+  "최무룡",
+  "정철원",
+  "김진광",
+  "조용희",
+  "이완근",
+  "박대권",
+  "이지수",
+  "김대호",
+  "이현일",
+  "유연경",
+  "정재우",
+];
+
+function normalizeNames(names: string[]) {
+  return Array.from(
+    new Set(
+      names
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function readNameChips() {
+  if (typeof window === "undefined") return DEFAULT_REVIEWER_NAME_CHIPS;
+  try {
+    const raw = window.localStorage.getItem(REVIEWER_NAME_CHIP_STORAGE_KEY);
+    if (!raw) return DEFAULT_REVIEWER_NAME_CHIPS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_REVIEWER_NAME_CHIPS;
+    const normalized = normalizeNames(parsed);
+    return normalized.length > 0 ? normalized : DEFAULT_REVIEWER_NAME_CHIPS;
+  } catch {
+    return DEFAULT_REVIEWER_NAME_CHIPS;
+  }
+}
+
+function writeNameChips(names: string[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(REVIEWER_NAME_CHIP_STORAGE_KEY, JSON.stringify(normalizeNames(names)));
+}
+
 export function ReviewerRolePage() {
   const [profiles, setProfiles] = useState<ReviewerRoleProfileItem[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
+  const [nameChips, setNameChips] = useState<string[]>(DEFAULT_REVIEWER_NAME_CHIPS);
+  const [savedSelectedNames, setSavedSelectedNames] = useState<string[]>([]);
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [newName, setNewName] = useState("");
+  const [editingNames, setEditingNames] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+
+  const nameChipOrder = useMemo(() => new Map(nameChips.map((name, index) => [name, index] as const)), [nameChips]);
+  const profileByName = useMemo(() => {
+    const map = new Map<string, ReviewerRoleProfileItem>();
+    [...profiles]
+      .sort((left, right) => left.name.localeCompare(right.name, "ko"))
+      .forEach((profile) => {
+        if (!map.has(profile.name)) {
+          map.set(profile.name, profile);
+        }
+      });
+    return map;
+  }, [profiles]);
 
   async function refresh() {
     setLoading(true);
     try {
       const workspace = await getTeamLeadReviewerRoleWorkspace();
+      const grantedReviewerNames = workspace.profiles
+        .filter((profile) => workspace.grantedProfileIds.includes(profile.id))
+        .map((profile) => profile.name);
+
       setProfiles(workspace.profiles);
-      setSelectedIds(
-        workspace.profiles
-          .filter((profile) => profile.role === "reviewer")
-          .map((profile) => profile.id),
-      );
+      const sortedGrantedReviewerNames = normalizeNames(grantedReviewerNames).sort((left, right) => {
+        const leftRank = nameChipOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = nameChipOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return left.localeCompare(right, "ko");
+      });
+      setSavedSelectedNames(sortedGrantedReviewerNames);
+      setSelectedNames((current) => {
+        const currentMissing = current.filter((name) => !workspace.profiles.some((profile) => profile.name === name));
+        return normalizeNames([...sortedGrantedReviewerNames, ...currentMissing]).sort((left, right) => {
+          const leftRank = nameChipOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
+          const rightRank = nameChipOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
+          if (leftRank !== rightRank) return leftRank - rightRank;
+          return left.localeCompare(right, "ko");
+        });
+      });
       setMessage(null);
     } catch (error) {
       setMessage({
@@ -37,47 +132,82 @@ export function ReviewerRolePage() {
   }
 
   useEffect(() => {
-    void refresh();
+    setNameChips(readNameChips());
   }, []);
 
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const filteredProfiles = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) return profiles;
-    return profiles.filter((profile) =>
-      [profile.name, profile.loginId, profile.email].join(" ").toLowerCase().includes(keyword),
-    );
-  }, [profiles, query]);
+  useEffect(() => {
+    void refresh();
+  }, [nameChipOrder]);
 
-  const initialSelectedIds = useMemo(
-    () => profiles.filter((profile) => profile.role === "reviewer").map((profile) => profile.id).sort(),
-    [profiles],
+  useEffect(() => {
+    writeNameChips(nameChips);
+  }, [nameChips]);
+
+  const selectedNameSet = useMemo(() => new Set(selectedNames), [selectedNames]);
+  const initialSelectedNames = useMemo(
+    () => [...savedSelectedNames].sort((left, right) => left.localeCompare(right, "ko")),
+    [savedSelectedNames],
   );
-  const draftSelectedIds = useMemo(() => [...selectedIds].sort(), [selectedIds]);
-  const dirty = initialSelectedIds.join(",") !== draftSelectedIds.join(",");
+  const draftSelectedNames = useMemo(() => [...selectedNames].sort((left, right) => left.localeCompare(right, "ko")), [selectedNames]);
+  const dirty = initialSelectedNames.join(",") !== draftSelectedNames.join(",");
 
   const summary = useMemo(
     () => ({
-      total: profiles.length,
-      reviewers: selectedIds.length,
-      members: Math.max(profiles.length - selectedIds.length, 0),
+      total: nameChips.length,
+      reviewers: selectedNames.length,
+      members: Math.max(nameChips.length - selectedNames.length, 0),
     }),
-    [profiles.length, selectedIds.length],
-  );
-  const selectedProfiles = useMemo(
-    () =>
-      profiles
-        .filter((profile) => selectedSet.has(profile.id))
-        .sort((left, right) => left.name.localeCompare(right.name, "ko")),
-    [profiles, selectedSet],
+    [nameChips.length, selectedNames.length],
   );
 
-  const toggleProfile = (profileId: string) => {
-    setSelectedIds((current) =>
-      current.includes(profileId)
-        ? current.filter((id) => id !== profileId)
-        : [...current, profileId],
+  const selectedDisplayNames = useMemo(
+    () =>
+      [...selectedNames].sort((left, right) => {
+        const leftRank = nameChipOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = nameChipOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return left.localeCompare(right, "ko");
+      }),
+    [nameChipOrder, selectedNames],
+  );
+
+  const visibleNameChips = useMemo(
+    () =>
+      nameChips.map((name) => ({
+        name,
+        selected: selectedNameSet.has(name),
+        linked: profileByName.has(name),
+      })),
+    [nameChips, profileByName, selectedNameSet],
+  );
+
+  const toggleName = (name: string) => {
+    setSelectedNames((current) =>
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name],
     );
+  };
+
+  const handleAddName = () => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setMessage({ tone: "warn", text: "추가할 이름을 입력해 주세요." });
+      return;
+    }
+    if (nameChips.includes(trimmed)) {
+      setMessage({ tone: "note", text: "이미 목록에 있는 이름입니다." });
+      return;
+    }
+    setNameChips((current) => [...current, trimmed]);
+    setNewName("");
+    setMessage({ tone: "ok", text: `${trimmed} 이름칩을 추가했습니다.` });
+  };
+
+  const handleDeleteName = (name: string) => {
+    setNameChips((current) => current.filter((item) => item !== name));
+    setSelectedNames((current) => current.filter((item) => item !== name));
+    setMessage({ tone: "note", text: `${name} 이름칩을 삭제했습니다.` });
   };
 
   return (
@@ -101,38 +231,34 @@ export function ReviewerRolePage() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">평가자 지정</div>
           <strong style={{ fontSize: 24 }}>평가자 권한 관리</strong>
-          <div className="status note">
-            승인된 일반 인원만 표시합니다. 이름을 눌러 평가자에 추가하고, 다시 누르거나 위 목록에서 빼면 저장 시 `member`로 돌아갑니다.
-          </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <div className="chip">이름 선택</div>
-              <span className="muted">기본 오프 인원처럼 이름을 눌러 추가/삭제합니다.</span>
-            </div>
-            <input
-              className="field-input"
-              style={{ width: 280 }}
-              placeholder="이름, 아이디, 이메일 검색"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="button" className="btn" onClick={() => setEditingNames((current) => !current)}>
+              {editingNames ? "수정 완료" : "수정"}
+            </button>
             <button
               type="button"
               className="btn primary"
               disabled={!dirty || saving || loading}
               onClick={async () => {
                 setSaving(true);
-                const result = await saveTeamLeadReviewerRoles(selectedIds);
-                setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
+                const linkedSelectedIds = selectedNames
+                  .map((name) => profileByName.get(name)?.id ?? null)
+                  .filter((id): id is string => Boolean(id));
+                const missingNames = selectedNames.filter((name) => !profileByName.has(name));
+                const result = await saveTeamLeadReviewerRoles(linkedSelectedIds);
+                const suffix = missingNames.length > 0
+                  ? ` 연결된 계정이 없는 이름은 화면에서만 유지됩니다: ${missingNames.join(", ")}`
+                  : "";
+                setMessage({
+                  tone: result.ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
+                  text: `${result.message}${suffix}`,
+                });
                 if (result.ok) {
                   await refresh();
                 }
@@ -141,48 +267,40 @@ export function ReviewerRolePage() {
             >
               저장
             </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={!dirty || saving || loading}
-              onClick={() => setSelectedIds(initialSelectedIds)}
-            >
-              선택 되돌리기
-            </button>
           </div>
+
+          {editingNames ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                className="field-input"
+                style={{ width: 240 }}
+                placeholder="이름 추가"
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleAddName();
+                  }
+                }}
+              />
+              <button type="button" className="btn" onClick={handleAddName}>
+                인원 추가
+              </button>
+            </div>
+          ) : null}
 
           <section style={{ display: "grid", gap: 10 }}>
             <div className="chip">선택된 평가자</div>
-            <div
-              style={{
-                padding: "12px 16px",
-                borderRadius: 20,
-                border: "1px solid rgba(255,255,255,.08)",
-                background: "rgba(255,255,255,.04)",
-                color: "#e5edf7",
-                fontSize: 14,
-                fontWeight: 700,
-                lineHeight: 1.55,
-              }}
-            >
-              위 이름들은 저장 시 평가자 권한이 됩니다. 이름을 누르면 바로 목록에서 빠집니다.
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 6,
-                alignContent: "flex-start",
-              }}
-            >
-              {selectedProfiles.length > 0 ? (
-                selectedProfiles.map((profile) => (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignContent: "flex-start" }}>
+              {selectedDisplayNames.length > 0 ? (
+                selectedDisplayNames.map((name) => (
                   <button
-                    key={`selected-${profile.id}`}
+                    key={`selected-${name}`}
                     type="button"
                     className="btn"
-                    title={`${profile.name} / ${profile.loginId || "-"} / ${profile.email}`}
-                    onClick={() => toggleProfile(profile.id)}
+                    title={profileByName.has(name) ? name : `${name} 연결된 계정 없음`}
+                    onClick={() => toggleName(name)}
                     style={{
                       padding: "8px 12px",
                       fontSize: 13,
@@ -192,7 +310,7 @@ export function ReviewerRolePage() {
                       color: "#fff1bf",
                     }}
                   >
-                    {profile.name} 삭제
+                    {name}
                   </button>
                 ))
               ) : (
@@ -203,24 +321,26 @@ export function ReviewerRolePage() {
 
           <section style={{ display: "grid", gap: 10 }}>
             <div className="chip">전체 인원</div>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 6,
-                alignContent: "flex-start",
-              }}
-            >
-              {filteredProfiles.length > 0 ? (
-                filteredProfiles.map((profile) => {
-                  const selected = selectedSet.has(profile.id);
-                  return (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {visibleNameChips.length > 0 ? (
+                visibleNameChips.map(({ name, selected, linked }) => (
+                  <div
+                    key={name}
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      padding: editingNames ? "4px 6px 4px 4px" : 0,
+                      borderRadius: 999,
+                      border: editingNames ? "1px solid rgba(255,255,255,.08)" : "none",
+                      background: editingNames ? "rgba(255,255,255,.03)" : "transparent",
+                    }}
+                  >
                     <button
-                      key={profile.id}
                       type="button"
                       className="btn"
-                      title={`${profile.name} / ${profile.loginId || "-"} / ${profile.email}`}
-                      onClick={() => toggleProfile(profile.id)}
+                      title={linked ? name : `${name} 연결된 계정 없음`}
+                      onClick={() => toggleName(name)}
                       style={{
                         padding: "8px 12px",
                         fontSize: 13,
@@ -230,10 +350,29 @@ export function ReviewerRolePage() {
                         color: selected ? "#fff1bf" : undefined,
                       }}
                     >
-                      {profile.name}
+                      {name}
                     </button>
-                  );
-                })
+                    {editingNames ? (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => handleDeleteName(name)}
+                        aria-label={`${name} 삭제`}
+                        style={{
+                          minWidth: 30,
+                          width: 30,
+                          height: 30,
+                          padding: 0,
+                          borderRadius: 999,
+                          fontSize: 18,
+                          lineHeight: 1,
+                        }}
+                      >
+                        -
+                      </button>
+                    ) : null}
+                  </div>
+                ))
               ) : (
                 <span className="muted">{loading ? "불러오는 중입니다." : "표시할 인원이 없습니다."}</span>
               )}

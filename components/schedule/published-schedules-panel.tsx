@@ -26,6 +26,7 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
+const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "야근", "청와대", "국회", "청사"] as const;
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -104,6 +105,14 @@ function getCategoryDisplayLabel(category: string) {
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
+function getVisibleAssignmentRank(category: string, isWeekendLike: boolean) {
+  if (!isWeekendLike) return getAssignmentDisplayRank(category);
+  const normalized = getScheduleCategoryLabel(category);
+  const weekendIndex = weekendAssignmentOrder.indexOf(normalized as (typeof weekendAssignmentOrder)[number]);
+  if (weekendIndex >= 0) return weekendIndex;
+  return weekendAssignmentOrder.length + getAssignmentDisplayRank(category);
+}
+
 function getDayCardStyle(day: DaySchedule, sameSheet: boolean) {
   const useOverflowTone = day.isOverflowMonth && !sameSheet;
   const isRedDay = day.isWeekend || day.isWeekdayHoliday;
@@ -130,6 +139,57 @@ function compactAssignments(item: PublishedScheduleItem, currentUser: string) {
         .join(", ");
       return `${day.month}/${day.day} - ${categories}`;
     });
+}
+
+function dayContainsUser(day: DaySchedule, username: string) {
+  if (!username) return false;
+  if (day.headerName?.trim() === username) return true;
+  return Object.values(day.assignments).some((names) => names.includes(username));
+}
+
+function getCurrentMonthKey() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getCoveredDateRange(
+  item: PublishedScheduleItem,
+  previousItem?: PublishedScheduleItem | null,
+) {
+  const startDateKey = previousItem?.schedule.nextStartDate ?? item.schedule.days[0]?.dateKey ?? item.schedule.nextStartDate;
+  const endDateKey = getPreviousDateKey(item.schedule.nextStartDate);
+  return { startDateKey, endDateKey };
+}
+
+function getPreferredPublishedMonthKey(
+  items: PublishedScheduleItem[],
+  todayDateKey = getTodayDateKey(),
+  currentMonthKey = getCurrentMonthKey(),
+) {
+  if (items.length === 0) return null;
+  const matchedTodayCoverage = items.find((item, index) => {
+    const previousItem = index > 0 ? items[index - 1] ?? null : null;
+    const { startDateKey, endDateKey } = getCoveredDateRange(item, previousItem);
+    return todayDateKey >= startDateKey && todayDateKey <= endDateKey;
+  });
+  if (matchedTodayCoverage) return matchedTodayCoverage.monthKey;
+  const matchedCurrentMonth = items.find((item) => item.monthKey === currentMonthKey);
+  if (matchedCurrentMonth) return matchedCurrentMonth.monthKey;
+  return items[items.length - 1]?.monthKey ?? null;
+}
+
+function formatPublishedAt(value: string) {
+  if (!value.trim()) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function buildDisplayDays(
@@ -407,7 +467,10 @@ export function PublishedSchedulesPanel() {
     await refreshPublishedSchedules();
     const nextItems = getPublishedSchedules();
     setItems(nextItems);
-    setSelectedMonthKey((current) => current ?? nextItems[nextItems.length - 1]?.monthKey ?? null);
+    setSelectedMonthKey((current) => {
+      if (current && nextItems.some((item) => item.monthKey === current)) return current;
+      return getPreferredPublishedMonthKey(nextItems);
+    });
   };
 
   const loadRequests = async () => {
@@ -884,12 +947,12 @@ export function PublishedSchedulesPanel() {
                     if (!ok) return;
                     const next = removePublishedSchedule(selectedItem.monthKey);
                     setItems(next);
-                    setSelectedMonthKey(next[next.length - 1]?.monthKey ?? null);
+                    setSelectedMonthKey(getPreferredPublishedMonthKey(next));
                   }}
                 >
                   게시 해제
-                </button>
-              ) : null}
+                    </button>
+                  ) : null}
             </div>
           ) : null}
         </div>
@@ -977,14 +1040,17 @@ export function PublishedSchedulesPanel() {
                       경조
                     </span>
                   </div>
-                  <div className="muted">게시 {selectedItem.publishedAt}</div>
+                  <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                 </div>
               </div>
-              <div className="muted">게시 {selectedItem.publishedAt}</div>
+              <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
 
-              <div className="schedule-calendar-scroll">
-              <div className="schedule-calendar-zoom" style={isCompactMonthlyView ? { zoom: monthZoom } : undefined}>
-              <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : ""}`}>
+              <div className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}>
+              <div
+                className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
+                style={isCompactMonthlyView ? { zoom: monthZoom } : undefined}
+              >
+              <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
                 {weekdayLabels.map((label) => (
                   <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
@@ -995,12 +1061,13 @@ export function PublishedSchedulesPanel() {
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
+                  const highlightDayHead = showMine && dayContainsUser(day, username);
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category]) => {
                       if (isWeekendLike) return category !== "휴가" && category !== "제크";
                       return !["국회", "청사", "청와대"].includes(category);
                     })
-                    .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory));
+                    .sort(([leftCategory], [rightCategory]) => getVisibleAssignmentRank(leftCategory, isWeekendLike) - getVisibleAssignmentRank(rightCategory, isWeekendLike));
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}
@@ -1021,6 +1088,10 @@ export function PublishedSchedulesPanel() {
                             alignItems: "center",
                             gap: 6,
                             marginBottom: 6,
+                            padding: highlightDayHead ? (isCompactMonthlyView ? "4px 6px" : "6px 8px") : 0,
+                            borderRadius: 16,
+                            background: highlightDayHead ? "rgba(125,211,252,.14)" : "transparent",
+                            boxShadow: highlightDayHead ? "0 0 0 1px rgba(125,211,252,.18) inset" : undefined,
                           }}
                       >
                         <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>

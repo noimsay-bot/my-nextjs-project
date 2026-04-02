@@ -318,9 +318,18 @@ textarea {
   font-weight: 900;
 }
 
+.schedule-current-range {
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .schedule-calendar-scroll {
   overflow-x: auto;
   overflow-y: visible;
+}
+
+.schedule-calendar-scroll--daily {
+  overflow-x: visible;
 }
 
 .schedule-calendar-grid {
@@ -331,6 +340,14 @@ textarea {
 
 .schedule-calendar-zoom {
   width: max-content;
+}
+
+.schedule-calendar-zoom--daily {
+  width: 100%;
+}
+
+.schedule-calendar-grid--daily {
+  width: 100%;
 }
 
 .schedule-day-date {
@@ -362,6 +379,14 @@ textarea {
   .review-layout,
   .review-main-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-preview-panel {
+    order: 1;
+  }
+
+  .review-criteria-panel {
+    order: 2;
   }
 
   .brand-logo {
@@ -409,7 +434,8 @@ textarea {
   }
 
   .schedule-toolbar-actions--controls > .muted,
-  .schedule-toolbar-actions--controls > .schedule-current-title {
+  .schedule-toolbar-actions--controls > .schedule-current-title,
+  .schedule-toolbar-actions--controls > .schedule-current-range {
     grid-column: 1 / -1;
     text-align: center;
     justify-self: stretch;
@@ -424,13 +450,26 @@ textarea {
     overflow-x: visible;
   }
 
+  .schedule-calendar-scroll--monthly {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
   .schedule-calendar-grid {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-calendar-grid--daily {
+    justify-items: center;
   }
 
   .schedule-calendar-grid--monthly {
     grid-template-columns: repeat(7, minmax(120px, 1fr)) !important;
     min-width: 840px;
+  }
+
+  .schedule-calendar-zoom--daily {
+    width: 100%;
   }
 
   .schedule-weekday {
@@ -444,11 +483,14 @@ textarea {
   .schedule-day-card {
     min-height: auto !important;
     padding: 10px !important;
+    width: min(100%, 760px);
+    justify-self: center;
   }
 
   .schedule-day-card--monthly {
     min-height: 148px !important;
     padding: 6px !important;
+    width: auto;
   }
 
   .schedule-day-head {

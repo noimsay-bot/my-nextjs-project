@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getUsers } from "@/lib/auth/storage";
-import { refreshScheduleState } from "@/lib/schedule/storage";
+import { getUsers, refreshUsers } from "@/lib/auth/storage";
+import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
+import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   AssignmentTravelType,
   getTeamLeadTripCards,
-  TEAM_LEAD_CONTRIBUTION_EVENT,
-  TEAM_LEAD_FINAL_CUT_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   refreshTeamLeadState,
   TeamLeadTripPersonCard,
@@ -34,16 +33,21 @@ export function TripBoardPage({
   const [cards, setCards] = useState<TeamLeadTripPersonCard[]>([]);
 
   useEffect(() => {
-    const refresh = async () => {
-      await Promise.all([refreshScheduleState(), refreshTeamLeadState()]);
+    const syncCards = () => {
       const tripCards = getTeamLeadTripCards(travelTypes);
       if (!showAllUsers) {
         setCards(tripCards);
         return;
       }
 
+      const users = getUsers();
+      if (users.length === 0) {
+        setCards(tripCards);
+        return;
+      }
+
       const cardMap = new Map(tripCards.map((card) => [card.name, card] as const));
-      const merged = getUsers()
+      const merged = users
         .map((user) => user.username)
         .filter(Boolean)
         .sort((left, right) => left.localeCompare(right, "ko"))
@@ -51,17 +55,22 @@ export function TripBoardPage({
 
       setCards(merged);
     };
+    const refresh = async () => {
+      await Promise.all([refreshUsers(), refreshScheduleState(), refreshTeamLeadState()]);
+      syncCards();
+    };
 
+    syncCards();
     void refresh();
     window.addEventListener("focus", refresh);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCards);
+    window.addEventListener(SCHEDULE_STATE_EVENT, syncCards);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncCards);
     return () => {
       window.removeEventListener("focus", refresh);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCards);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, syncCards);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncCards);
     };
   }, [showAllUsers, travelTypes]);
 

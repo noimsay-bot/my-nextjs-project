@@ -12,7 +12,7 @@ import {
 
 const links = [
   { href: "/", label: "홈" },
-  { href: "/vacation", label: "휴가 요청" },
+  { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/schedule", label: "DESK" },
   { href: "/review", label: "베스트리포트 평가" },
@@ -42,7 +42,13 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const visibleLinks = (() => {
     switch (session?.role) {
       case "member":
-        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
+        return links.filter(
+          (link) =>
+            link.href === "/" ||
+            link.href === "/vacation" ||
+            link.href === "/submissions" ||
+            (link.href === "/review" && session.canReview),
+        );
       case "reviewer":
         return links.filter(
           (link) =>
@@ -57,7 +63,6 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             link.href === "/" ||
             link.href === "/vacation" ||
             link.href === "/submissions" ||
-            link.href === "/review" ||
             link.href === "/schedule",
         );
       case "team_lead":
@@ -67,6 +72,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             link.href === "/vacation" ||
             link.href === "/submissions" ||
             link.href === "/review" ||
+            link.href === "/schedule" ||
             link.href === "/team-lead",
         );
       case "admin":

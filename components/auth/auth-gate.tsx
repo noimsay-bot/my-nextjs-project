@@ -6,20 +6,24 @@ import {
   getSession,
   initializeAuth,
   subscribeToAuth,
-  type UserRole,
   type SessionUser,
 } from "@/lib/auth/storage";
 
 const publicPaths = new Set(["/login"]);
 
-function hasAccess(pathname: string, role: UserRole) {
+function hasAccess(pathname: string, session: SessionUser) {
   if (pathname.startsWith("/schedule/vacations")) {
-    return role === "desk" || role === "admin";
+    return session.role === "desk" || session.role === "admin";
   }
 
-  switch (role) {
+  switch (session.role) {
     case "member":
-      return pathname === "/" || pathname === "/vacation" || pathname.startsWith("/submissions");
+      return (
+        pathname === "/" ||
+        pathname === "/vacation" ||
+        pathname.startsWith("/submissions") ||
+        (session.canReview && pathname.startsWith("/review"))
+      );
     case "reviewer":
       return (
         pathname === "/" ||
@@ -32,7 +36,6 @@ function hasAccess(pathname: string, role: UserRole) {
         pathname === "/" ||
         pathname === "/vacation" ||
         pathname.startsWith("/submissions") ||
-        pathname.startsWith("/review") ||
         pathname.startsWith("/schedule")
       );
     case "team_lead":
@@ -41,6 +44,7 @@ function hasAccess(pathname: string, role: UserRole) {
         pathname === "/vacation" ||
         pathname.startsWith("/submissions") ||
         pathname.startsWith("/review") ||
+        pathname.startsWith("/schedule") ||
         pathname.startsWith("/team-lead")
       );
     case "admin":
@@ -124,7 +128,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (!hasAccess(pathname, session.role)) {
+    if (!hasAccess(pathname, session)) {
       router.replace("/");
       return;
     }
@@ -132,6 +136,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (isPublicPath) return <>{children}</>;
   if (checkingSession || session === undefined) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
-  if (!session || !session.approved || !hasAccess(pathname, session.role)) return null;
+  if (!session || !session.approved || !hasAccess(pathname, session)) return null;
   return <>{children}</>;
 }

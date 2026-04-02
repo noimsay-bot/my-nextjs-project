@@ -125,6 +125,15 @@ const nightOffBadgeStyle = {
   color: "#e2e8f0",
 } as const;
 
+function getTodayDateKey() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+}
+
+function getTodayMonthKey() {
+  return getTodayDateKey().slice(0, 7);
+}
+
 function getCoverageScoreStyle(score: number) {
   if (score === 0.5) {
     return {
@@ -269,7 +278,7 @@ function getImportValue(record: Record<string, string>, ...keys: string[]) {
 }
 
 function normalizeTravelType(value: string): AssignmentTravelType {
-  if (value === "국내출장" || value === "해외출장" || value === "기획출장") return value as AssignmentTravelType;
+  if (value === "국내출장" || value === "해외출장" || value === "당일출장") return value as AssignmentTravelType;
   return "";
 }
 
@@ -381,6 +390,22 @@ function createEmptyGeneratedSchedule(monthKey: string): GeneratedSchedule {
   };
 }
 
+function buildMonthDays(schedule: GeneratedSchedule | null) {
+  if (!schedule) return [] as DaySchedule[];
+  const dayMap = new Map(
+    schedule.days
+      .filter((day) => day.month === schedule.month && day.year === schedule.year)
+      .map((day) => [day.dateKey, day] as const),
+  );
+  const lastDay = new Date(schedule.year, schedule.month, 0).getDate();
+
+  return Array.from({ length: lastDay }, (_, index) => {
+    const date = new Date(schedule.year, schedule.month - 1, index + 1);
+    const dateKey = `${schedule.year}-${String(schedule.month).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`;
+    return dayMap.get(dateKey) ?? createEmptyDaySchedule(date);
+  });
+}
+
 function ensureImportedMonthsExist(monthKeys: string[]) {
   if (monthKeys.length === 0 || typeof window === "undefined") return false;
 
@@ -411,48 +436,54 @@ export function ScheduleAssignmentPage() {
   const [selectedDeleteRowKey, setSelectedDeleteRowKey] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const todayCardRef = useRef<HTMLElement | null>(null);
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
   useEffect(() => {
-    const refreshSchedules = async () => {
-      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
+    const syncFromCache = () => {
       const nextSchedules = getTeamLeadSchedules();
       setSchedules(nextSchedules);
       setStore(getScheduleAssignmentStore());
       setSelectedMonthKey((current) =>
         nextSchedules.some((schedule) => schedule.monthKey === current)
           ? current
-          : nextSchedules[0]?.monthKey || "",
+          : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
+            ? todayMonthKey
+            : nextSchedules[0]?.monthKey || "",
       );
       setSelectedDeleteRowKey(null);
+    };
+    const refreshSchedules = async () => {
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
+      syncFromCache();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setImportMessage({ tone: "warn", text: detail.message });
     };
+    syncFromCache();
     void refreshSchedules();
-    const onRefresh = () => {
-      void refreshSchedules();
-    };
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
-    window.addEventListener(SCHEDULE_STATE_EVENT, onRefresh);
+    window.addEventListener("focus", refreshSchedules);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+    window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
-      window.removeEventListener(SCHEDULE_STATE_EVENT, onRefresh);
+      window.removeEventListener("focus", refreshSchedules);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, []);
+  }, [todayMonthKey]);
 
   const selectedMonth = useMemo(() => schedules.find((schedule) => schedule.monthKey === selectedMonthKey) ?? null, [schedules, selectedMonthKey]);
   const monthEntries = store.entries[selectedMonthKey] ?? {};
   const monthRows = store.rows[selectedMonthKey] ?? {};
-  const monthDays = useMemo(() => selectedMonth?.days.filter((day) => day.month === selectedMonth.month) ?? [], [selectedMonth]);
+  const monthDays = useMemo(() => buildMonthDays(selectedMonth), [selectedMonth]);
   const selectedMonthDayIndex = useMemo(
-    () => new Map((selectedMonth?.days ?? []).map((day) => [day.dateKey, day])),
-    [selectedMonth],
+    () => new Map(monthDays.map((day) => [day.dateKey, day])),
+    [monthDays],
   );
 
   const dutyOptions = useMemo(() => {
@@ -464,6 +495,19 @@ export function ScheduleAssignmentPage() {
     }));
     return Array.from(set);
   }, [schedules, store.rows]);
+
+  useEffect(() => {
+    if (selectedMonthKey !== todayMonthKey) return;
+    if (!monthDays.some((day) => day.dateKey === todayDateKey)) return;
+
+    const timer = window.setTimeout(() => {
+      todayCardRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 80);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [monthDays, selectedMonthKey, todayDateKey, todayMonthKey]);
 
   const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
     setStore((current) => {
@@ -804,7 +848,15 @@ export function ScheduleAssignmentPage() {
             : (previousDay?.assignments["야근"] ?? []);
 
         return (
-          <article key={day.dateKey} className="panel">
+          <article
+            key={day.dateKey}
+            className="panel"
+            ref={(element) => {
+              if (day.dateKey === todayDateKey) {
+                todayCardRef.current = element;
+              }
+            }}
+          >
             <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
               <div
                 style={{
@@ -816,7 +868,9 @@ export function ScheduleAssignmentPage() {
               >
                 <div style={{ display: "grid", gap: 4, justifySelf: "start" }}>
                   <div className="chip">{day.dateKey}</div>
-                  <strong style={{ fontSize: 22 }}>{day.month}월 {day.day}일 일정배정</strong>
+                  <strong style={{ fontSize: 22, color: day.dateKey === todayDateKey ? "#8fe7ff" : undefined }}>
+                    {day.month}월 {day.day}일 일정배정
+                  </strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
                   {vacationPeople.length > 0 || jcheckPeople.length > 0 || nightOffPeople.length > 0 ? (

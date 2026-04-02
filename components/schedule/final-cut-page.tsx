@@ -22,7 +22,7 @@ const decisionButtons: Array<{
 }> = [
   {
     value: "circle",
-    label: "동그라미",
+    label: "○",
     activeStyle: {
       borderColor: "rgba(74,222,128,.82)",
       background: "rgba(34,197,94,.22)",
@@ -31,7 +31,7 @@ const decisionButtons: Array<{
   },
   {
     value: "triangle",
-    label: "세모",
+    label: "△",
     activeStyle: {
       borderColor: "rgba(250,204,21,.82)",
       background: "rgba(250,204,21,.22)",
@@ -40,7 +40,7 @@ const decisionButtons: Array<{
   },
   {
     value: "cross",
-    label: "횞",
+    label: "✕",
     activeStyle: {
       borderColor: "rgba(248,113,113,.82)",
       background: "rgba(239,68,68,.22)",
@@ -161,6 +161,34 @@ function getDecisionSummary(card: FinalCutPersonCard) {
   );
 }
 
+function getDecisionLabel(decision: Exclude<FinalCutDecision, "">) {
+  return decisionButtons.find((button) => button.value === decision)?.label ?? "";
+}
+
+function getDecisionAriaLabel(decision: Exclude<FinalCutDecision, "">) {
+  if (decision === "circle") return "동그라미";
+  if (decision === "triangle") return "세모";
+  return "엑스";
+}
+
+function applyDecisionToCards(
+  currentCards: FinalCutPersonCard[],
+  itemId: string,
+  decision: FinalCutDecision,
+) {
+  return currentCards.map((card) => ({
+    ...card,
+    items: card.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            decision,
+          }
+        : item,
+    ),
+  }));
+}
+
 export function FinalCutPage() {
   const [quarterGroups, setQuarterGroups] = useState<FinalCutQuarterGroup[]>([]);
   const [selectedQuarterKey, setSelectedQuarterKey] = useState("");
@@ -192,13 +220,16 @@ export function FinalCutPage() {
       if (!detail || detail.ok) return;
       setMessage({ tone: "warn", text: detail.message });
     };
+    const syncFinalCutCards = () => {
+      setCards(getFinalCutCards());
+    };
 
     void refresh();
     window.addEventListener("focus", refresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, syncFinalCutCards);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
@@ -206,7 +237,7 @@ export function FinalCutPage() {
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, syncFinalCutCards);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, []);
@@ -265,9 +296,6 @@ export function FinalCutPage() {
               ))}
             </div>
           </div>
-          <div className="status note">
-            ?쇱젙諛곗젙???낅젰???쇱젙留??щ엺蹂?移대뱶濡?紐⑥쓭?덈떎. 遺꾧린 ??? 12??2?? 3??5?? 6??8?? 9??11??湲곗??쇰줈 ?⑹퀜??蹂댁뿬以띾땲??
-          </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
@@ -317,9 +345,9 @@ export function FinalCutPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    <span style={{ color: "#4ade80" }}>??{summary.circle}</span>
-                    <span style={{ color: "#facc15" }}>??{summary.triangle}</span>
-                    <span style={{ color: "#f87171" }}>횞 {summary.cross}</span>
+                    <span style={{ color: "#4ade80" }}>{getDecisionLabel("circle")} {summary.circle}</span>
+                    <span style={{ color: "#facc15" }}>{getDecisionLabel("triangle")} {summary.triangle}</span>
+                    <span style={{ color: "#f87171" }}>{getDecisionLabel("cross")} {summary.cross}</span>
                   </span>
                   <span className="chip">{card.items.length}건</span>
                 </button>
@@ -342,7 +370,7 @@ export function FinalCutPage() {
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <strong>{item.dateKey}</strong>
-                          <span className="muted">{item.duty || "근무 미지정"}</span>
+                          {item.duty ? <span className="muted">{item.duty}</span> : null}
                         </div>
                         <div style={{ color: "#f8fbff", lineHeight: 1.6 }}>{item.schedule}</div>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -354,10 +382,13 @@ export function FinalCutPage() {
                                 type="button"
                                 className="btn"
                                 onClick={() => {
-                                  updateFinalCutDecision(item.id, active ? "" : button.value);
-                                  setMessage({ tone: "ok", text: "?뺤젣蹂??먯젙????ν뻽?듬땲??" });
+                                  const nextDecision = active ? "" : button.value;
+                                  setCards((current) => applyDecisionToCards(current, item.id, nextDecision));
+                                  updateFinalCutDecision(item.id, nextDecision);
+                                  setMessage({ tone: "ok", text: "정제본 판정을 저장했습니다." });
                                 }}
                                 style={{
+                                  position: "relative",
                                   minWidth: 52,
                                   padding: "8px 12px",
                                   fontSize: 18,
@@ -365,6 +396,9 @@ export function FinalCutPage() {
                                   ...getDecisionButtonStyle(active, button.value),
                                 }}
                               >
+                                <span style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0, 0, 0, 0)", whiteSpace: "nowrap", border: 0 }}>
+                                  {getDecisionAriaLabel(button.value)}
+                                </span>
                                 {button.label}
                               </button>
                             );
@@ -381,7 +415,7 @@ export function FinalCutPage() {
       ) : (
         <section className="panel">
           <div className="panel-pad">
-            <div className="status note">?좏깮??遺꾧린???쇱젙諛곗젙?쇰줈 ?섏뼱???뺤젣蹂?移대뱶媛 ?놁뒿?덈떎.</div>
+            <div className="status note">선택한 분기에 일정배정으로 들어온 정제본 카드가 없습니다.</div>
           </div>
         </section>
       )}

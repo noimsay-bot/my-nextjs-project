@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  getAssignmentDisplayRank,
+  getScheduleCategoryLabel,
+} from "@/lib/schedule/constants";
+import {
   formatVacationEntry,
   getMonthKey,
   getUniquePeople,
@@ -8,7 +12,7 @@ import {
   parseVacationEntry,
 } from "@/lib/schedule/engine";
 import { readStoredScheduleState, saveScheduleState } from "@/lib/schedule/storage";
-import { GeneratedSchedule, VacationType } from "@/lib/schedule/types";
+import { DaySchedule, GeneratedSchedule, VacationType } from "@/lib/schedule/types";
 import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
 import {
   getPortalSession,
@@ -426,7 +430,13 @@ function getEffectiveGeneratedDateKeys(generated: GeneratedSchedule | null, sche
 }
 
 function getManagedDateKeysFromGeneratedSchedule(generated: GeneratedSchedule | null, scheduleState = readScheduleState()) {
-  return getEffectiveGeneratedDateKeys(generated, scheduleState).filter((dateKey) => !isWeekendDateKey(dateKey));
+  if (!generated) return [];
+  const dayMap = new Map(generated.days.map((day) => [day.dateKey, day] as const));
+  return getEffectiveGeneratedDateKeys(generated, scheduleState).filter((dateKey) => {
+    if (isWeekendDateKey(dateKey)) return false;
+    const day = dayMap.get(dateKey);
+    return !(day?.isWeekdayHoliday || day?.isCustomHoliday);
+  });
 }
 
 function getDisplayDateKeysFromGeneratedSchedule(generated: GeneratedSchedule | null, scheduleState = readScheduleState()) {
@@ -699,8 +709,42 @@ export function getVacationStore() {
   return readStore();
 }
 
+export interface VacationCalendarDateItem {
+  dateKey: string;
+  blocked: boolean;
+  myDutyLabels: string[];
+}
+
+function getMyDutyLabels(day: DaySchedule | undefined, username: string) {
+  if (!day || !username.trim()) return [] as string[];
+  return Object.entries(day.assignments)
+    .filter(([, names]) => names.includes(username))
+    .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory))
+    .map(([category]) => getScheduleCategoryLabel(category));
+}
+
+export function getVacationCalendarDateItems(year: number, month: number, username = ""): VacationCalendarDateItem[] {
+  const generated = getGeneratedScheduleForMonth(year, month);
+  if (!generated) return [];
+  const displayDateKeys = getDisplayDateKeysFromGeneratedSchedule(generated);
+  const dayMap = new Map(generated.days.map((day) => [day.dateKey, day] as const));
+
+  return displayDateKeys
+    .filter((dateKey) => !isWeekendDateKey(dateKey))
+    .map((dateKey) => {
+      const day = dayMap.get(dateKey);
+      return {
+        dateKey,
+        blocked: Boolean(day?.isWeekdayHoliday || day?.isCustomHoliday),
+        myDutyLabels: getMyDutyLabels(day, username),
+      };
+    });
+}
+
 export function getVacationManagedDateKeys(year: number, month: number) {
-  return getManagedDateKeysFromGeneratedSchedule(getGeneratedScheduleForMonth(year, month));
+  return getVacationCalendarDateItems(year, month)
+    .filter((item) => !item.blocked)
+    .map((item) => item.dateKey);
 }
 
 export function syncVacationMonthSheet(year: number, month: number) {
@@ -764,7 +808,15 @@ export function createVacationRequest(input: {
     return { ok: false as const, message: "로그인한 사용자 이름을 확인할 수 없습니다." };
   }
 
-  const managedDateKeys = getVacationManagedDateKeys(input.year, input.month);
+  const calendarDateItems = getVacationCalendarDateItems(input.year, input.month);
+  const blockedDateSet = new Set(
+    calendarDateItems
+      .filter((item) => item.blocked)
+      .map((item) => item.dateKey),
+  );
+  const managedDateKeys = calendarDateItems
+    .filter((item) => !item.blocked)
+    .map((item) => item.dateKey);
   if (managedDateKeys.length === 0) {
     return {
       ok: false as const,
@@ -774,8 +826,11 @@ export function createVacationRequest(input: {
 
   const parsedDates = parseRequestedVacationDates(input.year, input.month, input.rawDates);
   const managedDateSet = new Set(managedDateKeys);
+  const blockedDays = parsedDates.valid
+    .filter((dateKey) => blockedDateSet.has(dateKey))
+    .map((dateKey) => String(Number(dateKey.split("-")[2])));
   const unavailableDays = parsedDates.valid
-    .filter((dateKey) => !managedDateSet.has(dateKey))
+    .filter((dateKey) => !managedDateSet.has(dateKey) && !blockedDateSet.has(dateKey))
     .map((dateKey) => String(Number(dateKey.split("-")[2])));
   const validDates = parsedDates.valid.filter((dateKey) => managedDateSet.has(dateKey));
 
@@ -783,7 +838,9 @@ export function createVacationRequest(input: {
     return {
       ok: false as const,
       message:
-        unavailableDays.length > 0
+        blockedDays.length > 0
+          ? `평일 휴일로 지정된 날짜는 신청할 수 없습니다: ${blockedDays.join(", ")}`
+          : unavailableDays.length > 0
           ? `DESK 근무표에 작성된 날짜만 신청할 수 있습니다: ${unavailableDays.join(", ")}`
           : parsedDates.invalid.length > 0
             ? `입력한 날짜를 확인해 주세요: ${parsedDates.invalid.join(", ")}`

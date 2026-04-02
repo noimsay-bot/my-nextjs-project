@@ -139,6 +139,7 @@ export const TEAM_LEAD_FINAL_CUT_EVENT = "j-team-lead-final-cut-updated";
 export const TEAM_LEAD_STORAGE_STATUS_EVENT = "j-team-lead-storage-status";
 const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
 const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
+const TEAM_LEAD_REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 
 interface TeamLeadScheduleAssignmentRow {
   month_key: string;
@@ -650,6 +651,11 @@ export function updateFinalCutDecision(itemId: string, decision: FinalCutDecisio
   saveFinalCutStore(next);
 }
 
+function shouldIncludeFinalCutDuty(duty: string) {
+  const normalized = duty.replace(/\s+/g, "").trim();
+  return Boolean(normalized) && normalized !== "석근";
+}
+
 export function getContributionPeriod(baseDate = new Date()): ContributionPeriod {
   const year = baseDate.getFullYear();
   const startMonthKey = `${year - 1}-12`;
@@ -813,6 +819,7 @@ export function getFinalCutCards(monthKey?: string) {
         rows.forEach((row) => {
           const personName = row.name.trim();
           if (!personName) return;
+          if (!shouldIncludeFinalCutDuty(row.duty)) return;
           const entry = monthEntries[row.key];
           if (!entry) return;
 
@@ -1028,6 +1035,7 @@ export interface ReviewerRoleProfileItem {
 
 export interface ReviewerRoleWorkspace {
   profiles: ReviewerRoleProfileItem[];
+  grantedProfileIds: string[];
 }
 
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
@@ -1077,15 +1085,48 @@ function formatReviewerRoleProfile(row: ReviewManagementProfileRow): ReviewerRol
   };
 }
 
+function normalizeReviewAccessState(raw: unknown) {
+  if (!raw || typeof raw !== "object") return [] as string[];
+  const record = raw as { profileIds?: unknown };
+  if (!Array.isArray(record.profileIds)) return [] as string[];
+  return Array.from(
+    new Set(
+      record.profileIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  ).sort();
+}
+
+async function getGrantedReviewerProfileIds() {
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_REVIEW_ACCESS_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+      return [] as string[];
+    }
+    throw new Error(error.message);
+  }
+
+  return normalizeReviewAccessState(data?.state);
+}
+
 async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementWorkspace> {
   const supabase = await getPrivilegedSupabaseClient();
-  const { data: candidates, error: candidateError } = await supabase
+  const grantedProfileIds = await getGrantedReviewerProfileIds();
+  const candidateQuery = supabase
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
-    .eq("role", "reviewer")
     .eq("approved", true)
-    .order("name", { ascending: true })
-    .returns<ReviewManagementProfileRow[]>();
+    .order("name", { ascending: true });
+  const { data: candidates, error: candidateError } =
+    grantedProfileIds.length > 0
+      ? await candidateQuery.in("id", grantedProfileIds).returns<ReviewManagementProfileRow[]>()
+      : await candidateQuery.limit(0).returns<ReviewManagementProfileRow[]>();
 
   if (candidateError) {
     throw new Error(candidateError.message);
@@ -1222,6 +1263,7 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
 
   return {
     profiles: (data ?? []).map(formatReviewerRoleProfile),
+    grantedProfileIds: await getGrantedReviewerProfileIds(),
   };
 }
 
@@ -1232,7 +1274,9 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
   }
 
   const supabase = await getPrivilegedSupabaseClient();
-  const selectedSet = new Set(selectedProfileIds);
+  const normalizedSelectedIds = Array.from(
+    new Set(selectedProfileIds.map((id) => id.trim()).filter(Boolean)),
+  ).sort();
   const { data: profiles, error: profileError } = await supabase
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
@@ -1244,37 +1288,23 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
     return { ok: false as const, message: profileError.message };
   }
 
-  const targets = (profiles ?? []).filter((profile) => {
-    const nextRole = selectedSet.has(profile.id) ? "reviewer" : "member";
-    return profile.role !== nextRole;
-  });
-
-  if (targets.length === 0) {
-    return { ok: true as const, message: "변경할 평가자 권한이 없습니다." };
-  }
-
-  for (const profile of targets) {
-    const nextRole = selectedSet.has(profile.id) ? "reviewer" : "member";
-    const { error } = await supabase
-      .from("profiles")
-      .update({ role: nextRole })
-      .eq("id", profile.id);
-
-    if (error) {
-      return { ok: false as const, message: error.message };
-    }
-  }
+  const availableIds = new Set((profiles ?? []).map((profile) => profile.id));
+  const grantedProfileIds = normalizedSelectedIds.filter((id) => availableIds.has(id));
 
   try {
-    const authModule = await import("@/lib/auth/storage");
-    await authModule.refreshUsers();
-  } catch {
-    // Best effort: live UI will re-fetch from Supabase where needed.
+    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+      profileIds: grantedProfileIds,
+    });
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "평가 권한 저장에 실패했습니다.",
+    };
   }
 
   return {
     ok: true as const,
-    message: "평가자 권한을 저장했습니다.",
+    message: "평가 페이지 권한을 저장했습니다.",
   };
 }
 
@@ -1282,6 +1312,11 @@ export async function assignReviewerToSubmission(submissionId: string, reviewerI
   const session = await getPrivilegedPortalSession();
   if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
     return { ok: false as const, message: "assignment 관리 권한이 없습니다." };
+  }
+
+  const grantedProfileIds = await getGrantedReviewerProfileIds();
+  if (!grantedProfileIds.includes(reviewerId)) {
+    return { ok: false as const, message: "평가 페이지 권한이 있는 사람만 배정할 수 있습니다." };
   }
 
   const supabase = await getPrivilegedSupabaseClient();
@@ -1391,5 +1426,38 @@ export async function updateAdminProfileAccess(
     ok: true as const,
     message: "사용자 권한을 저장했습니다.",
     profile: formatAdminProfile(data),
+  };
+}
+
+export async function deleteAdminProfile(profileId: string) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || session.role !== "admin") {
+    return { ok: false as const, message: "admin 권한이 없습니다." };
+  }
+
+  if (session.id === profileId) {
+    return { ok: false as const, message: "현재 로그인한 관리자 계정은 탈퇴 처리할 수 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const { error } = await supabase
+    .from("profiles")
+    .delete()
+    .eq("id", profileId);
+
+  if (error) {
+    return { ok: false as const, message: error.message };
+  }
+
+  try {
+    const authModule = await import("@/lib/auth/storage");
+    await authModule.refreshUsers();
+  } catch {
+    // Best effort.
+  }
+
+  return {
+    ok: true as const,
+    message: "사용자를 탈퇴 처리했습니다.",
   };
 }

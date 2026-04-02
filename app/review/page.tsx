@@ -355,7 +355,7 @@ export default function ReviewPage() {
               </div>
 
               <div className="review-main-grid">
-                <div style={{ display: "grid", gap: 16 }}>
+                <div className="review-criteria-panel" style={{ display: "grid", gap: 16 }}>
                   <section
                     style={{
                       border: "1px solid var(--line)",
@@ -531,6 +531,7 @@ export default function ReviewPage() {
                 </div>
 
                     <aside
+                      className="review-preview-panel"
                       style={{
                         display: "grid",
                         gap: 12,

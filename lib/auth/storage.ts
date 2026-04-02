@@ -29,6 +29,7 @@ export interface SessionUser {
   role: UserRole;
   approved: boolean;
   mustChangePassword: boolean;
+  canReview: boolean;
 }
 
 export interface ResetMailLog {
@@ -54,9 +55,10 @@ type AuthListener = (session: SessionUser | null) => void;
 type BrowserSupabaseClient = ReturnType<typeof createSupabaseBrowserClient>;
 type BrowserRealtimeChannel = ReturnType<BrowserSupabaseClient["channel"]>;
 
-const AUTH_CACHE_KEY = "j-special-force-auth-cache-v2";
+const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
 const USERS_CACHE_KEY = "j-special-force-users-cache-v2";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
+const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
 let cachedSession = readJson<SessionUser | null>(AUTH_CACHE_KEY, null);
@@ -192,7 +194,41 @@ function normalizeRole(value: string | null | undefined): UserRole {
     : "member";
 }
 
-function profileToSession(profile: ProfileRow): SessionUser {
+function hasIntrinsicReviewAccess(role: UserRole) {
+  return role === "reviewer" || role === "team_lead" || role === "admin";
+}
+
+function normalizeReviewAccessState(raw: unknown) {
+  if (!raw || typeof raw !== "object") return [] as string[];
+  const record = raw as { profileIds?: unknown };
+  if (!Array.isArray(record.profileIds)) return [] as string[];
+  return Array.from(
+    new Set(
+      record.profileIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+}
+
+async function fetchGrantedReviewAccessProfileIds() {
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_state")
+      .select("state")
+      .eq("key", REVIEW_ACCESS_STATE_KEY)
+      .maybeSingle<{ state: unknown }>();
+
+    if (error || !data) {
+      return [] as string[];
+    }
+
+    return normalizeReviewAccessState(data.state);
+  } catch {
+    return [] as string[];
+  }
+}
+
+function profileToSession(profile: ProfileRow, canReview: boolean): SessionUser {
   return {
     id: profile.id,
     email: profile.email,
@@ -201,6 +237,7 @@ function profileToSession(profile: ProfileRow): SessionUser {
     role: profile.role,
     approved: profile.approved,
     mustChangePassword: false,
+    canReview,
   };
 }
 
@@ -221,6 +258,9 @@ function profileToAccount(profile: ProfileRow): UserAccount {
 }
 
 function fallbackSessionFromUser(user: User): SessionUser {
+  const role = normalizeRole(
+    typeof user.user_metadata.role === "string" ? user.user_metadata.role : "member",
+  );
   return {
     id: user.id,
     email: user.email ?? "",
@@ -229,11 +269,10 @@ function fallbackSessionFromUser(user: User): SessionUser {
       typeof user.user_metadata.name === "string" && user.user_metadata.name.trim()
         ? user.user_metadata.name.trim()
         : user.email ?? "User",
-    role: normalizeRole(
-      typeof user.user_metadata.role === "string" ? user.user_metadata.role : "member",
-    ),
+    role,
     approved: true,
     mustChangePassword: false,
+    canReview: hasIntrinsicReviewAccess(role),
   };
 }
 
@@ -333,7 +372,13 @@ async function syncSessionFromUser(user: User) {
     return null;
   }
 
-  const nextSession = profile ? profileToSession(profile) : fallbackSessionFromUser(user);
+  const grantedProfileIds = await fetchGrantedReviewAccessProfileIds();
+  const nextSession = profile
+    ? profileToSession(
+        profile,
+        hasIntrinsicReviewAccess(profile.role) || grantedProfileIds.includes(profile.id),
+      )
+    : fallbackSessionFromUser(user);
   setCachedSession(nextSession);
   syncProfileSubscription(user.id);
   return nextSession;

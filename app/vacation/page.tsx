@@ -1,45 +1,100 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getSession, hasDeskAccess } from "@/lib/auth/storage";
+import { getSession } from "@/lib/auth/storage";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS } from "@/lib/schedule/constants";
 import { VacationType } from "@/lib/schedule/types";
 import {
+  getVacationCalendarDateItems,
   createVacationRequest,
   getVacationManagedDateKeys,
   getVacationRequests,
   refreshVacationStore,
   VACATION_EVENT,
   VACATION_STATUS_EVENT,
+  VacationCalendarDateItem,
   VacationRequest,
 } from "@/lib/vacation/storage";
 import { refreshScheduleState } from "@/lib/schedule/storage";
 
+const vacationWeekdayLabels = ["월", "화", "수", "목", "금"];
+
+function getDefaultVacationTargetMonth(baseDate = new Date()) {
+  const nextDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
+  return {
+    year: nextDate.getFullYear(),
+    month: nextDate.getMonth() + 1,
+  };
+}
+
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return { year, month, day };
+}
+
+function formatDateLabel(dateKey: string) {
+  const { month, day } = parseDateKey(dateKey);
+  return `${month}월 ${day}일`;
+}
+
 function formatDateList(dateKeys: string[]) {
   return dateKeys
-    .map((dateKey) => `${Number(dateKey.split("-")[2])}일`)
+    .map((dateKey) => formatDateLabel(dateKey))
     .join(", ");
 }
 
-function sanitizeVacationDateInput(value: string) {
-  return value.replace(/[^0-9,]/g, "");
+function formatAllowedDateSummary(dateKeys: string[]) {
+  if (dateKeys.length === 0) return null;
+  const first = formatDateLabel(dateKeys[0]);
+  const last = formatDateLabel(dateKeys[dateKeys.length - 1]);
+  return first === last ? first : `${first} ~ ${last}`;
+}
+
+function buildVacationCalendarCells(dateItems: VacationCalendarDateItem[]) {
+  if (dateItems.length === 0) return [] as Array<{ dateKey: string | null; day: number | null; blocked: boolean; myDutyLabels: string[] }>;
+  const firstDate = new Date(`${dateItems[0]?.dateKey}T00:00:00`);
+  const firstDayOfWeek = firstDate.getDay();
+  const leadingBlankCount = firstDayOfWeek === 0 ? 0 : Math.max(0, firstDayOfWeek - 1);
+  const cells: Array<{ dateKey: string | null; day: number | null; blocked: boolean; myDutyLabels: string[] }> = [];
+
+  for (let index = 0; index < leadingBlankCount; index += 1) {
+    cells.push({ dateKey: null, day: null, blocked: false, myDutyLabels: [] });
+  }
+
+  dateItems.forEach(({ dateKey, blocked, myDutyLabels }) => {
+    cells.push({
+      dateKey,
+      day: parseDateKey(dateKey).day,
+      blocked,
+      myDutyLabels,
+    });
+  });
+
+  const trailingBlankCount = (5 - (cells.length % 5)) % 5;
+  for (let index = 0; index < trailingBlankCount; index += 1) {
+    cells.push({ dateKey: null, day: null, blocked: false, myDutyLabels: [] });
+  }
+
+  return cells;
 }
 
 export default function VacationPage() {
   const session = getSession();
-  const today = new Date();
-  const [year, setYear] = useState(today.getFullYear());
-  const [month, setMonth] = useState(today.getMonth() + 1);
-  const [annualDates, setAnnualDates] = useState("");
-  const [compensatoryDates, setCompensatoryDates] = useState("");
+  const defaultTarget = getDefaultVacationTargetMonth();
+  const [year, setYear] = useState(defaultTarget.year);
+  const [month, setMonth] = useState(defaultTarget.month);
+  const [activeType, setActiveType] = useState<VacationType>("연차");
+  const [annualSelectedDateKeys, setAnnualSelectedDateKeys] = useState<string[]>([]);
+  const [compensatorySelectedDateKeys, setCompensatorySelectedDateKeys] = useState<string[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
   const [requests, setRequests] = useState<VacationRequest[]>([]);
+  const [calendarDateItems, setCalendarDateItems] = useState<VacationCalendarDateItem[]>([]);
   const [managedDateKeys, setManagedDateKeys] = useState<string[]>([]);
 
   const loadRequests = async () => {
     await Promise.all([refreshScheduleState(), refreshVacationStore()]);
     setRequests(getVacationRequests());
+    setCalendarDateItems(getVacationCalendarDateItems(year, month, session?.username ?? ""));
     setManagedDateKeys(getVacationManagedDateKeys(year, month));
   };
 
@@ -61,6 +116,16 @@ export default function VacationPage() {
     };
   }, [year, month]);
 
+  useEffect(() => {
+    const selectableDateSet = new Set(
+      calendarDateItems
+        .filter((item) => !item.blocked)
+        .map((item) => item.dateKey),
+    );
+    setAnnualSelectedDateKeys((current) => current.filter((dateKey) => selectableDateSet.has(dateKey)));
+    setCompensatorySelectedDateKeys((current) => current.filter((dateKey) => selectableDateSet.has(dateKey)));
+  }, [calendarDateItems]);
+
   const myRequests = useMemo(
     () => requests.filter((request) => (
       session?.id
@@ -69,10 +134,28 @@ export default function VacationPage() {
     )),
     [requests, session?.id, session?.username],
   );
+  const monthRequests = useMemo(
+    () => requests.filter((request) => request.year === year && request.month === month),
+    [requests, year, month],
+  );
+  const requestCalendarCells = useMemo(() => buildVacationCalendarCells(calendarDateItems), [calendarDateItems]);
+  const requestLoadByDate = useMemo(() => {
+    const map = new Map<string, string[]>();
+    monthRequests.forEach((request) => {
+      request.dates.forEach((dateKey) => {
+        const current = map.get(dateKey) ?? [];
+        if (!current.includes(request.requesterName)) {
+          current.push(request.requesterName);
+        }
+        map.set(dateKey, current.sort((left, right) => left.localeCompare(right, "ko")));
+      });
+    });
+    return map;
+  }, [monthRequests]);
   const hasManagedSchedule = managedDateKeys.length > 0;
-  const allowedDaySummary = managedDateKeys.length > 0
-    ? `${Number(managedDateKeys[0].split("-")[2])}일 ~ ${Number(managedDateKeys[managedDateKeys.length - 1].split("-")[2])}일`
-    : null;
+  const allowedDaySummary = useMemo(() => formatAllowedDateSummary(managedDateKeys), [managedDateKeys]);
+  const annualSelectedDateSummary = useMemo(() => formatDateList(annualSelectedDateKeys), [annualSelectedDateKeys]);
+  const compensatorySelectedDateSummary = useMemo(() => formatDateList(compensatorySelectedDateKeys), [compensatorySelectedDateKeys]);
 
   const submitRequest = (type: VacationType, rawDates: string) => {
     return createVacationRequest({
@@ -86,20 +169,17 @@ export default function VacationPage() {
   };
 
   const handleSubmit = () => {
-    const annualInput = annualDates.trim();
-    const compensatoryInput = compensatoryDates.trim();
-
     if (!hasManagedSchedule) {
       setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 아직 작성되지 않아 휴가를 신청할 수 없습니다.` });
       return;
     }
 
-    if (!annualInput && !compensatoryInput) {
-      setMessage({ tone: "warn", text: "연차 또는 대휴 날짜를 입력해 주세요." });
+    if (annualSelectedDateKeys.length === 0 && compensatorySelectedDateKeys.length === 0) {
+      setMessage({ tone: "warn", text: "연차 또는 대휴 날짜를 달력에서 선택해 주세요." });
       return;
     }
 
-    if (!window.confirm("휴가 신청을 제출하시겠습니까?")) {
+    if (!window.confirm("신청하시겠습니까?")) {
       return;
     }
 
@@ -107,20 +187,18 @@ export default function VacationPage() {
     let hasSuccess = false;
     let hasFailure = false;
 
-    if (annualInput) {
-      const annualResult = submitRequest("연차", annualInput);
+    if (annualSelectedDateKeys.length > 0) {
+      const annualResult = submitRequest("연차", annualSelectedDateKeys.join(","));
       results.push(`연차: ${annualResult.message}`);
       hasSuccess = hasSuccess || annualResult.ok;
       hasFailure = hasFailure || !annualResult.ok;
-      if (annualResult.ok) setAnnualDates("");
     }
 
-    if (compensatoryInput) {
-      const compensatoryResult = submitRequest("대휴", compensatoryInput);
+    if (compensatorySelectedDateKeys.length > 0) {
+      const compensatoryResult = submitRequest("대휴", compensatorySelectedDateKeys.join(","));
       results.push(`대휴: ${compensatoryResult.message}`);
       hasSuccess = hasSuccess || compensatoryResult.ok;
       hasFailure = hasFailure || !compensatoryResult.ok;
-      if (compensatoryResult.ok) setCompensatoryDates("");
     }
 
     setMessage({
@@ -129,6 +207,8 @@ export default function VacationPage() {
     });
 
     if (hasSuccess) {
+      setAnnualSelectedDateKeys([]);
+      setCompensatorySelectedDateKeys([]);
       void loadRequests();
     }
   };
@@ -140,16 +220,8 @@ export default function VacationPage() {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ display: "grid", gap: 6 }}>
               <div className="chip">휴가 신청</div>
-              <strong style={{ fontSize: 22 }}>연차 / 대휴 신청 접수</strong>
-              <span className="muted">
-                숫자와 쉼표만 입력할 수 있습니다. 토요일과 일요일은 제외되며, DESK 근무표에 작성된 날짜만 신청할 수 있습니다.
-              </span>
+              <strong style={{ fontSize: 22 }}>달력으로 휴가 신청</strong>
             </div>
-            {hasDeskAccess(session?.role) ? (
-              <Link href="/schedule/vacations" className="btn">
-                DESK 휴가 관리
-              </Link>
-            ) : null}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
@@ -181,7 +253,7 @@ export default function VacationPage() {
 
           {hasManagedSchedule ? (
             <div className="status note">
-              신청 가능 날짜 범위: {allowedDaySummary} 평일만 접수됩니다.
+              신청 가능 날짜 범위: {allowedDaySummary}. 이 범위 안에서 신청가능합니다.
             </div>
           ) : (
             <div className="status note">
@@ -189,67 +261,171 @@ export default function VacationPage() {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
-            <section
-              style={{
-                display: "grid",
-                gap: 12,
-                padding: 16,
-                borderRadius: 18,
-                border: "1px solid rgba(125,211,252,.28)",
-                background: "rgba(59,130,246,.08)",
-              }}
-            >
-              <div style={{ display: "grid", gap: 4 }}>
-                <strong style={{ fontSize: 18 }}>연차 신청</strong>
-                <span className="muted">연차로 신청할 날짜만 따로 입력해 주세요.</span>
-              </div>
-              <label style={{ display: "grid", gap: 8 }}>
-                <span>연차 날짜</span>
-                <input
-                  className="field-input"
-                  inputMode="numeric"
-                  value={annualDates}
-                  onChange={(event) => setAnnualDates(sanitizeVacationDateInput(event.target.value))}
-                  placeholder="예: 1,3,5"
-                />
-              </label>
-            </section>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span className="muted">신청 종류</span>
+              {(["연차", "대휴"] as VacationType[]).map((type) => {
+                const selected = activeType === type;
+                const toneStyle = type === "연차"
+                  ? {
+                      borderColor: selected ? "rgba(96,165,250,.72)" : "rgba(96,165,250,.35)",
+                      background: selected ? "rgba(59,130,246,.22)" : "rgba(59,130,246,.08)",
+                      color: selected ? "#dbeafe" : "#bfdbfe",
+                    }
+                  : {
+                      borderColor: selected ? "rgba(74,222,128,.72)" : "rgba(74,222,128,.35)",
+                      background: selected ? "rgba(16,185,129,.22)" : "rgba(16,185,129,.08)",
+                      color: selected ? "#d1fae5" : "#bbf7d0",
+                    };
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    className="btn"
+                    onClick={() => setActiveType(type)}
+                    style={toneStyle}
+                  >
+                    {type}
+                  </button>
+                );
+              })}
+            </div>
 
-            <section
-              style={{
-                display: "grid",
-                gap: 12,
-                padding: 16,
-                borderRadius: 18,
-                border: "1px solid rgba(74,222,128,.28)",
-                background: "rgba(16,185,129,.08)",
-              }}
-            >
-              <div style={{ display: "grid", gap: 4 }}>
-                <strong style={{ fontSize: 18 }}>대휴 신청</strong>
-                <span className="muted">대휴로 신청할 날짜만 따로 입력해 주세요.</span>
+            <div style={{ display: "grid", gap: 4 }}>
+              <span className="muted">
+                {annualSelectedDateKeys.length > 0 ? `연차: ${annualSelectedDateSummary}` : "연차: 선택 없음"}
+              </span>
+              <span className="muted">
+                {compensatorySelectedDateKeys.length > 0 ? `대휴: ${compensatorySelectedDateSummary}` : "대휴: 선택 없음"}
+              </span>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 8, minWidth: 600 }}>
+                {vacationWeekdayLabels.map((label) => (
+                  <div
+                    key={`selector-${label}`}
+                    style={{
+                      textAlign: "center",
+                      padding: "6px 4px",
+                      borderRadius: 12,
+                      border: "1px solid var(--line)",
+                      background: "rgba(255,255,255,.03)",
+                      fontWeight: 800,
+                      fontSize: 13,
+                    }}
+                  >
+                    {label}
+                  </div>
+                ))}
+                {requestCalendarCells.map((cell, index) => {
+                  if (!cell.dateKey || !cell.day) {
+                    return <div key={`selector-blank-${index}`} style={{ minHeight: 104 }} />;
+                  }
+                  const annualSelected = annualSelectedDateKeys.includes(cell.dateKey);
+                  const compensatorySelected = compensatorySelectedDateKeys.includes(cell.dateKey);
+                  const selected = annualSelected || compensatorySelected;
+                  const myDutyPreview = cell.myDutyLabels.join(", ");
+                  const selectionTone = annualSelected
+                    ? {
+                        border: "1px solid rgba(96,165,250,.56)",
+                        background: "rgba(59,130,246,.22)",
+                        color: "#dbeafe",
+                      }
+                    : compensatorySelected
+                      ? {
+                        border: "1px solid rgba(74,222,128,.48)",
+                        background: "rgba(16,185,129,.2)",
+                        color: "#d1fae5",
+                      }
+                      : null;
+
+                  return (
+                    <button
+                      key={`selector-${cell.dateKey}`}
+                      type="button"
+                      disabled={cell.blocked}
+                      onClick={() => {
+                        const dateKey = cell.dateKey as string;
+                        if (annualSelected || compensatorySelected) {
+                          setAnnualSelectedDateKeys((current) => current.filter((item) => item !== dateKey));
+                          setCompensatorySelectedDateKeys((current) => current.filter((item) => item !== dateKey));
+                          return;
+                        }
+                        if (activeType === "연차") {
+                          setAnnualSelectedDateKeys((current) =>
+                            [...current, dateKey].sort((left, right) => left.localeCompare(right)),
+                          );
+                          setCompensatorySelectedDateKeys((current) => current.filter((item) => item !== dateKey));
+                          return;
+                        }
+                        setCompensatorySelectedDateKeys((current) =>
+                          [...current, dateKey].sort((left, right) => left.localeCompare(right)),
+                        );
+                        setAnnualSelectedDateKeys((current) => current.filter((item) => item !== dateKey));
+                      }}
+                      style={{
+                        minHeight: 104,
+                        padding: 10,
+                        borderRadius: 16,
+                        border: cell.blocked
+                          ? "1px solid rgba(248,113,113,.5)"
+                          : selected
+                            ? selectionTone?.border
+                            : "1px solid rgba(255,255,255,.08)",
+                        background: cell.blocked
+                          ? "rgba(248,113,113,.2)"
+                          : selected
+                            ? selectionTone?.background
+                            : "rgba(255,255,255,.03)",
+                        color: cell.blocked ? "#fecaca" : selected ? selectionTone?.color : "#f8fbff",
+                        display: "grid",
+                        gap: 6,
+                        alignContent: "start",
+                        textAlign: "left",
+                        cursor: cell.blocked ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                        <strong style={{ fontSize: 16 }}>{cell.day}</strong>
+                        {selected ? (
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 800,
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            {annualSelected ? "연차" : compensatorySelected ? "대휴" : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                        {cell.blocked ? "신청불가" : selected ? `${annualSelected ? "연차" : "대휴"} 선택됨` : `${activeType}로 선택`}
+                      </div>
+                      {myDutyPreview ? (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            lineHeight: 1.45,
+                            color: cell.blocked ? "#fecaca" : "#9bd1ff",
+                            wordBreak: "keep-all",
+                          }}
+                        >
+                          내 근무: {myDutyPreview}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
-              <label style={{ display: "grid", gap: 8 }}>
-                <span>대휴 날짜</span>
-                <input
-                  className="field-input"
-                  inputMode="numeric"
-                  value={compensatoryDates}
-                  onChange={(event) => setCompensatoryDates(sanitizeVacationDateInput(event.target.value))}
-                  placeholder="예: 1,3,5"
-                />
-              </label>
-            </section>
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button className="btn primary" onClick={handleSubmit} disabled={!hasManagedSchedule}>
-              휴가 신청
+              신청
             </button>
-            <span className="muted">
-              입력한 날짜는 {year}년 {month}월 DESK 근무표의 평일 범위 안에서만 접수됩니다.
-            </span>
           </div>
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
@@ -260,28 +436,120 @@ export default function VacationPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
           <div className="chip">내 신청 내역</div>
           {myRequests.length > 0 ? (
-            myRequests.map((request) => (
-              <article
-                key={request.id}
-                style={{
-                  display: "grid",
-                  gap: 6,
-                  padding: 14,
-                  borderRadius: 16,
-                  border: "1px solid var(--line)",
-                  background: "rgba(255,255,255,.05)",
-                }}
-              >
-                <strong>
-                  {request.year}년 {request.month}월 · {request.type}
-                </strong>
-                <span>{formatDateList(request.dates)}</span>
-                <span className="muted">{request.createdAt}</span>
-              </article>
-            ))
+            <>
+              {myRequests.map((request) => (
+                <article
+                  key={request.id}
+                  style={{
+                    display: "grid",
+                    gap: 6,
+                    padding: 14,
+                    borderRadius: 16,
+                    border: "1px solid var(--line)",
+                    background: "rgba(255,255,255,.05)",
+                  }}
+                >
+                  <strong>
+                    {request.year}년 {request.month}월 · {request.type}
+                  </strong>
+                  <span>{formatDateList(request.dates)}</span>
+                  <span className="muted">{request.createdAt}</span>
+                </article>
+              ))}
+            </>
           ) : (
             <div className="status note">아직 제출한 휴가 신청이 없습니다.</div>
           )}
+
+          <section style={{ display: "grid", gap: 12, marginTop: 8 }}>
+            <div style={{ display: "grid", gap: 4 }}>
+              <div className="chip">전체 신청 현황</div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 8, minWidth: 600 }}>
+                {vacationWeekdayLabels.map((label) => (
+                  <div
+                    key={label}
+                    style={{
+                      textAlign: "center",
+                      padding: "6px 4px",
+                      borderRadius: 12,
+                      border: "1px solid var(--line)",
+                      background: "rgba(255,255,255,.03)",
+                      fontWeight: 800,
+                      fontSize: 13,
+                    }}
+                  >
+                    {label}
+                  </div>
+                ))}
+                {requestCalendarCells.map((cell, index) => {
+                  if (!cell.dateKey || !cell.day) {
+                    return <div key={`blank-${index}`} style={{ minHeight: 104 }} />;
+                  }
+                  const applicants = requestLoadByDate.get(cell.dateKey) ?? [];
+                  const applicantPreview = applicants.length > 3 ? `${applicants.slice(0, 3).join(", ")} 외 ${applicants.length - 3}명` : applicants.join(", ");
+                  const blocked = cell.blocked;
+                  return (
+                    <article
+                      key={cell.dateKey}
+                      style={{
+                        minHeight: 104,
+                        padding: 10,
+                        borderRadius: 16,
+                        border: blocked
+                          ? "1px solid rgba(248,113,113,.5)"
+                          : applicants.length > 0
+                            ? "1px solid rgba(34,211,238,.34)"
+                            : "1px solid rgba(255,255,255,.08)",
+                        background: blocked
+                          ? "rgba(248,113,113,.2)"
+                          : applicants.length > 0
+                          ? `rgba(34,211,238,${Math.min(0.12 + applicants.length * 0.05, 0.3)})`
+                          : "rgba(255,255,255,.03)",
+                        display: "grid",
+                        gap: 6,
+                        alignContent: "start",
+                        opacity: 1,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                        <strong style={{ fontSize: 16, color: blocked ? "#fecaca" : undefined }}>{cell.day}</strong>
+                        {!blocked && applicants.length > 0 ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              minWidth: 28,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              background: "rgba(8,145,178,.18)",
+                              color: "#cffafe",
+                              fontSize: 12,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {applicants.length}명
+                          </span>
+                        ) : null}
+                      </div>
+                      <div
+                        className="muted"
+                        style={{ fontSize: 12, lineHeight: 1.5, color: blocked ? "#fecaca" : undefined }}
+                      >
+                        {blocked
+                          ? "신청불가"
+                          : applicants.length > 0
+                          ? applicantPreview
+                          : "신청 없음"}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
         </div>
       </section>
     </div>
