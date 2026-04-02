@@ -27,6 +27,10 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 
+function getWeekdayLabel(dow: number) {
+  return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
 const vacationLegendStyles = {
   연차: {
     background: "rgba(59,130,246,.22)",
@@ -712,9 +716,9 @@ export function PublishedSchedulesPanel() {
           </div>
         ) : null}
 
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="schedule-toolbar">
           <div className="chip">게시된 근무표</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
             <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
             <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
               {showMine ? "전체 보기" : "내 근무 보기"}
@@ -730,8 +734,8 @@ export function PublishedSchedulesPanel() {
         ) : null}
         {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
 
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="schedule-toolbar">
+          <div className="schedule-toolbar-actions">
             {items.map((item) => (
               <button
                 key={item.monthKey}
@@ -743,7 +747,7 @@ export function PublishedSchedulesPanel() {
             ))}
           </div>
           {selectedItem ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
               <span
                 style={{
                   display: "inline-flex",
@@ -777,7 +781,7 @@ export function PublishedSchedulesPanel() {
               <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
                 이전 달
               </button>
-              <strong>{selectedItem.title}</strong>
+              <strong className="schedule-current-title">{selectedItem.title}</strong>
               <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
                 다음 달
               </button>
@@ -845,10 +849,10 @@ export function PublishedSchedulesPanel() {
               </div>
               <div className="muted">게시 {selectedItem.publishedAt}</div>
 
-              <div style={{ overflowX: "auto", overflowY: "visible" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
+              <div className="schedule-calendar-scroll">
+              <div className="schedule-calendar-grid">
                 {weekdayLabels.map((label) => (
-                  <div key={label} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -866,7 +870,7 @@ export function PublishedSchedulesPanel() {
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}
-                      className="panel"
+                      className="panel schedule-day-card"
                       style={{
                         padding: 6,
                         minHeight: 216,
@@ -876,6 +880,7 @@ export function PublishedSchedulesPanel() {
                       }}
                     >
                         <div
+                          className="schedule-day-head"
                           style={{
                             display: "grid",
                             gridTemplateColumns: "auto minmax(0, 1fr)",
@@ -884,13 +889,9 @@ export function PublishedSchedulesPanel() {
                             marginBottom: 6,
                           }}
                       >
-                        <div
-                          style={{
-                            fontSize: 21,
-                            fontWeight: 900,
-                          }}
-                        >
-                          {day.month}/{day.day}
+                        <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
+                          <span>{day.month}/{day.day}</span>
+                          <span className="schedule-day-weekday">{getWeekdayLabel(day.dow)}</span>
                         </div>
                         <div
                           style={{
@@ -949,6 +950,7 @@ export function PublishedSchedulesPanel() {
                               }}
                             >
                               <strong
+                                className="schedule-assignment-label"
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -964,7 +966,7 @@ export function PublishedSchedulesPanel() {
                               >
                                 {getCategoryDisplayLabel(category)}
                               </strong>
-                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, minHeight: 38 }}>
+                              <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, minHeight: 38 }}>
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);

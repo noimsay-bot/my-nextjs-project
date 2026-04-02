@@ -48,6 +48,10 @@ import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, Schedule
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
 
+function getWeekdayLabel(dow: number) {
+  return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
 function getAdjacentMonth(year: number, month: number, offset: number) {
   const date = new Date(year, month - 1 + offset, 1);
   const nextYear = date.getFullYear();
@@ -1048,10 +1052,10 @@ export function ScheduleApp() {
 
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="schedule-toolbar">
             <div className="chip">DESK</div>
             {visibleSchedule ? (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
                 <span
                   style={{
                     display: "inline-flex",
@@ -1152,7 +1156,7 @@ export function ScheduleApp() {
                   수정 모드
                 </button>
               )}
-              <strong>{visibleSchedule.year}년 {visibleSchedule.month}월</strong>
+              <strong className="schedule-current-title">{visibleSchedule.year}년 {visibleSchedule.month}월</strong>
               <button
                 className="btn"
                   disabled={isEditingDate || !hasNextVisibleMonth}
@@ -1254,10 +1258,10 @@ export function ScheduleApp() {
                   </div>
                 </div>
               </div>
-              <div style={{ overflowX: "auto", overflowY: "visible" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
+              <div className="schedule-calendar-scroll">
+              <div className="schedule-calendar-grid">
                 {weekdayLabels.map((label) => (
-                  <div key={label} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 ))}
@@ -1281,7 +1285,7 @@ export function ScheduleApp() {
                   return (
                     <article
                       key={day.dateKey}
-                      className="panel"
+                      className="panel schedule-day-card"
                       style={{
                         padding: 6,
                         minHeight: 216,
@@ -1291,6 +1295,7 @@ export function ScheduleApp() {
                       }}
                     >
                       <div
+                        className="schedule-day-head"
                         style={{
                           display: "grid",
                           gridTemplateColumns: editMode ? "auto 1fr auto" : "auto minmax(0, 1fr) auto",
@@ -1300,7 +1305,10 @@ export function ScheduleApp() {
                           marginBottom: 6,
                         }}
                       >
-                        <div style={{ fontSize: 21, fontWeight: 900 }}>{day.month}/{day.day}</div>
+                        <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
+                          <span>{day.month}/{day.day}</span>
+                          <span className="schedule-day-weekday">{getWeekdayLabel(day.dow)}</span>
+                        </div>
                         <div
                           style={{
                             display: "grid",
@@ -1442,6 +1450,7 @@ export function ScheduleApp() {
                               }}
                             >
                               <strong
+                                className="schedule-assignment-label"
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -1508,6 +1517,7 @@ export function ScheduleApp() {
                                 </div>
                               ) : null}
                               <div
+                                className="schedule-name-grid"
                                 style={{
                                   display: "grid",
                                   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -1765,7 +1775,7 @@ export function ScheduleApp() {
                     </div>
                   </div>
                 ) : null}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 10 }}>
+                <div className="schedule-order-grid">
                   {Array.from({ length: 30 }, (_, index) => (
                     <label
                       key={`${category.key}-${index}`}
@@ -1967,21 +1977,21 @@ export function ScheduleApp() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="schedule-toolbar">
                 <div style={{ display: "grid", gap: 6 }}>
                   <div className="chip">근무 원본</div>
                   <strong>{originalPreviewSnapshot.generated.year}년 {originalPreviewSnapshot.generated.month}월</strong>
                   <span className="muted">{originalPreviewSnapshot.createdAt}</span>
                 </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div className="schedule-toolbar-actions">
                   <button type="button" className="btn" onClick={() => printOriginalSnapshot(originalPreviewSnapshot)}>출력</button>
                   <button type="button" className="btn" onClick={() => setOriginalPreviewSnapshot(null)}>닫기</button>
                 </div>
               </div>
-              <div style={{ overflowX: "auto", overflowY: "visible" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
+              <div className="schedule-calendar-scroll">
+                <div className="schedule-calendar-grid">
                   {weekdayLabels.map((label) => (
-                    <div key={`preview-${label}`} style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                    <div key={`preview-${label}`} className="schedule-weekday" style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
                       {label}
                     </div>
                   ))}
@@ -1996,7 +2006,7 @@ export function ScheduleApp() {
                     return (
                       <article
                         key={`preview-${originalPreviewSnapshot.id}-${day.dateKey}`}
-                        className="panel"
+                        className="panel schedule-day-card"
                         style={{
                           padding: 8,
                           minHeight: 232,
@@ -2005,8 +2015,11 @@ export function ScheduleApp() {
                           border: dayCardStyle.border,
                         }}
                       >
-                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                          <div style={{ fontSize: 21, fontWeight: 900 }}>{day.month}/{day.day}</div>
+                        <div className="schedule-day-head" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
+                            <span>{day.month}/{day.day}</span>
+                            <span className="schedule-day-weekday">{getWeekdayLabel(day.dow)}</span>
+                          </div>
                           <div
                             style={{
                               textAlign: "center",
@@ -2056,6 +2069,7 @@ export function ScheduleApp() {
                                 }}
                               >
                                 <strong
+                                  className="schedule-assignment-label"
                                   style={{
                                     display: "flex",
                                     alignItems: "center",
@@ -2070,7 +2084,7 @@ export function ScheduleApp() {
                                 >
                                   {getCategoryDisplayLabel(category)}
                                 </strong>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, minHeight: 42 }}>
+                              <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, minHeight: 42 }}>
                                 {names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const conflicted = conflictSet.has(`${category}-${name}`);

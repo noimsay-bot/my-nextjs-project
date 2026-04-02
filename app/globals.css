@@ -298,6 +298,55 @@ textarea {
   align-items: start;
 }
 
+.schedule-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.schedule-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.schedule-current-title {
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.schedule-calendar-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.schedule-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.schedule-day-date {
+  display: grid;
+  gap: 2px;
+}
+
+.schedule-day-weekday {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.schedule-order-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
 @media (max-width: 1100px) {
   .subgrid-4,
   .subgrid-3,
@@ -326,5 +375,90 @@ textarea {
   .brand-logo-text {
     letter-spacing: 0.16em;
     text-indent: 0.16em;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 16px 12px 48px;
+  }
+
+  .panel {
+    border-radius: 20px;
+  }
+
+  .panel-pad {
+    padding: 16px;
+  }
+
+  .schedule-toolbar {
+    align-items: stretch;
+  }
+
+  .schedule-toolbar-actions {
+    width: 100%;
+  }
+
+  .schedule-toolbar-actions--controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-toolbar-actions--controls > .muted,
+  .schedule-toolbar-actions--controls > .schedule-current-title {
+    grid-column: 1 / -1;
+    text-align: center;
+    justify-self: stretch;
+  }
+
+  .schedule-toolbar-actions--controls > .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .schedule-calendar-scroll {
+    overflow-x: visible;
+  }
+
+  .schedule-calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-weekday {
+    display: none;
+  }
+
+  .schedule-day-card {
+    min-height: auto !important;
+    padding: 10px !important;
+  }
+
+  .schedule-day-head {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    row-gap: 6px !important;
+  }
+
+  .schedule-day-date {
+    gap: 0;
+  }
+
+  .schedule-assignment-label {
+    min-height: auto !important;
+    font-size: 13px !important;
+  }
+
+  .schedule-name-grid {
+    grid-template-columns: 1fr !important;
+    min-height: auto !important;
+  }
+
+  .schedule-order-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .schedule-toolbar-actions--controls {
+    grid-template-columns: 1fr;
   }
 }
