@@ -33,11 +33,20 @@ function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
 
+function isHandheldPhoneDevice() {
+  if (typeof navigator === "undefined") return false;
+  const userAgentData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (userAgentData?.mobile) return true;
+  return /iPhone|iPod|Android.+Mobile|Windows Phone|Mobile/i.test(navigator.userAgent);
+}
+
 function isMobileScheduleViewport() {
   if (typeof window === "undefined") return false;
   if (window.innerWidth <= MOBILE_VIEWPORT_MAX) return true;
+  if (isHandheldPhoneDevice()) return true;
   const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  return isCoarsePointer && Math.min(window.innerWidth, window.innerHeight) <= MOBILE_VIEWPORT_MAX;
+  const screenShortEdge = Math.min(window.innerWidth, window.innerHeight, window.screen.width, window.screen.height);
+  return isCoarsePointer && screenShortEdge <= 860;
 }
 
 const vacationLegendStyles = {
