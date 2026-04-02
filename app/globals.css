@@ -540,3 +540,27 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 720px) {
+  .schedule-calendar-grid--daily {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    justify-items: stretch;
+    align-items: start;
+  }
+
+  .schedule-day-card {
+    width: 100%;
+    min-width: 0;
+    justify-self: stretch;
+    padding: 8px !important;
+  }
+
+  .schedule-name-grid {
+    gap: 4px !important;
+  }
+
+  .schedule-assignment-label {
+    font-size: 12px !important;
+  }
+}
