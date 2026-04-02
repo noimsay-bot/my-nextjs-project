@@ -16,7 +16,9 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/schedule/write") ||
     pathname === "/schedule/vacations" ||
     pathname === "/schedule/long-service-leave" ||
-    pathname === "/schedule/health-checks";
+    pathname === "/schedule/health-checks" ||
+    pathname === "/schedule/domestic-trip" ||
+    pathname === "/schedule/international-trip";
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
@@ -31,7 +33,9 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
                   (pathname.startsWith("/schedule/write") ||
                     pathname === "/schedule/vacations" ||
                     pathname === "/schedule/long-service-leave" ||
-                    pathname === "/schedule/health-checks"));
+                    pathname === "/schedule/health-checks" ||
+                    pathname === "/schedule/domestic-trip" ||
+                    pathname === "/schedule/international-trip"));
               return (
                 <Link key={item.href} href={item.href} className={`btn ${active ? "white" : ""}`}>
                   {item.label}

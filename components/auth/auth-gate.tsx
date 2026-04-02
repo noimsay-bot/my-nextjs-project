@@ -81,6 +81,20 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return undefined;
     }
 
+    if (session !== undefined) {
+      setCheckingSession(false);
+
+      let cancelled = false;
+      void initializeAuth().then((nextSession) => {
+        if (cancelled) return;
+        setSession(nextSession);
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     let cancelled = false;
     setCheckingSession(true);
 
@@ -93,7 +107,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isPublicPath, pathname]);
+  }, [isPublicPath]);
 
   useEffect(() => {
     if (isPublicPath || checkingSession) {
@@ -116,14 +130,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [checkingSession, isPublicPath, pathname, router, session]);
 
-  const content = (
-    <div key={pathname} style={{ display: "contents" }}>
-      {children}
-    </div>
-  );
-
-  if (isPublicPath) return content;
+  if (isPublicPath) return <>{children}</>;
   if (checkingSession || session === undefined) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   if (!session || !session.approved || !hasAccess(pathname, session.role)) return null;
-  return content;
+  return <>{children}</>;
 }

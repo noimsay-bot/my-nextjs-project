@@ -5,8 +5,6 @@ import { usePathname } from "next/navigation";
 
 const items = [
   { href: "/team-lead/contribution", label: "기여도" },
-  { href: "/team-lead/domestic-trip", label: "국내출장" },
-  { href: "/team-lead/international-trip", label: "해외출장" },
   { href: "/team-lead/broadcast-accident", label: "방송 사고" },
   { href: "/team-lead/live-safety", label: "LIVE무사고" },
   { href: "/team-lead/overall-score", label: "종합 점수" },

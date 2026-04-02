@@ -123,9 +123,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       </section>
       <main style={{ marginTop: 20 }}>
         <AppRouteBoundary resetKey={pathname}>
-          <div key={pathname} style={{ display: "contents" }}>
-            {children}
-          </div>
+          {children}
         </AppRouteBoundary>
       </main>
     </div>

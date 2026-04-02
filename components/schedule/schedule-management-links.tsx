@@ -8,6 +8,8 @@ const items = [
   { href: "/schedule/vacations", label: "휴가 관리" },
   { href: "/schedule/long-service-leave", label: "근속휴가" },
   { href: "/schedule/health-checks", label: "검진" },
+  { href: "/schedule/domestic-trip", label: "국내출장" },
+  { href: "/schedule/international-trip", label: "해외출장" },
 ];
 
 export function ScheduleManagementLinks() {
