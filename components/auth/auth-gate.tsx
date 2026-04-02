@@ -58,12 +58,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPublicPath = publicPaths.has(pathname);
-  const [session, setSession] = useState<SessionUser | null | undefined>(() =>
-    isPublicPath ? getSession() : undefined,
-  );
+  const [session, setSession] = useState<SessionUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(!isPublicPath);
 
   useEffect(() => {
+    if (isPublicPath) {
+      setSession(getSession());
+      setCheckingSession(false);
+      return undefined;
+    }
+
     let mounted = true;
 
     const unsubscribe = subscribeToAuth((nextSession) => {
@@ -79,25 +83,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (isPublicPath) {
-      setSession(getSession());
-      setCheckingSession(false);
-      return undefined;
-    }
-
-    if (session !== undefined) {
-      setCheckingSession(false);
-
-      let cancelled = false;
-      void initializeAuth().then((nextSession) => {
-        if (cancelled) return;
-        setSession(nextSession);
-      });
-
-      return () => {
-        cancelled = true;
-      };
-    }
+    if (isPublicPath) return undefined;
 
     let cancelled = false;
     setCheckingSession(true);
@@ -135,7 +121,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [checkingSession, isPublicPath, pathname, router, session]);
 
   if (isPublicPath) return <>{children}</>;
-  if (checkingSession || session === undefined) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
+  if (checkingSession) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   if (!session || !session.approved || !hasAccess(pathname, session)) return null;
   return <>{children}</>;
 }

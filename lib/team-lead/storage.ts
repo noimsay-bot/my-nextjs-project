@@ -156,6 +156,8 @@ let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} 
 let contributionManualCache = {} as Record<string, ContributionManualItem[]>;
 let finalCutCache = {} as Record<string, FinalCutDecision>;
 let teamLeadRefreshPromise: Promise<void> | null = null;
+let assignmentPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let assignmentPersistResolvers: Array<() => void> = [];
 
 export function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
   return `${dateKey}::${category}::${index}::${name}`;
@@ -474,17 +476,31 @@ export async function refreshTeamLeadState() {
 }
 
 export function saveScheduleAssignmentStore(store: ScheduleAssignmentDataStore) {
-  const previous = normalizeScheduleAssignmentDataStore(assignmentStoreCache);
   assignmentStoreCache = normalizeScheduleAssignmentDataStore(store);
   emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
-  return persistScheduleAssignmentStore(assignmentStoreCache).catch(async (error) => {
-    emitTeamLeadStorageStatus({
-      ok: false,
-      message: error instanceof Error ? error.message : "일정배정 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
-    });
-    assignmentStoreCache = previous;
-    emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
-    await refreshTeamLeadState();
+
+  if (assignmentPersistTimer) {
+    clearTimeout(assignmentPersistTimer);
+  }
+
+  return new Promise<void>((resolve) => {
+    assignmentPersistResolvers.push(resolve);
+    assignmentPersistTimer = setTimeout(() => {
+      assignmentPersistTimer = null;
+      persistScheduleAssignmentStore(assignmentStoreCache)
+        .catch(async (error) => {
+          emitTeamLeadStorageStatus({
+            ok: false,
+            message: error instanceof Error ? error.message : "일정배정 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+          });
+          await refreshTeamLeadState();
+        })
+        .finally(() => {
+          const resolvers = [...assignmentPersistResolvers];
+          assignmentPersistResolvers = [];
+          resolvers.forEach((item) => item());
+        });
+    }, 250);
   });
 }
 

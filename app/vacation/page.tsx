@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSession } from "@/lib/auth/storage";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS } from "@/lib/schedule/constants";
 import { VacationType } from "@/lib/schedule/types";
 import {
   getVacationCalendarDateItems,
-  createVacationRequest,
   getVacationManagedDateKeys,
   getVacationRequests,
   refreshVacationStore,
+  submitVacationRequests,
   VACATION_EVENT,
   VACATION_STATUS_EVENT,
   VacationCalendarDateItem,
@@ -91,30 +91,34 @@ export default function VacationPage() {
   const [calendarDateItems, setCalendarDateItems] = useState<VacationCalendarDateItem[]>([]);
   const [managedDateKeys, setManagedDateKeys] = useState<string[]>([]);
 
-  const loadRequests = async () => {
-    await Promise.all([refreshScheduleState(), refreshVacationStore()]);
+  const syncFromCache = useCallback(() => {
     setRequests(getVacationRequests());
     setCalendarDateItems(getVacationCalendarDateItems(year, month, session?.username ?? ""));
     setManagedDateKeys(getVacationManagedDateKeys(year, month));
-  };
+  }, [month, session?.username, year]);
+
+  const loadRequests = useCallback(async () => {
+    await Promise.all([refreshScheduleState(), refreshVacationStore()]);
+    syncFromCache();
+  }, [syncFromCache]);
 
   useEffect(() => {
     void loadRequests();
-    const onRefresh = () => void loadRequests();
+    const onFocusRefresh = () => void loadRequests();
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setMessage({ tone: "warn", text: detail.message });
     };
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(VACATION_EVENT, onRefresh);
+    window.addEventListener("focus", onFocusRefresh);
+    window.addEventListener(VACATION_EVENT, syncFromCache);
     window.addEventListener(VACATION_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(VACATION_EVENT, onRefresh);
+      window.removeEventListener("focus", onFocusRefresh);
+      window.removeEventListener(VACATION_EVENT, syncFromCache);
       window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
     };
-  }, [year, month]);
+  }, [loadRequests, syncFromCache]);
 
   useEffect(() => {
     const selectableDateSet = new Set(
@@ -157,17 +161,6 @@ export default function VacationPage() {
   const annualSelectedDateSummary = useMemo(() => formatDateList(annualSelectedDateKeys), [annualSelectedDateKeys]);
   const compensatorySelectedDateSummary = useMemo(() => formatDateList(compensatorySelectedDateKeys), [compensatorySelectedDateKeys]);
 
-  const submitRequest = (type: VacationType, rawDates: string) => {
-    return createVacationRequest({
-      requesterId: session?.id ?? null,
-      requesterName: session?.username ?? "",
-      type,
-      year,
-      month,
-      rawDates,
-    });
-  };
-
   const handleSubmit = () => {
     if (!hasManagedSchedule) {
       setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 아직 작성되지 않아 휴가를 신청할 수 없습니다.` });
@@ -183,30 +176,21 @@ export default function VacationPage() {
       return;
     }
 
-    const results: string[] = [];
-    let hasSuccess = false;
-    let hasFailure = false;
-
-    if (annualSelectedDateKeys.length > 0) {
-      const annualResult = submitRequest("연차", annualSelectedDateKeys.join(","));
-      results.push(`연차: ${annualResult.message}`);
-      hasSuccess = hasSuccess || annualResult.ok;
-      hasFailure = hasFailure || !annualResult.ok;
-    }
-
-    if (compensatorySelectedDateKeys.length > 0) {
-      const compensatoryResult = submitRequest("대휴", compensatorySelectedDateKeys.join(","));
-      results.push(`대휴: ${compensatoryResult.message}`);
-      hasSuccess = hasSuccess || compensatoryResult.ok;
-      hasFailure = hasFailure || !compensatoryResult.ok;
-    }
-
-    setMessage({
-      tone: hasSuccess && !hasFailure ? "ok" : hasSuccess ? "note" : "warn",
-      text: results.join(" "),
+    const result = submitVacationRequests({
+      requesterId: session?.id ?? null,
+      requesterName: session?.username ?? "",
+      year,
+      month,
+      annualRawDates: annualSelectedDateKeys.join(","),
+      compensatoryRawDates: compensatorySelectedDateKeys.join(","),
     });
 
-    if (hasSuccess) {
+    setMessage({
+      tone: result.ok ? "ok" : "warn",
+      text: result.message,
+    });
+
+    if (result.ok) {
       setAnnualSelectedDateKeys([]);
       setCompensatorySelectedDateKeys([]);
       void loadRequests();

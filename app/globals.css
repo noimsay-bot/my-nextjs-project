@@ -313,6 +313,11 @@ textarea {
   align-items: center;
 }
 
+.schedule-toolbar-actions--nav,
+.schedule-toolbar-actions--legend {
+  width: 100%;
+}
+
 .schedule-current-title {
   font-size: 18px;
   font-weight: 900;
@@ -407,7 +412,7 @@ textarea {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 720px) {
   .shell {
     padding: 16px 12px 48px;
   }
@@ -466,6 +471,7 @@ textarea {
   .schedule-calendar-grid--monthly {
     grid-template-columns: repeat(7, minmax(120px, 1fr)) !important;
     min-width: 840px;
+    gap: 4px;
   }
 
   .schedule-calendar-zoom--daily {
@@ -490,7 +496,9 @@ textarea {
   .schedule-day-card--monthly {
     min-height: 148px !important;
     padding: 6px !important;
-    width: auto;
+    width: 100%;
+    min-width: 0;
+    justify-self: stretch;
   }
 
   .schedule-day-head {

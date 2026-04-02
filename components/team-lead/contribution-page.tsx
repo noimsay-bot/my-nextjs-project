@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
@@ -88,34 +88,39 @@ export function ContributionPage() {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [manualDrafts, setManualDrafts] = useState<ManualEditorState>({});
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
-  const period = useMemo(() => getContributionPeriod(), []);
+  const [period, setPeriod] = useState(() => getContributionPeriod());
+
+  const syncFromCache = useCallback(() => {
+    const users = getUsers();
+    const hiddenNames = getHiddenContributionCardNames();
+    const contributionCards = getContributionCards();
+    const cardMap = new Map(contributionCards.map((card) => [card.name, card] as const));
+
+    const merged = users
+      .map((user) => user.username.trim())
+      .filter(Boolean)
+      .filter((name) => !hiddenNames.has(name))
+      .sort((left, right) => left.localeCompare(right, "ko"))
+      .map((name) => cardMap.get(name) ?? createEmptyCard(name));
+
+    const extraCards = contributionCards.filter(
+      (card) =>
+        !hiddenNames.has(card.name.trim()) &&
+        !merged.some((mergedCard) => mergedCard.name === card.name),
+    );
+
+    setCards(
+      [...merged, ...extraCards].sort(
+        (left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"),
+      ),
+    );
+    setPeriod(getContributionPeriod());
+  }, []);
 
   useEffect(() => {
     const refresh = async () => {
       await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
-      const users = getUsers();
-      const hiddenNames = getHiddenContributionCardNames();
-      const contributionCards = getContributionCards();
-      const cardMap = new Map(contributionCards.map((card) => [card.name, card] as const));
-
-      const merged = users
-        .map((user) => user.username.trim())
-        .filter(Boolean)
-        .filter((name) => !hiddenNames.has(name))
-        .sort((left, right) => left.localeCompare(right, "ko"))
-        .map((name) => cardMap.get(name) ?? createEmptyCard(name));
-
-      const extraCards = contributionCards.filter(
-        (card) =>
-          !hiddenNames.has(card.name.trim()) &&
-          !merged.some((mergedCard) => mergedCard.name === card.name),
-      );
-
-      setCards(
-        [...merged, ...extraCards].sort(
-          (left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"),
-        ),
-      );
+      syncFromCache();
     };
 
     void refresh();
@@ -125,21 +130,21 @@ export function ContributionPage() {
       setMessage({ tone: "warn", text: detail.message });
     };
     window.addEventListener("focus", refresh);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
-    window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
+    window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+    window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
       window.removeEventListener("focus", refresh);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
-      window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
+      window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, []);
+  }, [syncFromCache]);
 
   const toggleExpanded = (name: string) => {
     setExpandedNames((current) =>

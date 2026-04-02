@@ -26,10 +26,18 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
+const MOBILE_VIEWPORT_MAX = 720;
 const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "야근", "청와대", "국회", "청사"] as const;
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
+function isMobileScheduleViewport() {
+  if (typeof window === "undefined") return false;
+  if (window.innerWidth <= MOBILE_VIEWPORT_MAX) return true;
+  const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  return isCoarsePointer && Math.min(window.innerWidth, window.innerHeight) <= MOBILE_VIEWPORT_MAX;
 }
 
 const vacationLegendStyles = {
@@ -452,13 +460,14 @@ export function PublishedSchedulesPanel() {
   const [editMode, setEditMode] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [displayMode, setDisplayMode] = useState<"daily" | "monthly">("daily");
-  const [monthZoom, setMonthZoom] = useState(0.85);
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
+  const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
+  const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const session = getSession();
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
@@ -519,13 +528,14 @@ export function PublishedSchedulesPanel() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const mediaQuery = window.matchMedia("(max-width: 720px)");
-    const syncViewport = () => setIsMobileViewport(mediaQuery.matches);
+    const syncViewport = () => setIsMobileViewport(isMobileScheduleViewport());
 
     syncViewport();
-    mediaQuery.addEventListener("change", syncViewport);
+    window.addEventListener("resize", syncViewport);
+    window.addEventListener("orientationchange", syncViewport);
     return () => {
-      mediaQuery.removeEventListener("change", syncViewport);
+      window.removeEventListener("resize", syncViewport);
+      window.removeEventListener("orientationchange", syncViewport);
     };
   }, []);
 
@@ -600,9 +610,41 @@ export function PublishedSchedulesPanel() {
 
   const isMonthlyView = !isMobileViewport || displayMode === "monthly";
   const isCompactMonthlyView = isMobileViewport && displayMode === "monthly";
-  const zoomOut = () => setMonthZoom((current) => Math.max(0.65, Number((current - 0.1).toFixed(2))));
-  const zoomIn = () => setMonthZoom((current) => Math.min(1.35, Number((current + 0.1).toFixed(2))));
-  const resetZoom = () => setMonthZoom(0.85);
+
+  useEffect(() => {
+    if (!isCompactMonthlyView) {
+      setCompactMonthCardHeight(null);
+      compactMonthCardRefs.current = {};
+      return;
+    }
+
+    let frameId = 0;
+    const measureCardHeight = () => {
+      const cards = Object.values(compactMonthCardRefs.current).filter((node): node is HTMLElement => Boolean(node));
+      if (cards.length === 0) return;
+      cards.forEach((card) => {
+        card.style.height = "auto";
+      });
+      const nextHeight = Math.ceil(
+        cards.reduce((maxHeight, card) => Math.max(maxHeight, card.getBoundingClientRect().height), 0),
+      );
+      setCompactMonthCardHeight((current) => (current === nextHeight ? current : nextHeight));
+    };
+
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(measureCardHeight);
+    };
+
+    scheduleMeasure();
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("orientationchange", scheduleMeasure);
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("orientationchange", scheduleMeasure);
+    };
+  }, [displayDays, editMode, isCompactMonthlyView, requests, selectedRoute, showMine]);
 
   const printSelectedSchedule = () => {
     if (!selectedItem) return;
@@ -829,14 +871,6 @@ export function PublishedSchedulesPanel() {
                 월별 보기
               </button>
             </div>
-            {isCompactMonthlyView ? (
-              <div className="schedule-toolbar-actions">
-                <span className="muted">확대 {Math.round(monthZoom * 100)}%</span>
-                <button className="btn" onClick={zoomOut}>축소</button>
-                <button className="btn" onClick={resetZoom}>기본</button>
-                <button className="btn" onClick={zoomIn}>확대</button>
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -854,105 +888,111 @@ export function PublishedSchedulesPanel() {
           </div>
           {selectedItem ? (
             <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "5px 12px",
-                  borderRadius: 999,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  ...vacationLegendStyles.연차,
-                }}
-              >
-                연차
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "5px 12px",
-                  borderRadius: 999,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  ...vacationLegendStyles.대휴,
-                }}
-              >
-                대휴
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "5px 12px",
-                  borderRadius: 999,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  ...vacationLegendStyles.근속휴가,
-                }}
-              >
-                근속
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "5px 12px",
-                  borderRadius: 999,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  ...vacationLegendStyles.건강검진,
-                }}
-              >
-                검진
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "5px 12px",
-                  borderRadius: 999,
-                  fontSize: 14,
-                  fontWeight: 800,
-                  lineHeight: 1.2,
-                  ...vacationLegendStyles.경조,
-                }}
-              >
-                경조
-              </span>
-              <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
-                이전 달
-              </button>
               <strong className="schedule-current-title">{selectedItem.title}</strong>
-              <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
-                다음 달
-              </button>
-              <button className="btn" onClick={printSelectedSchedule}>
-                출력
-              </button>
-              {canDelete ? (
-                <button
-                  className="btn"
-                  onClick={() => {
-                    const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
-                    if (!ok) return;
-                    const next = removePublishedSchedule(selectedItem.monthKey);
-                    setItems(next);
-                    setSelectedMonthKey(getPreferredPublishedMonthKey(next));
+              <div className="schedule-toolbar-actions schedule-toolbar-actions--legend">
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.연차,
                   }}
                 >
-                  게시 해제
-                    </button>
-                  ) : null}
+                  연차
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.대휴,
+                  }}
+                >
+                  대휴
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.근속휴가,
+                  }}
+                >
+                  근속
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.건강검진,
+                  }}
+                >
+                  검진
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "5px 12px",
+                    borderRadius: 999,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    ...vacationLegendStyles.경조,
+                  }}
+                >
+                  경조
+                </span>
+              </div>
+              <div className="schedule-toolbar-actions schedule-toolbar-actions--nav">
+                <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
+                  이전 달
+                </button>
+                <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
+                  다음 달
+                </button>
+                {!isMobileViewport ? (
+                  <button className="btn" onClick={printSelectedSchedule}>
+                    출력
+                  </button>
+                ) : null}
+                {canDelete ? (
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
+                      if (!ok) return;
+                      const next = removePublishedSchedule(selectedItem.monthKey);
+                      setItems(next);
+                      setSelectedMonthKey(getPreferredPublishedMonthKey(next));
+                    }}
+                  >
+                    게시 해제
+                  </button>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </div>
@@ -1048,7 +1088,6 @@ export function PublishedSchedulesPanel() {
               <div className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}>
               <div
                 className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
-                style={isCompactMonthlyView ? { zoom: monthZoom } : undefined}
               >
               <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
                 {weekdayLabels.map((label) => (
@@ -1062,6 +1101,7 @@ export function PublishedSchedulesPanel() {
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const highlightDayHead = showMine && dayContainsUser(day, username);
+                  const highlightHeaderName = highlightDayHead && Boolean(day.headerName?.trim());
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category]) => {
                       if (isWeekendLike) return category !== "휴가" && category !== "제크";
@@ -1071,10 +1111,14 @@ export function PublishedSchedulesPanel() {
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}
+                      ref={(node) => {
+                        compactMonthCardRefs.current[`${day.ownerMonthKey}-${day.dateKey}`] = node;
+                      }}
                       className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
                       style={{
                         padding: 6,
                         minHeight: isCompactMonthlyView ? 148 : 216,
+                        height: isCompactMonthlyView && compactMonthCardHeight ? compactMonthCardHeight : undefined,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
@@ -1129,7 +1173,7 @@ export function PublishedSchedulesPanel() {
                             style={{
                               minHeight: 24,
                               textAlign: "center",
-                              color: "#f8fbff",
+                              color: highlightHeaderName ? "#f8fbff" : "#f8fbff",
                               fontSize: 21,
                               fontWeight: 900,
                               lineHeight: 1.1,
@@ -1137,13 +1181,18 @@ export function PublishedSchedulesPanel() {
                               overflow: "visible",
                               textOverflow: "clip",
                               wordBreak: "keep-all",
+                              justifySelf: "center",
+                              padding: highlightHeaderName ? (isCompactMonthlyView ? "4px 10px" : "5px 12px") : 0,
+                              borderRadius: highlightHeaderName ? 999 : 0,
+                              background: highlightHeaderName ? "rgba(125,211,252,.2)" : "transparent",
+                              border: highlightHeaderName ? "6px solid rgba(255,255,255,.95)" : undefined,
                             }}
                           >
                             {day.headerName ?? ""}
                           </div>
                         </div>
                       </div>
-                      <div style={{ display: "grid", gap: 1 }}>
+                      <div className="schedule-day-body" style={{ display: "grid", gap: 1 }}>
                         {visibleAssignments.map(([category, names]) => (
                           <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
                             <div

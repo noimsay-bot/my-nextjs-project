@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -82,11 +82,14 @@ export function ManualScoreBoardPage({
   const [editingName, setEditingName] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftState>({});
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+  const syncFromCache = useCallback(() => {
+    setCards(getCards(category));
+  }, [category]);
 
   useEffect(() => {
     const refresh = async () => {
       await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState(), refreshScoreboardState()]);
-      setCards(getCards(category));
+      syncFromCache();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
@@ -96,25 +99,25 @@ export function ManualScoreBoardPage({
 
     void refresh();
     window.addEventListener("focus", refresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
-    window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_SCOREBOARD_EVENT, refresh);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+    window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
+    window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
+    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, syncFromCache);
+    window.addEventListener(TEAM_LEAD_SCOREBOARD_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
       window.removeEventListener("focus", refresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
-      window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_SCOREBOARD_EVENT, refresh);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
+      window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
+      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, syncFromCache);
+      window.removeEventListener(TEAM_LEAD_SCOREBOARD_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, [category]);
+  }, [category, syncFromCache]);
 
   const toggleExpanded = (name: string) => {
     setExpandedNames((current) =>

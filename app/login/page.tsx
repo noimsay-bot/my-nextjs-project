@@ -57,6 +57,7 @@ export default function LoginPage() {
     return queryState.mode === "reset-password" ? "reset-password" : null;
   }, [queryState.mode]);
   const nextPath = useMemo(() => normalizeNextPath(queryState.next), [queryState.next]);
+  const approvalReason = queryState.reason;
 
   useEffect(() => {
     let mounted = true;
@@ -100,17 +101,17 @@ export default function LoginPage() {
       return;
     }
 
-    if (queryState.reason === "approval") {
+    if (approvalReason === "approval") {
       setMessage("계정이 아직 승인되지 않았습니다. 관리자 승인 후 다시 이용해 주세요.");
     }
-  }, [forcedMode, queryState.reason]);
+  }, [approvalReason, forcedMode]);
 
   useEffect(() => {
     if (forcedMode === "reset-password") return;
     if (!session?.approved) return;
     if (!session) return;
-    window.location.replace(nextPath);
-  }, [forcedMode, nextPath, session]);
+    router.replace(nextPath);
+  }, [forcedMode, nextPath, router, session]);
 
   async function handleLoginSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -134,7 +135,7 @@ export default function LoginPage() {
 
     setSession(result.session);
     setMessage("");
-    window.location.replace(nextPath);
+    router.replace(nextPath);
   }
 
   async function handleSignupSubmit(event?: FormEvent<HTMLFormElement>) {

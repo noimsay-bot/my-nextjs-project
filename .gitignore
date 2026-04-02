@@ -4,6 +4,10 @@ node_modules/
 out/
 build/
 *.log
+backend/node_modules/
+test-results/
+tmp_*
+tsconfig.tsbuildinfo
 .env
 .env.local
 .env.production.local

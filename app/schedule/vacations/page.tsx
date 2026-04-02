@@ -9,18 +9,28 @@ import {
   getVacationApplicantsOverview,
   refreshVacationStore,
   runVacationLottery,
-  seedVacationSimulationRequests,
   setVacationCapacity,
   VACATION_EVENT,
   VACATION_STATUS_EVENT,
   VacationMonthState,
-  VacationRequest,
   waitForVacationStoreWrite,
 } from "@/lib/vacation/storage";
 import { refreshScheduleState } from "@/lib/schedule/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const VACATION_MANAGEMENT_SELECTION_KEY = "desk-vacation-management-selection-v1";
+const vacationChipStyles = {
+  annual: {
+    borderColor: "rgba(96,165,250,.45)",
+    background: "rgba(59,130,246,.16)",
+    color: "#dbeafe",
+  },
+  compensatory: {
+    borderColor: "rgba(52,211,153,.45)",
+    background: "rgba(16,185,129,.16)",
+    color: "#d1fae5",
+  },
+} as const;
 
 function buildCalendarCells(year: number, month: number, displayDateKeys: string[]) {
   const firstDisplayDate = displayDateKeys.length > 0
@@ -66,39 +76,25 @@ function buildCalendarCells(year: number, month: number, displayDateKeys: string
 }
 
 function highlightStyle(active: boolean, tone: "annual" | "compensatory") {
+  const baseStyle = tone === "annual" ? vacationChipStyles.annual : vacationChipStyles.compensatory;
   if (!active) {
     return {
-      background: "rgba(255,255,255,.1)",
-      border: "1px solid rgba(255,255,255,.08)",
-      color: "#d6dfef",
-    };
-  }
-
-  if (tone === "annual") {
-    return {
-      background: "rgba(59,130,246,.28)",
-      border: "1px solid rgba(125,211,252,.48)",
-      color: "#eff6ff",
-      boxShadow: "0 10px 24px rgba(59,130,246,.18)",
+      background: baseStyle.background,
+      border: `1px solid ${baseStyle.borderColor}`,
+      color: baseStyle.color,
     };
   }
 
   return {
-    background: "rgba(16,185,129,.28)",
-    border: "1px solid rgba(74,222,128,.48)",
-    color: "#ecfdf5",
-    boxShadow: "0 10px 24px rgba(16,185,129,.16)",
+    background: baseStyle.background,
+    border: `1px solid ${baseStyle.borderColor}`,
+    color: baseStyle.color,
+    boxShadow: tone === "annual" ? "0 10px 24px rgba(59,130,246,.18)" : "0 10px 24px rgba(16,185,129,.16)",
   };
 }
 
 function countNamesByDateMap(map: Record<string, string[]>) {
   return Object.values(map).reduce((sum, names) => sum + names.length, 0);
-}
-
-function formatRequestDates(dateKeys: string[]) {
-  return dateKeys
-    .map((dateKey) => `${Number(dateKey.split("-")[2])}일`)
-    .join(", ");
 }
 
 export default function ScheduleVacationsPage() {
@@ -112,7 +108,6 @@ export default function ScheduleVacationsPage() {
   const [hasGeneratedSchedule, setHasGeneratedSchedule] = useState(false);
   const [annualApplicants, setAnnualApplicants] = useState<Record<string, string[]>>({});
   const [compensatoryApplicants, setCompensatoryApplicants] = useState<Record<string, string[]>>({});
-  const [requests, setRequests] = useState<VacationRequest[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   useEffect(() => {
@@ -144,7 +139,6 @@ export default function ScheduleVacationsPage() {
     setHasGeneratedSchedule(overview.hasGeneratedSchedule);
     setAnnualApplicants(overview.annualApplicants);
     setCompensatoryApplicants(overview.compensatoryApplicants);
-    setRequests(overview.requests);
   };
 
   useEffect(() => {
@@ -220,21 +214,6 @@ export default function ScheduleVacationsPage() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              className="btn"
-              disabled={!hasGeneratedSchedule}
-              onClick={async () => {
-                const result = seedVacationSimulationRequests(year, month);
-                const persistResult = await waitForVacationStoreWrite();
-                await loadMonth();
-                setMessage({
-                  tone: result.ok && persistResult.ok ? "ok" : "warn",
-                  text: persistResult.ok ? result.message : persistResult.message ?? result.message,
-                });
-              }}
-            >
-              시뮬레이션 채우기
-            </button>
             <button
               className="btn"
               disabled={!hasGeneratedSchedule}
@@ -402,7 +381,7 @@ export default function ScheduleVacationsPage() {
                     <div style={{ display: "grid", gap: 10 }}>
                       <div style={{ display: "grid", gap: 6 }}>
                         <strong style={{ fontSize: 13, color: "#bfdbfe" }}>
-                          연차 {annualNames.length}명 / 당첨 {annualWinners.length}명
+                          연차 {annualNames.length}명
                         </strong>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, minHeight: 32 }}>
                           {annualNames.length > 0 ? (
@@ -434,7 +413,7 @@ export default function ScheduleVacationsPage() {
 
                       <div style={{ display: "grid", gap: 6 }}>
                         <strong style={{ fontSize: 13, color: "#bbf7d0" }}>
-                          대휴 {compensatoryNames.length}명 / 당첨 {compensatoryWinners.length}명
+                          대휴 {compensatoryNames.length}명
                         </strong>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, minHeight: 32 }}>
                           {compensatoryNames.length > 0 ? (
@@ -469,35 +448,6 @@ export default function ScheduleVacationsPage() {
               })}
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
-          <div className="chip">제출된 휴가 신청</div>
-          {requests.length > 0 ? (
-            requests.map((request) => (
-              <article
-                key={request.id}
-                style={{
-                  display: "grid",
-                  gap: 6,
-                  padding: 14,
-                  borderRadius: 16,
-                  border: "1px solid var(--line)",
-                  background: "rgba(255,255,255,.05)",
-                }}
-              >
-                <strong>
-                  {request.requesterName} · {request.type}
-                </strong>
-                <span>{formatRequestDates(request.dates)}</span>
-                <span className="muted">{request.createdAt}</span>
-              </article>
-            ))
-          ) : (
-            <div className="status note">아직 접수된 휴가 신청이 없습니다.</div>
-          )}
         </div>
       </section>
     </div>

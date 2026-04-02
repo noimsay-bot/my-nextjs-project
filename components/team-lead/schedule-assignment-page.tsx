@@ -1,7 +1,6 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import { defaultPointers } from "@/lib/schedule/constants";
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
@@ -246,7 +245,8 @@ function parseCsvRows(text: string) {
   return rows;
 }
 
-function parseWorksheetRows(buffer: ArrayBuffer) {
+async function parseWorksheetRows(buffer: ArrayBuffer) {
+  const XLSX = await import("xlsx");
   const workbook = XLSX.read(buffer, { type: "array" });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) return [] as ParsedCsvRow[];
@@ -428,6 +428,38 @@ function ensureImportedMonthsExist(monthKeys: string[]) {
   return true;
 }
 
+function ScheduleDeleteConfirmButton({
+  onConfirm,
+}: {
+  onConfirm: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return open ? (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(248,113,113,.28)", background: "rgba(127,29,29,.12)" }}>
+      <span style={{ fontSize: 12, color: "#fecaca", fontWeight: 700 }}>삭제 하시겠습니까</span>
+      <button
+        type="button"
+        className="btn"
+        style={{ padding: "3px 8px", fontSize: 11 }}
+        onClick={() => {
+          onConfirm();
+          setOpen(false);
+        }}
+      >
+        확인
+      </button>
+      <button type="button" className="btn" style={{ padding: "3px 8px", fontSize: 11 }} onClick={() => setOpen(false)}>
+        취소
+      </button>
+    </div>
+  ) : (
+    <button type="button" className="btn" style={{ padding: "3px 6px", fontSize: 11 }} onClick={() => setOpen(true)}>
+      삭제
+    </button>
+  );
+}
+
 export function ScheduleAssignmentPage() {
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
@@ -437,6 +469,7 @@ export function ScheduleAssignmentPage() {
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
+  const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
@@ -499,14 +532,15 @@ export function ScheduleAssignmentPage() {
   useEffect(() => {
     if (selectedMonthKey !== todayMonthKey) return;
     if (!monthDays.some((day) => day.dateKey === todayDateKey)) return;
+    if (autoScrolledMonthKeyRef.current === selectedMonthKey) return;
+
+    autoScrolledMonthKeyRef.current = selectedMonthKey;
 
     const timer = window.setTimeout(() => {
-      todayCardRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-    }, 80);
+      todayCardRef.current?.scrollIntoView({ block: "start" });
+    }, 0);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
+    return () => window.clearTimeout(timer);
   }, [monthDays, selectedMonthKey, todayDateKey, todayMonthKey]);
 
   const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
@@ -595,31 +629,34 @@ export function ScheduleAssignmentPage() {
   };
 
   const downloadXlsxTemplate = () => {
-    const rows = [
-      [...csvTemplateHeaders],
-      [
-        "2025-12",
-        "2025-12-03",
-        "홍길동",
-        "조근",
-        "07:30",
-        "16:10",
-        "국회 백브리핑|대통령실 브리핑",
-        "국내출장",
-        "0|1",
-        "1",
-        "현장 대응",
-        "base",
-      ],
-    ];
-    const worksheet = XLSX.utils.aoa_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "schedule-assignment");
-    XLSX.writeFile(workbook, "schedule-assignment-template.xlsx");
-    setImportMessage({
-      tone: "note",
-      text: "XLSX 양식을 다운로드했습니다. monthKey,dateKey,name,duty는 반드시 채워 주세요.",
-    });
+    void (async () => {
+      const XLSX = await import("xlsx");
+      const rows = [
+        [...csvTemplateHeaders],
+        [
+          "2025-12",
+          "2025-12-03",
+          "홍길동",
+          "조근",
+          "07:30",
+          "16:10",
+          "국회 백브리핑|대통령실 브리핑",
+          "국내출장",
+          "0|1",
+          "1",
+          "현장 대응",
+          "base",
+        ],
+      ];
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "schedule-assignment");
+      XLSX.writeFile(workbook, "schedule-assignment-template.xlsx");
+      setImportMessage({
+        tone: "note",
+        text: "XLSX 양식을 다운로드했습니다. monthKey,dateKey,name,duty는 반드시 채워 주세요.",
+      });
+    })();
   };
 
   const importParsedRows = (parsedRows: ParsedCsvRow[]) => {
@@ -784,7 +821,7 @@ export function ScheduleAssignmentPage() {
       const lowerName = file.name.toLowerCase();
       const parsedRows = lowerName.endsWith(".csv")
         ? parseCsvRows(await file.text())
-        : parseWorksheetRows(await file.arrayBuffer());
+        : await parseWorksheetRows(await file.arrayBuffer());
       importParsedRows(parsedRows);
     } catch (error) {
       setImportMessage({
@@ -1080,13 +1117,27 @@ export function ScheduleAssignmentPage() {
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div style={{ display: "grid", gap: 3, minWidth: 460 }}>
                               {safeSchedules.map((schedule, index) => (
-                                <div key={`${row.key}-schedule-${index}`} style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
-                                  <input className="field-input" value={schedule} style={{ flex: 1 }} placeholder="일정 내용 입력" onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item) }))} />
-                                  <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
-                                  <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: "pointer", overflow: "hidden" }}>
-                                    <input type="checkbox" checked={safeExclusiveVideo[index]} style={{ appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%", margin: 0, background: "transparent", border: "none", cursor: "pointer" }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, exclusiveVideo: getSafeExclusiveVideo(current.exclusiveVideo, getSafeSchedules(current.schedules).length).map((item, itemIndex) => itemIndex === index ? event.target.checked : item) }))} />
-                                  </label>
-                                  <button type="button" className="btn" style={{ padding: "3px 6px", fontSize: 11 }} onClick={() => updateMonthEntry(row.key, (current) => { const currentSchedules = getSafeSchedules(current.schedules); const nextSchedules = removeScheduleAt(currentSchedules, index); return { ...current, schedules: nextSchedules, exclusiveVideo: removeExclusiveVideoAt(getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), index, nextSchedules.length) }; })}>삭제</button>
+                                <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
+                                  <div style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
+                                    <input className="field-input" value={schedule} style={{ flex: 1 }} placeholder="일정 내용 입력" onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item) }))} />
+                                    <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
+                                    <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: "pointer", overflow: "hidden" }}>
+                                      <input type="checkbox" checked={safeExclusiveVideo[index]} style={{ appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%", margin: 0, background: "transparent", border: "none", cursor: "pointer" }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, exclusiveVideo: getSafeExclusiveVideo(current.exclusiveVideo, getSafeSchedules(current.schedules).length).map((item, itemIndex) => itemIndex === index ? event.target.checked : item) }))} />
+                                    </label>
+                                    <ScheduleDeleteConfirmButton
+                                      onConfirm={() =>
+                                        updateMonthEntry(row.key, (current) => {
+                                          const currentSchedules = getSafeSchedules(current.schedules);
+                                          const nextSchedules = removeScheduleAt(currentSchedules, index);
+                                          return {
+                                            ...current,
+                                            schedules: nextSchedules,
+                                            exclusiveVideo: removeExclusiveVideoAt(getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), index, nextSchedules.length),
+                                          };
+                                        })
+                                      }
+                                    />
+                                  </div>
                                 </div>
                               ))}
                               <button type="button" className="btn" style={{ width: "fit-content", padding: "2px 6px", fontSize: 11, lineHeight: 1.1 }} onClick={() => updateMonthEntry(row.key, (current) => { const currentSchedules = getSafeSchedules(current.schedules); return { ...current, schedules: [...currentSchedules, ""], exclusiveVideo: [...getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), false] }; })}>+</button>

@@ -721,6 +721,12 @@ export function ScheduleApp() {
 
   const onRebalance = () => {
     if (!visibleSchedule) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`${visibleSchedule.month}월 근무표를 재배치하겠습니까?`)
+    ) {
+      return;
+    }
     const targetSchedule = JSON.parse(JSON.stringify(visibleSchedule));
     const workingState = sanitizeScheduleState({
       ...state,
@@ -773,9 +779,6 @@ export function ScheduleApp() {
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-            <Link href="/schedule/schedule-assignment" className="btn">
-              일정배정
-            </Link>
             <button className="btn white" disabled={isEditingDate} onClick={onGenerate}>작성</button>
             <button className="btn" disabled={isEditingDate} onClick={onRebalance}>자동 재배치</button>
             <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={() => setDeleteConfirmOpen(true)}>삭제</button>

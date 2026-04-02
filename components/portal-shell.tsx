@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import {
@@ -39,7 +39,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const visibleLinks = (() => {
+  const visibleLinks = useMemo(() => {
     switch (session?.role) {
       case "member":
         return links.filter(
@@ -80,7 +80,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       default:
         return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
     }
-  })();
+  }, [session?.canReview, session?.role]);
 
   return (
     <div className="shell">

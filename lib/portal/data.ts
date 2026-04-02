@@ -359,8 +359,6 @@ export interface ReviewStateEntry {
 
 export type ReviewStateStore = Record<string, ReviewStateEntry>;
 
-export const submissionStorageKey = "j-special-force-submissions-v1";
-export const reviewStorageKey = "j-special-force-reviews-v1";
 export const additionalBonusOptions = [1, 2, 3, 4, 5] as const;
 
 export function getSubmissionEntryKey(entry: SubmissionEntry) {
@@ -706,11 +704,6 @@ function formatSubmissionUpdatedAt(value: string | null | undefined) {
   return date.toLocaleString("ko-KR");
 }
 
-function writeSubmissionCache(entry: SubmissionEntry | null) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(submissionStorageKey, JSON.stringify(entry ? [entry] : []));
-}
-
 async function getPortalSession() {
   const authModule = await import("@/lib/auth/storage");
   return authModule.getSession() ?? authModule.getSessionAsync();
@@ -738,7 +731,6 @@ export async function getMySubmissionEntry() {
   }
 
   if (!data || data.length === 0) {
-    writeSubmissionCache(null);
     return null;
   }
 
@@ -753,7 +745,6 @@ export async function getMySubmissionEntry() {
     updatedAt: formatSubmissionUpdatedAt(latestUpdatedAt),
   };
 
-  writeSubmissionCache(entry);
   return entry;
 }
 

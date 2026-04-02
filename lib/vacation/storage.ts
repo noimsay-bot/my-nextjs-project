@@ -7,7 +7,6 @@ import {
 import {
   formatVacationEntry,
   getMonthKey,
-  getUniquePeople,
   parseVacationMap,
   parseVacationEntry,
 } from "@/lib/schedule/engine";
@@ -443,10 +442,6 @@ function getDisplayDateKeysFromGeneratedSchedule(generated: GeneratedSchedule | 
   return getEffectiveGeneratedDateKeys(generated, scheduleState);
 }
 
-function randomBetween(min: number, max: number) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
 function shuffleList<T>(items: T[]) {
   const next = [...items];
   for (let index = next.length - 1; index > 0; index -= 1) {
@@ -795,19 +790,11 @@ export function getVacationRequests(monthKey?: string) {
   return getRequestsForMonth(store, monthKey);
 }
 
-export function createVacationRequest(input: {
-  requesterId: string | null;
-  requesterName: string;
-  type: VacationType;
+function validateVacationRequestDates(input: {
   year: number;
   month: number;
   rawDates: string;
 }) {
-  const requesterName = input.requesterName.trim();
-  if (!requesterName) {
-    return { ok: false as const, message: "로그인한 사용자 이름을 확인할 수 없습니다." };
-  }
-
   const calendarDateItems = getVacationCalendarDateItems(input.year, input.month);
   const blockedDateSet = new Set(
     calendarDateItems
@@ -848,6 +835,53 @@ export function createVacationRequest(input: {
     };
   }
 
+  return {
+    ok: true as const,
+    validDates,
+  };
+}
+
+function isSameVacationRequester(request: VacationRequest, requesterId: string | null, requesterName: string) {
+  if (requesterId && request.requesterId === requesterId) {
+    return true;
+  }
+  return request.requesterName.trim() === requesterName;
+}
+
+export function submitVacationRequests(input: {
+  requesterId: string | null;
+  requesterName: string;
+  year: number;
+  month: number;
+  annualRawDates?: string;
+  compensatoryRawDates?: string;
+}) {
+  const requesterName = input.requesterName.trim();
+  if (!requesterName) {
+    return { ok: false as const, message: "로그인한 사용자 이름을 확인할 수 없습니다." };
+  }
+
+  const annualValidation = input.annualRawDates
+    ? validateVacationRequestDates({ year: input.year, month: input.month, rawDates: input.annualRawDates })
+    : null;
+  if (annualValidation && !annualValidation.ok) {
+    return { ok: false as const, message: `연차: ${annualValidation.message}` };
+  }
+
+  const compensatoryValidation = input.compensatoryRawDates
+    ? validateVacationRequestDates({ year: input.year, month: input.month, rawDates: input.compensatoryRawDates })
+    : null;
+  if (compensatoryValidation && !compensatoryValidation.ok) {
+    return { ok: false as const, message: `대휴: ${compensatoryValidation.message}` };
+  }
+
+  const selectedCount =
+    (annualValidation?.ok ? annualValidation.validDates.length : 0) +
+    (compensatoryValidation?.ok ? compensatoryValidation.validDates.length : 0);
+  if (selectedCount === 0) {
+    return { ok: false as const, message: "휴가 날짜를 입력해 주세요." };
+  }
+
   const store = readStore();
   const synced = syncMonthStateToGeneratedSchedule(store, input.year, input.month);
   const monthState = synced.monthState;
@@ -858,111 +892,51 @@ export function createVacationRequest(input: {
     };
   }
 
-  store.requests = [
-    {
+  store.requests = store.requests.filter(
+    (request) => !(request.monthKey === monthState.monthKey && isSameVacationRequester(request, input.requesterId, requesterName)),
+  );
+
+  const createdAt = nowLabel();
+  const nextRequests: VacationRequest[] = [];
+  if (annualValidation?.ok) {
+    nextRequests.push({
       id: crypto.randomUUID(),
       requesterId: input.requesterId,
       requesterName,
-      type: input.type,
+      type: "연차",
       year: input.year,
       month: input.month,
       monthKey: monthState.monthKey,
-      dates: validDates,
-      rawDates: formatRawDates(validDates),
-      createdAt: nowLabel(),
-    },
+      dates: annualValidation.validDates,
+      rawDates: formatRawDates(annualValidation.validDates),
+      createdAt,
+    });
+  }
+
+  if (compensatoryValidation?.ok) {
+    nextRequests.push({
+      id: crypto.randomUUID(),
+      requesterId: input.requesterId,
+      requesterName,
+      type: "대휴",
+      year: input.year,
+      month: input.month,
+      monthKey: monthState.monthKey,
+      dates: compensatoryValidation.validDates,
+      rawDates: formatRawDates(compensatoryValidation.validDates),
+      createdAt,
+    });
+  }
+
+  store.requests = [
+    ...nextRequests,
     ...store.requests,
   ];
   writeStore(store);
 
   return {
     ok: true as const,
-    message:
-      parsedDates.invalid.length > 0 || unavailableDays.length > 0
-        ? `휴가 신청을 제출했습니다. 제외된 입력: ${[...parsedDates.invalid, ...unavailableDays].join(", ")}`
-        : "휴가 신청을 제출했습니다.",
-  };
-}
-
-export function seedVacationSimulationRequests(year: number, month: number) {
-  if (typeof window === "undefined") {
-    return { ok: false as const, message: "브라우저에서만 시뮬레이션 신청자를 만들 수 있습니다." };
-  }
-
-  const scheduleState = readScheduleState();
-  const people = getUniquePeople(scheduleState);
-  if (people.length === 0) {
-    return { ok: false as const, message: "근무표에서 사용할 이름을 찾지 못했습니다." };
-  }
-
-  const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
-  const monthState = synced.monthState;
-  if (!monthState || synced.managedDateKeys.length === 0) {
-    return { ok: false as const, message: `${year}년 ${month}월 DESK 근무표가 없어 시뮬레이션을 만들 수 없습니다.` };
-  }
-
-  const applicantMap = new Map<string, { type: VacationType; dates: Set<string> }>();
-
-  synced.managedDateKeys.forEach((dateKey) => {
-    const shuffledNames = shuffleList(people);
-    const annualCount = Math.min(randomBetween(1, 5), shuffledNames.length);
-    const annualNames = shuffledNames.slice(0, annualCount);
-    const remainingNames = shuffledNames.filter((name) => !annualNames.includes(name));
-    const compensatoryCount = Math.min(10, remainingNames.length);
-    const compensatoryNames = remainingNames.slice(0, compensatoryCount);
-
-    annualNames.forEach((name) => {
-      const mapKey = `${name}::연차`;
-      const current = applicantMap.get(mapKey) ?? { type: "연차" as const, dates: new Set<string>() };
-      current.dates.add(dateKey);
-      applicantMap.set(mapKey, current);
-    });
-
-    compensatoryNames.forEach((name) => {
-      const mapKey = `${name}::대휴`;
-      const current = applicantMap.get(mapKey) ?? { type: "대휴" as const, dates: new Set<string>() };
-      current.dates.add(dateKey);
-      applicantMap.set(mapKey, current);
-    });
-  });
-
-  const createdAt = nowLabel();
-  const simulatedRequests = Array.from(applicantMap.entries())
-    .map(([mapKey, value]) => {
-      const [requesterName] = mapKey.split("::");
-      const dates = uniqueDateKeys(Array.from(value.dates));
-      return {
-        id: crypto.randomUUID(),
-        requesterId: null,
-        requesterName,
-        type: value.type,
-        year,
-        month,
-        monthKey: monthState.monthKey,
-        dates,
-        rawDates: formatRawDates(dates),
-        createdAt,
-      } satisfies VacationRequest;
-    })
-    .sort((left, right) => left.requesterName.localeCompare(right.requesterName) || left.type.localeCompare(right.type));
-
-  store.requests = [
-    ...simulatedRequests,
-    ...store.requests.filter((request) => request.monthKey !== monthState.monthKey),
-  ];
-  monthState.annualWinners = {};
-  monthState.compensatoryWinners = {};
-  monthState.appliedAt = null;
-  monthState.updatedAt = nowLabel();
-  writeStore(store);
-
-  const annualRequestCount = simulatedRequests.filter((request) => request.type === "연차").length;
-  const compensatoryRequestCount = simulatedRequests.filter((request) => request.type === "대휴").length;
-
-  return {
-    ok: true as const,
-    message: `${year}년 ${month}월 근무표 날짜 기준으로 시뮬레이션 신청자를 채웠습니다. 연차 ${annualRequestCount}건, 대휴 ${compensatoryRequestCount}건입니다.`,
+    message: "최신 휴가 신청으로 저장했습니다.",
   };
 }
 
