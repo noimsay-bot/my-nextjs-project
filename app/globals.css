@@ -563,4 +563,50 @@ textarea {
   .schedule-assignment-label {
     font-size: 12px !important;
   }
+
+  .schedule-published-panel--desktop .schedule-toolbar {
+    align-items: center;
+  }
+
+  .schedule-published-panel--desktop .schedule-toolbar-actions {
+    width: auto;
+  }
+
+  .schedule-published-panel--desktop .schedule-toolbar-actions--controls {
+    display: flex;
+    grid-template-columns: none;
+  }
+
+  .schedule-published-panel--desktop .schedule-calendar-scroll--daily {
+    overflow-x: auto;
+  }
+
+  .schedule-published-panel--desktop .schedule-calendar-grid--daily {
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  .schedule-published-panel--desktop .schedule-weekday {
+    display: block !important;
+  }
+
+  .schedule-published-panel--desktop .schedule-day-card {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 216px !important;
+    padding: 6px !important;
+  }
+
+  .schedule-published-panel--desktop .schedule-day-head {
+    row-gap: 0 !important;
+  }
+
+  .schedule-published-panel--desktop .schedule-assignment-label {
+    font-size: 14px !important;
+  }
+
+  .schedule-published-panel--desktop .schedule-name-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 5px !important;
+  }
 }

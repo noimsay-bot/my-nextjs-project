@@ -36,7 +36,8 @@ function hasAccess(pathname: string, session: SessionUser) {
         pathname === "/" ||
         pathname === "/vacation" ||
         pathname.startsWith("/submissions") ||
-        pathname.startsWith("/schedule")
+        pathname.startsWith("/schedule") ||
+        (session.canReview && pathname.startsWith("/review"))
       );
     case "team_lead":
       return (

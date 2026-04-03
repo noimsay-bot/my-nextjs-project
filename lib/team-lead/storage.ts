@@ -1045,13 +1045,39 @@ export interface ReviewerRoleProfileItem {
   name: string;
   email: string;
   loginId: string;
-  role: "member" | "reviewer";
+  role: "member" | "reviewer" | "desk" | "admin";
   approved: boolean;
 }
 
 export interface ReviewerRoleWorkspace {
   profiles: ReviewerRoleProfileItem[];
   grantedProfileIds: string[];
+}
+
+export interface TeamLeadBestReportReviewer {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface TeamLeadBestReportReviewerScore {
+  reviewerId: string;
+  reviewerName: string;
+  score: number | null;
+  reportCount: number;
+  reportScores: number[];
+}
+
+export interface TeamLeadBestReportResultsRow {
+  authorId: string;
+  authorName: string;
+  reviewerScores: TeamLeadBestReportReviewerScore[];
+  trimmedAverage: number | null;
+}
+
+export interface TeamLeadBestReportResultsWorkspace {
+  reviewers: TeamLeadBestReportReviewer[];
+  rows: TeamLeadBestReportResultsRow[];
 }
 
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
@@ -1096,7 +1122,10 @@ function formatReviewerRoleProfile(row: ReviewManagementProfileRow): ReviewerRol
     name: row.name,
     email: row.email,
     loginId: row.login_id ?? "",
-    role: row.role === "reviewer" ? "reviewer" : "member",
+    role:
+      row.role === "reviewer" || row.role === "desk" || row.role === "admin"
+        ? row.role
+        : "member",
     approved: row.approved,
   };
 }
@@ -1129,6 +1158,34 @@ async function getGrantedReviewerProfileIds() {
   }
 
   return normalizeReviewAccessState(data?.state);
+}
+
+async function getGrantedReviewerProfiles() {
+  const supabase = await getPrivilegedSupabaseClient();
+  const grantedProfileIds = await getGrantedReviewerProfileIds();
+  if (grantedProfileIds.length === 0) return [] as ReviewManagementProfileRow[];
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+    .eq("approved", true)
+    .in("id", grantedProfileIds)
+    .order("name", { ascending: true })
+    .returns<ReviewManagementProfileRow[]>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+}
+
+function getTrimmedReviewAverage(scores: number[]) {
+  if (scores.length < 3) return null;
+  const sorted = [...scores].sort((left, right) => left - right);
+  const middleScores = sorted.slice(1, -1);
+  if (middleScores.length === 0) return null;
+  return roundScore(middleScores.reduce((sum, score) => sum + score, 0) / middleScores.length);
 }
 
 async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementWorkspace> {
@@ -1269,7 +1326,7 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
     .eq("approved", true)
-    .in("role", ["member", "reviewer"])
+    .in("role", ["member", "reviewer", "desk", "admin"])
     .order("name", { ascending: true })
     .returns<ReviewManagementProfileRow[]>();
 
@@ -1281,6 +1338,133 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
     profiles: (data ?? []).map(formatReviewerRoleProfile),
     grantedProfileIds: await getGrantedReviewerProfileIds(),
   };
+}
+
+export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadBestReportResultsWorkspace> {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    throw new Error("베스트리포트 평가 결과 조회 권한이 없습니다.");
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const reviewerProfiles = await getGrantedReviewerProfiles();
+  const reviewers = reviewerProfiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    email: profile.email,
+  })) satisfies TeamLeadBestReportReviewer[];
+
+  const { data: submissionRows, error: submissionError } = await supabase
+    .from("submissions")
+    .select("id, author_id, type, title, link, date, notes, status, created_at, updated_at")
+    .order("updated_at", { ascending: false })
+    .returns<ReviewManagementSubmissionRow[]>();
+
+  if (submissionError) {
+    throw new Error(submissionError.message);
+  }
+
+  const submissionIds = (submissionRows ?? []).map((row) => row.id);
+  const authorIds = Array.from(
+    new Set([
+      ...(submissionRows ?? []).map((row) => row.author_id),
+      ...reviewers.map((reviewer) => reviewer.id),
+    ]),
+  );
+
+  const { data: authorProfiles, error: authorProfileError } =
+    authorIds.length > 0
+      ? await supabase
+          .from("profiles")
+          .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+          .in("id", authorIds)
+          .returns<ReviewManagementProfileRow[]>()
+      : await supabase
+          .from("profiles")
+          .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+          .limit(0)
+          .returns<ReviewManagementProfileRow[]>();
+
+  if (authorProfileError) {
+    throw new Error(authorProfileError.message);
+  }
+
+  const reviewQuery = supabase
+    .from("reviews")
+    .select("id, submission_id, reviewer_id, comment, total, completed_at, created_at, updated_at")
+    .not("completed_at", "is", null)
+    .order("updated_at", { ascending: false });
+  const { data: reviewRows, error: reviewError } =
+    submissionIds.length > 0 && reviewers.length > 0
+      ? await reviewQuery
+          .in("submission_id", submissionIds)
+          .in("reviewer_id", reviewers.map((reviewer) => reviewer.id))
+          .returns<ReviewManagementReviewRow[]>()
+      : await reviewQuery.limit(0).returns<ReviewManagementReviewRow[]>();
+
+  if (reviewError) {
+    throw new Error(reviewError.message);
+  }
+
+  const authorNameMap = new Map((authorProfiles ?? []).map((profile) => [profile.id, profile.name.trim()] as const));
+  reviewers.forEach((reviewer) => {
+    if (!authorNameMap.has(reviewer.id)) {
+      authorNameMap.set(reviewer.id, reviewer.name.trim());
+    }
+  });
+  const submissionAuthorMap = new Map((submissionRows ?? []).map((row) => [row.id, row.author_id] as const));
+  const scoreMap = new Map<string, Map<string, number[]>>();
+
+  (reviewRows ?? []).forEach((row) => {
+    if (!row.completed_at) return;
+    const authorId = submissionAuthorMap.get(row.submission_id);
+    const total = Number(row.total);
+    if (!authorId || !Number.isFinite(total)) return;
+
+    const reviewerScores = scoreMap.get(authorId) ?? new Map<string, number[]>();
+    const currentScores = reviewerScores.get(row.reviewer_id) ?? [];
+    currentScores.push(roundScore(total));
+    reviewerScores.set(row.reviewer_id, currentScores);
+    scoreMap.set(authorId, reviewerScores);
+  });
+
+  const rows = authorIds
+    .map((authorId) => {
+      const reviewerScoreMap = scoreMap.get(authorId) ?? new Map<string, number[]>();
+      const reviewerScores = reviewers.map((reviewer) => {
+        const reportScores = [...(reviewerScoreMap.get(reviewer.id) ?? [])].sort((left, right) => right - left);
+        return {
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+          score: reportScores[0] ?? null,
+          reportCount: reportScores.length,
+          reportScores,
+        } satisfies TeamLeadBestReportReviewerScore;
+      });
+      const validScores = reviewerScores
+        .map((item) => item.score)
+        .filter((score): score is number => score !== null);
+
+      return {
+        authorId,
+        authorName: authorNameMap.get(authorId) ?? authorId,
+        reviewerScores,
+        trimmedAverage: getTrimmedReviewAverage(validScores),
+      } satisfies TeamLeadBestReportResultsRow;
+    })
+    .sort((left, right) => left.authorName.localeCompare(right.authorName, "ko"));
+
+  return {
+    reviewers,
+    rows,
+  };
+}
+
+export async function getTeamLeadBestReportScoreMap() {
+  const workspace = await getTeamLeadBestReportResultsWorkspace();
+  return new Map(
+    workspace.rows.map((row) => [row.authorName.trim(), roundScore(row.trimmedAverage ?? 0)] as const),
+  );
 }
 
 export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
@@ -1297,7 +1481,7 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
     .eq("approved", true)
-    .in("role", ["member", "reviewer"])
+    .in("role", ["member", "reviewer", "desk", "admin"])
     .returns<ReviewManagementProfileRow[]>();
 
   if (profileError) {

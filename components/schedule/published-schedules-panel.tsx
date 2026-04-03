@@ -27,7 +27,8 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const MOBILE_VIEWPORT_MAX = 720;
-const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "야근", "청와대", "국회", "청사"] as const;
+const TOUCH_DESKTOP_SHORT_EDGE_MIN = 760;
+const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -40,9 +41,18 @@ function isHandheldPhoneDevice() {
   return /iPhone|iPod|Android.+Mobile|Windows Phone|Mobile/i.test(navigator.userAgent);
 }
 
+function shouldUseDesktopScheduleLayoutOnTouch() {
+  if (typeof window === "undefined") return false;
+  const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  if (!isCoarsePointer) return false;
+  const viewportShortEdge = Math.min(window.innerWidth, window.innerHeight);
+  return viewportShortEdge >= TOUCH_DESKTOP_SHORT_EDGE_MIN;
+}
+
 function isMobileScheduleViewport() {
   if (typeof window === "undefined") return false;
   if (window.innerWidth <= MOBILE_VIEWPORT_MAX) return true;
+  if (shouldUseDesktopScheduleLayoutOnTouch()) return false;
   if (isHandheldPhoneDevice()) return true;
   const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   const screenShortEdge = Math.min(window.innerWidth, window.innerHeight, window.screen.width, window.screen.height);
@@ -788,7 +798,7 @@ export function PublishedSchedulesPanel() {
   }
 
   return (
-    <section className="panel">
+    <section className={`panel ${isMobileViewport ? "schedule-published-panel--mobile" : "schedule-published-panel--desktop"}`}>
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
           <div

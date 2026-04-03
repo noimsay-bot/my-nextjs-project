@@ -45,6 +45,7 @@ export interface ReviewWorkspaceResult {
   reviewState: ReviewStateStore;
   canEdit: boolean;
   readOnlyReason: string | null;
+  reviewerId: string | null;
 }
 
 export async function subscribeToReviewWorkspaceChanges(onChange: () => void | Promise<void>) {
@@ -78,7 +79,10 @@ export async function subscribeToReviewWorkspaceChanges(onChange: () => void | P
 
   subscribe(`submissions:${session.id}`, "submissions");
 
-  if (session.canReview) {
+  const shouldFilterReviewerRows =
+    session.canReview && session.role !== "team_lead" && session.role !== "admin";
+
+  if (shouldFilterReviewerRows) {
     subscribe(`reviews:${session.id}`, "reviews", `reviewer_id=eq.${session.id}`);
   } else {
     subscribe(`reviews:${session.id}`, "reviews");
@@ -139,6 +143,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
       reviewState: {},
       canEdit: false,
       readOnlyReason: "로그인이 필요합니다.",
+      reviewerId: null,
     };
   }
 
@@ -149,6 +154,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
       reviewState: {},
       canEdit: false,
       readOnlyReason: "review 권한이 없습니다.",
+      reviewerId: session.id,
     };
   }
 
@@ -177,6 +183,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
       reviewState: {},
       canEdit,
       readOnlyReason,
+      reviewerId: session.id,
     };
   }
 
@@ -279,6 +286,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     reviewState,
     canEdit,
     readOnlyReason,
+    reviewerId: session.id,
   };
 }
 

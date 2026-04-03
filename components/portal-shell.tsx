@@ -63,7 +63,8 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             link.href === "/" ||
             link.href === "/vacation" ||
             link.href === "/submissions" ||
-            link.href === "/schedule",
+            link.href === "/schedule" ||
+            (link.href === "/review" && session.canReview),
         );
       case "team_lead":
         return links.filter(

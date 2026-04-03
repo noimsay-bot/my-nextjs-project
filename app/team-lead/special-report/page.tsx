@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { BestReportResultsPage } from "@/components/team-lead/best-report-results-page";
 
 export default function TeamLeadSpecialReportPage() {
-  redirect("/review");
+  return <BestReportResultsPage />;
 }

@@ -9,6 +9,7 @@ import {
   emitTeamLeadStorageStatus,
   ContributionPersonCard,
   FinalCutPersonCard,
+  getTeamLeadBestReportScoreMap,
   getContributionCards,
   getFinalCutCards,
   getTeamLeadSchedules,
@@ -70,20 +71,6 @@ interface TeamLeadScoreboardStore {
 interface TeamLeadStateRow {
   key: string;
   state: unknown;
-}
-
-interface ReviewScoreRow {
-  reviewer_id: string;
-  total: number | null;
-  completed_at: string | null;
-  submission: {
-    author_id: string;
-  } | null;
-}
-
-interface ProfileRow {
-  id: string;
-  name: string;
 }
 
 let scoreboardCache = createEmptyScoreboardStore();
@@ -213,26 +200,20 @@ export async function refreshScoreboardState() {
     }
 
     const supabase = await getPortalSupabaseClient();
-    const [{ data: stateRow, error: stateError }, { data: reviewRows, error: reviewError }, { data: profiles, error: profileError }] =
-      await Promise.all([
-        supabase
-          .from("team_lead_state")
-          .select("key, state")
-          .eq("key", TEAM_LEAD_SCOREBOARD_STATE_KEY)
-          .maybeSingle<TeamLeadStateRow>(),
-        supabase
-          .from("reviews")
-          .select("reviewer_id, total, completed_at, submission:submissions(author_id)")
-          .not("completed_at", "is", null)
-          .returns<ReviewScoreRow[]>(),
-        supabase.from("profiles").select("id, name").returns<ProfileRow[]>(),
-      ]);
+    const [{ data: stateRow, error: stateError }, nextVideoMap] = await Promise.all([
+      supabase
+        .from("team_lead_state")
+        .select("key, state")
+        .eq("key", TEAM_LEAD_SCOREBOARD_STATE_KEY)
+        .maybeSingle<TeamLeadStateRow>(),
+      getTeamLeadBestReportScoreMap(),
+    ]);
 
-    if (stateError || reviewError || profileError) {
-      const schemaError = stateError ?? reviewError ?? profileError;
+    if (stateError) {
+      const schemaError = stateError;
 
       if (isSupabaseSchemaMissingError(schemaError)) {
-        console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_state / reviews / profiles"));
+        console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_state"));
         scoreboardCache = createEmptyScoreboardStore();
         videoReviewScoreCache = new Map();
 
@@ -242,29 +223,10 @@ export async function refreshScoreboardState() {
         return;
       }
 
-      if (stateError) {
-        throw new Error(stateError.message);
-      }
-      if (reviewError) {
-        throw new Error(reviewError.message);
-      }
-      throw new Error(profileError?.message ?? "점수판 데이터를 불러오지 못했습니다.");
+      throw new Error(stateError.message);
     }
 
     scoreboardCache = normalizeScoreboardStore(stateRow?.state);
-    const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile.name.trim()] as const));
-    const nextVideoMap = new Map<string, number>();
-
-    (reviewRows ?? []).forEach((row) => {
-      if (!row.completed_at || !row.submission?.author_id) return;
-
-      const authorName = profileMap.get(row.submission.author_id)?.trim();
-      if (!authorName) return;
-
-      const current = nextVideoMap.get(authorName) ?? 0;
-      nextVideoMap.set(authorName, roundScore(current + (Number(row.total) || 0)));
-    });
-
     videoReviewScoreCache = nextVideoMap;
 
     if (typeof window !== "undefined") {

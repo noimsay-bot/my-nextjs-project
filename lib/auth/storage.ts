@@ -69,6 +69,7 @@ let initializePromise: Promise<SessionUser | null> | null = null;
 const listeners = new Set<AuthListener>();
 let profileChannel: BrowserRealtimeChannel | null = null;
 let profileSubscriptionUserId: string | null = null;
+let reviewAccessChannel: BrowserRealtimeChannel | null = null;
 let sessionRefreshListenersInitialized = false;
 
 function readJson<T>(key: string, fallback: T): T {
@@ -113,6 +114,12 @@ function clearProfileSubscription() {
   profileSubscriptionUserId = null;
 }
 
+function clearReviewAccessSubscription() {
+  if (!browserClient || !reviewAccessChannel) return;
+  void browserClient.removeChannel(reviewAccessChannel);
+  reviewAccessChannel = null;
+}
+
 function syncProfileSubscription(userId: string) {
   if (typeof window === "undefined") return;
   if (profileSubscriptionUserId === userId && profileChannel) return;
@@ -137,6 +144,29 @@ function syncProfileSubscription(userId: string) {
     .subscribe();
 
   profileSubscriptionUserId = userId;
+}
+
+function syncReviewAccessSubscription() {
+  if (typeof window === "undefined") return;
+  if (reviewAccessChannel) return;
+
+  const supabase = getSupabaseClient();
+  reviewAccessChannel = supabase
+    .channel("review-access-watch")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "team_lead_state",
+        filter: `key=eq.${REVIEW_ACCESS_STATE_KEY}`,
+      },
+      () => {
+        if (!cachedSession) return;
+        void refreshSession();
+      },
+    )
+    .subscribe();
 }
 
 function initSessionRefreshListeners() {
@@ -299,6 +329,7 @@ function setCachedUsers(users: UserAccount[]) {
 
 async function forceLogoutForUnapprovedUser() {
   clearProfileSubscription();
+  clearReviewAccessSubscription();
   setCachedUsers([]);
   setCachedSession(null);
 
@@ -380,6 +411,7 @@ async function syncSessionFromUser(user: User) {
       )
     : fallbackSessionFromUser(user);
   setCachedSession(nextSession);
+  syncReviewAccessSubscription();
   syncProfileSubscription(user.id);
   return nextSession;
 }
@@ -389,6 +421,7 @@ function initAuthListener() {
 
   const supabase = getSupabaseClient();
   initSessionRefreshListeners();
+  syncReviewAccessSubscription();
   supabase.auth.onAuthStateChange((event, session) => {
     if (!session?.user) {
       if (event === "INITIAL_SESSION" && cachedSession) {
@@ -396,6 +429,7 @@ function initAuthListener() {
       }
 
       clearProfileSubscription();
+      clearReviewAccessSubscription();
       setCachedSession(null);
       setCachedUsers([]);
       return;

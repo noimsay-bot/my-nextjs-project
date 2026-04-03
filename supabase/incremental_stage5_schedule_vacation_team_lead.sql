@@ -400,3 +400,65 @@ with check (
   public.current_profile_role() in ('team_lead', 'admin')
   and public.current_profile_approved() = true
 );
+
+create or replace function public.current_profile_has_review_access()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select (
+    public.current_profile_approved() = true
+    and (
+      public.current_profile_role() in ('reviewer', 'team_lead', 'admin', 'desk')
+      or exists (
+        select 1
+        from public.team_lead_state
+        where public.team_lead_state.key = 'review_access_v1'
+          and coalesce(public.team_lead_state.state -> 'profileIds', '[]'::jsonb) @> to_jsonb(array[auth.uid()::text])
+      )
+    )
+  );
+$$;
+
+drop policy if exists "submissions_select_granted_reviewers" on public.submissions;
+create policy "submissions_select_granted_reviewers"
+on public.submissions
+for select
+to authenticated
+using (public.current_profile_has_review_access());
+
+drop policy if exists "reviews_insert_granted_reviewers" on public.reviews;
+create policy "reviews_insert_granted_reviewers"
+on public.reviews
+for insert
+to authenticated
+with check (
+  reviewer_id = auth.uid()
+  and public.current_profile_has_review_access()
+);
+
+drop policy if exists "reviews_update_granted_reviewers" on public.reviews;
+create policy "reviews_update_granted_reviewers"
+on public.reviews
+for update
+to authenticated
+using (
+  reviewer_id = auth.uid()
+  and public.current_profile_has_review_access()
+)
+with check (
+  reviewer_id = auth.uid()
+  and public.current_profile_has_review_access()
+);
+
+drop policy if exists "reviews_delete_granted_reviewers" on public.reviews;
+create policy "reviews_delete_granted_reviewers"
+on public.reviews
+for delete
+to authenticated
+using (
+  reviewer_id = auth.uid()
+  and public.current_profile_has_review_access()
+);
