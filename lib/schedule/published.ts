@@ -28,12 +28,34 @@ let publishedRefreshPromise: Promise<PublishedScheduleItem[]> | null = null;
 function cloneItems(items: PublishedScheduleItem[]) {
   return items.map((item) => ({
     ...item,
-    schedule: JSON.parse(JSON.stringify(item.schedule)) as GeneratedSchedule,
+    schedule: normalizePublishedSchedule(JSON.parse(JSON.stringify(item.schedule)) as GeneratedSchedule),
   }));
 }
 
 function createPublishedTitle(schedule: GeneratedSchedule) {
   return `${schedule.year}년 ${schedule.month}월 근무표`;
+}
+
+function normalizeAssignments(assignments: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(assignments).filter(([, names]) =>
+      Array.isArray(names) && names.some((name) => typeof name === "string" && name.trim().length > 0),
+    ),
+  );
+}
+
+function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+  return {
+    ...schedule,
+    days: schedule.days.map((day) => {
+      const assignments = normalizeAssignments(day.assignments ?? {});
+      return {
+        ...day,
+        assignments,
+        manualExtras: (day.manualExtras ?? []).filter((category) => Boolean(assignments[category]?.length)),
+      };
+    }),
+  };
 }
 
 function emitPublishedSchedulesEvent() {
@@ -51,9 +73,9 @@ function rowsToItems(rows: ScheduleMonthPublishRow[]) {
     .filter((row) => row.published_state)
     .map((row) => ({
       monthKey: row.month_key,
-      title: createPublishedTitle(row.published_state as GeneratedSchedule),
+      title: createPublishedTitle(normalizePublishedSchedule(row.published_state as GeneratedSchedule)),
       publishedAt: row.published_at ?? "",
-      schedule: row.published_state as GeneratedSchedule,
+      schedule: normalizePublishedSchedule(row.published_state as GeneratedSchedule),
     }))
     .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
 }
@@ -152,7 +174,7 @@ export function publishSchedule(schedule: GeneratedSchedule) {
     monthKey: schedule.monthKey,
     title: createPublishedTitle(schedule),
     publishedAt: new Date().toISOString(),
-    schedule: JSON.parse(JSON.stringify(schedule)) as GeneratedSchedule,
+    schedule: normalizePublishedSchedule(JSON.parse(JSON.stringify(schedule)) as GeneratedSchedule),
   };
 
   const previous = cloneItems(publishedSchedulesCache);

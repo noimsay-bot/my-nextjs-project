@@ -641,6 +641,87 @@ function countWinnerMapEntries(winners: Record<string, string[]>) {
   return Object.values(winners).reduce((sum, names) => sum + uniqueNames(names ?? []).length, 0);
 }
 
+function buildApplicantDatesByName(applicantsByDate: Record<string, string[]>) {
+  const applicantDates = new Map<string, string[]>();
+  Object.entries(applicantsByDate).forEach(([dateKey, names]) => {
+    uniqueNames(names ?? []).forEach((name) => {
+      const current = applicantDates.get(name) ?? [];
+      current.push(dateKey);
+      applicantDates.set(name, uniqueDateKeys(current));
+    });
+  });
+  return applicantDates;
+}
+
+function countCompensatoryWinsByName(winners: Record<string, string[]>) {
+  const winnerCounts = new Map<string, number>();
+  Object.values(winners).forEach((names) => {
+    uniqueNames(names ?? []).forEach((name) => {
+      winnerCounts.set(name, (winnerCounts.get(name) ?? 0) + 1);
+    });
+  });
+  return winnerCounts;
+}
+
+function rebalanceCompensatoryWinners(
+  applicantsByDate: Record<string, string[]>,
+  winners: Record<string, string[]>,
+) {
+  const nextWinners = Object.fromEntries(
+    Object.entries(winners).map(([dateKey, names]) => [dateKey, uniqueNames(names ?? [])]),
+  ) as Record<string, string[]>;
+  const applicantDatesByName = buildApplicantDatesByName(applicantsByDate);
+
+  while (true) {
+    const winnerCounts = countCompensatoryWinsByName(nextWinners);
+    const zeroWinnerApplicants = Array.from(applicantDatesByName.entries())
+      .filter(([name, dateKeys]) => dateKeys.length > 0 && (winnerCounts.get(name) ?? 0) === 0)
+      .map(([name, dateKeys]) => ({ name, dateKeys }))
+      .sort((left, right) => left.name.localeCompare(right.name, "ko"));
+
+    if (zeroWinnerApplicants.length === 0) {
+      return nextWinners;
+    }
+
+    let reassigned = false;
+
+    for (const applicant of zeroWinnerApplicants) {
+      const transferableSlots = applicant.dateKeys
+        .flatMap((dateKey) =>
+          uniqueNames(nextWinners[dateKey] ?? [])
+            .map((winnerName) => ({
+              dateKey,
+              winnerName,
+              winnerCount: winnerCounts.get(winnerName) ?? 0,
+            }))
+            .filter((candidate) => candidate.winnerCount >= 2),
+        )
+        .sort(
+          (left, right) =>
+            right.winnerCount - left.winnerCount ||
+            left.dateKey.localeCompare(right.dateKey) ||
+            left.winnerName.localeCompare(right.winnerName, "ko"),
+        );
+
+      const selectedSlot = transferableSlots[0];
+      if (!selectedSlot) {
+        continue;
+      }
+
+      nextWinners[selectedSlot.dateKey] = uniqueNames([
+        ...(nextWinners[selectedSlot.dateKey] ?? []).filter((name) => name !== selectedSlot.winnerName),
+        applicant.name,
+      ]).sort((left, right) => left.localeCompare(right, "ko"));
+      reassigned = true;
+      break;
+    }
+
+    if (!reassigned) {
+      return nextWinners;
+    }
+  }
+}
+
 function serializeVacationMap(map: Record<string, string[]>) {
   return Object.keys(map)
     .sort((left, right) => left.localeCompare(right))
@@ -1018,6 +1099,7 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
   const nextAnnualWinners =
     hasLotteryResults(monthState.annualWinners) ? monthState.annualWinners : runAnnualVacationLottery(year, month)?.annualWinners ?? {};
   const nextCompensatoryWinners: Record<string, string[]> = {};
+  const compensatoryCandidatesByDate: Record<string, string[]> = {};
 
   monthState.managedDateKeys.forEach((dateKey) => {
     const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
@@ -1026,6 +1108,7 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
     const applicants = uniqueNames(
       (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name) && !blockedNames.has(name)),
     );
+    compensatoryCandidatesByDate[dateKey] = applicants;
 
     if (remainingCapacity === 0) {
       nextCompensatoryWinners[dateKey] = [];
@@ -1043,7 +1126,7 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
   });
 
   monthState.annualWinners = nextAnnualWinners;
-  monthState.compensatoryWinners = nextCompensatoryWinners;
+  monthState.compensatoryWinners = rebalanceCompensatoryWinners(compensatoryCandidatesByDate, nextCompensatoryWinners);
   monthState.updatedAt = nowLabel();
   writeStore(store);
   return monthState;
@@ -1063,6 +1146,7 @@ export function runVacationLottery(year: number, month: number) {
   const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
   const nextAnnualWinners: Record<string, string[]> = {};
   const nextCompensatoryWinners: Record<string, string[]> = {};
+  const compensatoryCandidatesByDate: Record<string, string[]> = {};
 
   monthState.managedDateKeys.forEach((dateKey) => {
     const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
@@ -1082,6 +1166,7 @@ export function runVacationLottery(year: number, month: number) {
     const compensatoryCandidates = uniqueNames(
       (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name) && !blockedNames.has(name)),
     );
+    compensatoryCandidatesByDate[dateKey] = compensatoryCandidates;
 
     if (remainingCapacity === 0) {
       nextCompensatoryWinners[dateKey] = [];
@@ -1097,7 +1182,7 @@ export function runVacationLottery(year: number, month: number) {
   });
 
   monthState.annualWinners = nextAnnualWinners;
-  monthState.compensatoryWinners = nextCompensatoryWinners;
+  monthState.compensatoryWinners = rebalanceCompensatoryWinners(compensatoryCandidatesByDate, nextCompensatoryWinners);
   monthState.updatedAt = nowLabel();
   writeStore(store);
   return monthState;

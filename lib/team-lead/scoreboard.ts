@@ -257,7 +257,7 @@ function setManualStoreByCategory(
 function getEligibleUsers() {
   return getUsers()
     .filter((user) => user.status === "ACTIVE")
-    .filter((user) => user.role !== "admin" && user.role !== "team_lead" && user.role !== "desk")
+    .filter((user) => user.role !== "team_lead" && user.role !== "desk")
     .map((user) => user.username.trim())
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right, "ko"));

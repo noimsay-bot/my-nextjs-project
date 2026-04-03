@@ -140,6 +140,7 @@ export const TEAM_LEAD_STORAGE_STATUS_EVENT = "j-team-lead-storage-status";
 const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
 const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
 const TEAM_LEAD_REVIEW_ACCESS_STATE_KEY = "review_access_v1";
+const TEAM_LEAD_REFERENCE_NOTES_STATE_KEY = "reference_notes_v1";
 
 interface TeamLeadScheduleAssignmentRow {
   month_key: string;
@@ -750,7 +751,7 @@ export function getScheduleAssignmentRows(
   dayRows: ScheduleAssignmentDayRows = createDefaultScheduleAssignmentDayRows(),
 ) {
   const baseRows = Object.entries(day.assignments)
-    .filter(([category, names]) => category !== "휴가" && names.length > 0)
+    .filter(([category, names]) => category !== "휴가" && category !== "제크" && names.length > 0)
     .flatMap(([category, names]) =>
       names.map((name, index) => {
         const key = createAssignmentRowKey(day.dateKey, category, index, name);
@@ -1054,6 +1055,22 @@ export interface ReviewerRoleWorkspace {
   grantedProfileIds: string[];
 }
 
+export interface TeamLeadReferenceNoteItem {
+  id: string;
+  text: string;
+}
+
+export interface TeamLeadReferenceNoteCard {
+  profileId: string;
+  name: string;
+  role: "member" | "reviewer" | "desk" | "admin";
+  items: TeamLeadReferenceNoteItem[];
+}
+
+export interface TeamLeadReferenceNotesWorkspace {
+  cards: TeamLeadReferenceNoteCard[];
+}
+
 export interface TeamLeadBestReportReviewer {
   id: string;
   name: string;
@@ -1068,6 +1085,24 @@ export interface TeamLeadBestReportReviewerScore {
   reportScores: number[];
 }
 
+export interface TeamLeadBestReportReviewerDetailReport {
+  submissionId: string;
+  reportType: string;
+  reportTitle: string;
+  score: number;
+  completedAt: string;
+  updatedAt: string;
+}
+
+export interface TeamLeadBestReportReviewerDetailRow {
+  reviewerId: string;
+  reviewerName: string;
+  authorId: string;
+  authorName: string;
+  totalScore: number;
+  reports: TeamLeadBestReportReviewerDetailReport[];
+}
+
 export interface TeamLeadBestReportResultsRow {
   authorId: string;
   authorName: string;
@@ -1078,6 +1113,7 @@ export interface TeamLeadBestReportResultsRow {
 export interface TeamLeadBestReportResultsWorkspace {
   reviewers: TeamLeadBestReportReviewer[];
   rows: TeamLeadBestReportResultsRow[];
+  reviewerDetails: TeamLeadBestReportReviewerDetailRow[];
 }
 
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
@@ -1139,6 +1175,32 @@ function normalizeReviewAccessState(raw: unknown) {
       record.profileIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
     ),
   ).sort();
+}
+
+function normalizeReferenceNoteItems(raw: unknown) {
+  if (!Array.isArray(raw)) return [] as TeamLeadReferenceNoteItem[];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Partial<TeamLeadReferenceNoteItem>;
+      const text = typeof record.text === "string" ? record.text.trim() : "";
+      if (!text) return null;
+      return {
+        id: typeof record.id === "string" && record.id ? record.id : crypto.randomUUID(),
+        text,
+      } satisfies TeamLeadReferenceNoteItem;
+    })
+    .filter((item): item is TeamLeadReferenceNoteItem => Boolean(item));
+}
+
+function normalizeReferenceNotesState(raw: unknown) {
+  if (!raw || typeof raw !== "object") return {} as Record<string, TeamLeadReferenceNoteItem[]>;
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).map(([profileId, items]) => [
+      profileId,
+      normalizeReferenceNoteItems(items),
+    ]),
+  ) as Record<string, TeamLeadReferenceNoteItem[]>;
 }
 
 async function getGrantedReviewerProfileIds() {
@@ -1340,6 +1402,97 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
   };
 }
 
+export async function getTeamLeadReferenceNotesWorkspace(): Promise<TeamLeadReferenceNotesWorkspace> {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    throw new Error("참고사항 조회 권한이 없습니다.");
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const [{ data: profiles, error: profileError }, { data: stateRow, error: stateError }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
+      .eq("approved", true)
+      .neq("role", "team_lead")
+      .order("name", { ascending: true })
+      .returns<ReviewManagementProfileRow[]>(),
+    supabase
+      .from("team_lead_state")
+      .select("state")
+      .eq("key", TEAM_LEAD_REFERENCE_NOTES_STATE_KEY)
+      .maybeSingle<{ state: unknown }>(),
+  ]);
+
+  if (profileError) {
+    throw new Error(profileError.message);
+  }
+  if (stateError) {
+    if (isSupabaseSchemaMissingError(stateError)) {
+      console.warn(getSupabaseStorageErrorMessage(stateError, "team_lead_state"));
+    } else {
+      throw new Error(stateError.message);
+    }
+  }
+
+  const noteMap = normalizeReferenceNotesState(stateRow?.state);
+
+  return {
+    cards: (profiles ?? []).map((profile) => ({
+      profileId: profile.id,
+      name: profile.name,
+      role:
+        profile.role === "reviewer" || profile.role === "desk" || profile.role === "admin"
+          ? profile.role
+          : "member",
+      items: [...(noteMap[profile.id] ?? [])],
+    })),
+  };
+}
+
+export async function saveTeamLeadReferenceNotes(
+  profileId: string,
+  items: TeamLeadReferenceNoteItem[],
+) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "참고사항 저장 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const normalizedItems = normalizeReferenceNoteItems(items);
+  const { data: stateRow, error: stateError } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_REFERENCE_NOTES_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (stateError && !isSupabaseSchemaMissingError(stateError)) {
+    return { ok: false as const, message: stateError.message };
+  }
+
+  const nextState = normalizeReferenceNotesState(stateRow?.state);
+  if (normalizedItems.length > 0) {
+    nextState[profileId] = normalizedItems;
+  } else {
+    delete nextState[profileId];
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_REFERENCE_NOTES_STATE_KEY, nextState);
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "참고사항 저장에 실패했습니다.",
+    };
+  }
+
+  return {
+    ok: true as const,
+    message: "참고사항을 저장했습니다.",
+  };
+}
+
 export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadBestReportResultsWorkspace> {
   const session = await getPrivilegedPortalSession();
   if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
@@ -1365,12 +1518,7 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   }
 
   const submissionIds = (submissionRows ?? []).map((row) => row.id);
-  const authorIds = Array.from(
-    new Set([
-      ...(submissionRows ?? []).map((row) => row.author_id),
-      ...reviewers.map((reviewer) => reviewer.id),
-    ]),
-  );
+  const authorIds = Array.from(new Set((submissionRows ?? []).map((row) => row.author_id)));
 
   const { data: authorProfiles, error: authorProfileError } =
     authorIds.length > 0
@@ -1407,13 +1555,11 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   }
 
   const authorNameMap = new Map((authorProfiles ?? []).map((profile) => [profile.id, profile.name.trim()] as const));
-  reviewers.forEach((reviewer) => {
-    if (!authorNameMap.has(reviewer.id)) {
-      authorNameMap.set(reviewer.id, reviewer.name.trim());
-    }
-  });
+  const reviewerNameMap = new Map(reviewers.map((reviewer) => [reviewer.id, reviewer.name] as const));
   const submissionAuthorMap = new Map((submissionRows ?? []).map((row) => [row.id, row.author_id] as const));
+  const submissionMap = new Map((submissionRows ?? []).map((row) => [row.id, row] as const));
   const scoreMap = new Map<string, Map<string, number[]>>();
+  const reviewerDetailMap = new Map<string, TeamLeadBestReportReviewerDetailRow>();
 
   (reviewRows ?? []).forEach((row) => {
     if (!row.completed_at) return;
@@ -1426,6 +1572,28 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
     currentScores.push(roundScore(total));
     reviewerScores.set(row.reviewer_id, currentScores);
     scoreMap.set(authorId, reviewerScores);
+
+    const submission = submissionMap.get(row.submission_id);
+    const detailKey = `${row.reviewer_id}::${authorId}`;
+    const detailRow = reviewerDetailMap.get(detailKey) ?? {
+      reviewerId: row.reviewer_id,
+      reviewerName: reviewerNameMap.get(row.reviewer_id) ?? row.reviewer_id,
+      authorId,
+      authorName: authorNameMap.get(authorId) ?? authorId,
+      totalScore: 0,
+      reports: [],
+    };
+
+    detailRow.reports.push({
+      submissionId: row.submission_id,
+      reportType: submission?.type ?? "",
+      reportTitle: submission?.title ?? "",
+      score: roundScore(total),
+      completedAt: row.completed_at,
+      updatedAt: row.updated_at,
+    });
+    detailRow.totalScore = roundScore(detailRow.totalScore + roundScore(total));
+    reviewerDetailMap.set(detailKey, detailRow);
   });
 
   const rows = authorIds
@@ -1454,9 +1622,22 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
     })
     .sort((left, right) => left.authorName.localeCompare(right.authorName, "ko"));
 
+  const reviewerDetails = Array.from(reviewerDetailMap.values())
+    .map((row) => ({
+      ...row,
+      reports: [...row.reports].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+      totalScore: roundScore(row.totalScore),
+    }))
+    .sort((left, right) => {
+      const reviewerCompare = left.reviewerName.localeCompare(right.reviewerName, "ko");
+      if (reviewerCompare !== 0) return reviewerCompare;
+      return left.authorName.localeCompare(right.authorName, "ko");
+    });
+
   return {
     reviewers,
     rows,
+    reviewerDetails,
   };
 }
 

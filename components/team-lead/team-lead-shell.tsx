@@ -5,9 +5,10 @@ import { usePathname } from "next/navigation";
 
 const items = [
   { href: "/team-lead/reviewer-management", label: "평가자 지정" },
+  { href: "/team-lead/reference-notes", label: "참고사항" },
   { href: "/team-lead/special-report", label: "베스트리포트 결과" },
   { href: "/team-lead/contribution", label: "기여도" },
-  { href: "/team-lead/broadcast-accident", label: "방송 사고" },
+  { href: "/team-lead/broadcast-accident", label: "장비/인적 사고" },
   { href: "/team-lead/live-safety", label: "LIVE무사고" },
   { href: "/team-lead/overall-score", label: "종합 점수" },
 ];

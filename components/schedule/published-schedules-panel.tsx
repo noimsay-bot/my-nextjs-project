@@ -22,6 +22,7 @@ import {
   refreshPublishedSchedules,
   removePublishedSchedule,
 } from "@/lib/schedule/published";
+import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -47,6 +48,10 @@ function shouldUseDesktopScheduleLayoutOnTouch() {
   if (!isCoarsePointer) return false;
   const viewportShortEdge = Math.min(window.innerWidth, window.innerHeight);
   return viewportShortEdge >= TOUCH_DESKTOP_SHORT_EDGE_MIN;
+}
+
+function shouldAutoFitScheduleViewport() {
+  return true;
 }
 
 function isMobileScheduleViewport() {
@@ -97,6 +102,13 @@ const dutyLegendStyles = {
 
 type DisplayDay = DaySchedule & {
   ownerMonthKey: string;
+};
+
+type ScheduleDisplaySource = {
+  monthKey: string;
+  schedule: {
+    days: DaySchedule[];
+  };
 };
 
 function getAssignmentDisplay(category: string, value: string) {
@@ -221,7 +233,7 @@ function formatPublishedAt(value: string) {
 
 function buildDisplayDays(
   item: PublishedScheduleItem,
-  previousItem?: PublishedScheduleItem | null,
+  previousItem?: ScheduleDisplaySource | null,
 ) {
   const days: DisplayDay[] = item.schedule.days.map((day) => ({
     ...day,
@@ -474,6 +486,7 @@ function isSwapCandidateValid(
 
 export function PublishedSchedulesPanel() {
   const [items, setItems] = useState<PublishedScheduleItem[]>([]);
+  const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>([]);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -486,8 +499,15 @@ export function PublishedSchedulesPanel() {
   const [requestMessage, setRequestMessage] = useState("");
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
+  const [shouldAutoFitSchedule, setShouldAutoFitSchedule] = useState(false);
+  const [scheduleFitScale, setScheduleFitScale] = useState(1);
+  const [scheduleScale, setScheduleScale] = useState(1);
+  const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
+  const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
+  const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const scheduleZoomTouchedRef = useRef(false);
   const session = getSession();
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
@@ -507,15 +527,32 @@ export function PublishedSchedulesPanel() {
     setRequests(getScheduleChangeRequests());
   };
 
+  const syncScheduleHistory = () => {
+    const nextHistory = readStoredScheduleState().generatedHistory.map((schedule) => ({
+      monthKey: schedule.monthKey,
+      schedule,
+    }));
+    setScheduleHistory(nextHistory);
+  };
+
+  const loadScheduleHistory = async () => {
+    await refreshScheduleState();
+    syncScheduleHistory();
+  };
+
   useEffect(() => {
     void loadItems();
     void loadRequests();
+    void loadScheduleHistory();
   }, []);
 
   useEffect(() => {
     const onRefresh = () => {
       void loadItems();
       void loadRequests();
+    };
+    const onScheduleStateRefresh = () => {
+      syncScheduleHistory();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
@@ -527,6 +564,7 @@ export function PublishedSchedulesPanel() {
     window.addEventListener("focus", onRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
     window.addEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+    window.addEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
     window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     return () => {
@@ -534,6 +572,7 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
       window.removeEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     };
@@ -549,8 +588,9 @@ export function PublishedSchedulesPanel() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const syncViewport = () => {
-      setIsMobileViewport(isMobileScheduleViewport());
+      setIsMobileViewport(false);
       setIsLandscapeViewport(window.innerWidth > window.innerHeight);
+      setShouldAutoFitSchedule(shouldAutoFitScheduleViewport());
     };
 
     syncViewport();
@@ -574,13 +614,21 @@ export function PublishedSchedulesPanel() {
     return items[index - 1] ?? null;
   }, [items, selectedItem]);
 
+  const previousDisplaySource = useMemo(() => {
+    if (!selectedItem) return null;
+    if (previousSelectedItem) return previousSelectedItem;
+    const selectedHistoryIndex = scheduleHistory.findIndex((item) => item.monthKey === selectedItem.monthKey);
+    if (selectedHistoryIndex <= 0) return null;
+    return scheduleHistory[selectedHistoryIndex - 1] ?? null;
+  }, [previousSelectedItem, scheduleHistory, selectedItem]);
+
   const selectedIndex = selectedItem ? items.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(items), [items]);
   const displayDays = useMemo(
-    () => (selectedItem ? buildDisplayDays(selectedItem, previousSelectedItem) : []),
-    [previousSelectedItem, selectedItem],
+    () => (selectedItem ? buildDisplayDays(selectedItem, previousDisplaySource) : []),
+    [previousDisplaySource, selectedItem],
   );
   const firstSelectedRef = selectedRoute[0] ?? null;
   const hasConflictWarning = useMemo(
@@ -635,6 +683,76 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = isMobileViewport && displayMode === "monthly";
   const isCompactDailyView = isMobileViewport && displayMode === "daily";
   const isCompactDailyLandscapeView = isCompactDailyView && isLandscapeViewport;
+  const scheduleMinScale = shouldAutoFitSchedule ? 0.15 : 1;
+  const scheduleMaxScale = shouldAutoFitSchedule ? 2.4 : 1;
+  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
+  const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
+  const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
+
+  useEffect(() => {
+    scheduleZoomTouchedRef.current = false;
+  }, [selectedMonthKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!selectedItem) return;
+
+    let frameId = 0;
+    const measureSchedule = () => {
+      const scrollNode = scheduleScrollRef.current;
+      const zoomNode = scheduleZoomRef.current;
+      if (!scrollNode || !zoomNode) return;
+      const nextWidth = Math.ceil(zoomNode.offsetWidth);
+      const nextHeight = Math.ceil(zoomNode.offsetHeight);
+      if (nextWidth <= 0 || nextHeight <= 0) return;
+      setScheduleContentSize((current) =>
+        current.width === nextWidth && current.height === nextHeight ? current : { width: nextWidth, height: nextHeight },
+      );
+
+      const containerWidth = scrollNode.clientWidth;
+      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, containerWidth / nextWidth) : 1;
+      setScheduleFitScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
+      setScheduleScale((current) => {
+        if (!shouldAutoFitSchedule) return 1;
+        const clampedCurrent = Math.min(scheduleMaxScale, Math.max(scheduleMinScale, current));
+        if (!scheduleZoomTouchedRef.current) return nextFitScale;
+        return clampedCurrent;
+      });
+    };
+
+    const queueMeasure = () => {
+      cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(measureSchedule);
+    };
+
+    queueMeasure();
+    window.addEventListener("resize", queueMeasure);
+    window.addEventListener("orientationchange", queueMeasure);
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", queueMeasure);
+      window.removeEventListener("orientationchange", queueMeasure);
+    };
+  }, [
+    compactMonthCardHeight,
+    displayDays,
+    editMode,
+    requests,
+    selectedItem,
+    selectedRoute,
+    shouldAutoFitSchedule,
+    showMine,
+    username,
+    scheduleMaxScale,
+    scheduleMinScale,
+  ]);
+
+  const updateScheduleScale = (nextScale: number) => {
+    if (!shouldAutoFitSchedule) return;
+    scheduleZoomTouchedRef.current = true;
+    const clampedScale = Math.min(scheduleMaxScale, Math.max(scheduleMinScale, Number(nextScale.toFixed(2))));
+    setScheduleScale(clampedScale);
+  };
 
   useEffect(() => {
     if (!isCompactMonthlyView) {
@@ -877,6 +995,26 @@ export function PublishedSchedulesPanel() {
             <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
               {editMode ? "근무 수정 완료" : "근무 수정"}
             </button>
+            {shouldAutoFitSchedule ? (
+              <>
+                <button className="btn" onClick={() => updateScheduleScale(appliedScheduleScale - 0.1)}>
+                  축소
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    scheduleZoomTouchedRef.current = false;
+                    setScheduleScale(scheduleFitScale);
+                  }}
+                >
+                  맞춤
+                </button>
+                <button className="btn" onClick={() => updateScheduleScale(appliedScheduleScale + 0.1)}>
+                  확대
+                </button>
+                <span className="muted">{Math.round(appliedScheduleScale * 100)}%</span>
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -1110,9 +1248,32 @@ export function PublishedSchedulesPanel() {
               </div>
               <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
 
-              <div className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}>
               <div
+                ref={scheduleScrollRef}
+                className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
+                style={{
+                  overflowX: shouldAutoFitSchedule ? "hidden" : undefined,
+                }}
+              >
+              <div
+                style={{
+                  minWidth: shouldAutoFitSchedule ? "100%" : undefined,
+                  width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
+                  height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
+                  margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,
+                  position: shouldAutoFitSchedule ? "relative" : undefined,
+                }}
+              >
+              <div
+                ref={scheduleZoomRef}
                 className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
+                style={{
+                  transform: shouldAutoFitSchedule ? `scale(${appliedScheduleScale})` : undefined,
+                  transformOrigin: shouldAutoFitSchedule ? "top left" : undefined,
+                  position: shouldAutoFitSchedule ? "absolute" : undefined,
+                  top: shouldAutoFitSchedule ? 0 : undefined,
+                  left: shouldAutoFitSchedule ? 0 : undefined,
+                }}
               >
               <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
                 {weekdayLabels.map((label) => (
@@ -1128,7 +1289,8 @@ export function PublishedSchedulesPanel() {
                   const highlightDayHead = showMine && dayContainsUser(day, username);
                   const highlightHeaderName = highlightDayHead && Boolean(day.headerName?.trim());
                   const visibleAssignments = Object.entries(day.assignments)
-                    .filter(([category]) => {
+                    .filter(([category, names]) => {
+                      if (!Array.isArray(names) || names.length === 0) return false;
                       if (isWeekendLike) return category !== "휴가" && category !== "제크";
                       return !["국회", "청사", "청와대"].includes(category);
                     })
@@ -1281,8 +1443,8 @@ export function PublishedSchedulesPanel() {
                                         width: mineHighlighted ? "fit-content" : "100%",
                                         maxWidth: "100%",
                                         gap: 5,
-                                        minHeight: mineHighlighted ? (isCompactMonthlyView ? 30 : isCompactDailyLandscapeView ? 42 : isCompactDailyView ? 34 : 36) : isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 32,
-                                        padding: mineHighlighted ? (isCompactMonthlyView ? "4px 9px" : isCompactDailyView ? "5px 9px" : "5px 11px") : isCompactMonthlyView ? "4px 7px" : isCompactDailyView ? "5px 8px" : "5px 9px",
+                                        minHeight: mineHighlighted ? (isCompactMonthlyView ? 30 : isCompactDailyLandscapeView ? 42 : isCompactDailyView ? 34 : 34) : isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
+                                        padding: mineHighlighted ? (isCompactMonthlyView ? "4px 9px" : isCompactDailyView ? "5px 9px" : "4px 9px") : isCompactMonthlyView ? "4px 7px" : isCompactDailyView ? "5px 8px" : "4px 8px",
                                         borderRadius: mineHighlighted ? 16 : 14,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
@@ -1310,7 +1472,7 @@ export function PublishedSchedulesPanel() {
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
-                                        fontSize: mineHighlighted ? (isCompactMonthlyView ? 16 : isCompactDailyLandscapeView ? 15 : isCompactDailyView ? 18 : 22) : isCompactMonthlyView ? 12 : isCompactDailyLandscapeView ? 12 : isCompactDailyView ? 13 : 15,
+                                        fontSize: mineHighlighted ? (isCompactMonthlyView ? 16 : isCompactDailyLandscapeView ? 15 : isCompactDailyView ? 18 : 17) : isCompactMonthlyView ? 12 : isCompactDailyLandscapeView ? 12 : isCompactDailyView ? 13 : 12,
                                         lineHeight: 1.3,
                                         boxShadow: routeSelected && firstSelected
                                           ? "0 10px 24px rgba(88,28,135,.28), 0 0 0 1px rgba(255,255,255,.08) inset"
@@ -1324,19 +1486,20 @@ export function PublishedSchedulesPanel() {
                                     >
                                       <span
                                         style={{
-                                          whiteSpace: isCompactDailyLandscapeView ? "normal" : "nowrap",
+                                          display: "block",
+                                          whiteSpace: "nowrap",
                                           textAlign: "center",
                                           flex: 1,
                                           minWidth: 0,
-                                          overflow: isCompactMonthlyView ? "hidden" : isCompactDailyLandscapeView ? "visible" : isMobileViewport ? "hidden" : "visible",
-                                          textOverflow: isCompactMonthlyView ? "ellipsis" : isCompactDailyLandscapeView ? "clip" : isMobileViewport ? "ellipsis" : "clip",
-                                          lineHeight: isCompactDailyLandscapeView ? 1.15 : 1.3,
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          lineHeight: 1.25,
                                           wordBreak: "keep-all",
                                         }}
                                       >
                                         {assignmentDisplay.name}
                                       </span>
-                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 12 }}>요청중</span> : null}
+                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 11 }}>요청중</span> : null}
                                     </button>
                                   );
                                 })
@@ -1351,6 +1514,7 @@ export function PublishedSchedulesPanel() {
                     </article>
                   );
                 })}
+              </div>
               </div>
               </div>
             </div>

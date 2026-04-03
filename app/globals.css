@@ -355,6 +355,23 @@ textarea {
   width: 100%;
 }
 
+.schedule-published-panel--desktop .schedule-calendar-scroll--daily {
+  overflow-x: auto;
+}
+
+.schedule-published-panel--desktop .schedule-calendar-zoom--daily {
+  width: max-content;
+  min-width: 1240px;
+}
+
+.schedule-published-panel--desktop .schedule-calendar-grid--daily {
+  min-width: 1240px;
+}
+
+.schedule-published-panel--desktop .schedule-day-card {
+  min-width: 170px;
+}
+
 .schedule-day-date {
   display: grid;
   gap: 2px;
@@ -373,7 +390,7 @@ textarea {
   gap: 10px;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 0px) {
   .subgrid-4,
   .subgrid-3,
   .subgrid-2,
@@ -412,7 +429,7 @@ textarea {
   }
 }
 
-@media (max-width: 720px), (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 720px) {
+@media (max-width: 0px), (max-width: 0px) {
   .shell {
     padding: 16px 12px 48px;
   }
@@ -535,13 +552,13 @@ textarea {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 0px) {
   .schedule-toolbar-actions--controls {
     grid-template-columns: 1fr;
   }
 }
 
-@media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 720px) {
+@media (max-width: 0px) {
   .schedule-calendar-grid--daily {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
