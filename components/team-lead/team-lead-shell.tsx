@@ -10,7 +10,8 @@ const items = [
   { href: "/team-lead/contribution", label: "기여도" },
   { href: "/team-lead/broadcast-accident", label: "장비/인적 사고" },
   { href: "/team-lead/live-safety", label: "LIVE무사고" },
-  { href: "/team-lead/overall-score", label: "종합 점수" },
+  { href: "/team-lead/overall-score", label: "개인별 점수" },
+  { href: "/team-lead/overall-score-summary", label: "종합점수" },
 ];
 
 export function TeamLeadShell({ children }: { children: React.ReactNode }) {

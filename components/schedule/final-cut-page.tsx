@@ -1,12 +1,11 @@
-﻿"use client";
+"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   FinalCutDecision,
   FinalCutPersonCard,
-  TEAM_LEAD_FINAL_CUT_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
   getFinalCutCards,
@@ -171,90 +170,118 @@ function getDecisionAriaLabel(decision: Exclude<FinalCutDecision, "">) {
   return "엑스";
 }
 
-function applyDecisionToCards(
+function mergeCardsWithDecisionDrafts(
   currentCards: FinalCutPersonCard[],
-  itemId: string,
-  decision: FinalCutDecision,
+  decisionDrafts: Record<string, FinalCutDecision>,
 ) {
   return currentCards.map((card) => ({
     ...card,
-    items: card.items.map((item) =>
-      item.id === itemId
-        ? {
-            ...item,
-            decision,
-          }
-        : item,
-    ),
+    items: card.items.map((item) => ({
+      ...item,
+      decision: Object.prototype.hasOwnProperty.call(decisionDrafts, item.id)
+        ? decisionDrafts[item.id]
+        : item.decision,
+    })),
   }));
+}
+
+function reconcileDecisionDrafts(
+  currentCards: FinalCutPersonCard[],
+  decisionDrafts: Record<string, FinalCutDecision>,
+) {
+  if (Object.keys(decisionDrafts).length === 0) return decisionDrafts;
+
+  const next = { ...decisionDrafts };
+  const decisionMap = new Map(
+    currentCards.flatMap((card) => card.items.map((item) => [item.id, item.decision] as const)),
+  );
+
+  Object.entries(decisionDrafts).forEach(([itemId, decision]) => {
+    if (!decisionMap.has(itemId) || decisionMap.get(itemId) === decision) {
+      delete next[itemId];
+    }
+  });
+
+  return next;
 }
 
 export function FinalCutPage() {
   const [quarterGroups, setQuarterGroups] = useState<FinalCutQuarterGroup[]>([]);
   const [selectedQuarterKey, setSelectedQuarterKey] = useState("");
   const [cards, setCards] = useState<FinalCutPersonCard[]>([]);
+  const [decisionDrafts, setDecisionDrafts] = useState<Record<string, FinalCutDecision>>({});
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
-  useEffect(() => {
-    const refresh = async () => {
-      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
-      const schedules = getTeamLeadSchedules();
-      const generatedState = readStoredScheduleState();
-      const generatedMonthKeys = generatedState.generatedHistory.map((schedule) => schedule.monthKey);
-      const baseMonthKeys = schedules.map((schedule) => schedule.monthKey);
-      const nextMonthKeys = Array.from(new Set([...baseMonthKeys, ...generatedMonthKeys])).sort((left, right) =>
-        left.localeCompare(right),
-      );
-      const nextQuarterGroups = buildQuarterGroups(nextMonthKeys);
-      const fallbackQuarterKey = nextQuarterGroups[0]?.key ?? "";
+  const refreshCards = useCallback(async () => {
+    await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
+    const schedules = getTeamLeadSchedules();
+    const generatedState = readStoredScheduleState();
+    const generatedMonthKeys = generatedState.generatedHistory.map((schedule) => schedule.monthKey);
+    const baseMonthKeys = schedules.map((schedule) => schedule.monthKey);
+    const nextMonthKeys = Array.from(new Set([...baseMonthKeys, ...generatedMonthKeys])).sort((left, right) =>
+      left.localeCompare(right),
+    );
+    const nextQuarterGroups = buildQuarterGroups(nextMonthKeys);
+    const fallbackQuarterKey = nextQuarterGroups[0]?.key ?? "";
 
-      setQuarterGroups(nextQuarterGroups);
-      setSelectedQuarterKey((current) =>
-        nextQuarterGroups.some((group) => group.key === current) ? current : fallbackQuarterKey,
-      );
-      setCards(getFinalCutCards());
-    };
+    setQuarterGroups(nextQuarterGroups);
+    setSelectedQuarterKey((current) =>
+      nextQuarterGroups.some((group) => group.key === current) ? current : fallbackQuarterKey,
+    );
+
+    const nextCards = getFinalCutCards();
+    setCards(nextCards);
+    setDecisionDrafts((current) => reconcileDecisionDrafts(nextCards, current));
+  }, []);
+
+  useEffect(() => {
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setMessage({ tone: "warn", text: detail.message });
-    };
-    const syncFinalCutCards = () => {
-      setCards(getFinalCutCards());
+      setDecisionDrafts({});
+      void refreshCards();
     };
 
-    void refresh();
-    window.addEventListener("focus", refresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
-    window.addEventListener(SCHEDULE_STATE_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-    window.addEventListener(TEAM_LEAD_FINAL_CUT_EVENT, syncFinalCutCards);
+    void refreshCards();
+    window.addEventListener("focus", refreshCards);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refreshCards);
+    window.addEventListener(SCHEDULE_STATE_EVENT, refreshCards);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshCards);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refresh);
-      window.removeEventListener(SCHEDULE_STATE_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refresh);
-      window.removeEventListener(TEAM_LEAD_FINAL_CUT_EVENT, syncFinalCutCards);
+      window.removeEventListener("focus", refreshCards);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refreshCards);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, refreshCards);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshCards);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, []);
+  }, [refreshCards]);
 
   const selectedQuarterGroup = useMemo(
     () => quarterGroups.find((group) => group.key === selectedQuarterKey) ?? null,
     [quarterGroups, selectedQuarterKey],
   );
+  const displayCards = useMemo(
+    () => mergeCardsWithDecisionDrafts(cards, decisionDrafts),
+    [cards, decisionDrafts],
+  );
   const filteredCards = useMemo(
-    () => filterCardsByQuarter(cards, selectedQuarterKey),
-    [cards, selectedQuarterKey],
+    () => filterCardsByQuarter(displayCards, selectedQuarterKey),
+    [displayCards, selectedQuarterKey],
   );
 
   const toggleExpanded = (name: string) => {
     setExpandedNames((current) =>
       current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
     );
+  };
+
+  const applyDecision = (itemId: string, decision: FinalCutDecision) => {
+    setDecisionDrafts((current) => ({ ...current, [itemId]: decision }));
+    void updateFinalCutDecision(itemId, decision);
   };
 
   if (quarterGroups.length === 0) {
@@ -315,42 +342,42 @@ export function FinalCutPage() {
                   const summary = getDecisionSummary(card);
 
                   return (
-                <button
-                  type="button"
-                  onClick={() => toggleExpanded(card.name)}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) auto auto",
-                    alignItems: "center",
-                    gap: 12,
-                    width: "100%",
-                    padding: 0,
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <strong style={{ fontSize: 22, color: "#ffffff" }}>{card.name}</strong>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 10,
-                      justifySelf: "center",
-                      color: "#cbd5e1",
-                      fontSize: 15,
-                      fontWeight: 800,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    <span style={{ color: "#4ade80" }}>{getDecisionLabel("circle")} {summary.circle}</span>
-                    <span style={{ color: "#facc15" }}>{getDecisionLabel("triangle")} {summary.triangle}</span>
-                    <span style={{ color: "#f87171" }}>{getDecisionLabel("cross")} {summary.cross}</span>
-                  </span>
-                  <span className="chip">{card.items.length}건</span>
-                </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(card.name)}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                        alignItems: "center",
+                        gap: 12,
+                        width: "100%",
+                        padding: 0,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <strong style={{ fontSize: 22, color: "#ffffff" }}>{card.name}</strong>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 10,
+                          justifySelf: "center",
+                          color: "#cbd5e1",
+                          fontSize: 15,
+                          fontWeight: 800,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <span style={{ color: "#4ade80" }}>{getDecisionLabel("circle")} {summary.circle}</span>
+                        <span style={{ color: "#facc15" }}>{getDecisionLabel("triangle")} {summary.triangle}</span>
+                        <span style={{ color: "#f87171" }}>{getDecisionLabel("cross")} {summary.cross}</span>
+                      </span>
+                      <span className="chip">{card.items.length}건</span>
+                    </button>
                   );
                 })()}
 
@@ -380,12 +407,10 @@ export function FinalCutPage() {
                               <button
                                 key={`${item.id}-${button.value}`}
                                 type="button"
-                                className="btn"
+                                className="btn final-cut-decision-btn"
                                 onClick={() => {
                                   const nextDecision = active ? "" : button.value;
-                                  setCards((current) => applyDecisionToCards(current, item.id, nextDecision));
-                                  updateFinalCutDecision(item.id, nextDecision);
-                                  setMessage({ tone: "ok", text: "정제본 판정을 저장했습니다." });
+                                  applyDecision(item.id, nextDecision);
                                 }}
                                 style={{
                                   position: "relative",

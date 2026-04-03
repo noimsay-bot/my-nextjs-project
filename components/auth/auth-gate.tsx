@@ -12,6 +12,10 @@ import {
 const publicPaths = new Set(["/login"]);
 
 function hasAccess(pathname: string, session: SessionUser) {
+  if (pathname.startsWith("/team-lead")) {
+    return session.role === "team_lead" || session.role === "admin";
+  }
+
   if (pathname.startsWith("/schedule/vacations")) {
     return session.role === "desk" || session.role === "admin";
   }
@@ -45,8 +49,7 @@ function hasAccess(pathname: string, session: SessionUser) {
         pathname === "/vacation" ||
         pathname.startsWith("/submissions") ||
         pathname.startsWith("/review") ||
-        pathname.startsWith("/schedule") ||
-        pathname.startsWith("/team-lead")
+        pathname.startsWith("/schedule")
       );
     case "admin":
       return true;

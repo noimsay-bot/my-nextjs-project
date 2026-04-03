@@ -40,6 +40,10 @@ textarea {
   font: inherit;
 }
 
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
 .shell {
   max-width: 1560px;
   margin: 0 auto;
@@ -95,6 +99,8 @@ textarea {
   cursor: pointer;
   font-weight: 800;
   padding: 11px 15px;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 .btn.primary {
@@ -106,6 +112,28 @@ textarea {
   color: #08111d;
   border: none;
   background: white;
+}
+
+.final-cut-decision-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+}
+
+.final-cut-decision-btn::-moz-focus-inner {
+  border: 0;
+}
+
+.final-cut-decision-btn:focus {
+  outline: none;
+}
+
+.final-cut-decision-btn:focus-visible {
+  outline: 2px solid rgba(148, 163, 184, 0.9);
+  outline-offset: 2px;
 }
 
 .field-input,
@@ -284,6 +312,27 @@ textarea {
   vertical-align: top;
 }
 
+.team-lead-summary-table th,
+.team-lead-summary-table td {
+  border-right: 1px solid var(--line);
+}
+
+.team-lead-summary-table th:first-child,
+.team-lead-summary-table td:first-child {
+  border-left: 1px solid var(--line);
+}
+
+.team-lead-summary-table--compact {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.team-lead-summary-table--compact th,
+.team-lead-summary-table--compact td {
+  padding: 7px 6px;
+  letter-spacing: -0.02em;
+}
+
 .review-layout {
   display: grid;
   gap: 16px;
@@ -390,6 +439,35 @@ textarea {
   gap: 10px;
 }
 
+.schedule-name-chip {
+  font-size: clamp(14px, 2.4vw, 18px);
+  line-height: 1.08;
+}
+
+.schedule-name-chip--edit {
+  font-size: clamp(13px, 2.2vw, 16px);
+}
+
+.schedule-name-chip--compact {
+  font-size: clamp(11px, 1.9vw, 14px);
+  line-height: 1.05;
+}
+
+.schedule-name-chip--featured {
+  font-size: clamp(15px, 2.7vw, 19px);
+}
+
+.schedule-name-chip__text {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  word-break: keep-all;
+}
+
 @media (max-width: 0px) {
   .subgrid-4,
   .subgrid-3,
@@ -474,6 +552,7 @@ textarea {
 
   .schedule-calendar-scroll--monthly {
     overflow-x: auto;
+    overflow-y: hidden;
     padding-bottom: 4px;
   }
 
@@ -545,6 +624,22 @@ textarea {
   .schedule-name-grid--monthly {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 4px !important;
+  }
+
+  .schedule-name-chip {
+    font-size: clamp(15px, 3.6vw, 20px);
+  }
+
+  .schedule-name-chip--edit {
+    font-size: clamp(14px, 3.2vw, 18px);
+  }
+
+  .schedule-name-chip--compact {
+    font-size: clamp(11px, 2vw, 14px);
+  }
+
+  .schedule-name-chip--featured {
+    font-size: clamp(16px, 4vw, 21px);
   }
 
   .schedule-order-grid {
@@ -625,5 +720,13 @@ textarea {
   .schedule-published-panel--desktop .schedule-name-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 5px !important;
+  }
+
+  .schedule-published-panel--desktop .schedule-name-chip {
+    font-size: clamp(12px, 1.8vw, 16px);
+  }
+
+  .schedule-published-panel--desktop .schedule-name-chip--compact {
+    font-size: clamp(11px, 1.6vw, 14px);
   }
 }

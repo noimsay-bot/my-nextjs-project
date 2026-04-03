@@ -22,7 +22,16 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
-      <article className="panel">
+      <article
+        className="panel"
+        style={{
+          position: "sticky",
+          top: 10,
+          zIndex: 30,
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+        }}
+      >
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">DESK</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

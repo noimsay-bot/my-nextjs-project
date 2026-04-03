@@ -89,10 +89,10 @@ export function OverallScorePage() {
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
-          <div className="chip">종합 점수</div>
-          <strong style={{ fontSize: 24 }}>종합 점수</strong>
+          <div className="chip">개인별 점수</div>
+          <strong style={{ fontSize: 24 }}>개인별 점수</strong>
           <div className="status note">
-              활성 사용자 기준으로 기여도, 베스트리포트 평가 평균, 정제본, 장비/인적 사고, LIVE 무사고 점수를 합산합니다.
+            활성 사용자 기준으로 개인별 기여도, 베스트리포트 평가 평균, 정제본, 장비/인적 사고, LIVE 무사고 점수를 합산합니다.
             정제본 점수는 선택한 분기만 반영됩니다.
           </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}

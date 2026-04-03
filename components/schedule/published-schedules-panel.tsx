@@ -710,7 +710,11 @@ export function PublishedSchedulesPanel() {
       );
 
       const containerWidth = scrollNode.clientWidth;
-      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, containerWidth / nextWidth) : 1;
+      const containerTop = scrollNode.getBoundingClientRect().top;
+      const availableHeight = Math.max(0, window.innerHeight - containerTop - 16);
+      const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
+      const heightFitScale = isCompactMonthlyView && availableHeight > 0 ? availableHeight / nextHeight : 1;
+      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, widthFitScale, heightFitScale) : 1;
       setScheduleFitScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
       setScheduleScale((current) => {
         if (!shouldAutoFitSchedule) return 1;
@@ -743,6 +747,7 @@ export function PublishedSchedulesPanel() {
     shouldAutoFitSchedule,
     showMine,
     username,
+    isCompactMonthlyView,
     scheduleMaxScale,
     scheduleMinScale,
   ]);
@@ -1287,7 +1292,7 @@ export function PublishedSchedulesPanel() {
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const highlightDayHead = showMine && dayContainsUser(day, username);
-                  const highlightHeaderName = highlightDayHead && Boolean(day.headerName?.trim());
+                  const highlightHeaderName = showMine && Boolean(username) && day.headerName?.trim() === username;
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category, names]) => {
                       if (!Array.isArray(names) || names.length === 0) return false;
@@ -1433,6 +1438,7 @@ export function PublishedSchedulesPanel() {
                                     <button
                                       key={personObject.key}
                                       type="button"
+                                      className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
                                       onClick={() => handleNameClick(personObject)}
                                       style={{
                                         display: "flex",
@@ -1472,7 +1478,6 @@ export function PublishedSchedulesPanel() {
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
-                                        fontSize: mineHighlighted ? (isCompactMonthlyView ? 16 : isCompactDailyLandscapeView ? 15 : isCompactDailyView ? 18 : 17) : isCompactMonthlyView ? 12 : isCompactDailyLandscapeView ? 12 : isCompactDailyView ? 13 : 12,
                                         lineHeight: 1.3,
                                         boxShadow: routeSelected && firstSelected
                                           ? "0 10px 24px rgba(88,28,135,.28), 0 0 0 1px rgba(255,255,255,.08) inset"
@@ -1485,16 +1490,9 @@ export function PublishedSchedulesPanel() {
                                       }}
                                     >
                                       <span
+                                        className="schedule-name-chip__text"
                                         style={{
-                                          display: "block",
-                                          whiteSpace: "nowrap",
-                                          textAlign: "center",
-                                          flex: 1,
-                                          minWidth: 0,
-                                          overflow: "hidden",
-                                          textOverflow: "ellipsis",
-                                          lineHeight: 1.25,
-                                          wordBreak: "keep-all",
+                                          lineHeight: 1.15,
                                         }}
                                       >
                                         {assignmentDisplay.name}

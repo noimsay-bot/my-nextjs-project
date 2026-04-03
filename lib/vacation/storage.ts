@@ -629,6 +629,31 @@ function getApplicantsByType(store: VacationStore, monthKey: string, type: Vacat
   ) as Record<string, string[]>;
 }
 
+function getRequestedDatesByName(store: VacationStore, monthKey: string, type: VacationType) {
+  const requestedDatesByName = new Map<string, string[]>();
+  getRequestsForMonth(store, monthKey)
+    .filter((request) => request.type === type)
+    .forEach((request) => {
+      const current = requestedDatesByName.get(request.requesterName) ?? [];
+      requestedDatesByName.set(
+        request.requesterName,
+        uniqueDateKeys([...current, ...request.dates.filter((dateKey) => !isWeekendDateKey(dateKey))]),
+      );
+    });
+  return requestedDatesByName;
+}
+
+function getCompensatoryWeightsByName(store: VacationStore, monthKey: string) {
+  const requestedDatesByName = getRequestedDatesByName(store, monthKey, "대휴");
+  return getCompensatoryWeightsByRequestedDates(requestedDatesByName);
+}
+
+function getCompensatoryWeightsByRequestedDates(requestedDatesByName: Map<string, string[]>) {
+  return new Map(
+    Array.from(requestedDatesByName.entries()).map(([name, requestedDates]) => [name, 1 / Math.max(1, requestedDates.length)] as const),
+  );
+}
+
 function getMonthCapacity(monthState: VacationMonthState, dateKey: string) {
   return monthState.limits[dateKey] ?? DEFAULT_VACATION_CAPACITY;
 }
@@ -663,6 +688,48 @@ function countCompensatoryWinsByName(winners: Record<string, string[]>) {
   return winnerCounts;
 }
 
+function getWinnerSlotsByNames(winners: Record<string, string[]>, names: string[]) {
+  const nameSet = new Set(names);
+  return Object.entries(winners).flatMap(([dateKey, winnerNames]) =>
+    uniqueNames(winnerNames ?? [])
+      .filter((winnerName) => nameSet.has(winnerName))
+      .map((winnerName) => ({ dateKey, winnerName })),
+  );
+}
+
+function pickWeightedNames(names: string[], count: number, weightsByName: Map<string, number>) {
+  const pool = uniqueNames(names);
+  const winners: string[] = [];
+  const targetCount = Math.max(0, Math.min(count, pool.length));
+
+  while (winners.length < targetCount) {
+    const totalWeight = pool.reduce((sum, name) => sum + Math.max(weightsByName.get(name) ?? 1, Number.EPSILON), 0);
+    if (totalWeight <= 0) {
+      winners.push(shuffleNames(pool)[0]);
+    } else {
+      let threshold = Math.random() * totalWeight;
+      let selectedName = pool[pool.length - 1];
+      for (const name of pool) {
+        threshold -= Math.max(weightsByName.get(name) ?? 1, Number.EPSILON);
+        if (threshold <= 0) {
+          selectedName = name;
+          break;
+        }
+      }
+      winners.push(selectedName);
+    }
+
+    const selectedSet = new Set(winners);
+    for (let index = pool.length - 1; index >= 0; index -= 1) {
+      if (selectedSet.has(pool[index])) {
+        pool.splice(index, 1);
+      }
+    }
+  }
+
+  return winners.sort((left, right) => left.localeCompare(right, "ko"));
+}
+
 function rebalanceCompensatoryWinners(
   applicantsByDate: Record<string, string[]>,
   winners: Record<string, string[]>,
@@ -686,24 +753,27 @@ function rebalanceCompensatoryWinners(
     let reassigned = false;
 
     for (const applicant of zeroWinnerApplicants) {
-      const transferableSlots = applicant.dateKeys
-        .flatMap((dateKey) =>
-          uniqueNames(nextWinners[dateKey] ?? [])
-            .map((winnerName) => ({
-              dateKey,
-              winnerName,
-              winnerCount: winnerCounts.get(winnerName) ?? 0,
-            }))
-            .filter((candidate) => candidate.winnerCount >= 2),
-        )
-        .sort(
-          (left, right) =>
-            right.winnerCount - left.winnerCount ||
-            left.dateKey.localeCompare(right.dateKey) ||
-            left.winnerName.localeCompare(right.winnerName, "ko"),
-        );
+      const maxWinnerCount = Math.max(...Array.from(winnerCounts.values()), 0);
+      if (maxWinnerCount < 2) {
+        continue;
+      }
 
-      const selectedSlot = transferableSlots[0];
+      const topWinnerNames = Array.from(winnerCounts.entries())
+        .filter(([name, count]) => name !== applicant.name && count === maxWinnerCount)
+        .map(([name]) => name);
+      if (topWinnerNames.length === 0) {
+        continue;
+      }
+
+      const requestedDateSlots = applicant.dateKeys.flatMap((dateKey) =>
+        uniqueNames(nextWinners[dateKey] ?? [])
+          .filter((winnerName) => topWinnerNames.includes(winnerName))
+          .map((winnerName) => ({ dateKey, winnerName })),
+      );
+
+      const allTopWinnerSlots = getWinnerSlotsByNames(nextWinners, topWinnerNames);
+      const candidateSlots = requestedDateSlots.length > 0 ? requestedDateSlots : allTopWinnerSlots;
+      const selectedSlot = candidateSlots.length > 0 ? shuffleList(candidateSlots)[0] : null;
       if (!selectedSlot) {
         continue;
       }
@@ -720,6 +790,113 @@ function rebalanceCompensatoryWinners(
       return nextWinners;
     }
   }
+}
+
+function buildAnnualLotteryWinners(
+  monthState: VacationMonthState,
+  annualApplicants: Record<string, string[]>,
+  priorityMap: Record<string, string[]>,
+) {
+  const nextAnnualWinners: Record<string, string[]> = {};
+
+  monthState.managedDateKeys.forEach((dateKey) => {
+    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
+    const applicants = (annualApplicants[dateKey] ?? []).filter((name) => !blockedNames.has(name));
+    const capacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size);
+    if (applicants.length <= capacity) {
+      nextAnnualWinners[dateKey] = [...applicants];
+      return;
+    }
+    nextAnnualWinners[dateKey] = shuffleNames(applicants)
+      .slice(0, capacity)
+      .sort((left, right) => left.localeCompare(right, "ko"));
+  });
+
+  return nextAnnualWinners;
+}
+
+function buildCompensatoryLotteryWinners(
+  monthState: VacationMonthState,
+  annualWinners: Record<string, string[]>,
+  compensatoryApplicants: Record<string, string[]>,
+  priorityMap: Record<string, string[]>,
+  compensatoryWeightsByName: Map<string, number>,
+) {
+  const nextCompensatoryWinners: Record<string, string[]> = {};
+  const compensatoryCandidatesByDate: Record<string, string[]> = {};
+
+  monthState.managedDateKeys.forEach((dateKey) => {
+    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
+    const annualWinnerNames = uniqueNames(annualWinners[dateKey] ?? []);
+    const remainingCapacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size - annualWinnerNames.length);
+    const applicants = uniqueNames(
+      (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinnerNames.includes(name) && !blockedNames.has(name)),
+    );
+    compensatoryCandidatesByDate[dateKey] = applicants;
+
+    if (remainingCapacity === 0) {
+      nextCompensatoryWinners[dateKey] = [];
+      return;
+    }
+
+    if (applicants.length <= remainingCapacity) {
+      nextCompensatoryWinners[dateKey] = [...applicants];
+      return;
+    }
+
+    nextCompensatoryWinners[dateKey] = pickWeightedNames(applicants, remainingCapacity, compensatoryWeightsByName);
+  });
+
+  return {
+    compensatoryCandidatesByDate,
+    compensatoryWinners: rebalanceCompensatoryWinners(compensatoryCandidatesByDate, nextCompensatoryWinners),
+  };
+}
+
+function buildVacationLotteryWinnersFromApplicants(
+  monthState: VacationMonthState,
+  annualApplicants: Record<string, string[]>,
+  compensatoryApplicants: Record<string, string[]>,
+  compensatoryWeightsByName: Map<string, number>,
+) {
+  const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
+  const annualWinners = buildAnnualLotteryWinners(monthState, annualApplicants, priorityMap);
+  const { compensatoryWinners } = buildCompensatoryLotteryWinners(
+    monthState,
+    annualWinners,
+    compensatoryApplicants,
+    priorityMap,
+    compensatoryWeightsByName,
+  );
+
+  return {
+    annualApplicants,
+    compensatoryApplicants,
+    annualWinners,
+    compensatoryWinners,
+  };
+}
+
+function buildVacationLotteryWinners(store: VacationStore, monthState: VacationMonthState) {
+  const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
+  const compensatoryApplicants = getApplicantsByType(store, monthState.monthKey, "대휴");
+  return buildVacationLotteryWinnersFromApplicants(
+    monthState,
+    annualApplicants,
+    compensatoryApplicants,
+    getCompensatoryWeightsByName(store, monthState.monthKey),
+  );
+}
+
+function buildApplicantsByDateFromRequestedDates(requestedDatesByName: Map<string, string[]>) {
+  const applicantsByDate = new Map<string, string[]>();
+  requestedDatesByName.forEach((dateKeys, name) => {
+    dateKeys.forEach((dateKey) => {
+      const current = applicantsByDate.get(dateKey) ?? [];
+      applicantsByDate.set(dateKey, uniqueNames([...current, name]));
+    });
+  });
+  return Object.fromEntries(applicantsByDate.entries()) as Record<string, string[]>;
 }
 
 function serializeVacationMap(map: Record<string, string[]>) {
@@ -1062,22 +1239,7 @@ export function runAnnualVacationLottery(year: number, month: number) {
 
   const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
   const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
-  const nextAnnualWinners: Record<string, string[]> = {};
-
-  monthState.managedDateKeys.forEach((dateKey) => {
-    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
-    const applicants = (annualApplicants[dateKey] ?? []).filter((name) => !blockedNames.has(name));
-    const capacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size);
-    if (applicants.length <= capacity) {
-      nextAnnualWinners[dateKey] = [...applicants];
-      return;
-    }
-    nextAnnualWinners[dateKey] = shuffleNames(applicants)
-      .slice(0, capacity)
-      .sort((left, right) => left.localeCompare(right));
-  });
-
-  monthState.annualWinners = nextAnnualWinners;
+  monthState.annualWinners = buildAnnualLotteryWinners(monthState, annualApplicants, priorityMap);
   monthState.compensatoryWinners = {};
   monthState.updatedAt = nowLabel();
   writeStore(store);
@@ -1093,40 +1255,22 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
     return monthState;
   }
 
-  const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
   const compensatoryApplicants = getApplicantsByType(store, monthState.monthKey, "대휴");
   const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
   const nextAnnualWinners =
-    hasLotteryResults(monthState.annualWinners) ? monthState.annualWinners : runAnnualVacationLottery(year, month)?.annualWinners ?? {};
-  const nextCompensatoryWinners: Record<string, string[]> = {};
-  const compensatoryCandidatesByDate: Record<string, string[]> = {};
-
-  monthState.managedDateKeys.forEach((dateKey) => {
-    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
-    const annualWinners = uniqueNames(nextAnnualWinners[dateKey] ?? []);
-    const remainingCapacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size - annualWinners.length);
-    const applicants = uniqueNames(
-      (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name) && !blockedNames.has(name)),
-    );
-    compensatoryCandidatesByDate[dateKey] = applicants;
-
-    if (remainingCapacity === 0) {
-      nextCompensatoryWinners[dateKey] = [];
-      return;
-    }
-
-    if (applicants.length <= remainingCapacity) {
-      nextCompensatoryWinners[dateKey] = [...applicants];
-      return;
-    }
-
-    nextCompensatoryWinners[dateKey] = shuffleNames(applicants)
-      .slice(0, remainingCapacity)
-      .sort((left, right) => left.localeCompare(right));
-  });
+    hasLotteryResults(monthState.annualWinners)
+      ? monthState.annualWinners
+      : buildAnnualLotteryWinners(monthState, getApplicantsByType(store, monthState.monthKey, "연차"), priorityMap);
+  const { compensatoryWinners } = buildCompensatoryLotteryWinners(
+    monthState,
+    nextAnnualWinners,
+    compensatoryApplicants,
+    priorityMap,
+    getCompensatoryWeightsByName(store, monthState.monthKey),
+  );
 
   monthState.annualWinners = nextAnnualWinners;
-  monthState.compensatoryWinners = rebalanceCompensatoryWinners(compensatoryCandidatesByDate, nextCompensatoryWinners);
+  monthState.compensatoryWinners = compensatoryWinners;
   monthState.updatedAt = nowLabel();
   writeStore(store);
   return monthState;
@@ -1141,48 +1285,9 @@ export function runVacationLottery(year: number, month: number) {
     return monthState;
   }
 
-  const annualApplicants = getApplicantsByType(store, monthState.monthKey, "연차");
-  const compensatoryApplicants = getApplicantsByType(store, monthState.monthKey, "대휴");
-  const priorityMap = getDeskPriorityVacationMap(monthState.monthKey);
-  const nextAnnualWinners: Record<string, string[]> = {};
-  const nextCompensatoryWinners: Record<string, string[]> = {};
-  const compensatoryCandidatesByDate: Record<string, string[]> = {};
-
-  monthState.managedDateKeys.forEach((dateKey) => {
-    const blockedNames = new Set((priorityMap[dateKey] ?? []).map((entry) => parseVacationEntry(entry).name));
-    const annualCandidates = uniqueNames((annualApplicants[dateKey] ?? []).filter((name) => !blockedNames.has(name)));
-    const capacity = Math.max(0, getMonthCapacity(monthState, dateKey) - blockedNames.size);
-
-    const annualWinners =
-      annualCandidates.length <= capacity
-        ? [...annualCandidates]
-        : shuffleNames(annualCandidates)
-            .slice(0, capacity)
-            .sort((left, right) => left.localeCompare(right));
-
-    nextAnnualWinners[dateKey] = annualWinners;
-
-    const remainingCapacity = Math.max(0, capacity - annualWinners.length);
-    const compensatoryCandidates = uniqueNames(
-      (compensatoryApplicants[dateKey] ?? []).filter((name) => !annualWinners.includes(name) && !blockedNames.has(name)),
-    );
-    compensatoryCandidatesByDate[dateKey] = compensatoryCandidates;
-
-    if (remainingCapacity === 0) {
-      nextCompensatoryWinners[dateKey] = [];
-      return;
-    }
-
-    nextCompensatoryWinners[dateKey] =
-      compensatoryCandidates.length <= remainingCapacity
-        ? [...compensatoryCandidates]
-        : shuffleNames(compensatoryCandidates)
-            .slice(0, remainingCapacity)
-            .sort((left, right) => left.localeCompare(right));
-  });
-
-  monthState.annualWinners = nextAnnualWinners;
-  monthState.compensatoryWinners = rebalanceCompensatoryWinners(compensatoryCandidatesByDate, nextCompensatoryWinners);
+  const { annualWinners, compensatoryWinners } = buildVacationLotteryWinners(store, monthState);
+  monthState.annualWinners = annualWinners;
+  monthState.compensatoryWinners = compensatoryWinners;
   monthState.updatedAt = nowLabel();
   writeStore(store);
   return monthState;

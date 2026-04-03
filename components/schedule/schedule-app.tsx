@@ -1566,6 +1566,7 @@ export function ScheduleApp() {
                                       }}
                                     >
                                       <div
+                                        className={`schedule-name-chip ${editMode ? "schedule-name-chip--edit" : ""}`}
                                         draggable={editMode}
                                         onClick={() => {
                                           if (!editMode) return;
@@ -1620,19 +1621,14 @@ export function ScheduleApp() {
                                               ? "#fffbea"
                                               : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                           fontWeight: 700,
-                                          fontSize: editMode ? 13 : 15,
                                           lineHeight: 1.3,
                                           boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
                                         }}
                                       >
                                         <span
+                                          className="schedule-name-chip__text"
                                           style={{
-                                            minWidth: editMode ? 0 : undefined,
-                                            flex: 1,
-                                            whiteSpace: "nowrap",
-                                            overflow: editMode ? "hidden" : "visible",
-                                            textOverflow: editMode ? "ellipsis" : "clip",
-                                            textAlign: "center",
+                                            minWidth: 0,
                                           }}
                                         >
                                           {assignmentDisplay.name}
@@ -2094,6 +2090,7 @@ export function ScheduleApp() {
                                   const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
                                   return (
                                     <div
+                                      className="schedule-name-chip"
                                       key={`preview-${category}-${name}-${index}`}
                                       style={{
                                         display: "flex",
@@ -2116,12 +2113,11 @@ export function ScheduleApp() {
                                           : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
-                                        fontSize: 15,
                                         lineHeight: 1.3,
                                         boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
                                       }}
                                     >
-                                      <span style={{ whiteSpace: "nowrap", textAlign: "center" }}>{assignmentDisplay.name}</span>
+                                      <span className="schedule-name-chip__text">{assignmentDisplay.name}</span>
                                     </div>
                                   );
                                 })}

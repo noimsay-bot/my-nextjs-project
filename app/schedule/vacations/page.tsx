@@ -97,6 +97,50 @@ function countNamesByDateMap(map: Record<string, string[]>) {
   return Object.values(map).reduce((sum, names) => sum + names.length, 0);
 }
 
+function countDaysByName(map: Record<string, string[]>) {
+  const counts = new Map<string, number>();
+  Object.values(map).forEach((names) => {
+    Array.from(new Set(names)).forEach((name) => {
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    });
+  });
+  return counts;
+}
+
+function buildCompensatorySummary(
+  annualApplicants: Record<string, string[]>,
+  compensatoryApplicants: Record<string, string[]>,
+  annualWinners: Record<string, string[]>,
+  compensatoryWinners: Record<string, string[]>,
+) {
+  const annualRequestedCounts = countDaysByName(annualApplicants);
+  const compensatoryRequestedCounts = countDaysByName(compensatoryApplicants);
+  const annualWinCounts = countDaysByName(annualWinners);
+  const compensatoryWinCounts = countDaysByName(compensatoryWinners);
+
+  return Array.from(
+    new Set([
+      ...annualRequestedCounts.keys(),
+      ...compensatoryRequestedCounts.keys(),
+      ...annualWinCounts.keys(),
+      ...compensatoryWinCounts.keys(),
+    ]),
+  )
+    .map((name) => ({
+      name,
+      annualRequestedCount: annualRequestedCounts.get(name) ?? 0,
+      annualWinCount: annualWinCounts.get(name) ?? 0,
+      compensatoryRequestedCount: compensatoryRequestedCounts.get(name) ?? 0,
+      compensatoryWinCount: compensatoryWinCounts.get(name) ?? 0,
+    }))
+    .sort(
+      (left, right) =>
+        (right.annualRequestedCount + right.compensatoryRequestedCount) - (left.annualRequestedCount + left.compensatoryRequestedCount) ||
+        (right.annualWinCount + right.compensatoryWinCount) - (left.annualWinCount + left.compensatoryWinCount) ||
+        left.name.localeCompare(right.name, "ko"),
+    );
+}
+
 export default function ScheduleVacationsPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -167,6 +211,16 @@ export default function ScheduleVacationsPage() {
   const annualLotteryDone = Boolean(monthState && Object.values(monthState.annualWinners).some((names) => names.length > 0));
   const compensatoryLotteryDone = Boolean(monthState && Object.values(monthState.compensatoryWinners).some((names) => names.length > 0));
   const vacationLotteryDone = annualLotteryDone || compensatoryLotteryDone;
+  const lotteryReport = useMemo(
+    () =>
+      buildCompensatorySummary(
+        annualApplicants,
+        compensatoryApplicants,
+        monthState?.annualWinners ?? {},
+        monthState?.compensatoryWinners ?? {},
+      ),
+    [annualApplicants, compensatoryApplicants, monthState?.annualWinners, monthState?.compensatoryWinners],
+  );
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -248,7 +302,7 @@ export default function ScheduleVacationsPage() {
                 }
                 setMessage({
                   tone: "ok",
-                  text: `${year}년 ${month}월 휴가 추첨이 완료되었습니다. 연차 ${annualWinnerCount}명, 대휴 ${compensatoryWinnerCount}명이 당첨되었습니다.`,
+                  text: `${year}년 ${month}월 휴가 추첨이 완료되었습니다. 연차 ${annualWinnerCount}명, 대휴 ${compensatoryWinnerCount}명이 당첨되었습니다. 아래 결과보고서에서 사람별 신청/당첨 현황을 확인하세요.`,
                 });
               }}
             >
@@ -280,6 +334,54 @@ export default function ScheduleVacationsPage() {
           ) : null}
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+
+          {vacationLotteryDone && lotteryReport.length > 0 ? (
+            <div className="status note" style={{ display: "grid", gap: 10 }}>
+              <strong style={{ fontSize: 15 }}>휴가 추첨 결과보고서</strong>
+              <div className="muted">사람별 연차/대휴 신청 수와 당첨 수를 함께 보여줍니다.</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      {["이름", "연차 신청", "연차 당첨", "대휴 신청", "대휴 당첨", "총 신청", "총 당첨"].map((label) => (
+                        <th
+                          key={label}
+                          style={{
+                            textAlign: "left",
+                            padding: "10px 12px",
+                            fontSize: 13,
+                            color: "#9bb0c7",
+                            borderBottom: "1px solid rgba(255,255,255,.1)",
+                          }}
+                        >
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotteryReport.map((entry) => (
+                      <tr key={`lottery-report-${entry.name}`}>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)", fontWeight: 800 }}>
+                          {entry.name}
+                        </td>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>{entry.annualRequestedCount}개</td>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>{entry.annualWinCount}개</td>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>{entry.compensatoryRequestedCount}개</td>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>{entry.compensatoryWinCount}개</td>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>
+                          {entry.annualRequestedCount + entry.compensatoryRequestedCount}개
+                        </td>
+                        <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>
+                          {entry.annualWinCount + entry.compensatoryWinCount}개
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
 

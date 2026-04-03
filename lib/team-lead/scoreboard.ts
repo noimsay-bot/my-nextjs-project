@@ -7,12 +7,14 @@ import {
 } from "@/lib/supabase/portal";
 import {
   emitTeamLeadStorageStatus,
-  ContributionPersonCard,
   FinalCutPersonCard,
-  getTeamLeadBestReportScoreMap,
   getContributionCards,
+  getContributionPeriod,
   getFinalCutCards,
+  getTeamLeadBestReportResultsWorkspace,
   getTeamLeadSchedules,
+  TeamLeadBestReportReviewer,
+  TeamLeadBestReportReviewerDetailRow,
 } from "@/lib/team-lead/storage";
 
 export const TEAM_LEAD_SCOREBOARD_EVENT = "j-team-lead-scoreboard-updated";
@@ -62,6 +64,38 @@ export interface TeamLeadOverallScoreCard {
   finalCutQuarterScores: FinalCutQuarterScoreItem[];
 }
 
+export type TeamLeadSummaryQuarterKey = "12-2" | "3-5" | "6-8" | "9-11";
+
+export interface TeamLeadQuarterSummaryScore {
+  key: TeamLeadSummaryQuarterKey;
+  label: string;
+  score: number;
+}
+
+export interface TeamLeadWeightedQuarterSummaryRow {
+  name: string;
+  totalScore: number;
+  convertedScore: number;
+  quarterScores: TeamLeadQuarterSummaryScore[];
+}
+
+export interface TeamLeadFinalCutSummaryQuarter {
+  key: TeamLeadSummaryQuarterKey;
+  label: string;
+  itemCount: number;
+  earnedScore: number;
+  ratePercent: number;
+}
+
+export interface TeamLeadFinalCutSummaryRow {
+  name: string;
+  totalItemCount: number;
+  totalEarnedScore: number;
+  overallRatePercent: number;
+  convertedScore: number;
+  quarterScores: TeamLeadFinalCutSummaryQuarter[];
+}
+
 interface TeamLeadScoreboardStore {
   broadcastAccident: Record<string, TeamLeadScoreItem[]>;
   liveSafety: Record<string, TeamLeadScoreItem[]>;
@@ -73,8 +107,17 @@ interface TeamLeadStateRow {
   state: unknown;
 }
 
+const SUMMARY_QUARTERS = [
+  { key: "12-2", label: "12-2월" },
+  { key: "3-5", label: "3-5월" },
+  { key: "6-8", label: "6-8월" },
+  { key: "9-11", label: "9-11월" },
+] as const satisfies ReadonlyArray<{ key: TeamLeadSummaryQuarterKey; label: string }>;
+
 let scoreboardCache = createEmptyScoreboardStore();
 let videoReviewScoreCache = new Map<string, number>();
+let videoReviewReviewerCache: TeamLeadBestReportReviewer[] = [];
+let videoReviewReviewerDetailCache: TeamLeadBestReportReviewerDetailRow[] = [];
 let scoreboardRefreshPromise: Promise<void> | null = null;
 
 function roundScore(score: number) {
@@ -192,6 +235,8 @@ export async function refreshScoreboardState() {
     if (!session?.approved) {
       scoreboardCache = createEmptyScoreboardStore();
       videoReviewScoreCache = new Map();
+      videoReviewReviewerCache = [];
+      videoReviewReviewerDetailCache = [];
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -200,13 +245,13 @@ export async function refreshScoreboardState() {
     }
 
     const supabase = await getPortalSupabaseClient();
-    const [{ data: stateRow, error: stateError }, nextVideoMap] = await Promise.all([
+    const [{ data: stateRow, error: stateError }, nextVideoWorkspace] = await Promise.all([
       supabase
         .from("team_lead_state")
         .select("key, state")
         .eq("key", TEAM_LEAD_SCOREBOARD_STATE_KEY)
         .maybeSingle<TeamLeadStateRow>(),
-      getTeamLeadBestReportScoreMap(),
+      getTeamLeadBestReportResultsWorkspace(),
     ]);
 
     if (stateError) {
@@ -216,6 +261,8 @@ export async function refreshScoreboardState() {
         console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_state"));
         scoreboardCache = createEmptyScoreboardStore();
         videoReviewScoreCache = new Map();
+        videoReviewReviewerCache = [];
+        videoReviewReviewerDetailCache = [];
 
         if (typeof window !== "undefined") {
           window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -227,7 +274,11 @@ export async function refreshScoreboardState() {
     }
 
     scoreboardCache = normalizeScoreboardStore(stateRow?.state);
-    videoReviewScoreCache = nextVideoMap;
+    videoReviewScoreCache = new Map(
+      nextVideoWorkspace.rows.map((row) => [row.authorName.trim(), roundScore(row.trimmedAverage ?? 0)] as const),
+    );
+    videoReviewReviewerCache = [...nextVideoWorkspace.reviewers];
+    videoReviewReviewerDetailCache = [...nextVideoWorkspace.reviewerDetails];
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -440,6 +491,175 @@ function getContributionScoreMap() {
 
 function getVideoReviewScoreMap() {
   return new Map(videoReviewScoreCache);
+}
+
+function isMonthKeyInContributionPeriod(monthKey: string, startMonthKey: string, endMonthKey: string) {
+  return monthKey >= startMonthKey && monthKey <= endMonthKey;
+}
+
+function getSummaryQuarterKey(monthKey: string): TeamLeadSummaryQuarterKey {
+  const { month } = parseMonthKey(monthKey);
+  if (month === 12 || month <= 2) return "12-2";
+  if (month >= 3 && month <= 5) return "3-5";
+  if (month >= 6 && month <= 8) return "6-8";
+  return "9-11";
+}
+
+function getSummaryQuarterKeyInCurrentPeriod(monthKey: string) {
+  const period = getContributionPeriod();
+  if (!isMonthKeyInContributionPeriod(monthKey, period.startMonthKey, period.endMonthKey)) {
+    return null;
+  }
+  return getSummaryQuarterKey(monthKey);
+}
+
+function getTrimmedQuarterAverage(scores: number[]) {
+  if (scores.length < 3) return 0;
+  const sorted = [...scores].sort((left, right) => left - right);
+  const middleScores = sorted.slice(1, -1);
+  if (middleScores.length === 0) return 0;
+  return roundScore(middleScores.reduce((sum, score) => sum + score, 0) / middleScores.length);
+}
+
+export function getVideoReviewSummaryRows() {
+  const eligibleNames = getEligibleUsers();
+  const authorQuarterReviewerScores = new Map<string, Map<TeamLeadSummaryQuarterKey, Map<string, number>>>();
+
+  videoReviewReviewerDetailCache.forEach((detail) => {
+    const authorName = detail.authorName.trim();
+    if (!authorName) return;
+
+    detail.reports.forEach((report) => {
+      const monthKey = report.completedAt.slice(0, 7);
+      const quarterKey = getSummaryQuarterKeyInCurrentPeriod(monthKey);
+      if (!quarterKey) return;
+
+      const quarterMap = authorQuarterReviewerScores.get(authorName) ?? new Map<TeamLeadSummaryQuarterKey, Map<string, number>>();
+      const reviewerMap = quarterMap.get(quarterKey) ?? new Map<string, number>();
+      reviewerMap.set(detail.reviewerId, Math.max(reviewerMap.get(detail.reviewerId) ?? 0, roundScore(report.score)));
+      quarterMap.set(quarterKey, reviewerMap);
+      authorQuarterReviewerScores.set(authorName, quarterMap);
+    });
+  });
+
+  return eligibleNames
+    .map((name) => {
+      const reviewerQuarterMap = authorQuarterReviewerScores.get(name) ?? new Map();
+      const quarterScores = SUMMARY_QUARTERS.map((quarter) => {
+        const reviewerMap = reviewerQuarterMap.get(quarter.key) ?? new Map<string, number>();
+        const scores = videoReviewReviewerCache
+          .map((reviewer) => reviewerMap.get(reviewer.id))
+          .filter((score): score is number => Number.isFinite(score));
+
+        return {
+          key: quarter.key,
+          label: quarter.label,
+          score: getTrimmedQuarterAverage(scores),
+        } satisfies TeamLeadQuarterSummaryScore;
+      });
+      const totalScore = roundScore(quarterScores.reduce((sum, item) => sum + item.score, 0));
+
+      return {
+        name,
+        totalScore,
+        convertedScore: roundScore(totalScore * 0.2),
+        quarterScores,
+      } satisfies TeamLeadWeightedQuarterSummaryRow;
+    })
+    .sort(
+      (left, right) =>
+        right.convertedScore - left.convertedScore ||
+        right.totalScore - left.totalScore ||
+        left.name.localeCompare(right.name, "ko"),
+    );
+}
+
+export function getContributionSummaryRows() {
+  const contributionCards = new Map(getContributionCards().map((card) => [card.name.trim(), card] as const));
+
+  return getEligibleUsers()
+    .map((name) => {
+      const card = contributionCards.get(name);
+      const quarterScoreMap = new Map<TeamLeadSummaryQuarterKey, number>();
+
+      (card?.items ?? []).forEach((item) => {
+        const quarterKey = getSummaryQuarterKeyInCurrentPeriod(item.monthKey);
+        if (!quarterKey) return;
+        quarterScoreMap.set(quarterKey, roundScore((quarterScoreMap.get(quarterKey) ?? 0) + item.totalScore));
+      });
+
+      const quarterScores = SUMMARY_QUARTERS.map((quarter) => ({
+        key: quarter.key,
+        label: quarter.label,
+        score: roundScore(quarterScoreMap.get(quarter.key) ?? 0),
+      })) satisfies TeamLeadQuarterSummaryScore[];
+      const totalScore = roundScore(quarterScores.reduce((sum, item) => sum + item.score, 0));
+
+      return {
+        name,
+        totalScore,
+        convertedScore: roundScore(totalScore * 0.3),
+        quarterScores,
+      } satisfies TeamLeadWeightedQuarterSummaryRow;
+    })
+    .sort(
+      (left, right) =>
+        right.convertedScore - left.convertedScore ||
+        right.totalScore - left.totalScore ||
+        left.name.localeCompare(right.name, "ko"),
+    );
+}
+
+export function getFinalCutSummaryRows() {
+  const finalCutCards = new Map(getFinalCutCards().map((card) => [card.name.trim(), card] as const));
+
+  return getEligibleUsers()
+    .map((name) => {
+      const card = finalCutCards.get(name);
+      const quarterItemsMap = new Map<TeamLeadSummaryQuarterKey, FinalCutPersonCard["items"]>();
+
+      (card?.items ?? []).forEach((item) => {
+        const quarterKey = getSummaryQuarterKeyInCurrentPeriod(item.dateKey.slice(0, 7));
+        if (!quarterKey) return;
+        const current = quarterItemsMap.get(quarterKey) ?? [];
+        current.push(item);
+        quarterItemsMap.set(quarterKey, current);
+      });
+
+      const quarterScores = SUMMARY_QUARTERS.map((quarter) => {
+        const items = quarterItemsMap.get(quarter.key) ?? [];
+        const itemCount = items.length;
+        const earnedScore = roundScore(items.reduce((sum, item) => sum + getDecisionWeight(item.decision), 0));
+        const ratePercent = itemCount > 0 ? roundScore((earnedScore / itemCount) * 100) : 0;
+
+        return {
+          key: quarter.key,
+          label: quarter.label,
+          itemCount,
+          earnedScore,
+          ratePercent,
+        } satisfies TeamLeadFinalCutSummaryQuarter;
+      });
+
+      const totalItemCount = quarterScores.reduce((sum, item) => sum + item.itemCount, 0);
+      const totalEarnedScore = roundScore(quarterScores.reduce((sum, item) => sum + item.earnedScore, 0));
+      const overallRatePercent = totalItemCount > 0 ? roundScore((totalEarnedScore / totalItemCount) * 100) : 0;
+
+      return {
+        name,
+        totalItemCount,
+        totalEarnedScore,
+        overallRatePercent,
+        convertedScore: totalItemCount > 0 ? roundScore((totalEarnedScore / totalItemCount) * 10) : 0,
+        quarterScores,
+      } satisfies TeamLeadFinalCutSummaryRow;
+    })
+    .sort(
+      (left, right) =>
+        right.convertedScore - left.convertedScore ||
+        right.overallRatePercent - left.overallRatePercent ||
+        left.name.localeCompare(right.name, "ko"),
+    );
 }
 
 export function getOverallScoreCards() {

@@ -159,6 +159,8 @@ let finalCutCache = {} as Record<string, FinalCutDecision>;
 let teamLeadRefreshPromise: Promise<void> | null = null;
 let assignmentPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let assignmentPersistResolvers: Array<() => void> = [];
+let finalCutPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let finalCutPersistResolvers: Array<() => void> = [];
 
 export function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
   return `${dateKey}::${category}::${index}::${name}`;
@@ -643,14 +645,29 @@ export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
   const previous = normalizeFinalCutStore(finalCutCache);
   finalCutCache = normalized;
   emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
-  return persistTeamLeadState(TEAM_LEAD_FINAL_CUT_STATE_KEY, normalized).catch(async (error) => {
-    emitTeamLeadStorageStatus({
-      ok: false,
-      message: error instanceof Error ? error.message : "정제본 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
-    });
-    finalCutCache = previous;
-    emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
-    await refreshTeamLeadState();
+
+  if (finalCutPersistTimer) {
+    clearTimeout(finalCutPersistTimer);
+  }
+
+  return new Promise<void>((resolve) => {
+    finalCutPersistResolvers.push(resolve);
+    finalCutPersistTimer = setTimeout(() => {
+      finalCutPersistTimer = null;
+      persistTeamLeadState(TEAM_LEAD_FINAL_CUT_STATE_KEY, finalCutCache).catch(async (error) => {
+        emitTeamLeadStorageStatus({
+          ok: false,
+          message: error instanceof Error ? error.message : "정제본 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+        });
+        finalCutCache = previous;
+        emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+        await refreshTeamLeadState();
+      }).finally(() => {
+        const resolvers = [...finalCutPersistResolvers];
+        finalCutPersistResolvers = [];
+        resolvers.forEach((item) => item());
+      });
+    }, 180);
   });
 }
 
