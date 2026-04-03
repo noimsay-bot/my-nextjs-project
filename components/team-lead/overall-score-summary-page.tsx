@@ -390,8 +390,8 @@ export function OverallScoreSummaryPage() {
       />
 
       <WeightedQuarterSummaryTable
-        title="참여기여도"
-        groupLabel="참여기여도"
+        title="참여/기여도"
+        groupLabel="참여/기여도"
         weightLabel="30%환산"
         rows={contributionRows}
       />

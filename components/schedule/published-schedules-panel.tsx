@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { getSession, hasDeskAccess } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
 import { getAssignmentDisplayRank, getScheduleCategoryLabel } from "@/lib/schedule/constants";
@@ -500,14 +501,12 @@ export function PublishedSchedulesPanel() {
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [shouldAutoFitSchedule, setShouldAutoFitSchedule] = useState(false);
-  const [scheduleFitScale, setScheduleFitScale] = useState(1);
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
-  const scheduleZoomTouchedRef = useRef(false);
   const session = getSession();
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
@@ -683,15 +682,9 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = isMobileViewport && displayMode === "monthly";
   const isCompactDailyView = isMobileViewport && displayMode === "daily";
   const isCompactDailyLandscapeView = isCompactDailyView && isLandscapeViewport;
-  const scheduleMinScale = shouldAutoFitSchedule ? 0.15 : 1;
-  const scheduleMaxScale = shouldAutoFitSchedule ? 2.4 : 1;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
-
-  useEffect(() => {
-    scheduleZoomTouchedRef.current = false;
-  }, [selectedMonthKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -713,15 +706,12 @@ export function PublishedSchedulesPanel() {
       const containerTop = scrollNode.getBoundingClientRect().top;
       const availableHeight = Math.max(0, window.innerHeight - containerTop - 16);
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const heightFitScale = isCompactMonthlyView && availableHeight > 0 ? availableHeight / nextHeight : 1;
-      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, widthFitScale, heightFitScale) : 1;
-      setScheduleFitScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
-      setScheduleScale((current) => {
-        if (!shouldAutoFitSchedule) return 1;
-        const clampedCurrent = Math.min(scheduleMaxScale, Math.max(scheduleMinScale, current));
-        if (!scheduleZoomTouchedRef.current) return nextFitScale;
-        return clampedCurrent;
-      });
+      const heightFitScale = isMobileViewport && availableHeight > 0 ? availableHeight / nextHeight : 1;
+      const autoFitCap = 1;
+      const nextFitScale = shouldAutoFitSchedule
+        ? Math.min(autoFitCap, Math.max(0.15, Math.min(widthFitScale, heightFitScale)))
+        : 1;
+      setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
     };
 
     const queueMeasure = () => {
@@ -748,16 +738,8 @@ export function PublishedSchedulesPanel() {
     showMine,
     username,
     isCompactMonthlyView,
-    scheduleMaxScale,
-    scheduleMinScale,
+    isMobileViewport,
   ]);
-
-  const updateScheduleScale = (nextScale: number) => {
-    if (!shouldAutoFitSchedule) return;
-    scheduleZoomTouchedRef.current = true;
-    const clampedScale = Math.min(scheduleMaxScale, Math.max(scheduleMinScale, Number(nextScale.toFixed(2))));
-    setScheduleScale(clampedScale);
-  };
 
   useEffect(() => {
     if (!isCompactMonthlyView) {
@@ -990,38 +972,20 @@ export function PublishedSchedulesPanel() {
           </div>
         ) : null}
 
-        <div className="schedule-toolbar">
-          <div className="chip">게시된 근무표</div>
-          <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
-            <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
-            <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
-              {showMine ? "전체 보기" : "내 근무 보기"}
-            </button>
-            <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
-              {editMode ? "근무 수정 완료" : "근무 수정"}
-            </button>
-            {shouldAutoFitSchedule ? (
-              <>
-                <button className="btn" onClick={() => updateScheduleScale(appliedScheduleScale - 0.1)}>
-                  축소
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    scheduleZoomTouchedRef.current = false;
-                    setScheduleScale(scheduleFitScale);
-                  }}
-                >
-                  맞춤
-                </button>
-                <button className="btn" onClick={() => updateScheduleScale(appliedScheduleScale + 0.1)}>
-                  확대
-                </button>
-                <span className="muted">{Math.round(appliedScheduleScale * 100)}%</span>
-              </>
-            ) : null}
+        {isMobileViewport ? (
+          <div className="schedule-toolbar">
+            <div className="chip">게시된 근무표</div>
+            <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
+              <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
+              <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
+                {showMine ? "전체 보기" : "내 근무 보기"}
+              </button>
+              <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
+                {editMode ? "근무 수정 완료" : "근무 수정"}
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {editMode && username ? (
           <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 {routeScopeLabel} 전체에서 미래 날짜 근무를 요청 경로에 넣을 수 있습니다.</div>
@@ -1042,128 +1006,152 @@ export function PublishedSchedulesPanel() {
           </div>
         ) : null}
 
-        <div className="schedule-toolbar">
-          <div className="schedule-toolbar-actions">
-            {items.map((item) => (
-              <button
-                key={item.monthKey}
-                className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
-                onClick={() => setSelectedMonthKey(item.monthKey)}
-              >
-                {item.schedule.year}년 {item.schedule.month}월
-              </button>
-            ))}
-          </div>
-          {selectedItem ? (
-            <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
-              <strong className="schedule-current-title">{selectedItem.title}</strong>
-              <div className="schedule-toolbar-actions schedule-toolbar-actions--legend">
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.연차,
-                  }}
+        {isMobileViewport ? (
+          <div className="schedule-toolbar">
+            <div className="schedule-toolbar-actions">
+              {items.map((item) => (
+                <button
+                  key={item.monthKey}
+                  className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
+                  onClick={() => setSelectedMonthKey(item.monthKey)}
                 >
-                  연차
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.대휴,
-                  }}
-                >
-                  대휴
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.근속휴가,
-                  }}
-                >
-                  근속
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.건강검진,
-                  }}
-                >
-                  검진
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.경조,
-                  }}
-                >
-                  경조
-                </span>
-              </div>
-              <div className="schedule-toolbar-actions schedule-toolbar-actions--nav">
-                <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
-                  이전 달
+                  {item.schedule.year}년 {item.schedule.month}월
                 </button>
-                <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
-                  다음 달
-                </button>
-                {!isMobileViewport ? (
-                  <button className="btn" onClick={printSelectedSchedule}>
-                    출력
-                  </button>
-                ) : null}
-                {canDelete ? (
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
-                      if (!ok) return;
-                      const next = removePublishedSchedule(selectedItem.monthKey);
-                      setItems(next);
-                      setSelectedMonthKey(getPreferredPublishedMonthKey(next));
-                    }}
-                  >
-                    게시 해제
-                  </button>
-                ) : null}
-              </div>
+              ))}
             </div>
-          ) : null}
-        </div>
+            {selectedItem ? (
+              <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
+                <strong
+                  className="schedule-current-title"
+                  style={{
+                    fontSize: 18,
+                    textAlign: "center",
+                    justifySelf: "center",
+                    width: "100%",
+                  }}
+                >
+                  {selectedItem.title}
+                </strong>
+                <div
+                  className="schedule-toolbar-actions schedule-toolbar-actions--meta"
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: "fit-content",
+                    maxWidth: "100%",
+                    justifySelf: "center",
+                  }}
+                >
+                  <div className="schedule-toolbar-actions schedule-toolbar-actions--legend">
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.연차,
+                      }}
+                    >
+                      연차
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.대휴,
+                      }}
+                    >
+                      대휴
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.근속휴가,
+                      }}
+                    >
+                      근속
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.건강검진,
+                      }}
+                    >
+                      검진
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "5px 12px",
+                        borderRadius: 999,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        lineHeight: 1.2,
+                        ...vacationLegendStyles.경조,
+                      }}
+                    >
+                      경조
+                    </span>
+                  </div>
+                  <div className="schedule-toolbar-actions schedule-toolbar-actions--nav" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+                    <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
+                      이전 달
+                    </button>
+                    <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
+                      다음 달
+                    </button>
+                    <button className="btn" onClick={printSelectedSchedule}>
+                      출력
+                    </button>
+                    {canDelete ? (
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
+                          if (!ok) return;
+                          const next = removePublishedSchedule(selectedItem.monthKey);
+                          setItems(next);
+                          setSelectedMonthKey(getPreferredPublishedMonthKey(next));
+                        }}
+                      >
+                        게시 해제
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {selectedItem ? (
           <>
@@ -1251,13 +1239,151 @@ export function PublishedSchedulesPanel() {
                   <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                 </div>
               </div>
-              <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
+              {isMobileViewport ? <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div> : null}
+              {!isMobileViewport ? (
+                <div className="schedule-published-hero">
+                  <div className="schedule-published-hero__left">
+                    <div className="chip">게시된 근무표</div>
+                    <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
+                    <div className="schedule-toolbar-actions schedule-published-hero__months">
+                      {items.map((item) => (
+                        <button
+                          key={item.monthKey}
+                          className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
+                          onClick={() => setSelectedMonthKey(item.monthKey)}
+                        >
+                          {item.schedule.year}년 {item.schedule.month}월
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="schedule-published-hero__center">
+                    <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
+                  </div>
+                  <div className="schedule-published-hero__right">
+                    <div className="schedule-toolbar-actions schedule-published-hero__user">
+                      <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
+                      <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
+                        {showMine ? "전체 보기" : "내 근무 보기"}
+                      </button>
+                      <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
+                        {editMode ? "근무 수정 완료" : "근무 수정"}
+                      </button>
+                    </div>
+                    <div className="schedule-published-hero__footer">
+                      <div className="schedule-calendar-top-legend">
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "5px 12px",
+                            borderRadius: 999,
+                            fontSize: 14,
+                            fontWeight: 800,
+                            lineHeight: 1.2,
+                            ...vacationLegendStyles.연차,
+                          }}
+                        >
+                          연차
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "5px 12px",
+                            borderRadius: 999,
+                            fontSize: 14,
+                            fontWeight: 800,
+                            lineHeight: 1.2,
+                            ...vacationLegendStyles.대휴,
+                          }}
+                        >
+                          대휴
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "5px 12px",
+                            borderRadius: 999,
+                            fontSize: 14,
+                            fontWeight: 800,
+                            lineHeight: 1.2,
+                            ...vacationLegendStyles.근속휴가,
+                          }}
+                        >
+                          근속
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "5px 12px",
+                            borderRadius: 999,
+                            fontSize: 14,
+                            fontWeight: 800,
+                            lineHeight: 1.2,
+                            ...vacationLegendStyles.건강검진,
+                          }}
+                        >
+                          검진
+                        </span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "5px 12px",
+                            borderRadius: 999,
+                            fontSize: 14,
+                            fontWeight: 800,
+                            lineHeight: 1.2,
+                            ...vacationLegendStyles.경조,
+                          }}
+                        >
+                          경조
+                        </span>
+                      </div>
+                      <div className="schedule-calendar-top-actions">
+                        <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
+                          이전 달
+                        </button>
+                        <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
+                          다음 달
+                        </button>
+                        <button className="btn" onClick={printSelectedSchedule}>
+                          출력
+                        </button>
+                        {canDelete ? (
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
+                              if (!ok) return;
+                              const next = removePublishedSchedule(selectedItem.monthKey);
+                              setItems(next);
+                              setSelectedMonthKey(getPreferredPublishedMonthKey(next));
+                            }}
+                          >
+                            게시 해제
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
                 style={{
                   overflowX: shouldAutoFitSchedule ? "hidden" : undefined,
+                  overflowY: shouldAutoFitSchedule ? "hidden" : undefined,
                 }}
               >
               <div
@@ -1332,7 +1458,6 @@ export function PublishedSchedulesPanel() {
                       >
                         <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
                           <span>{day.month}/{day.day}</span>
-                          <span className="schedule-day-weekday">{getWeekdayLabel(day.dow)}</span>
                         </div>
                         <div
                           style={{
@@ -1412,7 +1537,19 @@ export function PublishedSchedulesPanel() {
                               >
                                 {getCategoryDisplayLabel(category)}
                               </strong>
-                              <div className={`schedule-name-grid ${isCompactMonthlyView ? "schedule-name-grid--monthly" : ""}`} style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, minHeight: 38 }}>
+                              <div
+                                className={`schedule-name-grid ${isCompactMonthlyView ? "schedule-name-grid--monthly" : ""}`}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                                  justifyContent: "stretch",
+                                  justifyItems: "stretch",
+                                  alignItems: "center",
+                                  gap: 0,
+                                  minHeight: 38,
+                                  width: "100%",
+                                }}
+                              >
                               {names.length > 0 ? (
                                 names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
@@ -1441,17 +1578,18 @@ export function PublishedSchedulesPanel() {
                                       className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
                                       onClick={() => handleNameClick(personObject)}
                                       style={{
-                                        display: "flex",
-                                        gridColumn: mineHighlighted ? "1 / -1" : "auto",
-                                        justifySelf: mineHighlighted ? "center" : "stretch",
+                                        display: personObject.pending ? "flex" : "grid",
+                                        gridColumn: "auto",
+                                        justifySelf: "stretch",
                                         alignItems: "center",
+                                        placeItems: personObject.pending ? undefined : "center",
                                         justifyContent: personObject.pending ? "space-between" : "center",
-                                        width: mineHighlighted ? "fit-content" : "100%",
+                                        width: "100%",
                                         maxWidth: "100%",
                                         gap: 5,
-                                        minHeight: mineHighlighted ? (isCompactMonthlyView ? 30 : isCompactDailyLandscapeView ? 42 : isCompactDailyView ? 34 : 34) : isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
-                                        padding: mineHighlighted ? (isCompactMonthlyView ? "4px 9px" : isCompactDailyView ? "5px 9px" : "4px 9px") : isCompactMonthlyView ? "4px 7px" : isCompactDailyView ? "5px 8px" : "4px 8px",
-                                        borderRadius: mineHighlighted ? 16 : 14,
+                                        minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
+                                        padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
+                                        borderRadius: 0,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
                                           : routeSelected
@@ -1472,31 +1610,31 @@ export function PublishedSchedulesPanel() {
                                               ? "1px solid rgba(192,132,252,.78)"
                                               : "1px solid rgba(56,189,248,.75)"
                                             : mineHighlighted
-                                              ? "4px solid rgba(226,232,240,.82)"
-                                              : dimOtherNames
+                                              ? "2px solid rgba(226,232,240,.82)"
+                                            : dimOtherNames
                                                 ? "1px solid rgba(255,255,255,.08)"
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
                                         lineHeight: 1.3,
-                                        boxShadow: routeSelected && firstSelected
-                                          ? "0 10px 24px rgba(88,28,135,.28), 0 0 0 1px rgba(255,255,255,.08) inset"
-                                          : mineHighlighted
-                                            ? "0 10px 24px rgba(15,23,42,.18), 0 0 0 1px rgba(255,255,255,.08) inset"
-                                            : undefined,
+                                        boxShadow: "none",
                                         textShadow: undefined,
                                         opacity: dimOtherNames ? 0.42 : 1,
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
-                                      <span
+                                      <FittedNameText
+                                        text={assignmentDisplay.name}
                                         className="schedule-name-chip__text"
+                                        minFontSize={9}
+                                        maxFontSize={isCompactMonthlyView ? 16 : 18}
                                         style={{
-                                          lineHeight: 1.15,
+                                          display: "inline-block",
+                                          flex: "0 1 auto",
+                                          width: "100%",
+                                          margin: "0 auto",
                                         }}
-                                      >
-                                        {assignmentDisplay.name}
-                                      </span>
+                                      />
                                       {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 11 }}>요청중</span> : null}
                                     </button>
                                   );
@@ -1504,6 +1642,17 @@ export function PublishedSchedulesPanel() {
                               ) : (
                                 <span style={{ display: "inline-block", minHeight: 22 }} />
                               )}
+                              {names.length > 0 && names.length % 2 === 1 ? (
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    display: "block",
+                                    minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
+                                    border: "1px solid rgba(255,255,255,.08)",
+                                    background: "rgba(255,255,255,.03)",
+                                  }}
+                                />
+                              ) : null}
                               </div>
                             </div>
                           </div>

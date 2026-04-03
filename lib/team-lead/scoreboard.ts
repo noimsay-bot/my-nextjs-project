@@ -576,8 +576,7 @@ export function getVideoReviewSummaryRows() {
 
 export function getContributionSummaryRows() {
   const contributionCards = new Map(getContributionCards().map((card) => [card.name.trim(), card] as const));
-
-  return getEligibleUsers()
+  const rows = getEligibleUsers()
     .map((name) => {
       const card = contributionCards.get(name);
       const quarterScoreMap = new Map<TeamLeadSummaryQuarterKey, number>();
@@ -598,10 +597,18 @@ export function getContributionSummaryRows() {
       return {
         name,
         totalScore,
-        convertedScore: roundScore(totalScore * 0.3),
+        convertedScore: 0,
         quarterScores,
       } satisfies TeamLeadWeightedQuarterSummaryRow;
-    })
+    });
+
+  const maxTotalScore = Math.max(...rows.map((row) => row.totalScore), 0);
+
+  return rows
+    .map((row) => ({
+      ...row,
+      convertedScore: maxTotalScore > 0 ? roundScore((row.totalScore / maxTotalScore) * 30) : 0,
+    }))
     .sort(
       (left, right) =>
         right.convertedScore - left.convertedScore ||
@@ -664,7 +671,7 @@ export function getFinalCutSummaryRows() {
 
 export function getOverallScoreCards() {
   const names = getEligibleUsers();
-  const contributionMap = getContributionScoreMap();
+  const contributionSummaryRows = new Map(getContributionSummaryRows().map((row) => [row.name, row] as const));
   const videoReviewScoreMap = getVideoReviewScoreMap();
   const broadcastScoreMap = new Map(getBroadcastAccidentCards().map((card) => [card.name, card] as const));
   const liveScoreMap = new Map(getLiveSafetyCards().map((card) => [card.name, card] as const));
@@ -673,11 +680,11 @@ export function getOverallScoreCards() {
 
   return names
     .map((name) => {
-      const contributionCard = contributionMap.get(name);
+      const contributionSummaryRow = contributionSummaryRows.get(name);
       const finalCutQuarterScores = getFinalCutQuarterScoreItems(finalCutCards.get(name), selectedQuarterKeys);
       const finalCutScore = roundScore(finalCutQuarterScores.reduce((sum, item) => sum + item.convertedScore, 0));
       const videoReviewScore = roundScore(videoReviewScoreMap.get(name) ?? 0);
-      const contributionScore = roundScore(contributionCard?.totalScore ?? 0);
+      const contributionScore = roundScore(contributionSummaryRow?.convertedScore ?? 0);
       const broadcastAccidentScore = roundScore(broadcastScoreMap.get(name)?.totalScore ?? TEAM_LEAD_SCORE_BASE);
       const liveSafetyScore = roundScore(liveScoreMap.get(name)?.totalScore ?? TEAM_LEAD_SCORE_BASE);
 

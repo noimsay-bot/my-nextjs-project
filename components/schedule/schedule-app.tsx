@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, orderCategories } from "@/lib/schedule/constants";
@@ -1310,7 +1311,6 @@ export function ScheduleApp() {
                       >
                         <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
                           <span>{day.month}/{day.day}</span>
-                          <span className="schedule-day-weekday">{getWeekdayLabel(day.dow)}</span>
                         </div>
                         <div
                           style={{
@@ -1524,10 +1524,11 @@ export function ScheduleApp() {
                                 style={{
                                   display: "grid",
                                   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                                  gap: 5,
+                                  gap: 0,
                                   minHeight: 38,
                                   gridColumn: editMode ? "1 / -1" : 2,
                                   gridRow: editMode ? 2 : 1,
+                                  width: "100%",
                                 }}
                               >
                               {names.length > 0 ? (
@@ -1588,16 +1589,16 @@ export function ScheduleApp() {
                                         style={{
                                           display: "flex",
                                           alignItems: "center",
-                                          justifyContent: "center",
-                                          gap: 5,
-                                          width: "100%",
-                                          minWidth: 0,
-                                          minHeight: 32,
-                                          padding: editMode ? "4px 8px" : "5px 9px",
-                                          borderRadius: 14,
-                                          background: personObject.pending
-                                            ? "rgba(245,158,11,.18)"
-                                            : conflicted
+                                        justifyContent: "center",
+                                        gap: 5,
+                                        width: "100%",
+                                        minWidth: 0,
+                                        minHeight: 32,
+                                        padding: editMode ? "3px 4px" : "4px 4px",
+                                        borderRadius: 0,
+                                        background: personObject.pending
+                                          ? "rgba(245,158,11,.18)"
+                                          : conflicted
                                                 ? weekendConflict
                                                   ? "rgba(34,211,238,.28)"
                                                   : "rgba(239,68,68,.22)"
@@ -1615,24 +1616,23 @@ export function ScheduleApp() {
                                               : highlighted
                                                 ? "1px solid rgba(34,211,238,.35)"
                                                 : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                          color: weekendConflict
-                                            ? "#d8fbff"
-                                            : editMode
+                                        color: weekendConflict
+                                          ? "#d8fbff"
+                                          : editMode
                                               ? "#fffbea"
                                               : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                          fontWeight: 700,
-                                          lineHeight: 1.3,
-                                          boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
-                                        }}
-                                      >
-                                        <span
+                                        fontWeight: 700,
+                                        lineHeight: 1.3,
+                                        boxShadow: "none",
+                                      }}
+                                    >
+                                        <FittedNameText
+                                          text={assignmentDisplay.name}
                                           className="schedule-name-chip__text"
-                                          style={{
-                                            minWidth: 0,
-                                          }}
-                                        >
-                                          {assignmentDisplay.name}
-                                        </span>
+                                          minFontSize={9}
+                                          maxFontSize={editMode ? 16 : 18}
+                                          style={{ minWidth: 0 }}
+                                        />
                                         {personObject.pending && !editMode ? <span style={{ fontSize: 13 }}>근무변경요청중</span> : null}
                                       </div>
                                       {editMode ? (
@@ -1663,6 +1663,17 @@ export function ScheduleApp() {
                                     </div>
                                   );
                                 })
+                              ) : null}
+                              {names.length > 0 && names.length % 2 === 1 ? (
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    display: "block",
+                                    minHeight: 32,
+                                    border: "1px solid rgba(255,255,255,.08)",
+                                    background: "rgba(255,255,255,.03)",
+                                  }}
+                                />
                               ) : null}
                               </div>
                             </div>
@@ -2017,7 +2028,6 @@ export function ScheduleApp() {
                         <div className="schedule-day-head" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>
                           <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
                             <span>{day.month}/{day.day}</span>
-                            <span className="schedule-day-weekday">{getWeekdayLabel(day.dow)}</span>
                           </div>
                           <div
                             style={{
@@ -2083,7 +2093,7 @@ export function ScheduleApp() {
                                 >
                                   {getCategoryDisplayLabel(category)}
                                 </strong>
-                              <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, minHeight: 42 }}>
+                              <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 0, minHeight: 42, width: "100%" }}>
                                 {names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const conflicted = conflictSet.has(`${category}-${name}`);
@@ -2098,9 +2108,9 @@ export function ScheduleApp() {
                                         justifyContent: "center",
                                         width: "100%",
                                         gap: 6,
-                                        padding: "6px 10px",
+                                        padding: "4px",
                                         minHeight: 34,
-                                        borderRadius: 14,
+                                        borderRadius: 0,
                                         background: conflicted
                                           ? weekendConflict
                                             ? "rgba(34,211,238,.28)"
@@ -2114,13 +2124,29 @@ export function ScheduleApp() {
                                         color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
                                         lineHeight: 1.3,
-                                        boxShadow: weekendConflict ? "0 8px 18px rgba(34,211,238,.2)" : undefined,
+                                        boxShadow: "none",
                                       }}
                                     >
-                                      <span className="schedule-name-chip__text">{assignmentDisplay.name}</span>
+                                      <FittedNameText
+                                        text={assignmentDisplay.name}
+                                        className="schedule-name-chip__text"
+                                        minFontSize={9}
+                                        maxFontSize={18}
+                                      />
                                     </div>
                                   );
                                 })}
+                                {names.length > 0 && names.length % 2 === 1 ? (
+                                  <span
+                                    aria-hidden="true"
+                                    style={{
+                                      display: "block",
+                                      minHeight: 34,
+                                      border: "1px solid rgba(255,255,255,.08)",
+                                      background: "rgba(255,255,255,.03)",
+                                    }}
+                                  />
+                                ) : null}
                                 </div>
                               </div>
                             </article>
