@@ -644,7 +644,7 @@ button {
 }
 
 .schedule-published-panel--mobile .schedule-calendar-grid--daily {
-  grid-template-columns: repeat(7, 176px);
+  grid-template-columns: repeat(7, 192px);
   gap: 6px;
   align-items: start;
 }
@@ -654,8 +654,8 @@ button {
 }
 
 .schedule-published-panel--mobile .schedule-day-card {
-  width: 176px !important;
-  min-width: 176px;
+  width: 192px !important;
+  min-width: 192px;
   min-height: 216px !important;
   padding: 6px !important;
 }
@@ -669,14 +669,15 @@ button {
 }
 
 .schedule-published-panel--mobile .schedule-name-grid {
+  grid-template-columns: 1fr !important;
   gap: 2px !important;
   justify-content: stretch !important;
 }
 
 .schedule-published-panel--mobile .schedule-name-chip {
-  font-size: 10px;
+  font-size: 9px;
   border-radius: 0 !important;
-  min-height: 28px;
+  min-height: 24px;
 }
 
 .schedule-published-panel--mobile .schedule-name-chip--compact {

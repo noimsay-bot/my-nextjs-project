@@ -29,40 +29,24 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const MOBILE_PHONE_SHORT_EDGE_MAX = 430;
-const TOUCH_TABLET_SHORT_EDGE_MIN = 431;
 const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
 
-function isHandheldPhoneDevice() {
-  if (typeof navigator === "undefined") return false;
-  const userAgentData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
-  if (userAgentData?.mobile) return true;
-  return /iPhone|iPod|Android.+Mobile|Windows Phone|Mobile/i.test(navigator.userAgent);
-}
-
 function getScheduleViewportMode() {
   if (typeof window === "undefined") return "desktop" as const;
   const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   if (!isCoarsePointer) return "desktop" as const;
-  const viewportShortEdge = Math.min(window.innerWidth, window.innerHeight);
-  const screenShortEdge = Math.min(window.screen.width, window.screen.height);
-  const deviceShortEdge = Math.max(viewportShortEdge, screenShortEdge);
-  const viewportLongEdge = Math.max(window.innerWidth, window.innerHeight);
-  const screenLongEdge = Math.max(window.screen.width, window.screen.height);
-  const deviceLongEdge = Math.max(viewportLongEdge, screenLongEdge);
+  const viewportWidth = Math.round(window.visualViewport?.width ?? window.innerWidth);
+  const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
+  const viewportShortEdge = Math.min(viewportWidth, viewportHeight);
 
-  if (deviceShortEdge <= MOBILE_PHONE_SHORT_EDGE_MAX) {
+  if (viewportShortEdge <= MOBILE_PHONE_SHORT_EDGE_MAX) {
     return "mobile" as const;
   }
-
-  if (deviceShortEdge >= TOUCH_TABLET_SHORT_EDGE_MIN) {
-    return "tablet" as const;
-  }
-
-  return isHandheldPhoneDevice() ? "mobile" as const : deviceLongEdge > 900 ? "tablet" as const : "mobile" as const;
+  return "tablet" as const;
 }
 
 function shouldAutoFitScheduleViewport() {
