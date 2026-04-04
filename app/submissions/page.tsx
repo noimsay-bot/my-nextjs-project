@@ -193,7 +193,7 @@ export default function SubmissionsPage() {
             />
             <input
               className="field-input"
-              placeholder="링크"
+              placeholder="링크 (가급적 유튜브 링크 부탁드립니다.)"
               value={card.link}
               onChange={(event) => updateCard(card.id, { link: event.target.value })}
             />

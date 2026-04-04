@@ -1,10 +1,9 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { defaultPointers } from "@/lib/schedule/constants";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
-import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import {
   AssignmentTripTagPhase,
@@ -54,20 +53,77 @@ const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
   ongoing: "출장중",
   return: "출장복귀",
 };
-const csvTemplateHeaders = [
-  "monthKey",
-  "dateKey",
-  "name",
-  "duty",
-  "clockIn",
-  "clockOut",
-  "schedules",
-  "travelType",
-  "exclusiveVideoFlags",
-  "coverageScore",
-  "coverageNote",
-  "rowType",
-] as const;
+
+function getTripTagStyle(travelType: AssignmentTravelType, phase: AssignmentTripTagPhase = "") {
+  if (travelType === "국내출장") {
+    if (phase === "departure") {
+      return {
+        borderColor: "rgba(74,222,128,.72)",
+        background: "rgba(34,197,94,.16)",
+        color: "#dcfce7",
+      };
+    }
+    if (phase === "ongoing") {
+      return {
+        borderColor: "rgba(16,185,129,.78)",
+        background: "rgba(16,185,129,.24)",
+        color: "#d1fae5",
+      };
+    }
+    if (phase === "return") {
+      return {
+        borderColor: "rgba(5,150,105,.82)",
+        background: "rgba(5,150,105,.3)",
+        color: "#ecfdf5",
+      };
+    }
+    return {
+      borderColor: "rgba(34,197,94,.48)",
+      background: "rgba(34,197,94,.16)",
+      color: "#dcfce7",
+    };
+  }
+  if (travelType === "해외출장") {
+    if (phase === "departure") {
+      return {
+        borderColor: "rgba(125,211,252,.78)",
+        background: "rgba(56,189,248,.16)",
+        color: "#e0f2fe",
+      };
+    }
+    if (phase === "ongoing") {
+      return {
+        borderColor: "rgba(96,165,250,.82)",
+        background: "rgba(59,130,246,.24)",
+        color: "#dbeafe",
+      };
+    }
+    if (phase === "return") {
+      return {
+        borderColor: "rgba(129,140,248,.82)",
+        background: "rgba(99,102,241,.28)",
+        color: "#e0e7ff",
+      };
+    }
+    return {
+      borderColor: "rgba(96,165,250,.52)",
+      background: "rgba(59,130,246,.16)",
+      color: "#dbeafe",
+    };
+  }
+  if (travelType === "당일출장") {
+    return {
+      borderColor: "rgba(250,204,21,.72)",
+      background: "rgba(250,204,21,.2)",
+      color: "#fef3c7",
+    };
+  }
+  return {
+    borderColor: "rgba(255,255,255,.16)",
+    background: "rgba(255,255,255,.08)",
+    color: "#f8fbff",
+  };
+}
 
 type ImportMessageTone = "ok" | "warn" | "note";
 
@@ -76,25 +132,6 @@ interface ImportMessage {
   text: string;
 }
 
-interface ScheduleAssignmentImportRow {
-  monthKey: string;
-  dateKey: string;
-  name: string;
-  duty: string;
-  clockIn: string;
-  clockOut: string;
-  schedules: string[];
-  travelType: AssignmentTravelType;
-  exclusiveVideoFlags: boolean[];
-  coverageScore: number;
-  coverageNote: string;
-  rowType: "base" | "custom";
-}
-
-interface ParsedCsvRow {
-  values: string[];
-  lineNumber: number;
-}
 const vacationBadgeStyles = {
   연차: {
     borderColor: "rgba(96,165,250,.45)",
@@ -210,161 +247,11 @@ function formatManualTime(value: string) {
   return null;
 }
 
-function parseCsvLine(line: string) {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (char === "\"") {
-      if (inQuotes && line[index + 1] === "\"") {
-        current += "\"";
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (char === "," && !inQuotes) {
-      values.push(current);
-      current = "";
-      continue;
-    }
-    current += char;
-  }
-
-  values.push(current);
-  return values.map((value) => value.trim());
-}
-
-function parseCsvRows(text: string) {
-  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const rawLines = normalized.split("\n");
-  const rows: ParsedCsvRow[] = [];
-
-  rawLines.forEach((line, index) => {
-    if (!line.trim()) return;
-    rows.push({
-      values: parseCsvLine(line),
-      lineNumber: index + 1,
-    });
-  });
-
-  return rows;
-}
-
-async function parseWorksheetRows(buffer: ArrayBuffer) {
-  const XLSX = await import("xlsx");
-  const workbook = XLSX.read(buffer, { type: "array" });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return [] as ParsedCsvRow[];
-  const sheet = workbook.Sheets[sheetName];
-  const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | null)[]>(sheet, {
-    header: 1,
-    raw: false,
-    defval: "",
-  });
-
-  return matrix
-    .filter((row) => row.some((cell) => String(cell ?? "").trim()))
-    .map((row, index) => ({
-      values: row.map((cell) => String(cell ?? "").trim()),
-      lineNumber: index + 1,
-    }));
-}
-
-function normalizeHeader(value: string) {
-  return value.replace(/\s+/g, "").trim().toLowerCase();
-}
-
-function getImportValue(record: Record<string, string>, ...keys: string[]) {
-  for (const key of keys) {
-    const value = record[normalizeHeader(key)];
-    if (typeof value === "string") return value.trim();
-  }
-  return "";
-}
-
-function normalizeTravelType(value: string): AssignmentTravelType {
-  if (value === "국내출장" || value === "해외출장" || value === "당일출장") return value as AssignmentTravelType;
-  return "";
-}
-
 function cycleTripTagPhase(phase: AssignmentTripTagPhase): AssignmentTripTagPhase {
   if (phase === "") return "departure";
   if (phase === "departure") return "ongoing";
   if (phase === "ongoing") return "return";
   return "";
-}
-
-function normalizeCoverageScore(value: string) {
-  const parsed = Number(value.trim());
-  return coverageScoreSteps.includes(parsed as (typeof coverageScoreSteps)[number]) ? parsed : 0;
-}
-
-function normalizeExclusiveVideoFlags(values: string[], scheduleCount: number) {
-  const normalized = Array.from({ length: Math.max(scheduleCount, 1) }, (_, index) => {
-    const value = values[index]?.trim().toLowerCase() ?? "";
-    return value === "1" || value === "true" || value === "y" || value === "yes";
-  });
-  return normalized;
-}
-
-function parseScheduleAssignmentImportRow(parsedRow: ParsedCsvRow, headerMap: string[]) {
-  const record = Object.fromEntries(
-    headerMap.map((header, index) => [header, parsedRow.values[index] ?? ""]),
-  );
-  const monthKey = getImportValue(record, "monthKey", "month", "월");
-  const dateKey = getImportValue(record, "dateKey", "date", "날짜");
-  const name = getImportValue(record, "name", "person", "username", "이름");
-  const duty = getImportValue(record, "duty", "근무", "근무유형");
-  const clockIn = getImportValue(record, "clockIn", "출근");
-  const clockOut = getImportValue(record, "clockOut", "퇴근");
-  const schedules = getImportValue(record, "schedules", "schedule", "일정")
-    .split("|")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const travelType = normalizeTravelType(getImportValue(record, "travelType", "출장"));
-  const exclusiveVideoFlags = normalizeExclusiveVideoFlags(
-    getImportValue(record, "exclusiveVideoFlags", "exclusiveVideo", "단독", "단독여부")
-      .split("|")
-      .map((item) => item.trim())
-      .filter(Boolean),
-    schedules.length,
-  );
-  const coverageScore = normalizeCoverageScore(getImportValue(record, "coverageScore", "가점"));
-  const coverageNote = getImportValue(record, "coverageNote", "가점사유");
-  const rowTypeValue = getImportValue(record, "rowType", "행구분").toLowerCase();
-
-  if (!dateKey || !name) {
-    throw new Error(`${parsedRow.lineNumber}행: dateKey와 name은 필수입니다.`);
-  }
-
-  const normalizedClockIn = clockIn ? formatManualTime(clockIn) : "";
-  const normalizedClockOut = clockOut ? formatManualTime(clockOut) : "";
-
-  if (normalizedClockIn === null) {
-    throw new Error(`${parsedRow.lineNumber}행: clockIn 형식이 올바르지 않습니다.`);
-  }
-  if (normalizedClockOut === null) {
-    throw new Error(`${parsedRow.lineNumber}행: clockOut 형식이 올바르지 않습니다.`);
-  }
-
-  return {
-    monthKey: monthKey || dateKey.slice(0, 7),
-    dateKey,
-    name,
-    duty,
-    clockIn: normalizedClockIn,
-    clockOut: normalizedClockOut,
-    schedules,
-    travelType,
-    exclusiveVideoFlags,
-    coverageScore,
-    coverageNote,
-    rowType: rowTypeValue === "custom" ? "custom" : "base",
-  } satisfies ScheduleAssignmentImportRow;
 }
 
 function createEmptyDaySchedule(date: Date): DaySchedule {
@@ -389,20 +276,6 @@ function createEmptyDaySchedule(date: Date): DaySchedule {
     manualExtras: [],
     headerName: "",
     conflicts: [],
-  };
-}
-
-function createEmptyGeneratedSchedule(monthKey: string): GeneratedSchedule {
-  const [year, month] = monthKey.split("-").map(Number);
-  const lastDay = new Date(year, month, 0).getDate();
-
-  return {
-    year,
-    month,
-    monthKey,
-    days: Array.from({ length: lastDay }, (_, index) => createEmptyDaySchedule(new Date(year, month - 1, index + 1))),
-    nextPointers: { ...defaultPointers },
-    nextStartDate: `${monthKey}-01`,
   };
 }
 
@@ -455,28 +328,6 @@ function buildMonthDays(schedule: GeneratedSchedule | null) {
   });
 }
 
-function ensureImportedMonthsExist(monthKeys: string[]) {
-  if (monthKeys.length === 0 || typeof window === "undefined") return false;
-
-  const state = readStoredScheduleState();
-  const existing = new Set([
-    ...(state.generated ? [state.generated.monthKey] : []),
-    ...state.generatedHistory.map((schedule) => schedule.monthKey),
-  ]);
-  const missingMonthKeys = Array.from(new Set(monthKeys.filter((monthKey) => monthKey && !existing.has(monthKey))));
-  if (missingMonthKeys.length === 0) return false;
-
-  const nextState = {
-    ...state,
-    generatedHistory: [...state.generatedHistory, ...missingMonthKeys.map(createEmptyGeneratedSchedule)].sort((left, right) =>
-      left.monthKey.localeCompare(right.monthKey),
-    ),
-  };
-
-  void saveScheduleState(nextState).catch(() => undefined);
-  return true;
-}
-
 function ScheduleDeleteConfirmButton({
   onConfirm,
 }: {
@@ -504,8 +355,8 @@ export function ScheduleAssignmentPage() {
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
   const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
+  const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
@@ -700,23 +551,30 @@ export function ScheduleAssignmentPage() {
     }));
   };
 
-  const createTripTag = (rowKey: string, travelType: AssignmentTravelType) => {
+  const createTripTag = (
+    rowKey: string,
+    travelType: AssignmentTravelType,
+    options?: { initialLabel?: string; startEditing?: boolean },
+  ) => {
     if (!travelType) {
       setImportMessage({ tone: "warn", text: "출장 태그를 만들려면 먼저 출장 종류를 선택해 주세요." });
       return;
     }
-
-    const label = window.prompt("출장 태그 이름을 입력하세요.", "");
-    const trimmedLabel = label?.trim() ?? "";
-    if (!trimmedLabel) return;
+    const tripTagId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const initialLabel = options?.initialLabel?.trim() ?? "";
 
     updateMonthEntry(rowKey, (current) => ({
       ...current,
       travelType,
-      tripTagId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      tripTagLabel: trimmedLabel,
+      tripTagId,
+      tripTagLabel: initialLabel,
       tripTagPhase: "",
     }));
+    if (options?.startEditing ?? true) {
+      setEditingTripTag({ tripTagId, rowKey, value: initialLabel });
+      return;
+    }
+    setEditingTripTag(null);
   };
 
   const cycleTripTag = (
@@ -737,11 +595,9 @@ export function ScheduleAssignmentPage() {
     }));
   };
 
-  const renameTripTag = (tripTagId: string, currentLabel: string) => {
-    const label = window.prompt("출장 태그 이름을 수정하세요.", currentLabel);
-    const trimmedLabel = label?.trim() ?? "";
-    if (!trimmedLabel || trimmedLabel === currentLabel) return;
-
+  const saveTripTagLabel = (tripTagId: string, nextLabel: string) => {
+    const trimmedLabel = nextLabel.trim();
+    if (!trimmedLabel) return;
     updateStore((current) => ({
       ...current,
       entries: Object.fromEntries(
@@ -752,6 +608,90 @@ export function ScheduleAssignmentPage() {
               rowKey,
               entry.tripTagId === tripTagId ? { ...entry, tripTagLabel: trimmedLabel } : entry,
             ]),
+          ),
+        ]),
+      ),
+    }));
+    setEditingTripTag((current) => (current?.tripTagId === tripTagId ? null : current));
+  };
+
+  const clearTripTag = (rowKey: string, tripTagId: string) => {
+    setEditingTripTag((current) => (current?.tripTagId === tripTagId ? null : current));
+    updateStore((current) => ({
+      ...current,
+      entries: Object.fromEntries(
+        Object.entries(current.entries).map(([monthKey, monthEntries]) => [
+          monthKey,
+          Object.fromEntries(
+            Object.entries(monthEntries).map(([entryRowKey, entry]) => {
+              if (tripTagId && entry.tripTagId === tripTagId) {
+                return [
+                  entryRowKey,
+                  {
+                    ...entry,
+                    travelType: "",
+                    tripTagId: "",
+                    tripTagLabel: "",
+                    tripTagPhase: "",
+                  },
+                ];
+              }
+              if (monthKey === selectedMonthKey && entryRowKey === rowKey) {
+                return [
+                  entryRowKey,
+                  {
+                    ...entry,
+                    travelType: "",
+                    tripTagId: "",
+                    tripTagLabel: "",
+                    tripTagPhase: "",
+                  },
+                ];
+              }
+              return [entryRowKey, entry];
+            }),
+          ),
+        ]),
+      ),
+    }));
+  };
+
+  const createSingleDayTripTag = (rowKey: string, currentTripTagId: string) => {
+    const tripTagId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    setEditingTripTag((current) => (current?.tripTagId === currentTripTagId ? null : current));
+    updateStore((current) => ({
+      ...current,
+      entries: Object.fromEntries(
+        Object.entries(current.entries).map(([monthKey, monthEntries]) => [
+          monthKey,
+          Object.fromEntries(
+            Object.entries(monthEntries).map(([entryRowKey, entry]) => {
+              if (currentTripTagId && entry.tripTagId === currentTripTagId) {
+                return [
+                  entryRowKey,
+                  {
+                    ...entry,
+                    travelType: "",
+                    tripTagId: "",
+                    tripTagLabel: "",
+                    tripTagPhase: "",
+                  },
+                ];
+              }
+              if (monthKey === selectedMonthKey && entryRowKey === rowKey) {
+                return [
+                  entryRowKey,
+                  {
+                    ...entry,
+                    travelType: "당일출장",
+                    tripTagId,
+                    tripTagLabel: "당일출장",
+                    tripTagPhase: "",
+                  },
+                ];
+              }
+              return [entryRowKey, entry];
+            }),
           ),
         ]),
       ),
@@ -778,211 +718,6 @@ export function ScheduleAssignmentPage() {
     });
   };
 
-  const downloadXlsxTemplate = () => {
-    void (async () => {
-      const XLSX = await import("xlsx");
-      const rows = [
-        [...csvTemplateHeaders],
-        [
-          "2025-12",
-          "2025-12-03",
-          "홍길동",
-          "조근",
-          "07:30",
-          "16:10",
-          "국회 백브리핑|대통령실 브리핑",
-          "국내출장",
-          "0|1",
-          "1",
-          "현장 대응",
-          "base",
-        ],
-      ];
-      const worksheet = XLSX.utils.aoa_to_sheet(rows);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "schedule-assignment");
-      XLSX.writeFile(workbook, "schedule-assignment-template.xlsx");
-      setImportMessage({
-        tone: "note",
-        text: "XLSX 양식을 다운로드했습니다. monthKey,dateKey,name,duty는 반드시 채워 주세요.",
-      });
-    })();
-  };
-
-  const importParsedRows = (parsedRows: ParsedCsvRow[]) => {
-    if (parsedRows.length < 2) {
-      throw new Error("헤더와 데이터가 포함된 파일이 필요합니다.");
-    }
-
-    const headerMap = parsedRows[0].values.map((value) => normalizeHeader(value));
-    const validRows: ScheduleAssignmentImportRow[] = [];
-    const skippedMessages: string[] = [];
-
-    parsedRows.slice(1).forEach((row) => {
-      try {
-        validRows.push(parseScheduleAssignmentImportRow(row, headerMap));
-      } catch (error) {
-        skippedMessages.push(error instanceof Error ? error.message : `${row.lineNumber}행: 형식을 읽을 수 없습니다.`);
-      }
-    });
-
-    const createdMissingMonths = ensureImportedMonthsExist(validRows.map((row) => row.monthKey));
-    const nextSchedules = createdMissingMonths ? getTeamLeadSchedules() : schedules;
-    const scheduleMap = new Map(nextSchedules.map((schedule) => [schedule.monthKey, schedule] as const));
-
-    if (createdMissingMonths) {
-      setSchedules(nextSchedules);
-      setSelectedMonthKey((current) =>
-        nextSchedules.some((schedule) => schedule.monthKey === current)
-          ? current
-          : nextSchedules[0]?.monthKey || "",
-      );
-    }
-
-    let nextStore = store;
-    let importedCount = 0;
-
-    validRows.forEach((row) => {
-      try {
-        const monthSchedule = scheduleMap.get(row.monthKey);
-        if (!monthSchedule) {
-          throw new Error(`${row.dateKey}: 근무표가 없는 monthKey입니다. (${row.monthKey})`);
-        }
-
-        const day = monthSchedule.days.find((item) => item.dateKey === row.dateKey);
-        if (!day) {
-          throw new Error(`${row.dateKey}: 해당 날짜가 ${row.monthKey} 근무표에 없습니다.`);
-        }
-
-        const currentMonthRows = nextStore.rows[row.monthKey] ?? {};
-        const currentDayRows = currentMonthRows[row.dateKey] ?? createDefaultScheduleAssignmentDayRows();
-        const existingRows = getScheduleAssignmentRows(day, currentDayRows);
-        const normalizedName = row.name.trim();
-        const normalizedDuty = row.duty.trim();
-        const exactMatch = existingRows.find(
-          (item) => item.name.trim() === normalizedName && (!normalizedDuty || item.duty.trim() === normalizedDuty),
-        );
-        const sameNameRows = existingRows.filter((item) => item.name.trim() === normalizedName);
-
-        let targetRow = exactMatch ?? (sameNameRows.length === 1 && row.rowType !== "custom" ? sameNameRows[0] : null);
-        let nextDayRows = currentDayRows;
-
-        if (!targetRow) {
-          const customId = createCustomRowId();
-          nextDayRows = {
-            ...currentDayRows,
-            addedRows: [
-              ...currentDayRows.addedRows,
-              { id: customId, name: normalizedName, duty: normalizedDuty },
-            ],
-          };
-          targetRow = {
-            key: `${row.dateKey}::custom::${customId}`,
-            name: normalizedName,
-            duty: normalizedDuty,
-            isCustom: true,
-          };
-        } else if (!targetRow.isCustom && (normalizedName !== targetRow.name || (normalizedDuty && normalizedDuty !== targetRow.duty))) {
-          nextDayRows = {
-            ...currentDayRows,
-            rowOverrides: {
-              ...currentDayRows.rowOverrides,
-              [targetRow.key]: {
-                name: normalizedName,
-                duty: normalizedDuty || targetRow.duty,
-              },
-            },
-          };
-        }
-
-        const currentMonthEntries = nextStore.entries[row.monthKey] ?? {};
-        const currentEntry = currentMonthEntries[targetRow.key] ?? createDefaultScheduleAssignmentEntry();
-        const nextSchedules = row.schedules.length > 0 ? row.schedules : [""];
-        const nextExclusiveVideo = Array.from(
-          { length: Math.max(nextSchedules.length, 1) },
-          (_, index) => row.exclusiveVideoFlags[index] ?? false,
-        );
-
-        nextStore = {
-          entries: {
-            ...nextStore.entries,
-            [row.monthKey]: {
-              ...currentMonthEntries,
-              [targetRow.key]: {
-                ...currentEntry,
-                clockIn: row.clockIn,
-                clockInConfirmed: Boolean(row.clockIn),
-                clockInColor: row.clockIn ? currentEntry.clockInColor : "",
-                clockOut: row.clockOut,
-                clockOutConfirmed: Boolean(row.clockOut),
-                clockOutColor: row.clockOut ? (currentEntry.clockOutColor || "yellow") : "",
-                schedules: nextSchedules,
-                travelType: row.travelType,
-                exclusiveVideo: nextExclusiveVideo,
-                coverageScore: row.coverageScore,
-                coverageNote: row.coverageScore > 0 ? row.coverageNote : "",
-              },
-            },
-          },
-          rows: {
-            ...nextStore.rows,
-            [row.monthKey]: {
-              ...currentMonthRows,
-              [row.dateKey]: nextDayRows,
-            },
-          },
-        };
-        importedCount += 1;
-      } catch (error) {
-        skippedMessages.push(error instanceof Error ? error.message : `${row.dateKey}: 가져오지 못했습니다.`);
-      }
-    });
-
-    if (importedCount > 0) {
-      saveScheduleAssignmentStore(nextStore);
-      setStore(nextStore);
-    }
-
-    const skippedPreview = skippedMessages.slice(0, 3).join(" / ");
-    if (importedCount === 0) {
-      setImportMessage({
-        tone: "warn",
-        text: skippedMessages.length > 0
-          ? `반영된 행이 없습니다. 제외 ${skippedMessages.length}건. ${skippedPreview}`
-          : "반영된 행이 없습니다.",
-      });
-      return;
-    }
-
-    setImportMessage({
-      tone: skippedMessages.length > 0 ? "warn" : "ok",
-      text:
-        skippedMessages.length > 0
-          ? `${importedCount}건 반영, ${skippedMessages.length}건 제외했습니다. ${skippedPreview}`
-          : `${importedCount}건을 반영했습니다.`,
-    });
-  };
-
-  const handleSpreadsheetUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const lowerName = file.name.toLowerCase();
-      const parsedRows = lowerName.endsWith(".csv")
-        ? parseCsvRows(await file.text())
-        : await parseWorksheetRows(await file.arrayBuffer());
-      importParsedRows(parsedRows);
-    } catch (error) {
-      setImportMessage({
-        tone: "warn",
-        text: error instanceof Error ? error.message : "업로드 중 오류가 발생했습니다.",
-      });
-    } finally {
-      event.target.value = "";
-    }
-  };
-
   if (schedules.length === 0) {
     return <section className="panel"><div className="panel-pad"><div className="status note">게시되었거나 작성된 근무표가 없어 일정배정표를 만들 수 없습니다.</div></div></section>;
   }
@@ -997,19 +732,6 @@ export function ScheduleAssignmentPage() {
               <strong style={{ fontSize: 24 }}>월별 일정배정</strong>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <button type="button" className="btn" onClick={downloadXlsxTemplate}>
-                XLSX 양식
-              </button>
-              <button type="button" className="btn" onClick={() => fileInputRef.current?.click()}>
-                XLSX 업로드
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv,text/csv"
-                style={{ display: "none" }}
-                onChange={handleSpreadsheetUpload}
-              />
               {schedules.map((schedule) => (
                 <button key={schedule.monthKey} type="button" className={`btn ${selectedMonthKey === schedule.monthKey ? "white" : ""}`} onClick={() => setSelectedMonthKey(schedule.monthKey)}>
                   {schedule.year}년 {schedule.month}월
@@ -1185,6 +907,13 @@ export function ScheduleAssignmentPage() {
                         row.isCustom &&
                         !storedDayRows.addedRows.some((item) => item.id === getCustomRowIdFromKey(row.key));
                       const visibleTripTag = visibleTripTagMap.get(row.key) ?? null;
+                      const currentTripTagId = visibleTripTag?.tripTagId || entry.tripTagId;
+                      const currentTripTagLabel = visibleTripTag?.tripTagLabel || entry.tripTagLabel;
+                      const currentTripTravelType = visibleTripTag?.travelType || entry.travelType;
+                      const currentTripPhase = visibleTripTag?.phase ?? entry.tripTagPhase;
+                      const isEditingCurrentTripTag =
+                        editingTripTag?.rowKey === row.key &&
+                        editingTripTag.tripTagId === currentTripTagId;
 
                       return (
                         <tr key={row.key}>
@@ -1325,68 +1054,119 @@ export function ScheduleAssignmentPage() {
                             <div
                               style={{
                                 display: "grid",
-                                gridTemplateColumns: visibleTripTag || entry.travelType ? "150px minmax(0, 1fr)" : "minmax(0, 1fr)",
+                                gridTemplateColumns: visibleTripTag || entry.travelType ? "max-content minmax(0, 1fr)" : "minmax(0, 1fr)",
                                 gap: 8,
-                                minWidth: 460,
+                                minWidth: 560,
                                 alignItems: "start",
                               }}
                             >
-                              {visibleTripTag || entry.travelType ? (
-                                <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
-                                  {visibleTripTag ? (
+                              {visibleTripTag || entry.travelType || isEditingCurrentTripTag ? (
+                                <div style={{ display: "grid", gap: 4, alignContent: "start", alignSelf: "start", width: "fit-content", minHeight: 32 }}>
+                                  {visibleTripTag || isEditingCurrentTripTag ? (
                                     <>
-                                      <button
-                                        type="button"
-                                        className="btn"
-                                        disabled={isEditingPeople}
-                                        onClick={() => cycleTripTag(row, entry, visibleTripTag)}
-                                        style={{
-                                          padding: "7px 10px",
-                                          fontSize: 12,
-                                          borderRadius: 14,
-                                          textAlign: "left",
-                                          justifyContent: "flex-start",
-                                          borderColor:
-                                            visibleTripTag.phase === "return"
-                                              ? "rgba(250,204,21,.45)"
-                                              : visibleTripTag.phase === "departure"
-                                                ? "rgba(125,211,252,.45)"
-                                                : visibleTripTag.phase === "ongoing"
-                                                  ? "rgba(96,165,250,.45)"
-                                                  : "rgba(255,255,255,.16)",
-                                          background:
-                                            visibleTripTag.phase === "return"
-                                              ? "rgba(250,204,21,.16)"
-                                              : visibleTripTag.phase === "departure"
-                                                ? "rgba(56,189,248,.16)"
-                                                : visibleTripTag.phase === "ongoing"
-                                                  ? "rgba(59,130,246,.16)"
-                                                  : "rgba(255,255,255,.08)",
-                                          color: "#f8fbff",
-                                        }}
-                                      >
-                                        {visibleTripTag.tripTagLabel}
-                                        {tripPhaseLabels[visibleTripTag.phase] ? ` · ${tripPhaseLabels[visibleTripTag.phase]}` : ""}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="btn"
-                                        disabled={isEditingPeople}
-                                        style={{ padding: "4px 8px", fontSize: 11 }}
-                                        onClick={() => renameTripTag(visibleTripTag.tripTagId, visibleTripTag.tripTagLabel)}
-                                      >
-                                        태그명 수정
-                                      </button>
+                                      {isEditingCurrentTripTag ? (
+                                        <>
+                                          <input
+                                            className="field-input"
+                                            value={editingTripTag?.value ?? ""}
+                                            disabled={isEditingPeople}
+                                            style={{ minWidth: 0, width: 96, padding: "6px 8px", fontSize: 12, height: 32 }}
+                                            onChange={(event) =>
+                                              setEditingTripTag((current) =>
+                                                current?.tripTagId === currentTripTagId
+                                                  ? { ...current, value: event.target.value }
+                                                  : current,
+                                              )
+                                            }
+                                            onKeyDown={(event) => {
+                                              if (event.key === "Enter") {
+                                                event.preventDefault();
+                                                if (currentTripTagId) {
+                                                  saveTripTagLabel(currentTripTagId, editingTripTag?.value ?? "");
+                                                }
+                                              }
+                                              if (event.key === "Escape") {
+                                                event.preventDefault();
+                                                setEditingTripTag(null);
+                                              }
+                                            }}
+                                          />
+                                          <button
+                                            type="button"
+                                            className="btn"
+                                            disabled={isEditingPeople}
+                                            style={{ padding: "4px 6px", fontSize: 11, minWidth: 42 }}
+                                            onClick={() => {
+                                              if (currentTripTagId) {
+                                                saveTripTagLabel(currentTripTagId, editingTripTag?.value ?? "");
+                                              }
+                                            }}
+                                          >
+                                            확인
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="btn"
+                                            disabled={isEditingPeople}
+                                            onClick={() => {
+                                              if (!visibleTripTag) return;
+                                              if (visibleTripTag.travelType === "당일출장") return;
+                                              cycleTripTag(row, entry, visibleTripTag);
+                                            }}
+                                            style={{
+                                              padding: "7px 10px",
+                                              fontSize: 12,
+                                              borderRadius: 14,
+                                              textAlign: "left",
+                                              justifyContent: "flex-start",
+                                              ...getTripTagStyle(currentTripTravelType, currentTripPhase),
+                                              minWidth: 0,
+                                            }}
+                                          >
+                                            {currentTripTagLabel}
+                                            {currentTripTravelType !== "당일출장" && tripPhaseLabels[currentTripPhase]
+                                              ? ` · ${tripPhaseLabels[currentTripPhase]}`
+                                              : ""}
+                                          </button>
+                                          {currentTripTravelType !== "당일출장" ? (
+                                            <button
+                                              type="button"
+                                              className="btn"
+                                              disabled={isEditingPeople}
+                                              style={{ padding: "2px 6px", fontSize: 10, whiteSpace: "nowrap", width: "fit-content" }}
+                                              onClick={() => {
+                                                if (!currentTripTagId) return;
+                                                setEditingTripTag({ tripTagId: currentTripTagId, rowKey: row.key, value: currentTripTagLabel });
+                                              }}
+                                            >
+                                              수정
+                                            </button>
+                                          ) : null}
+                                        </>
+                                      )}
                                     </>
                                   ) : entry.travelType ? (
                                     <button
                                       type="button"
                                       className="btn"
                                       disabled={isEditingPeople}
-                                      style={{ padding: "6px 8px", fontSize: 11 }}
-                                      onClick={() => createTripTag(row.key, entry.travelType)}
+                                      style={{
+                                        padding: "6px 8px",
+                                        fontSize: 11,
+                                        borderRadius: 14,
+                                        ...getTripTagStyle(entry.travelType),
+                                      }}
+                                      onClick={() =>
+                                        createTripTag(row.key, entry.travelType, {
+                                          initialLabel: "",
+                                          startEditing: true,
+                                        })
+                                      }
                                     >
-                                      출장 생성
+                                      출장태그
                                     </button>
                                   ) : null}
                                 </div>
@@ -1426,7 +1206,24 @@ export function ScheduleAssignmentPage() {
                           </td>
                           <td style={{ padding: "4px 5px", textAlign: "center", verticalAlign: "middle" }}>{scheduleCount}</td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
-                            <select disabled={isEditingPeople} className="field-select" value={entry.travelType} style={{ minWidth: 118 }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, travelType: event.target.value as AssignmentTravelType }))}>
+                            <select
+                              disabled={isEditingPeople}
+                              className="field-select"
+                              value={entry.travelType}
+                              style={{ minWidth: 118 }}
+                              onChange={(event) => {
+                                const nextTravelType = event.target.value as AssignmentTravelType;
+                                if (!nextTravelType) {
+                                  clearTripTag(row.key, entry.tripTagId);
+                                  return;
+                                }
+                                if (nextTravelType === "당일출장") {
+                                  createSingleDayTripTag(row.key, entry.tripTagId);
+                                  return;
+                                }
+                                updateMonthEntry(row.key, (current) => ({ ...current, travelType: nextTravelType }));
+                              }}
+                            >
                               {travelOptions.map((option) => <option key={`${row.key}-${option.value || "default"}`} value={option.value}>{option.label}</option>)}
                             </select>
                           </td>

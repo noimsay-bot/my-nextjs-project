@@ -301,5 +301,6 @@ export const defaultScheduleState: ScheduleState = {
   currentUser: "",
   showMyWork: false,
   editDateKey: null,
+  editingMonthKey: null,
   selectedPerson: null,
 };

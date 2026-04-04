@@ -254,6 +254,7 @@ async function persistVacationStore(store: VacationStore) {
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
+  const canManageVacationMonths = session.role === "desk" || session.role === "admin";
 
   const supabase = await getPortalSupabaseClient();
   const sanitized = sanitizeVacationStore(store);
@@ -284,7 +285,9 @@ async function persistVacationStore(store: VacationStore) {
     await Promise.all([
       supabase.from("vacation_requests").select("id"),
       requestRows.length > 0 ? supabase.from("vacation_requests").upsert(requestRows) : Promise.resolve({ error: null }),
-      monthRows.length > 0 ? supabase.from("vacation_months").upsert(monthRows) : Promise.resolve({ error: null }),
+      canManageVacationMonths && monthRows.length > 0
+        ? supabase.from("vacation_months").upsert(monthRows)
+        : Promise.resolve({ error: null }),
     ]);
 
   if (requestSelectError) {

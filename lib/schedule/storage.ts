@@ -65,6 +65,7 @@ function buildSettingsState(state: ScheduleState): Partial<ScheduleState> {
     currentUser: state.currentUser,
     showMyWork: state.showMyWork,
     editDateKey: state.editDateKey,
+    editingMonthKey: state.editingMonthKey,
     selectedPerson: state.selectedPerson,
   };
 }

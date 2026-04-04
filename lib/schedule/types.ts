@@ -130,6 +130,7 @@ export interface ScheduleState {
   currentUser: string;
   showMyWork: boolean;
   editDateKey: string | null;
+  editingMonthKey: string | null;
   selectedPerson: SelectedPerson | null;
 }
 

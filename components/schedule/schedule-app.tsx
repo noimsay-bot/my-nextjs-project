@@ -290,6 +290,7 @@ export function ScheduleApp() {
   const session = getSession();
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
+  const activeEditMonthKey = state.editingMonthKey ?? state.generated?.monthKey ?? null;
 
   const loadState = async () => {
     try {
@@ -399,11 +400,11 @@ export function ScheduleApp() {
 
   useEffect(() => {
     if (!addPersonDialog) return;
-    if (state.generated?.monthKey === visibleMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
+    if (activeEditMonthKey === visibleMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
     setAddPersonDialog(null);
     setAddPersonName("");
     setAddPersonVacationType("연차");
-  }, [addPersonDialog, isAllDaysEditMode, state.editDateKey, state.generated?.monthKey, visibleMonthKey]);
+  }, [activeEditMonthKey, addPersonDialog, isAllDaysEditMode, state.editDateKey, visibleMonthKey]);
 
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
   const totalCount = uniquePeople.length;
@@ -627,6 +628,7 @@ export function ScheduleApp() {
           item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
         ),
         editDateKey: dateKey,
+        editingMonthKey: visibleScheduleClone.monthKey,
         selectedPerson: null,
       }),
     );
@@ -645,6 +647,7 @@ export function ScheduleApp() {
           item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
         ),
         editDateKey: ALL_DAYS_EDIT_KEY,
+        editingMonthKey: visibleScheduleClone.monthKey,
         selectedPerson: null,
       }),
     );
@@ -658,6 +661,7 @@ export function ScheduleApp() {
         backup ?? {
           ...current,
           editDateKey: null,
+          editingMonthKey: null,
           selectedPerson: null,
         },
       ),
@@ -673,6 +677,7 @@ export function ScheduleApp() {
       sanitizeScheduleState({
         ...current,
         editDateKey: null,
+        editingMonthKey: null,
         selectedPerson: null,
       }),
     );
@@ -755,7 +760,8 @@ export function ScheduleApp() {
         snapshots: Object.fromEntries(
           Object.entries(current.snapshots).filter(([monthKey]) => monthKey !== visibleSchedule.monthKey),
         ),
-        editDateKey: current.editDateKey && current.generated?.monthKey === visibleSchedule.monthKey ? null : current.editDateKey,
+        editDateKey: current.editingMonthKey === visibleSchedule.monthKey ? null : current.editDateKey,
+        editingMonthKey: current.editingMonthKey === visibleSchedule.monthKey ? null : current.editingMonthKey,
         selectedPerson: null,
       }),
     );
@@ -1272,8 +1278,9 @@ export function ScheduleApp() {
                   </div>
                 )})}
                 {visibleDays.map((day) => {
+                  const isEditingVisibleMonth = activeEditMonthKey === visibleSchedule.monthKey && isEditingDate;
                   const editMode =
-                    state.generated?.monthKey === visibleSchedule.monthKey &&
+                    isEditingVisibleMonth &&
                     (isAllDaysEditMode || state.editDateKey === day.dateKey);
                   const currentUser = state.currentUser.trim();
                   const editLocked = Boolean(state.editDateKey && !isAllDaysEditMode && state.editDateKey !== day.dateKey);
@@ -1412,9 +1419,9 @@ export function ScheduleApp() {
                         {visibleAssignments.map(([category, names]) => (
                           <article
                             key={`${day.dateKey}-${category}`}
-                            draggable={editMode && state.generated?.monthKey === visibleSchedule.monthKey}
+                            draggable={editMode && isEditingVisibleMonth}
                             onDragStart={(event) => {
-                              if (!editMode || state.generated?.monthKey !== visibleSchedule.monthKey) return;
+                              if (!editMode || !isEditingVisibleMonth) return;
                               event.dataTransfer.effectAllowed = "move";
                               event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "category", dateKey: day.dateKey, category }));
                             }}
@@ -1442,7 +1449,7 @@ export function ScheduleApp() {
                               borderRadius: 10,
                               padding: 6,
                               background: "rgba(9,17,30,.34)",
-                              cursor: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? "grab" : "default",
+                              cursor: editMode && isEditingVisibleMonth ? "grab" : "default",
                             }}
                           >
                             <div
@@ -1450,7 +1457,7 @@ export function ScheduleApp() {
                                 display: "grid",
                                 gridTemplateColumns: "44px minmax(0, 1fr)",
                                 columnGap: 8,
-                                rowGap: editMode && state.generated?.monthKey === visibleSchedule.monthKey ? 8 : 0,
+                                rowGap: editMode && isEditingVisibleMonth ? 8 : 0,
                                 alignItems: "stretch",
                               }}
                             >
@@ -1470,7 +1477,7 @@ export function ScheduleApp() {
                               >
                                 {getCategoryDisplayLabel(category)}
                               </strong>
-                              {editMode && state.generated?.monthKey === visibleSchedule.monthKey ? (
+                              {editMode && isEditingVisibleMonth ? (
                                 <div style={{ display: "grid", gap: 6, justifyItems: "end", gridColumn: 2, gridRow: 1 }}>
                                   <button
                                     className="btn"
@@ -1685,7 +1692,7 @@ export function ScheduleApp() {
                             </div>
                           </article>
                         ))}
-                        {editMode && state.generated?.monthKey === visibleSchedule.monthKey ? (
+                        {editMode && isEditingVisibleMonth ? (
                           <button className="btn" onClick={() => {
                             const label = window.prompt("추가칸 이름을 입력하세요", "추가칸");
                             if (label === null) return;

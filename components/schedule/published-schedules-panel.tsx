@@ -66,7 +66,8 @@ function getScheduleViewportMode() {
 }
 
 function shouldAutoFitScheduleViewport() {
-  return true;
+  if (typeof window === "undefined") return true;
+  return getScheduleViewportMode() === "desktop";
 }
 
 function isMobileScheduleViewport() {
@@ -722,14 +723,10 @@ export function PublishedSchedulesPanel() {
       );
 
       const containerWidth = scrollNode.clientWidth;
-      const containerTop = scrollNode.getBoundingClientRect().top;
-      const availableHeight = Math.max(0, window.innerHeight - containerTop - 16);
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const heightFitScale =
-        isMobileViewport && !isWideTouchDesktopViewport && availableHeight > 0 ? availableHeight / nextHeight : 1;
       const autoFitCap = 1;
       const nextFitScale = shouldAutoFitSchedule
-        ? Math.min(autoFitCap, Math.max(0.15, Math.min(widthFitScale, heightFitScale)))
+        ? Math.min(autoFitCap, Math.max(0.15, widthFitScale))
         : 1;
       setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
     };
@@ -925,7 +922,7 @@ export function PublishedSchedulesPanel() {
 
   return (
     <section
-      className={`panel schedule-published-panel--${viewportMode} ${viewportMode === "tablet" ? "schedule-published-panel--desktop" : viewportMode === "desktop" ? "schedule-published-panel--desktop" : ""}`}
+      className={`panel schedule-published-panel--${viewportMode} ${viewportMode === "desktop" ? "schedule-published-panel--desktop" : ""}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
@@ -1391,10 +1388,10 @@ export function PublishedSchedulesPanel() {
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
                 style={{
-                  overflowX: isMobileViewport ? "auto" : shouldAutoFitSchedule ? "hidden" : undefined,
-                  overflowY: isMobileViewport ? "auto" : shouldAutoFitSchedule ? "hidden" : undefined,
-                  touchAction: isMobileViewport ? "pan-x pan-y pinch-zoom" : undefined,
-                  WebkitOverflowScrolling: isMobileViewport ? "touch" : undefined,
+                  overflowX: viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
+                  overflowY: viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
+                  touchAction: viewportMode === "desktop" ? undefined : "pan-x pan-y pinch-zoom",
+                  WebkitOverflowScrolling: viewportMode === "desktop" ? undefined : "touch",
                 }}
               >
               <div

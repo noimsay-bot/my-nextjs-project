@@ -33,6 +33,12 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
 export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): ScheduleState {
   const base = cloneScheduleState(defaultScheduleState);
   if (!input) return base;
+  const editDateKey = input.editDateKey ?? null;
+  const editingMonthKey = editDateKey
+    ? typeof input.editingMonthKey === "string"
+      ? input.editingMonthKey
+      : input.generated?.monthKey ?? null
+    : null;
   const legacyOffPeople = Array.isArray(input.offPeople) ? input.offPeople : [];
   const nextOffByCategory = createEmptyOffByCategory();
   const nextOffExcludeByCategory = createEmptyOffByCategory();
@@ -91,7 +97,8 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     generatedHistory: input.generatedHistory ?? (input.generated ? [input.generated] : []),
     currentUser: input.currentUser ?? base.currentUser,
     showMyWork: Boolean(input.showMyWork),
-    editDateKey: input.editDateKey ?? null,
+    editDateKey,
+    editingMonthKey,
     selectedPerson: input.selectedPerson ?? null,
   };
 }

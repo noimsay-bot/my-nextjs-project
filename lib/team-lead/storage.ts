@@ -973,7 +973,9 @@ function buildScheduleAssignmentTripWorkspace(
       }
 
       const tripForDay =
-        explicitTrip?.phase === "departure" || explicitTrip?.phase === "ongoing"
+        explicitTrip?.travelType === "당일출장"
+          ? explicitTrip
+          : explicitTrip?.phase === "departure" || explicitTrip?.phase === "ongoing"
           ? activeTrip
           : activeTrip && visibleTrip && visibleTrip.tripTagId === activeTrip.tripTagId
             ? activeTrip
