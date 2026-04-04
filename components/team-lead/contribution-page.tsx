@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
+import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -71,6 +72,44 @@ function createEmptyCard(name: string): ContributionPersonCard {
     items: [],
     manualItems: [],
   };
+}
+
+function buildContributionPrintBody(cards: ContributionPersonCard[]) {
+  const rows = [...cards]
+    .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"))
+    .map(
+      (card, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeTeamLeadPrintHtml(card.name)}</strong></td>
+          <td>${formatScore(card.totalScore)}점</td>
+          <td>${formatScore(card.autoScore)}점</td>
+          <td>${formatScore(card.manualScore)}점</td>
+          <td>${formatScore(card.clockInScore)}점</td>
+          <td>${formatScore(card.clockOutScore)}점</td>
+          <td>${formatScore(card.coverageScore)}점</td>
+          <td>${card.itemCount}건</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <table class="team-lead-print-table">
+      <thead>
+        <tr>
+          <th>순위</th>
+          <th>이름</th>
+          <th>총점</th>
+          <th>자동합계</th>
+          <th>추가합계</th>
+          <th>출근</th>
+          <th>퇴근</th>
+          <th>가점</th>
+          <th>자동반영 건수</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 function getHiddenContributionCardNames() {
@@ -195,12 +234,31 @@ export function ContributionPage() {
     });
   };
 
+  const handlePrint = () => {
+    const ok = printTeamLeadDocument("팀 기여도", [
+      {
+        title: "팀 기여도",
+        bodyHtml: buildContributionPrintBody(cards),
+        size: "dense",
+      },
+    ]);
+
+    if (!ok) {
+      setMessage({ tone: "warn", text: "인쇄 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    }
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
-          <div className="chip">기여도</div>
-          <strong style={{ fontSize: 24 }}>기여도 점수</strong>
+          <div className="chip">팀 기여도</div>
+          <strong style={{ fontSize: 24 }}>팀 기여도</strong>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn" onClick={handlePrint} disabled={cards.length === 0}>
+              인쇄
+            </button>
+          </div>
           <div className="status note">
             기준 기간은 {period.startLabel}부터 {period.endLabel}까지입니다. 자동 점수는 일정배정의
             출근/퇴근 시간과 가점을 합산해 반영합니다.

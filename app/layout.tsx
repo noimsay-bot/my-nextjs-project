@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { PortalShell } from "@/components/portal-shell";
+import { ThemeScript } from "@/components/theme/theme-script";
 
 export const metadata: Metadata = {
   title: "JTBC 영상취재팀 포털",
@@ -18,7 +19,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ko">
+    <html lang="ko" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body>
         <AuthGate>
           <PortalShell>{children}</PortalShell>

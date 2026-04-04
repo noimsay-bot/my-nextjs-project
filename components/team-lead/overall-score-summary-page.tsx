@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
+import { escapeTeamLeadPrintHtml, printTeamLeadDocument, TeamLeadPrintPage } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -34,6 +35,153 @@ function formatPercent(score: number) {
 function averageOf(cards: TeamLeadOverallScoreCard[], selector: (card: TeamLeadOverallScoreCard) => number) {
   if (cards.length === 0) return 0;
   return cards.reduce((sum, card) => sum + selector(card), 0) / cards.length;
+}
+
+function buildOverallRankingPrintPage(cards: TeamLeadOverallScoreCard[]) {
+  const rows = [...cards]
+    .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"))
+    .map(
+      (card, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeTeamLeadPrintHtml(card.name)}</strong></td>
+          <td>${formatScore(card.totalScore)}점</td>
+          <td>${formatScore(card.finalCutScore)}점</td>
+          <td>${formatScore(card.videoReviewScore)}점</td>
+          <td>${formatScore(card.contributionScore)}점</td>
+          <td>${formatScore(card.broadcastAccidentScore)}점</td>
+          <td>${formatScore(card.liveSafetyScore)}점</td>
+        </tr>`,
+    )
+    .join("");
+
+  return {
+    title: "종합점수",
+    bodyHtml: `
+      <table class="team-lead-print-table">
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>이름</th>
+            <th>총점</th>
+            <th>정제본</th>
+            <th>영상평가</th>
+            <th>팀 기여도</th>
+            <th>장비/인적 사고</th>
+            <th>라이브 무사고</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`,
+    size: "dense",
+  } satisfies TeamLeadPrintPage;
+}
+
+function buildWeightedPrintPage(
+  title: string,
+  rows: TeamLeadWeightedQuarterSummaryRow[],
+  midLabel: string,
+  getMidValue: (row: TeamLeadWeightedQuarterSummaryRow) => number,
+) {
+  const bodyRows = rows
+    .map(
+      (row, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeTeamLeadPrintHtml(row.name)}</strong></td>
+          <td>${formatScore(row.quarterScores[0]?.score ?? 0)}</td>
+          <td>${formatScore(row.quarterScores[1]?.score ?? 0)}</td>
+          <td>${formatScore(getMidValue(row))}</td>
+          <td>${formatScore(row.quarterScores[2]?.score ?? 0)}</td>
+          <td>${formatScore(row.quarterScores[3]?.score ?? 0)}</td>
+          <td>${formatScore(row.totalScore)}</td>
+          <td>${formatScore(row.convertedScore)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return {
+    title,
+    bodyHtml: `
+      <table class="team-lead-print-table">
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>이름</th>
+            <th>12-2월</th>
+            <th>3-5월</th>
+            <th>${escapeTeamLeadPrintHtml(midLabel)}</th>
+            <th>6-8월</th>
+            <th>9-11월</th>
+            <th>합산</th>
+            <th>환산</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>`,
+    size: "dense",
+  } satisfies TeamLeadPrintPage;
+}
+
+function buildFinalCutPrintPage(rows: TeamLeadFinalCutSummaryRow[]) {
+  const bodyRows = rows
+    .map((row, index) => {
+      const halfItemCount = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.itemCount, 0);
+      const halfEarnedScore = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.earnedScore, 0);
+      const halfRate = halfItemCount > 0 ? (halfEarnedScore / halfItemCount) * 100 : 0;
+
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeTeamLeadPrintHtml(row.name)}</strong></td>
+          <td>${row.quarterScores[0]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[0]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[0]?.ratePercent ?? 0)}</td>
+          <td>${row.quarterScores[1]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[1]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[1]?.ratePercent ?? 0)}</td>
+          <td>${formatPercent(halfRate)}</td>
+          <td>${row.quarterScores[2]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[2]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[2]?.ratePercent ?? 0)}</td>
+          <td>${row.quarterScores[3]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[3]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[3]?.ratePercent ?? 0)}</td>
+          <td>${formatPercent(row.overallRatePercent)}</td>
+          <td>${formatScore(row.convertedScore)}</td>
+        </tr>`;
+    })
+    .join("");
+
+  return {
+    title: "정제본 제작",
+    bodyHtml: `
+      <table class="team-lead-print-table">
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>이름</th>
+            <th>12-2 일정수</th>
+            <th>12-2 정제본</th>
+            <th>12-2 수행률</th>
+            <th>3-5 일정수</th>
+            <th>3-5 정제본</th>
+            <th>3-5 수행률</th>
+            <th>중간 합계</th>
+            <th>6-8 일정수</th>
+            <th>6-8 정제본</th>
+            <th>6-8 수행률</th>
+            <th>9-11 일정수</th>
+            <th>9-11 정제본</th>
+            <th>9-11 수행률</th>
+            <th>전체수행률</th>
+            <th>10%환산</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>`,
+    size: "compact",
+  } satisfies TeamLeadPrintPage;
 }
 
 function WeightedQuarterSummaryTable({
@@ -261,12 +409,30 @@ export function OverallScoreSummaryPage() {
     [cards],
   );
 
+  const handlePrint = () => {
+    const ok = printTeamLeadDocument("종합점수", [
+      buildOverallRankingPrintPage(ranking),
+      buildWeightedPrintPage("영상평가", videoReviewRows, "중간 합계", (row) => ((row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)) * 0.2),
+      buildWeightedPrintPage("팀 기여도", contributionRows, "중간 합계", (row) => (row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)),
+      buildFinalCutPrintPage(finalCutRows),
+    ]);
+
+    if (!ok) {
+      setMessage({ tone: "warn", text: "인쇄 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    }
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">종합점수</div>
           <strong style={{ fontSize: 24 }}>종합점수</strong>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn" onClick={handlePrint} disabled={cards.length === 0}>
+              인쇄
+            </button>
+          </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
@@ -282,7 +448,7 @@ export function OverallScoreSummaryPage() {
           { label: "전체 평균", value: averages.total },
           { label: "정제본 평균", value: averages.finalCut },
           { label: "평가 평균", value: averages.review },
-          { label: "기여도 평균", value: averages.contribution },
+          { label: "팀 기여도 평균", value: averages.contribution },
           { label: "사고 점수 평균", value: averages.accident },
           { label: "LIVE 평균", value: averages.liveSafety },
         ].map((item) => (
@@ -338,7 +504,7 @@ export function OverallScoreSummaryPage() {
             <table className="team-lead-summary-table" style={{ width: "100%", minWidth: 840, borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  {["순위", "이름", "총점", "정제본", "평가 평균", "기여도", "장비/인적 사고", "LIVE 무사고"].map((label) => (
+                  {["순위", "이름", "총점", "정제본", "평가 평균", "팀 기여도", "장비/인적 사고", "라이브 무사고"].map((label) => (
                     <th
                       key={label}
                       style={{
@@ -383,8 +549,8 @@ export function OverallScoreSummaryPage() {
       />
 
       <WeightedQuarterSummaryTable
-        title="참여/기여도"
-        groupLabel="참여/기여도"
+        title="팀 기여도"
+        groupLabel="팀 기여도"
         weightLabel="30%환산"
         midLabel="중간 합계"
         getMidValue={(row) => (row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)}

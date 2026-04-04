@@ -29,10 +29,7 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const MOBILE_VIEWPORT_MAX = 720;
-const TOUCH_DESKTOP_SHORT_EDGE_MIN = 760;
-const MOBILE_SCHEDULE_ZOOM_MIN = 1;
-const MOBILE_SCHEDULE_ZOOM_MAX = 4;
-const MOBILE_SCHEDULE_ZOOM_STEP = 0.25;
+const TOUCH_DESKTOP_SHORT_EDGE_MIN = 680;
 const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 
 function getWeekdayLabel(dow: number) {
@@ -50,8 +47,11 @@ function shouldUseDesktopScheduleLayoutOnTouch() {
   if (typeof window === "undefined") return false;
   const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   if (!isCoarsePointer) return false;
-  const viewportShortEdge = Math.min(window.innerWidth, window.innerHeight);
-  return viewportShortEdge >= TOUCH_DESKTOP_SHORT_EDGE_MIN;
+  const deviceShortEdge = Math.min(
+    Math.max(window.innerWidth, window.screen.width),
+    Math.max(window.innerHeight, window.screen.height),
+  );
+  return deviceShortEdge >= TOUCH_DESKTOP_SHORT_EDGE_MIN;
 }
 
 function shouldAutoFitScheduleViewport() {
@@ -60,8 +60,8 @@ function shouldAutoFitScheduleViewport() {
 
 function isMobileScheduleViewport() {
   if (typeof window === "undefined") return false;
-  if (window.innerWidth <= MOBILE_VIEWPORT_MAX) return true;
   if (shouldUseDesktopScheduleLayoutOnTouch()) return false;
+  if (window.innerWidth <= MOBILE_VIEWPORT_MAX) return true;
   if (isHandheldPhoneDevice()) return true;
   const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   const screenShortEdge = Math.min(window.innerWidth, window.innerHeight, window.screen.width, window.screen.height);
@@ -504,7 +504,6 @@ export function PublishedSchedulesPanel() {
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [shouldAutoFitSchedule, setShouldAutoFitSchedule] = useState(false);
-  const [mobileZoomFactor, setMobileZoomFactor] = useState(1);
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
@@ -691,7 +690,7 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const appliedScheduleScale = (shouldAutoFitSchedule ? scheduleScale : 1) * (isMobileViewport ? mobileZoomFactor : 1);
+  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
 
@@ -1000,32 +999,6 @@ export function PublishedSchedulesPanel() {
           <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 {routeScopeLabel} 전체에서 미래 날짜 근무를 요청 경로에 넣을 수 있습니다.</div>
         ) : null}
         {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
-
-        {isMobileViewport ? (
-          <div className="schedule-toolbar">
-            <div className="schedule-toolbar-actions">
-              <span className="muted">배율</span>
-              <button
-                className="btn"
-                disabled={mobileZoomFactor <= MOBILE_SCHEDULE_ZOOM_MIN}
-                onClick={() => setMobileZoomFactor((current) => Math.max(MOBILE_SCHEDULE_ZOOM_MIN, Number((current - MOBILE_SCHEDULE_ZOOM_STEP).toFixed(2))))}
-              >
-                축소
-              </button>
-              <button className="btn" onClick={() => setMobileZoomFactor(1)}>
-                맞춤
-              </button>
-              <button
-                className="btn"
-                disabled={mobileZoomFactor >= MOBILE_SCHEDULE_ZOOM_MAX}
-                onClick={() => setMobileZoomFactor((current) => Math.min(MOBILE_SCHEDULE_ZOOM_MAX, Number((current + MOBILE_SCHEDULE_ZOOM_STEP).toFixed(2))))}
-              >
-                확대
-              </button>
-              <span className="muted" style={{ fontWeight: 800 }}>{Math.round(appliedScheduleScale * 100)}%</span>
-            </div>
-          </div>
-        ) : null}
 
         {isMobileViewport ? (
           <div className="schedule-toolbar">

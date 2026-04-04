@@ -14,6 +14,7 @@ import {
 
 export type AssignmentTimeColor = "" | "red" | "blue" | "yellow";
 export type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
+export type AssignmentTripTagPhase = "" | "departure" | "ongoing" | "return";
 
 export interface ScheduleAssignmentEntry {
   clockIn: string;
@@ -24,6 +25,9 @@ export interface ScheduleAssignmentEntry {
   clockOutConfirmed: boolean;
   schedules: string[];
   travelType: AssignmentTravelType;
+  tripTagId: string;
+  tripTagLabel: string;
+  tripTagPhase: AssignmentTripTagPhase;
   exclusiveVideo: boolean[];
   coverageScore: number;
   coverageNote: string;
@@ -48,16 +52,28 @@ export interface ScheduleAssignmentRowOverride {
 }
 
 export interface TeamLeadTripItem {
-  monthKey: string;
-  dateKey: string;
-  duty: string;
+  tripTagId: string;
+  tripTagLabel: string;
   travelType: AssignmentTravelType;
+  startDateKey: string;
+  endDateKey: string;
+  dayCount: number;
+  dateKeys: string[];
+  duties: string[];
   schedules: string[];
 }
 
 export interface TeamLeadTripPersonCard {
   name: string;
   items: TeamLeadTripItem[];
+}
+
+export interface ScheduleAssignmentVisibleTripTag {
+  tripTagId: string;
+  tripTagLabel: string;
+  travelType: AssignmentTravelType;
+  phase: AssignmentTripTagPhase;
+  isInherited: boolean;
 }
 
 export interface ContributionPeriod {
@@ -183,6 +199,9 @@ export function createDefaultScheduleAssignmentEntry(): ScheduleAssignmentEntry 
     clockOutConfirmed: false,
     schedules: [""],
     travelType: "",
+    tripTagId: "",
+    tripTagLabel: "",
+    tripTagPhase: "",
     exclusiveVideo: [false],
     coverageScore: 0,
     coverageNote: "",
@@ -226,6 +245,12 @@ function normalizeScheduleAssignmentEntry(
     clockOutConfirmed: entry?.clockOutConfirmed ?? Boolean(clockOut),
     schedules,
     travelType: entry?.travelType ?? defaultEntry.travelType,
+    tripTagId: typeof entry?.tripTagId === "string" ? entry.tripTagId.trim() : "",
+    tripTagLabel: typeof entry?.tripTagLabel === "string" ? entry.tripTagLabel.trim() : "",
+    tripTagPhase:
+      entry?.tripTagPhase === "departure" || entry?.tripTagPhase === "ongoing" || entry?.tripTagPhase === "return"
+        ? entry.tripTagPhase
+        : "",
     exclusiveVideo,
     coverageScore: [0, 0.5, 1, 2].includes(Number(entry?.coverageScore)) ? Number(entry?.coverageScore) : 0,
     coverageNote: typeof entry?.coverageNote === "string" ? entry.coverageNote : "",
@@ -796,10 +821,39 @@ export function getScheduleAssignmentRows(
   return [...baseRows, ...addedRows] satisfies ScheduleAssignmentRow[];
 }
 
-export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
-  const schedules = getTeamLeadSchedules();
-  const store = getScheduleAssignmentStore();
-  const personMap = new Map<string, TeamLeadTripItem[]>();
+interface TripTimelineRow {
+  personName: string;
+  rowKey: string;
+  dateKey: string;
+  duty: string;
+  entry: ScheduleAssignmentEntry;
+}
+
+interface ActiveTripState {
+  tripTagId: string;
+  tripTagLabel: string;
+  travelType: AssignmentTravelType;
+}
+
+interface TripAggregateBuilder {
+  tripTagId: string;
+  tripTagLabel: string;
+  travelType: AssignmentTravelType;
+  startDateKey: string;
+  endDateKey: string;
+  dateKeys: string[];
+  dateKeySet: Set<string>;
+  duties: string[];
+  dutySet: Set<string>;
+  schedules: string[];
+  scheduleSet: Set<string>;
+}
+
+function buildTripTimelineRows(
+  schedules: GeneratedSchedule[],
+  store: ScheduleAssignmentDataStore,
+) {
+  const timelineMap = new Map<string, TripTimelineRow[]>();
 
   schedules.forEach((monthSchedule) => {
     const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
@@ -807,36 +861,189 @@ export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
 
     monthSchedule.days
       .filter((day) => day.month === monthSchedule.month)
+      .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
       .forEach((day) => {
         const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows());
         rows.forEach((row) => {
-          const entry = monthEntries[row.key];
-          if (!entry || !travelTypes.includes(entry.travelType)) return;
-
           const personName = row.name.trim();
           if (!personName) return;
 
-          const tripItem: TeamLeadTripItem = {
-            monthKey: monthSchedule.monthKey,
+          const entry = monthEntries[row.key] ?? createDefaultScheduleAssignmentEntry();
+          const current = timelineMap.get(personName) ?? [];
+          current.push({
+            personName,
+            rowKey: row.key,
             dateKey: day.dateKey,
             duty: row.duty,
-            travelType: entry.travelType,
-            schedules: entry.schedules.map((item) => item.trim()).filter(Boolean),
-          };
-
-          const current = personMap.get(personName) ?? [];
-          current.push(tripItem);
-          personMap.set(personName, current);
+            entry,
+          });
+          timelineMap.set(personName, current);
         });
       });
   });
 
-  return Array.from(personMap.entries())
-    .map(([name, items]) => ({
+  timelineMap.forEach((rows, personName) => {
+    timelineMap.set(
+      personName,
+      [...rows].sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.rowKey.localeCompare(right.rowKey)),
+    );
+  });
+
+  return timelineMap;
+}
+
+function addTripAggregateDay(builder: TripAggregateBuilder, row: TripTimelineRow) {
+  if (!builder.dateKeySet.has(row.dateKey)) {
+    builder.dateKeySet.add(row.dateKey);
+    builder.dateKeys.push(row.dateKey);
+    builder.startDateKey = builder.startDateKey <= row.dateKey ? builder.startDateKey : row.dateKey;
+    builder.endDateKey = builder.endDateKey >= row.dateKey ? builder.endDateKey : row.dateKey;
+  }
+
+  const duty = row.duty.trim();
+  if (duty && !builder.dutySet.has(duty)) {
+    builder.dutySet.add(duty);
+    builder.duties.push(duty);
+  }
+
+  row.entry.schedules
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((schedule) => {
+      if (builder.scheduleSet.has(schedule)) return;
+      builder.scheduleSet.add(schedule);
+      builder.schedules.push(schedule);
+    });
+}
+
+function finalizeTripAggregate(builder: TripAggregateBuilder): TeamLeadTripItem {
+  return {
+    tripTagId: builder.tripTagId,
+    tripTagLabel: builder.tripTagLabel,
+    travelType: builder.travelType,
+    startDateKey: builder.startDateKey,
+    endDateKey: builder.endDateKey,
+    dayCount: builder.dateKeys.length,
+    dateKeys: [...builder.dateKeys],
+    duties: [...builder.duties],
+    schedules: [...builder.schedules],
+  };
+}
+
+function buildScheduleAssignmentTripWorkspace(
+  schedules: GeneratedSchedule[] = getTeamLeadSchedules(),
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+) {
+  const visibleTripTagMap = new Map<string, ScheduleAssignmentVisibleTripTag>();
+  const personTripBuilderMap = new Map<string, Map<string, TripAggregateBuilder>>();
+  const timelineMap = buildTripTimelineRows(schedules, store);
+
+  timelineMap.forEach((rows, personName) => {
+    let activeTrip: ActiveTripState | null = null;
+
+    rows.forEach((row) => {
+      const explicitTrip: ScheduleAssignmentVisibleTripTag | null =
+        row.entry.tripTagId && row.entry.tripTagLabel
+          ? {
+              tripTagId: row.entry.tripTagId,
+              tripTagLabel: row.entry.tripTagLabel,
+              travelType: (row.entry.travelType || activeTrip?.travelType || "") as AssignmentTravelType,
+              phase: row.entry.tripTagPhase,
+              isInherited: false,
+            }
+          : null;
+
+      const visibleTrip: ScheduleAssignmentVisibleTripTag | null = explicitTrip ?? (activeTrip
+        ? {
+            tripTagId: activeTrip.tripTagId,
+            tripTagLabel: activeTrip.tripTagLabel,
+            travelType: activeTrip.travelType,
+            phase: "" as AssignmentTripTagPhase,
+            isInherited: true,
+          }
+        : null);
+
+      if (visibleTrip) {
+        visibleTripTagMap.set(row.rowKey, visibleTrip);
+      }
+
+      if (explicitTrip?.phase === "departure" || (explicitTrip?.phase === "ongoing" && !activeTrip)) {
+        activeTrip = {
+          tripTagId: explicitTrip.tripTagId,
+          tripTagLabel: explicitTrip.tripTagLabel,
+          travelType: explicitTrip.travelType,
+        };
+      } else if (activeTrip && explicitTrip && explicitTrip.tripTagId === activeTrip.tripTagId) {
+        activeTrip = {
+          tripTagId: activeTrip.tripTagId,
+          tripTagLabel: explicitTrip.tripTagLabel,
+          travelType: explicitTrip.travelType || activeTrip.travelType,
+        };
+      }
+
+      const tripForDay =
+        explicitTrip?.phase === "departure" || explicitTrip?.phase === "ongoing"
+          ? activeTrip
+          : activeTrip && visibleTrip && visibleTrip.tripTagId === activeTrip.tripTagId
+            ? activeTrip
+            : null;
+
+      if (tripForDay && tripForDay.travelType) {
+        const personTrips = personTripBuilderMap.get(personName) ?? new Map<string, TripAggregateBuilder>();
+        const currentBuilder = personTrips.get(tripForDay.tripTagId) ?? {
+          tripTagId: tripForDay.tripTagId,
+          tripTagLabel: tripForDay.tripTagLabel,
+          travelType: tripForDay.travelType,
+          startDateKey: row.dateKey,
+          endDateKey: row.dateKey,
+          dateKeys: [],
+          dateKeySet: new Set<string>(),
+          duties: [],
+          dutySet: new Set<string>(),
+          schedules: [],
+          scheduleSet: new Set<string>(),
+        };
+
+        currentBuilder.tripTagLabel = tripForDay.tripTagLabel;
+        currentBuilder.travelType = tripForDay.travelType;
+        addTripAggregateDay(currentBuilder, row);
+        personTrips.set(tripForDay.tripTagId, currentBuilder);
+        personTripBuilderMap.set(personName, personTrips);
+      }
+
+      if (explicitTrip?.phase === "return" && activeTrip && explicitTrip.tripTagId === activeTrip.tripTagId) {
+        activeTrip = null;
+      }
+    });
+  });
+
+  const tripCards = Array.from(personTripBuilderMap.entries())
+    .map(([name, tripMap]) => ({
       name,
-      items: [...items].sort((left, right) => left.dateKey.localeCompare(right.dateKey)),
+      items: Array.from(tripMap.values())
+        .map((builder) => finalizeTripAggregate(builder))
+        .sort((left, right) => left.startDateKey.localeCompare(right.startDateKey)),
     }))
     .sort((left, right) => left.name.localeCompare(right.name, "ko"));
+
+  return {
+    visibleTripTagMap,
+    tripCards,
+  };
+}
+
+export function getScheduleAssignmentVisibleTripTagMap() {
+  return buildScheduleAssignmentTripWorkspace().visibleTripTagMap;
+}
+
+export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
+  const allowedTypes = new Set(travelTypes);
+  return buildScheduleAssignmentTripWorkspace().tripCards
+    .map((card) => ({
+      name: card.name,
+      items: card.items.filter((item) => allowedTypes.has(item.travelType)),
+    }))
+    .filter((card) => card.items.length > 0);
 }
 
 export function getFinalCutCards(monthKey?: string) {

@@ -20,10 +20,19 @@ const links = [
   { href: "/admin", label: "관리자" },
 ];
 
+type PortalTheme = "dark" | "light";
+const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
+
+function readStoredTheme(): PortalTheme {
+  if (typeof window === "undefined") return "dark";
+  return window.localStorage.getItem(PORTAL_THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+}
+
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLogin = pathname === "/login";
   const [session, setSession] = useState(() => getSession());
+  const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
 
   useEffect(() => {
     let mounted = true;
@@ -38,6 +47,12 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(PORTAL_THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   const visibleLinks = useMemo(() => {
     switch (session?.role) {
@@ -121,6 +136,22 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                 ))}
               </nav>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
+                  <button
+                    type="button"
+                    className={`theme-toggle__button ${theme === "light" ? "theme-toggle__button--active" : ""}`}
+                    onClick={() => setTheme("light")}
+                  >
+                    라이트
+                  </button>
+                  <button
+                    type="button"
+                    className={`theme-toggle__button ${theme === "dark" ? "theme-toggle__button--active" : ""}`}
+                    onClick={() => setTheme("dark")}
+                  >
+                    다크
+                  </button>
+                </div>
                 <span className="muted">
                   {session?.username} / {session?.role}
                 </span>

@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -66,6 +67,38 @@ function normalizeScore(value: string) {
 
 function getCards(category: TeamLeadManualScoreCategory) {
   return category === "broadcastAccident" ? getBroadcastAccidentCards() : getLiveSafetyCards();
+}
+
+function buildManualScorePrintBody(cards: TeamLeadManualScoreCard[]) {
+  const rows = [...cards]
+    .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"))
+    .map(
+      (card, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeTeamLeadPrintHtml(card.name)}</strong></td>
+          <td>${formatScore(card.baseScore)}점</td>
+          <td>${formatScore(card.manualScore)}점</td>
+          <td>${formatScore(card.totalScore)}점</td>
+          <td>${card.items.length}건</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <table class="team-lead-print-table">
+      <thead>
+        <tr>
+          <th>순위</th>
+          <th>이름</th>
+          <th>기본점수</th>
+          <th>가감점수</th>
+          <th>총점</th>
+          <th>항목수</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 export function ManualScoreBoardPage({
@@ -167,12 +200,31 @@ export function ManualScoreBoardPage({
     });
   };
 
+  const handlePrint = () => {
+    const ok = printTeamLeadDocument(title, [
+      {
+        title,
+        bodyHtml: buildManualScorePrintBody(cards),
+        size: "dense",
+      },
+    ]);
+
+    if (!ok) {
+      setMessage({ tone: "warn", text: "인쇄 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    }
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">{title}</div>
           <strong style={{ fontSize: 24 }}>{title}</strong>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn" onClick={handlePrint} disabled={cards.length === 0}>
+              인쇄
+            </button>
+          </div>
           <div className="status note">
             {description} 기본점수는 {TEAM_LEAD_SCORE_BASE}점이고, 카드 안에서 사유별로 플러스/마이너스 점수를 직접 입력합니다.
           </div>

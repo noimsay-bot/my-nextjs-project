@@ -19,6 +19,12 @@ function travelTypeLabel(value: AssignmentTravelType) {
   return "";
 }
 
+function formatTripRange(startDateKey: string, endDateKey: string) {
+  if (!startDateKey) return "";
+  if (startDateKey === endDateKey) return startDateKey;
+  return `${startDateKey} ~ ${endDateKey}`;
+}
+
 export function TripBoardPage({
   title,
   travelTypes,
@@ -99,14 +105,16 @@ export function TripBoardPage({
               <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <strong style={{ fontSize: 20 }}>{card.name}</strong>
-                  <span className="muted">{card.items.length}건</span>
+                  <span className="muted">
+                    {card.items.length}건 / {card.items.reduce((sum, item) => sum + item.dayCount, 0)}일
+                  </span>
                 </div>
 
                 {card.items.length > 0 ? (
                   <div style={{ display: "grid", gap: 10 }}>
                     {card.items.map((item) => (
                       <div
-                        key={`${card.name}-${item.dateKey}-${item.duty}-${item.travelType}`}
+                        key={`${card.name}-${item.tripTagId}`}
                         style={{
                           display: "grid",
                           gap: 6,
@@ -117,7 +125,7 @@ export function TripBoardPage({
                         }}
                       >
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                          <strong>{item.dateKey}</strong>
+                          <strong>{item.tripTagLabel || "출장명 없음"}</strong>
                           <span
                             style={{
                               padding: "3px 8px",
@@ -141,11 +149,16 @@ export function TripBoardPage({
                             {travelTypeLabel(item.travelType)}
                           </span>
                         </div>
-                        <div className="muted">{item.duty || "근무유형 미입력"}</div>
+                        <div className="muted">
+                          {formatTripRange(item.startDateKey, item.endDateKey)} / {item.dayCount}일
+                        </div>
+                        <div className="muted">
+                          {item.duties.length > 0 ? item.duties.join(", ") : "근무유형 미입력"}
+                        </div>
                         <div style={{ display: "grid", gap: 4 }}>
                           {item.schedules.length > 0 ? (
                             item.schedules.map((schedule, index) => (
-                              <div key={`${item.dateKey}-schedule-${index}`}>{schedule}</div>
+                              <div key={`${item.tripTagId}-schedule-${index}`}>{schedule}</div>
                             ))
                           ) : (
                             <div className="muted">일정 내용 없음</div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { subscribeToReviewWorkspaceChanges } from "@/lib/portal/data";
+import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { refreshScoreboardState } from "@/lib/team-lead/scoreboard";
 import {
   getTeamLeadBestReportResultsWorkspace,
@@ -15,6 +16,45 @@ import {
 function formatScore(score: number | null) {
   if (score === null) return "-";
   return `${score.toFixed(1)}점`;
+}
+
+function buildBestReportPrintBody(reviewers: TeamLeadBestReportReviewer[], rows: TeamLeadBestReportResultsRow[]) {
+  const headerCells = reviewers
+    .map((reviewer) => `<th>${escapeTeamLeadPrintHtml(reviewer.name)}</th>`)
+    .join("");
+
+  const bodyRows = rows
+    .map((row) => {
+      const reviewerCells = row.reviewerScores
+        .map(
+          (score) => `
+            <td>
+              <strong>${escapeTeamLeadPrintHtml(formatScore(score.score))}</strong><br />
+              <span>${escapeTeamLeadPrintHtml(score.reportCount > 0 ? `${score.reportCount}건` : "-")}</span>
+            </td>`,
+        )
+        .join("");
+
+      return `
+        <tr>
+          <td><strong>${escapeTeamLeadPrintHtml(row.authorName)}</strong></td>
+          ${reviewerCells}
+          <td><strong>${escapeTeamLeadPrintHtml(formatScore(row.trimmedAverage))}</strong></td>
+        </tr>`;
+    })
+    .join("");
+
+  return `
+    <table class="team-lead-print-table">
+      <thead>
+        <tr>
+          <th>피평가자</th>
+          ${headerCells}
+          <th>최고/최저 제외 평균</th>
+        </tr>
+      </thead>
+      <tbody>${bodyRows}</tbody>
+    </table>`;
 }
 
 export function BestReportResultsPage() {
@@ -48,7 +88,7 @@ export function BestReportResultsPage() {
     } catch (error) {
       setMessage({
         tone: "warn",
-        text: error instanceof Error ? error.message : "베스트리포트 평가 결과를 불러오지 못했습니다.",
+        text: error instanceof Error ? error.message : "영상평가 결과를 불러오지 못했습니다.",
       });
     } finally {
       setLoading(false);
@@ -132,6 +172,19 @@ export function BestReportResultsPage() {
   );
 
   const canSaveQuarter = selectedResultKey === "current" && completedRowCount > 0 && !loading && !savingQuarter;
+  const handlePrint = () => {
+    const ok = printTeamLeadDocument("영상평가 결과", [
+      {
+        title: `${selectedResultLabel} 영상평가 결과`,
+        bodyHtml: buildBestReportPrintBody(displayedReviewers, displayedRows),
+        size: displayedReviewers.length >= 6 ? "compact" : "dense",
+      },
+    ]);
+
+    if (!ok) {
+      setMessage({ tone: "warn", text: "인쇄 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    }
+  };
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
@@ -154,9 +207,12 @@ export function BestReportResultsPage() {
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">베스트리포트 평가 결과</div>
-          <strong style={{ fontSize: 24 }}>{selectedResultLabel} 평가 결과 매트릭스</strong>
+          <div className="chip">영상평가 결과</div>
+          <strong style={{ fontSize: 24 }}>{selectedResultLabel} 영상평가 결과</strong>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="button" className="btn" onClick={handlePrint} disabled={loading || displayedRows.length === 0}>
+              인쇄
+            </button>
             <button
               type="button"
               className="btn primary"
@@ -200,7 +256,7 @@ export function BestReportResultsPage() {
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">저장된 분기</div>
-          <strong style={{ fontSize: 22 }}>저장된 베스트리포트 결과</strong>
+          <strong style={{ fontSize: 22 }}>저장된 영상평가 결과</strong>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"

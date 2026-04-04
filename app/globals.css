@@ -1,5 +1,10 @@
 :root {
+  color-scheme: dark;
   --bg: #07111f;
+  --bg-top-glow: rgba(59, 130, 246, 0.2);
+  --bg-start: #07111f;
+  --bg-mid: #0b1628;
+  --bg-end: #101c31;
   --panel: rgba(255, 255, 255, 0.09);
   --line: rgba(255, 255, 255, 0.1);
   --text: #f8fbff;
@@ -7,6 +12,41 @@
   --accent: #22d3ee;
   --accent-2: #3b82f6;
   --accent-3: #f97316;
+  --field-bg: rgba(255, 255, 255, 0.05);
+  --status-note-bg: rgba(255, 255, 255, 0.04);
+  --nav-bg: rgba(255, 255, 255, 0.04);
+  --nav-active-bg: rgba(59, 130, 246, 0.18);
+  --nav-active-line: rgba(59, 130, 246, 0.4);
+  --brand-border: rgba(125, 211, 252, 0.28);
+  --brand-glow-1: rgba(34, 211, 238, 0.16);
+  --brand-glow-2: rgba(59, 130, 246, 0.18);
+  --brand-glow-3: rgba(249, 115, 22, 0.16);
+  --brand-surface: rgba(255, 255, 255, 0.04);
+  --brand-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 18px 36px rgba(0, 0, 0, 0.22);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eaf1f8;
+  --bg-top-glow: rgba(56, 189, 248, 0.28);
+  --bg-start: #dce8f4;
+  --bg-mid: #eef4fa;
+  --bg-end: #d7e2ef;
+  --panel: rgba(10, 24, 43, 0.74);
+  --line: rgba(14, 28, 45, 0.18);
+  --text: #f8fbff;
+  --muted: #d3e4f8;
+  --field-bg: rgba(255, 255, 255, 0.14);
+  --status-note-bg: rgba(255, 255, 255, 0.12);
+  --nav-bg: rgba(255, 255, 255, 0.12);
+  --nav-active-bg: rgba(59, 130, 246, 0.3);
+  --nav-active-line: rgba(59, 130, 246, 0.48);
+  --brand-border: rgba(59, 130, 246, 0.28);
+  --brand-glow-1: rgba(34, 211, 238, 0.2);
+  --brand-glow-2: rgba(59, 130, 246, 0.24);
+  --brand-glow-3: rgba(249, 115, 22, 0.16);
+  --brand-surface: rgba(255, 255, 255, 0.16);
+  --brand-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 18px 36px rgba(101, 122, 146, 0.24);
 }
 
 * {
@@ -18,8 +58,8 @@ body {
   margin: 0;
   padding: 0;
   background:
-    radial-gradient(circle at top, rgba(59, 130, 246, 0.2), transparent 28%),
-    linear-gradient(180deg, #07111f, #0b1628 48%, #101c31);
+    radial-gradient(circle at top, var(--bg-top-glow), transparent 28%),
+    linear-gradient(180deg, var(--bg-start), var(--bg-mid) 48%, var(--bg-end));
   color: var(--text);
   font-family: "Segoe UI", "Pretendard", sans-serif;
 }
@@ -91,7 +131,7 @@ button {
 .field-select {
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--field-bg);
   color: var(--text);
 }
 
@@ -198,7 +238,7 @@ button {
 
 .status.note {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--status-note-bg);
 }
 
 .nav {
@@ -215,11 +255,11 @@ button {
   width: 100%;
   padding: 18px 24px;
   border-radius: 0;
-  border: 1px solid rgba(125, 211, 252, 0.28);
+  border: 1px solid var(--brand-border);
   background:
-    linear-gradient(90deg, rgba(34, 211, 238, 0.16), rgba(59, 130, 246, 0.18), rgba(249, 115, 22, 0.16)),
-    rgba(255, 255, 255, 0.04);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 18px 36px rgba(0, 0, 0, 0.22);
+    linear-gradient(90deg, var(--brand-glow-1), var(--brand-glow-2), var(--brand-glow-3)),
+    var(--brand-surface);
+  box-shadow: var(--brand-shadow);
 }
 
 .brand-logo-text {
@@ -235,15 +275,52 @@ button {
   padding: 10px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--nav-bg);
   color: var(--muted);
   font-weight: 700;
 }
 
 .nav a.active {
   color: var(--text);
-  background: rgba(59, 130, 246, 0.18);
-  border-color: rgba(59, 130, 246, 0.4);
+  background: var(--nav-active-bg);
+  border-color: var(--nav-active-line);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--nav-bg);
+}
+
+.theme-toggle__button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.theme-toggle__button--active {
+  color: #08111d;
+  background: white;
+}
+
+.btn-team-lead-personal {
+  border-color: rgba(251, 191, 36, 0.34);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fde68a;
+}
+
+.btn-team-lead-summary {
+  border-color: rgba(52, 211, 153, 0.34);
+  background: rgba(16, 185, 129, 0.14);
+  color: #d1fae5;
 }
 
 .page-title {

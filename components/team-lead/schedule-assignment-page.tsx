@@ -7,10 +7,12 @@ import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/sche
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import {
+  AssignmentTripTagPhase,
   AssignmentTimeColor,
   AssignmentTravelType,
   createDefaultScheduleAssignmentDayRows,
   createDefaultScheduleAssignmentEntry,
+  getScheduleAssignmentVisibleTripTagMap,
   getScheduleAssignmentRows,
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
@@ -21,6 +23,7 @@ import {
   ScheduleAssignmentDayRows,
   ScheduleAssignmentEntry,
   ScheduleAssignmentRow,
+  ScheduleAssignmentVisibleTripTag,
 } from "@/lib/team-lead/storage";
 
 const travelOptions: Array<{ value: AssignmentTravelType; label: string }> = [
@@ -45,6 +48,12 @@ const getSafeExclusiveVideo = (values: boolean[], count: number) => Array.from({
 const removeExclusiveVideoAt = (values: boolean[], index: number, nextCount: number) => getSafeExclusiveVideo(values.filter((_, i) => i !== index), nextCount);
 const createCustomRowId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const coverageScoreSteps = [0, 0.5, 1, 2] as const;
+const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
+  "": "",
+  departure: "출장출발",
+  ongoing: "출장중",
+  return: "출장복귀",
+};
 const csvTemplateHeaders = [
   "monthKey",
   "dateKey",
@@ -282,6 +291,13 @@ function normalizeTravelType(value: string): AssignmentTravelType {
   return "";
 }
 
+function cycleTripTagPhase(phase: AssignmentTripTagPhase): AssignmentTripTagPhase {
+  if (phase === "") return "departure";
+  if (phase === "departure") return "ongoing";
+  if (phase === "ongoing") return "return";
+  return "";
+}
+
 function normalizeCoverageScore(value: string) {
   const parsed = Number(value.trim());
   return coverageScoreSteps.includes(parsed as (typeof coverageScoreSteps)[number]) ? parsed : 0;
@@ -390,6 +406,39 @@ function createEmptyGeneratedSchedule(monthKey: string): GeneratedSchedule {
   };
 }
 
+function cloneDayRows(dayRows: ScheduleAssignmentDayRows): ScheduleAssignmentDayRows {
+  return {
+    addedRows: dayRows.addedRows.map((row) => ({ ...row })),
+    deletedRowKeys: [...dayRows.deletedRowKeys],
+    rowOverrides: Object.fromEntries(
+      Object.entries(dayRows.rowOverrides).map(([rowKey, row]) => [rowKey, { ...row }]),
+    ),
+  };
+}
+
+function sanitizeDayRows(dayRows: ScheduleAssignmentDayRows): ScheduleAssignmentDayRows {
+  return {
+    addedRows: dayRows.addedRows
+      .map((row) => ({
+        ...row,
+        name: row.name.trim(),
+        duty: row.duty.trim(),
+      }))
+      .filter((row) => row.name),
+    deletedRowKeys: [...dayRows.deletedRowKeys],
+    rowOverrides: Object.fromEntries(
+      Object.entries(dayRows.rowOverrides).map(([rowKey, row]) => [
+        rowKey,
+        { name: row.name.trim(), duty: row.duty.trim() },
+      ]),
+    ),
+  };
+}
+
+function getCustomRowIdFromKey(rowKey: string) {
+  return rowKey.split("::custom::")[1] ?? "";
+}
+
 function buildMonthDays(schedule: GeneratedSchedule | null) {
   if (!schedule) return [] as DaySchedule[];
   const dayMap = new Map(
@@ -465,7 +514,7 @@ export function ScheduleAssignmentPage() {
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
-  const [selectedDeleteRowKey, setSelectedDeleteRowKey] = useState<string | null>(null);
+  const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
@@ -485,7 +534,7 @@ export function ScheduleAssignmentPage() {
             ? todayMonthKey
             : nextSchedules[0]?.monthKey || "",
       );
-      setSelectedDeleteRowKey(null);
+      setEditingDayRows({});
     };
     const refreshSchedules = async () => {
       await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
@@ -510,6 +559,10 @@ export function ScheduleAssignmentPage() {
     };
   }, [todayMonthKey]);
 
+  useEffect(() => {
+    setEditingDayRows({});
+  }, [selectedMonthKey]);
+
   const selectedMonth = useMemo(() => schedules.find((schedule) => schedule.monthKey === selectedMonthKey) ?? null, [schedules, selectedMonthKey]);
   const monthEntries = store.entries[selectedMonthKey] ?? {};
   const monthRows = store.rows[selectedMonthKey] ?? {};
@@ -518,6 +571,7 @@ export function ScheduleAssignmentPage() {
     () => new Map(monthDays.map((day) => [day.dateKey, day])),
     [monthDays],
   );
+  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [schedules, store]);
 
   const dutyOptions = useMemo(() => {
     const set = new Set<string>();
@@ -585,6 +639,136 @@ export function ScheduleAssignmentPage() {
     });
   };
 
+  const updateEditingDayRows = (dateKey: string, recipe: (dayRows: ScheduleAssignmentDayRows) => ScheduleAssignmentDayRows) => {
+    setEditingDayRows((current) => {
+      const source = current[dateKey] ?? cloneDayRows(monthRows[dateKey] ?? createDefaultScheduleAssignmentDayRows());
+      return {
+        ...current,
+        [dateKey]: recipe(source),
+      };
+    });
+  };
+
+  const startPeopleEdit = (dateKey: string) => {
+    setEditingDayRows((current) => ({
+      ...current,
+      [dateKey]: cloneDayRows(monthRows[dateKey] ?? createDefaultScheduleAssignmentDayRows()),
+    }));
+  };
+
+  const cancelPeopleEdit = (dateKey: string) => {
+    setEditingDayRows((current) => {
+      const next = { ...current };
+      delete next[dateKey];
+      return next;
+    });
+  };
+
+  const confirmPeopleEdit = (dateKey: string) => {
+    const draft = editingDayRows[dateKey];
+    if (!draft) return;
+    updateDayRows(dateKey, () => sanitizeDayRows(draft));
+    cancelPeopleEdit(dateKey);
+  };
+
+  const addEditingRow = (dateKey: string) => {
+    updateEditingDayRows(dateKey, (dayRows) => ({
+      ...dayRows,
+      addedRows: [...dayRows.addedRows, { id: createCustomRowId(), name: "", duty: dutyOptions[0] ?? "" }],
+    }));
+  };
+
+  const removeEditingRow = (dateKey: string, row: ScheduleAssignmentRow) => {
+    updateEditingDayRows(dateKey, (dayRows) => {
+      if (row.isCustom) {
+        const customId = getCustomRowIdFromKey(row.key);
+        return {
+          ...dayRows,
+          addedRows: dayRows.addedRows.filter((item) => item.id !== customId),
+        };
+      }
+
+      return dayRows.deletedRowKeys.includes(row.key)
+        ? dayRows
+        : {
+            ...dayRows,
+            deletedRowKeys: [...dayRows.deletedRowKeys, row.key],
+          };
+    });
+  };
+
+  const updateEditingCustomRow = (
+    dateKey: string,
+    rowKey: string,
+    patch: Partial<{ name: string; duty: string }>,
+  ) => {
+    const customId = getCustomRowIdFromKey(rowKey);
+    if (!customId) return;
+
+    updateEditingDayRows(dateKey, (dayRows) => ({
+      ...dayRows,
+      addedRows: dayRows.addedRows.map((item) => (item.id === customId ? { ...item, ...patch } : item)),
+    }));
+  };
+
+  const createTripTag = (rowKey: string, travelType: AssignmentTravelType) => {
+    if (!travelType) {
+      setImportMessage({ tone: "warn", text: "출장 태그를 만들려면 먼저 출장 종류를 선택해 주세요." });
+      return;
+    }
+
+    const label = window.prompt("출장 태그 이름을 입력하세요.", "");
+    const trimmedLabel = label?.trim() ?? "";
+    if (!trimmedLabel) return;
+
+    updateMonthEntry(rowKey, (current) => ({
+      ...current,
+      travelType,
+      tripTagId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      tripTagLabel: trimmedLabel,
+      tripTagPhase: "",
+    }));
+  };
+
+  const cycleTripTag = (
+    row: ScheduleAssignmentRow,
+    entry: ScheduleAssignmentEntry,
+    visibleTripTag: ScheduleAssignmentVisibleTripTag,
+  ) => {
+    const currentPhase =
+      entry.tripTagId === visibleTripTag.tripTagId ? entry.tripTagPhase : "";
+    const nextPhase = cycleTripTagPhase(currentPhase);
+
+    updateMonthEntry(row.key, (current) => ({
+      ...current,
+      travelType: visibleTripTag.travelType || current.travelType,
+      tripTagId: visibleTripTag.tripTagId,
+      tripTagLabel: visibleTripTag.tripTagLabel,
+      tripTagPhase: nextPhase,
+    }));
+  };
+
+  const renameTripTag = (tripTagId: string, currentLabel: string) => {
+    const label = window.prompt("출장 태그 이름을 수정하세요.", currentLabel);
+    const trimmedLabel = label?.trim() ?? "";
+    if (!trimmedLabel || trimmedLabel === currentLabel) return;
+
+    updateStore((current) => ({
+      ...current,
+      entries: Object.fromEntries(
+        Object.entries(current.entries).map(([monthKey, monthEntries]) => [
+          monthKey,
+          Object.fromEntries(
+            Object.entries(monthEntries).map(([rowKey, entry]) => [
+              rowKey,
+              entry.tripTagId === tripTagId ? { ...entry, tripTagLabel: trimmedLabel } : entry,
+            ]),
+          ),
+        ]),
+      ),
+    }));
+  };
+
   const updateRowDuty = (dateKey: string, row: ScheduleAssignmentRow, duty: string) => {
     updateDayRows(dateKey, (dayRows) => {
       if (row.isCustom) {
@@ -603,29 +787,6 @@ export function ScheduleAssignmentPage() {
         },
       };
     });
-  };
-
-  const deleteRow = (dateKey: string, row: ScheduleAssignmentRow) => {
-    updateDayRows(dateKey, (dayRows) => {
-      if (row.isCustom) {
-        const customId = row.key.split("::custom::")[1];
-        return { ...dayRows, addedRows: dayRows.addedRows.filter((item) => item.id !== customId) };
-      }
-      return {
-        ...dayRows,
-        deletedRowKeys: dayRows.deletedRowKeys.includes(row.key) ? dayRows.deletedRowKeys : [...dayRows.deletedRowKeys, row.key],
-      };
-    });
-  };
-
-  const addRow = (dateKey: string) => {
-    const name = window.prompt("추가할 사람 이름을 입력하세요.");
-    const trimmedName = name?.trim() ?? "";
-    if (!trimmedName) return;
-    updateDayRows(dateKey, (dayRows) => ({
-      ...dayRows,
-      addedRows: [...dayRows.addedRows, { id: createCustomRowId(), name: trimmedName, duty: dutyOptions[0] ?? "" }],
-    }));
   };
 
   const downloadXlsxTemplate = () => {
@@ -867,15 +1028,17 @@ export function ScheduleAssignmentPage() {
               ))}
             </div>
           </div>
-          <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 사람 추가와 삭제, 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
+          <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
           {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>
 
       {monthDays.map((day) => {
-        const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+        const storedDayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+        const draftDayRows = editingDayRows[day.dateKey];
+        const dayRows = draftDayRows ?? storedDayRows;
         const rows = getScheduleAssignmentRows(day, dayRows);
-        const selectedRow = rows.find((row) => row.key === selectedDeleteRowKey) ?? null;
+        const isEditingPeople = Boolean(draftDayRows);
         const vacationPeople = day.vacations.map((entry) => parseVacationEntry(entry)).filter((item) => item.name);
         const jcheckPeople = day.assignments["제크"] ?? [];
         const previousDay = selectedMonthDayIndex.get(getPreviousDateKey(day.dateKey));
@@ -983,9 +1146,23 @@ export function ScheduleAssignmentPage() {
                   </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifySelf: "end" }}>
                   <span className="muted">{rows.length}명</span>
-                  <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => addRow(day.dateKey)}>
-                    사람 추가
-                  </button>
+                  {isEditingPeople ? (
+                    <>
+                      <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12, minWidth: 34 }} onClick={() => addEditingRow(day.dateKey)}>
+                        +
+                      </button>
+                      <button type="button" className="btn primary" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => confirmPeopleEdit(day.dateKey)}>
+                        확인
+                      </button>
+                      <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => cancelPeopleEdit(day.dateKey)}>
+                        취소
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => startPeopleEdit(day.dateKey)}>
+                      인원 수정
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1014,15 +1191,28 @@ export function ScheduleAssignmentPage() {
                       const showClockInActions = activeTimeField === clockInFieldKey || entry.clockInConfirmed;
                       const showClockOutActions = activeTimeField === clockOutFieldKey || entry.clockOutConfirmed;
                       const rowDutyOptions = row.duty && !dutyOptions.includes(row.duty) ? [row.duty, ...dutyOptions] : dutyOptions;
+                      const isDraftCustomRow =
+                        isEditingPeople &&
+                        row.isCustom &&
+                        !storedDayRows.addedRows.some((item) => item.id === getCustomRowIdFromKey(row.key));
+                      const visibleTripTag = visibleTripTagMap.get(row.key) ?? null;
 
                       return (
                         <tr key={row.key}>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "38px minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: isEditingPeople ? "38px minmax(0, 1fr) auto" : "38px minmax(0, 1fr)",
+                                gap: 6,
+                                alignItems: "start",
+                              }}
+                            >
                               <button
                                 type="button"
                                 className="btn"
                                 title="가산점"
+                                disabled={isEditingPeople}
                                 onClick={() =>
                                   updateMonthEntry(row.key, (current) => {
                                     const nextCoverageScore = cycleCoverageScore(current.coverageScore ?? 0);
@@ -1051,26 +1241,45 @@ export function ScheduleAssignmentPage() {
                               >
                                 {coverageScore === 0 ? "" : coverageScore}
                               </button>
-                            <button
-                              type="button"
-                              className="field-input"
-                              style={{
-                                width: "100%",
-                                textAlign: "left",
-                                cursor: "pointer",
-                                borderColor: selectedDeleteRowKey === row.key ? "rgba(248,113,113,.52)" : undefined,
-                                background: selectedDeleteRowKey === row.key ? "rgba(127,29,29,.18)" : undefined,
-                                color: selectedDeleteRowKey === row.key ? "#fee2e2" : undefined,
-                              }}
-                              onClick={() => setSelectedDeleteRowKey((current) => (current === row.key ? null : row.key))}
-                            >
-                              {row.name || "이름 없음"}
-                            </button>
+                              {isDraftCustomRow ? (
+                                <input
+                                  className="field-input"
+                                  value={row.name}
+                                  placeholder="이름 입력"
+                                  onChange={(event) =>
+                                    updateEditingCustomRow(day.dateKey, row.key, {
+                                      name: event.target.value,
+                                    })
+                                  }
+                                />
+                              ) : (
+                                <div className="field-input" style={{ width: "100%", textAlign: "left" }}>
+                                  {row.name || "이름 없음"}
+                                </div>
+                              )}
+                              {isEditingPeople ? (
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    padding: "0 10px",
+                                    minWidth: 34,
+                                    height: 38,
+                                    borderColor: "rgba(248,113,113,.4)",
+                                    background: "rgba(127,29,29,.18)",
+                                    color: "#fecaca",
+                                  }}
+                                  onClick={() => removeEditingRow(day.dateKey, row)}
+                                >
+                                  -
+                                </button>
+                              ) : null}
                             {coverageScore > 0 ? (
                               <input
                                 className="field-input"
                                 value={entry.coverageNote}
                                 placeholder="가점 사유 입력"
+                                disabled={isEditingPeople}
                                 style={{ gridColumn: "1 / -1" }}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
@@ -1083,7 +1292,16 @@ export function ScheduleAssignmentPage() {
                             </div>
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
-                            <select className="field-select" value={row.duty} onChange={(event) => updateRowDuty(day.dateKey, row, event.target.value)}>
+                            <select
+                              className="field-select"
+                              value={row.duty}
+                              disabled={isEditingPeople && !isDraftCustomRow}
+                              onChange={(event) =>
+                                isDraftCustomRow
+                                  ? updateEditingCustomRow(day.dateKey, row.key, { duty: event.target.value })
+                                  : updateRowDuty(day.dateKey, row, event.target.value)
+                              }
+                            >
                               <option value="">근무 선택</option>
                               {rowDutyOptions.map((option) => <option key={`${row.key}-${option}`} value={option}>{option}</option>)}
                             </select>
@@ -1091,61 +1309,135 @@ export function ScheduleAssignmentPage() {
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div style={{ display: "grid", gap: 2 }}>
                               {entry.clockInConfirmed ? (
-                                <button type="button" className="field-input" style={{ width: 84, minWidth: 84, textAlign: "center", cursor: "pointer", ...(timeColorStyle(entry.clockInColor) ?? {}) }} onClick={() => updateMonthEntry(row.key, (current) => ({ ...current, clockInColor: cycleClockInColor(current.clockInColor) }))}>{entry.clockIn}</button>
+                                <button type="button" disabled={isEditingPeople} className="field-input" style={{ width: 84, minWidth: 84, textAlign: "center", cursor: isEditingPeople ? "default" : "pointer", ...(timeColorStyle(entry.clockInColor) ?? {}) }} onClick={() => updateMonthEntry(row.key, (current) => ({ ...current, clockInColor: cycleClockInColor(current.clockInColor) }))}>{entry.clockIn}</button>
                               ) : (
-                                <input className="field-input" type="text" inputMode="numeric" maxLength={5} placeholder="00:00" value={entry.clockIn} style={{ width: 84, minWidth: 84, textAlign: "center" }} onFocus={() => setActiveTimeField(clockInFieldKey)} onClick={() => setActiveTimeField(clockInFieldKey)} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, clockIn: event.target.value, clockInConfirmed: false, clockInColor: "" }))} />
+                                <input disabled={isEditingPeople} className="field-input" type="text" inputMode="numeric" maxLength={5} placeholder="00:00" value={entry.clockIn} style={{ width: 84, minWidth: 84, textAlign: "center" }} onFocus={() => setActiveTimeField(clockInFieldKey)} onClick={() => setActiveTimeField(clockInFieldKey)} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, clockIn: event.target.value, clockInConfirmed: false, clockInColor: "" }))} />
                               )}
                               {showClockInActions ? <div style={{ display: "flex", gap: 2 }}>
-                                {!entry.clockInConfirmed ? <button type="button" className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockIn); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockIn: formatted, clockInConfirmed: Boolean(formatted), clockInColor: "" })); setActiveTimeField(null); }}>확인</button> : null}
-                                <button type="button" className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { setActiveTimeField(null); updateMonthEntry(row.key, (current) => ({ ...current, clockIn: "", clockInColor: "", clockInConfirmed: false })); }}>초기화</button>
+                                {!entry.clockInConfirmed ? <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockIn); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockIn: formatted, clockInConfirmed: Boolean(formatted), clockInColor: "" })); setActiveTimeField(null); }}>확인</button> : null}
+                                <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { setActiveTimeField(null); updateMonthEntry(row.key, (current) => ({ ...current, clockIn: "", clockInColor: "", clockInConfirmed: false })); }}>초기화</button>
                               </div> : null}
                             </div>
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div style={{ display: "grid", gap: 2 }}>
                               {entry.clockOutConfirmed ? (
-                                <button type="button" className="field-input" style={{ width: 84, minWidth: 84, textAlign: "center", cursor: "pointer", ...(timeColorStyle(entry.clockOutColor) ?? {}) }} onClick={() => updateMonthEntry(row.key, (current) => ({ ...current, clockOutColor: cycleClockOutColor(current.clockOutColor) }))}>{entry.clockOut}</button>
+                                <button type="button" disabled={isEditingPeople} className="field-input" style={{ width: 84, minWidth: 84, textAlign: "center", cursor: isEditingPeople ? "default" : "pointer", ...(timeColorStyle(entry.clockOutColor) ?? {}) }} onClick={() => updateMonthEntry(row.key, (current) => ({ ...current, clockOutColor: cycleClockOutColor(current.clockOutColor) }))}>{entry.clockOut}</button>
                               ) : (
-                                <input className="field-input" type="text" inputMode="numeric" maxLength={5} placeholder="00:00" value={entry.clockOut} style={{ width: 84, minWidth: 84, textAlign: "center" }} onFocus={() => setActiveTimeField(clockOutFieldKey)} onClick={() => setActiveTimeField(clockOutFieldKey)} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, clockOut: event.target.value, clockOutConfirmed: false, clockOutColor: "" }))} />
+                                <input disabled={isEditingPeople} className="field-input" type="text" inputMode="numeric" maxLength={5} placeholder="00:00" value={entry.clockOut} style={{ width: 84, minWidth: 84, textAlign: "center" }} onFocus={() => setActiveTimeField(clockOutFieldKey)} onClick={() => setActiveTimeField(clockOutFieldKey)} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, clockOut: event.target.value, clockOutConfirmed: false, clockOutColor: "" }))} />
                               )}
                               {showClockOutActions ? <div style={{ display: "flex", gap: 2 }}>
-                                {!entry.clockOutConfirmed ? <button type="button" className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockOut); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockOut: formatted, clockOutConfirmed: Boolean(formatted), clockOutColor: formatted ? "yellow" : "" })); setActiveTimeField(null); }}>확인</button> : null}
-                                <button type="button" className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { setActiveTimeField(null); updateMonthEntry(row.key, (current) => ({ ...current, clockOut: "", clockOutColor: "", clockOutConfirmed: false })); }}>초기화</button>
+                                {!entry.clockOutConfirmed ? <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockOut); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockOut: formatted, clockOutConfirmed: Boolean(formatted), clockOutColor: formatted ? "yellow" : "" })); setActiveTimeField(null); }}>확인</button> : null}
+                                <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { setActiveTimeField(null); updateMonthEntry(row.key, (current) => ({ ...current, clockOut: "", clockOutColor: "", clockOutConfirmed: false })); }}>초기화</button>
                               </div> : null}
                             </div>
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
-                            <div style={{ display: "grid", gap: 3, minWidth: 460 }}>
-                              {safeSchedules.map((schedule, index) => (
-                                <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
-                                  <div style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
-                                    <input className="field-input" value={schedule} style={{ flex: 1 }} placeholder="일정 내용 입력" onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item) }))} />
-                                    <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
-                                    <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: "pointer", overflow: "hidden" }}>
-                                      <input type="checkbox" checked={safeExclusiveVideo[index]} style={{ appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%", margin: 0, background: "transparent", border: "none", cursor: "pointer" }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, exclusiveVideo: getSafeExclusiveVideo(current.exclusiveVideo, getSafeSchedules(current.schedules).length).map((item, itemIndex) => itemIndex === index ? event.target.checked : item) }))} />
-                                    </label>
-                                    <ScheduleDeleteConfirmButton
-                                      onConfirm={() =>
-                                        updateMonthEntry(row.key, (current) => {
-                                          const currentSchedules = getSafeSchedules(current.schedules);
-                                          const nextSchedules = removeScheduleAt(currentSchedules, index);
-                                          return {
-                                            ...current,
-                                            schedules: nextSchedules,
-                                            exclusiveVideo: removeExclusiveVideoAt(getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), index, nextSchedules.length),
-                                          };
-                                        })
-                                      }
-                                    />
-                                  </div>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: visibleTripTag || entry.travelType ? "150px minmax(0, 1fr)" : "minmax(0, 1fr)",
+                                gap: 8,
+                                minWidth: 460,
+                                alignItems: "start",
+                              }}
+                            >
+                              {visibleTripTag || entry.travelType ? (
+                                <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
+                                  {visibleTripTag ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn"
+                                        disabled={isEditingPeople}
+                                        onClick={() => cycleTripTag(row, entry, visibleTripTag)}
+                                        style={{
+                                          padding: "7px 10px",
+                                          fontSize: 12,
+                                          borderRadius: 14,
+                                          textAlign: "left",
+                                          justifyContent: "flex-start",
+                                          borderColor:
+                                            visibleTripTag.phase === "return"
+                                              ? "rgba(250,204,21,.45)"
+                                              : visibleTripTag.phase === "departure"
+                                                ? "rgba(125,211,252,.45)"
+                                                : visibleTripTag.phase === "ongoing"
+                                                  ? "rgba(96,165,250,.45)"
+                                                  : "rgba(255,255,255,.16)",
+                                          background:
+                                            visibleTripTag.phase === "return"
+                                              ? "rgba(250,204,21,.16)"
+                                              : visibleTripTag.phase === "departure"
+                                                ? "rgba(56,189,248,.16)"
+                                                : visibleTripTag.phase === "ongoing"
+                                                  ? "rgba(59,130,246,.16)"
+                                                  : "rgba(255,255,255,.08)",
+                                          color: "#f8fbff",
+                                        }}
+                                      >
+                                        {visibleTripTag.tripTagLabel}
+                                        {tripPhaseLabels[visibleTripTag.phase] ? ` · ${tripPhaseLabels[visibleTripTag.phase]}` : ""}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn"
+                                        disabled={isEditingPeople}
+                                        style={{ padding: "4px 8px", fontSize: 11 }}
+                                        onClick={() => renameTripTag(visibleTripTag.tripTagId, visibleTripTag.tripTagLabel)}
+                                      >
+                                        이름수정
+                                      </button>
+                                    </>
+                                  ) : entry.travelType ? (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={isEditingPeople}
+                                      style={{ padding: "6px 8px", fontSize: 11 }}
+                                      onClick={() => createTripTag(row.key, entry.travelType)}
+                                    >
+                                      출장 생성
+                                    </button>
+                                  ) : null}
                                 </div>
-                              ))}
-                              <button type="button" className="btn" style={{ width: "fit-content", padding: "2px 6px", fontSize: 11, lineHeight: 1.1 }} onClick={() => updateMonthEntry(row.key, (current) => { const currentSchedules = getSafeSchedules(current.schedules); return { ...current, schedules: [...currentSchedules, ""], exclusiveVideo: [...getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), false] }; })}>+</button>
+                              ) : null}
+                              <div style={{ display: "grid", gap: 3 }}>
+                                {safeSchedules.map((schedule, index) => (
+                                  <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
+                                  <div style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
+                                    <input disabled={isEditingPeople} className="field-input" value={schedule} style={{ flex: 1 }} placeholder="일정 내용 입력" onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item) }))} />
+                                    <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
+                                    <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: isEditingPeople ? "default" : "pointer", overflow: "hidden", opacity: isEditingPeople ? 0.6 : 1 }}>
+                                      <input disabled={isEditingPeople} type="checkbox" checked={safeExclusiveVideo[index]} style={{ appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%", margin: 0, background: "transparent", border: "none", cursor: isEditingPeople ? "default" : "pointer" }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, exclusiveVideo: getSafeExclusiveVideo(current.exclusiveVideo, getSafeSchedules(current.schedules).length).map((item, itemIndex) => itemIndex === index ? event.target.checked : item) }))} />
+                                    </label>
+                                    {!isEditingPeople ? (
+                                      <ScheduleDeleteConfirmButton
+                                        onConfirm={() =>
+                                          updateMonthEntry(row.key, (current) => {
+                                            const currentSchedules = getSafeSchedules(current.schedules);
+                                            const nextSchedules = removeScheduleAt(currentSchedules, index);
+                                            return {
+                                              ...current,
+                                              schedules: nextSchedules,
+                                              exclusiveVideo: removeExclusiveVideoAt(getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), index, nextSchedules.length),
+                                            };
+                                          })
+                                        }
+                                      />
+                                    ) : null}
+                                  </div>
+                                  </div>
+                                ))}
+                                {!isEditingPeople ? (
+                                  <button type="button" className="btn" style={{ width: "fit-content", padding: "2px 6px", fontSize: 11, lineHeight: 1.1 }} onClick={() => updateMonthEntry(row.key, (current) => { const currentSchedules = getSafeSchedules(current.schedules); return { ...current, schedules: [...currentSchedules, ""], exclusiveVideo: [...getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), false] }; })}>+</button>
+                                ) : null}
+                              </div>
                             </div>
                           </td>
                           <td style={{ padding: "4px 5px", textAlign: "center", verticalAlign: "middle" }}>{scheduleCount}</td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
-                            <select className="field-select" value={entry.travelType} style={{ minWidth: 118 }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, travelType: event.target.value as AssignmentTravelType }))}>
+                            <select disabled={isEditingPeople} className="field-select" value={entry.travelType} style={{ minWidth: 118 }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, travelType: event.target.value as AssignmentTravelType }))}>
                               {travelOptions.map((option) => <option key={`${row.key}-${option.value || "default"}`} value={option.value}>{option.label}</option>)}
                             </select>
                           </td>
@@ -1160,21 +1452,6 @@ export function ScheduleAssignmentPage() {
                 </table>
               </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ padding: "5px 10px", fontSize: 12, opacity: selectedRow ? 1 : 0.45 }}
-                  disabled={!selectedRow}
-                  onClick={() => {
-                    if (!selectedRow) return;
-                    deleteRow(day.dateKey, selectedRow);
-                    setSelectedDeleteRowKey(null);
-                  }}
-                >
-                  사람 삭제
-                </button>
-              </div>
             </div>
           </article>
         );

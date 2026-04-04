@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
+import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -43,6 +44,42 @@ function maskName(name: string, selectedName: string) {
   return name === selectedName ? name : "";
 }
 
+function buildOverallScorePagePrintBody(cards: TeamLeadOverallScoreCard[]) {
+  const rows = [...cards]
+    .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"))
+    .map(
+      (card, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td><strong>${escapeTeamLeadPrintHtml(card.name)}</strong></td>
+          <td>${formatScore(card.totalScore)}점</td>
+          <td>${formatScore(card.finalCutScore)}점</td>
+          <td>${formatScore(card.videoReviewScore)}점</td>
+          <td>${formatScore(card.contributionScore)}점</td>
+          <td>${formatScore(card.broadcastAccidentScore)}점</td>
+          <td>${formatScore(card.liveSafetyScore)}점</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <table class="team-lead-print-table">
+      <thead>
+        <tr>
+          <th>순위</th>
+          <th>이름</th>
+          <th>총점</th>
+          <th>정제본</th>
+          <th>영상평가</th>
+          <th>팀 기여도</th>
+          <th>장비/인적 사고</th>
+          <th>라이브 무사고</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 function getPrintEvaluationMeta(baseDate = new Date()) {
   const month = baseDate.getMonth() + 1;
   const year = baseDate.getFullYear();
@@ -58,7 +95,18 @@ function getPrintEvaluationMeta(baseDate = new Date()) {
   };
 }
 
-function renderPrintRankingTable(cards: TeamLeadOverallScoreCard[], selectedName: string) {
+function formatPrintDateLabel(value = new Date()) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(value);
+}
+
+function renderPrintRankingTable(cards: TeamLeadOverallScoreCard[], selectedName: string, printedAt: string) {
   const rows = [...cards]
     .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"))
     .map(
@@ -79,6 +127,7 @@ function renderPrintRankingTable(cards: TeamLeadOverallScoreCard[], selectedName
   return `
     <section class="print-page print-page--ranking">
       <h1>종합점수 - 전체 순위</h1>
+      <div class="print-date">출력일시 ${escapeHtml(printedAt)}</div>
       <table>
         <thead>
           <tr>
@@ -87,9 +136,9 @@ function renderPrintRankingTable(cards: TeamLeadOverallScoreCard[], selectedName
             <th>총점</th>
             <th>정제본</th>
             <th>평가 평균</th>
-            <th>기여도</th>
+            <th>팀 기여도</th>
             <th>장비/인적 사고</th>
-            <th>LIVE 무사고</th>
+            <th>라이브 무사고</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -103,6 +152,7 @@ function renderPrintWeightedTable(
   selectedName: string,
   midValueLabel: string,
   getMidValue: (row: TeamLeadWeightedQuarterSummaryRow) => number,
+  printedAt: string,
 ) {
   const body = rows
     .map(
@@ -124,6 +174,7 @@ function renderPrintWeightedTable(
   return `
     <section class="print-page print-page--weighted">
       <h1>${escapeHtml(title)}</h1>
+      <div class="print-date">출력일시 ${escapeHtml(printedAt)}</div>
       <table>
         <thead>
           <tr>
@@ -143,7 +194,7 @@ function renderPrintWeightedTable(
     </section>`;
 }
 
-function renderPrintFinalCutTable(rows: TeamLeadFinalCutSummaryRow[], selectedName: string) {
+function renderPrintFinalCutTable(rows: TeamLeadFinalCutSummaryRow[], selectedName: string, printedAt: string) {
   const body = rows
     .map((row, index) => {
       const halfItemCount = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.itemCount, 0);
@@ -176,6 +227,7 @@ function renderPrintFinalCutTable(rows: TeamLeadFinalCutSummaryRow[], selectedNa
   return `
     <section class="print-page print-page--final-cut">
       <h1>정제본 제작</h1>
+      <div class="print-date">출력일시 ${escapeHtml(printedAt)}</div>
       <table>
         <thead>
           <tr>
@@ -203,12 +255,13 @@ function renderPrintFinalCutTable(rows: TeamLeadFinalCutSummaryRow[], selectedNa
     </section>`;
 }
 
-function renderPrintCoverPage(selectedName: string, evaluationLabel: string) {
+function renderPrintCoverPage(selectedName: string, evaluationLabel: string, printedAt: string) {
   return `
     <section class="print-page print-cover">
       <div class="cover-wrap">
         <h1>${escapeHtml(evaluationLabel)}</h1>
         <strong class="cover-name">${escapeHtml(selectedName)}</strong>
+        <div class="print-date">출력일시 ${escapeHtml(printedAt)}</div>
       </div>
     </section>`;
 }
@@ -221,6 +274,7 @@ function buildPrintHtml(
   finalCutRows: TeamLeadFinalCutSummaryRow[],
 ) {
   const evaluationMeta = getPrintEvaluationMeta();
+  const printedAt = formatPrintDateLabel();
 
   return `<!doctype html>
   <html lang="ko">
@@ -246,6 +300,11 @@ function buildPrintHtml(
           font-size: 16px;
           text-align: center;
           line-height: 1.2;
+        }
+        .print-date {
+          font-size: 10px;
+          color: #475569;
+          text-align: right;
         }
         table {
           width: 100%;
@@ -314,11 +373,11 @@ function buildPrintHtml(
       </style>
     </head>
     <body>
-      ${renderPrintCoverPage(selectedName, evaluationMeta.label)}
-      ${renderPrintRankingTable(cards, selectedName)}
-      ${renderPrintWeightedTable("영상평가", videoReviewRows, selectedName, "중간 합계", (row) => ((row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)) * 0.2)}
-      ${renderPrintWeightedTable("참여/기여도", contributionRows, selectedName, "중간 합계", (row) => (row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0))}
-      ${renderPrintFinalCutTable(finalCutRows, selectedName)}
+      ${renderPrintCoverPage(selectedName, evaluationMeta.label, printedAt)}
+      ${renderPrintRankingTable(cards, selectedName, printedAt)}
+      ${renderPrintWeightedTable("영상평가", videoReviewRows, selectedName, "중간 합계", (row) => ((row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)) * 0.2, printedAt)}
+      ${renderPrintWeightedTable("팀 기여도", contributionRows, selectedName, "중간 합계", (row) => (row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0), printedAt)}
+      ${renderPrintFinalCutTable(finalCutRows, selectedName, printedAt)}
     </body>
   </html>`;
 }
@@ -388,6 +447,20 @@ export function OverallScorePage() {
     [cards, contributionRows, finalCutRows, videoReviewRows],
   );
 
+  const handlePagePrint = () => {
+    const ok = printTeamLeadDocument("개인별 점수", [
+      {
+        title: "개인별 점수",
+        bodyHtml: buildOverallScorePagePrintBody(cards),
+        size: "dense",
+      },
+    ]);
+
+    if (!ok) {
+      setMessage({ tone: "warn", text: "인쇄 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    }
+  };
+
   const handlePrint = (selectedName: string) => {
     if (!printPayloadReady) {
       setMessage({ tone: "warn", text: "출력용 데이터를 아직 불러오는 중입니다. 잠시 후 다시 시도해 주세요." });
@@ -443,8 +516,13 @@ export function OverallScorePage() {
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">개인별 점수</div>
           <strong style={{ fontSize: 24 }}>개인별 점수</strong>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn" onClick={handlePagePrint} disabled={cards.length === 0}>
+              인쇄
+            </button>
+          </div>
           <div className="status note">
-            활성 사용자 기준으로 개인별 기여도, 베스트리포트 평가 평균, 정제본, 장비/인적 사고, LIVE 무사고 점수를 합산합니다.
+            활성 사용자 기준으로 개인별 기여도, 베스트리포트 평가 평균, 정제본, 장비/인적 사고, 라이브 무사고 점수를 합산합니다.
             정제본 점수는 현재까지 반영된 수행 결과를 기준으로 계산합니다.
           </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
@@ -556,7 +634,7 @@ export function OverallScorePage() {
                       background: "rgba(15,23,42,.16)",
                     }}
                   >
-                    <strong>기여도</strong>
+                    <strong>팀 기여도</strong>
                     <strong>{formatScore(card.contributionScore)}점</strong>
                   </div>
 
@@ -588,7 +666,7 @@ export function OverallScorePage() {
                       background: "rgba(15,23,42,.16)",
                     }}
                   >
-                    <strong>LIVE 무사고</strong>
+                    <strong>라이브 무사고</strong>
                     <strong>{formatScore(card.liveSafetyScore)}점</strong>
                   </div>
                 </div>
