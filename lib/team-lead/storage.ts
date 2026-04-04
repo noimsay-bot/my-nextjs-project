@@ -958,7 +958,7 @@ function buildScheduleAssignmentTripWorkspace(
             tripTagId: activeTrip.tripTagId,
             tripTagLabel: activeTrip.tripTagLabel,
             travelType: activeTrip.travelType,
-            phase: "" as AssignmentTripTagPhase,
+            phase: "ongoing" as AssignmentTripTagPhase,
             isInherited: true,
           }
         : null);
