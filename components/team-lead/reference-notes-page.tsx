@@ -91,6 +91,9 @@ export function ReferenceNotesPage() {
   };
 
   const removeItem = (profileId: string, itemId: string) => {
+    const ok = window.confirm("삭제하시겠습니까?");
+    if (!ok) return;
+
     setDraftItems((current) => {
       const nextItems = (current[profileId] ?? []).filter((item) => item.id !== itemId);
       return {

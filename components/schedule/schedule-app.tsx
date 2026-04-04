@@ -1495,6 +1495,8 @@ export function ScheduleApp() {
                                       background: "rgba(239,68,68,.18)",
                                     }}
                                     onClick={() => {
+                                      const ok = window.confirm("이 칸을 삭제하시겠습니까?");
+                                      if (!ok) return;
                                       if (addPersonDialog?.dateKey === day.dateKey && addPersonDialog.category === category) {
                                         closeAddPersonDialog();
                                       }
@@ -1654,6 +1656,8 @@ export function ScheduleApp() {
                                           }}
                                           onClick={(event) => {
                                             event.stopPropagation();
+                                            const ok = window.confirm("이 인원을 삭제하시겠습니까?");
+                                            if (!ok) return;
                                             updateEditingState((current) => removePersonFromCategory(current, day.dateKey, category, index));
                                           }}
                                         >

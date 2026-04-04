@@ -482,28 +482,17 @@ function ScheduleDeleteConfirmButton({
 }: {
   onConfirm: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-
-  return open ? (
-    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "6px 8px", borderRadius: 10, border: "1px solid rgba(248,113,113,.28)", background: "rgba(127,29,29,.12)" }}>
-      <span style={{ fontSize: 12, color: "#fecaca", fontWeight: 700 }}>삭제 하시겠습니까</span>
-      <button
-        type="button"
-        className="btn"
-        style={{ padding: "3px 8px", fontSize: 11 }}
-        onClick={() => {
-          onConfirm();
-          setOpen(false);
-        }}
-      >
-        확인
-      </button>
-      <button type="button" className="btn" style={{ padding: "3px 8px", fontSize: 11 }} onClick={() => setOpen(false)}>
-        취소
-      </button>
-    </div>
-  ) : (
-    <button type="button" className="btn" style={{ padding: "3px 6px", fontSize: 11 }} onClick={() => setOpen(true)}>
+  return (
+    <button
+      type="button"
+      className="btn"
+      style={{ padding: "3px 6px", fontSize: 11 }}
+      onClick={() => {
+        const ok = window.confirm("삭제하시겠습니까?");
+        if (!ok) return;
+        onConfirm();
+      }}
+    >
       삭제
     </button>
   );
@@ -1386,7 +1375,7 @@ export function ScheduleAssignmentPage() {
                                         style={{ padding: "4px 8px", fontSize: 11 }}
                                         onClick={() => renameTripTag(visibleTripTag.tripTagId, visibleTripTag.tripTagLabel)}
                                       >
-                                        이름수정
+                                        태그명 수정
                                       </button>
                                     </>
                                   ) : entry.travelType ? (

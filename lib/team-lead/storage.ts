@@ -905,15 +905,6 @@ function addTripAggregateDay(builder: TripAggregateBuilder, row: TripTimelineRow
     builder.dutySet.add(duty);
     builder.duties.push(duty);
   }
-
-  row.entry.schedules
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .forEach((schedule) => {
-      if (builder.scheduleSet.has(schedule)) return;
-      builder.scheduleSet.add(schedule);
-      builder.schedules.push(schedule);
-    });
 }
 
 function finalizeTripAggregate(builder: TripAggregateBuilder): TeamLeadTripItem {
@@ -1000,8 +991,8 @@ function buildScheduleAssignmentTripWorkspace(
           dateKeySet: new Set<string>(),
           duties: [],
           dutySet: new Set<string>(),
-          schedules: [],
-          scheduleSet: new Set<string>(),
+          schedules: row.entry.schedules.map((item) => item.trim()).filter(Boolean),
+          scheduleSet: new Set(row.entry.schedules.map((item) => item.trim()).filter(Boolean)),
         };
 
         currentBuilder.tripTagLabel = tripForDay.tripTagLabel;
@@ -1317,6 +1308,7 @@ export interface TeamLeadBestReportReviewerDetailReport {
   reportType: string;
   reportTitle: string;
   score: number;
+  comment?: string;
   completedAt: string;
   updatedAt: string;
 }
@@ -1973,6 +1965,7 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
       reportType: submission?.type ?? "",
       reportTitle: submission?.title ?? "",
       score: roundScore(total),
+      comment: row.comment ?? "",
       completedAt: row.completed_at,
       updatedAt: row.updated_at,
     });

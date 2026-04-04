@@ -154,12 +154,14 @@ export function DeskRecordsPage({ kind }: { kind: DeskRecordKind }) {
                         type="button"
                         className="btn"
                         style={{ padding: "8px 12px" }}
-                        onClick={() =>
+                        onClick={() => {
+                          const ok = window.confirm("삭제하시겠습니까?");
+                          if (!ok) return;
                           updateEntries(
                             entries.filter((item) => item.id !== entry.id),
                             { tone: "note", text: "선택한 행을 삭제했습니다." },
-                          )
-                        }
+                          );
+                        }}
                       >
                         삭제
                       </button>

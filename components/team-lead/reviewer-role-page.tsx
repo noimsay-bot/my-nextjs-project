@@ -205,6 +205,9 @@ export function ReviewerRolePage() {
   };
 
   const handleDeleteName = (name: string) => {
+    const ok = window.confirm("삭제하시겠습니까?");
+    if (!ok) return;
+
     setNameChips((current) => current.filter((item) => item !== name));
     setSelectedNames((current) => current.filter((item) => item !== name));
     setMessage({ tone: "note", text: `${name} 이름칩을 삭제했습니다.` });

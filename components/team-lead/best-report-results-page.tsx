@@ -400,16 +400,33 @@ export function BestReportResultsPage() {
                             <div
                               key={report.submissionId}
                               style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                gap: 12,
-                                flexWrap: "wrap",
+                                display: "grid",
+                                gap: 6,
+                                padding: "10px 12px",
+                                borderRadius: 12,
+                                border: "1px solid rgba(255,255,255,.08)",
+                                background: "rgba(15,23,42,.18)",
                               }}
                             >
-                              <span>
-                                [{report.reportType || "-"}] {report.reportTitle || "(제목 없음)"}
-                              </span>
-                              <strong>{formatScore(report.score)}</strong>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: 12,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <span>
+                                  [{report.reportType || "-"}] {report.reportTitle || "(제목 없음)"}
+                                </span>
+                                <strong>{formatScore(report.score)}</strong>
+                              </div>
+                              {typeof report.comment === "string" && report.comment.trim() ? (
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  <span className="muted" style={{ fontSize: 12 }}>가점 의견</span>
+                                  <span style={{ whiteSpace: "pre-wrap" }}>{report.comment.trim()}</span>
+                                </div>
+                              ) : null}
                             </div>
                           ))}
                         </div>

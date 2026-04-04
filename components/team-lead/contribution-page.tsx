@@ -436,14 +436,16 @@ export function ContributionPage() {
                                   type="button"
                                   className="btn"
                                   style={{ padding: "4px 8px", fontSize: 12 }}
-                                  onClick={() =>
+                                  onClick={() => {
+                                    const ok = window.confirm("삭제하시겠습니까?");
+                                    if (!ok) return;
                                     setManualDrafts((current) => ({
                                       ...current,
                                       [card.name]: (current[card.name] ?? []).filter(
                                         (currentItem) => currentItem.id !== item.id,
                                       ),
-                                    }))
-                                  }
+                                    }));
+                                  }}
                                 >
                                   삭제
                                 </button>

@@ -6,6 +6,7 @@ import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/sche
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   getBroadcastAccidentCards,
+  getTeamLeadManualScoreItems,
   getLiveSafetyCards,
   refreshScoreboardState,
   TEAM_LEAD_SCORE_BASE,
@@ -200,6 +201,23 @@ export function ManualScoreBoardPage({
     });
   };
 
+  const deleteItem = (cardName: string, itemId: string) => {
+    const ok = window.confirm("삭제하시겠습니까?");
+    if (!ok) return;
+
+    if (editingName === cardName) {
+      setDrafts((current) => ({
+        ...current,
+        [cardName]: (current[cardName] ?? []).filter((item) => item.id !== itemId),
+      }));
+      return;
+    }
+
+    const nextItems = getTeamLeadManualScoreItems(category, cardName).filter((item) => item.id !== itemId);
+    updateTeamLeadManualScoreItems(category, cardName, nextItems);
+    setMessage({ tone: "ok", text: "항목을 삭제했습니다." });
+  };
+
   const handlePrint = () => {
     const ok = printTeamLeadDocument(title, [
       {
@@ -385,8 +403,8 @@ export function ManualScoreBoardPage({
                                 <div
                                   key={item.id}
                                   style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
+                                    display: "grid",
+                                    gridTemplateColumns: "minmax(0, 1fr) auto auto",
                                     gap: 12,
                                     alignItems: "center",
                                     padding: "10px 12px",
@@ -400,6 +418,14 @@ export function ManualScoreBoardPage({
                                     {item.score > 0 ? "+" : ""}
                                     {formatScore(item.score)}점
                                   </strong>
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    style={{ padding: "4px 8px", fontSize: 12 }}
+                                    onClick={() => deleteItem(card.name, item.id)}
+                                  >
+                                    삭제
+                                  </button>
                                 </div>
                               ))}
                         </div>

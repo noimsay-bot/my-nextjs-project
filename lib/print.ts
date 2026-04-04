@@ -58,11 +58,12 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
       .schedule-print-sheet {
         width: 100%;
         display: grid;
-        gap: 4px;
+        gap: 3px;
         color: #111827;
         font-family: "Segoe UI", "Pretendard", sans-serif;
         text-align: center;
         page-break-inside: avoid;
+        overflow: hidden;
       }
 
       .schedule-print-header {
@@ -73,7 +74,7 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
       }
 
       .schedule-print-header strong {
-        font-size: 15px;
+        font-size: 13px;
         font-weight: 800;
         line-height: 1.2;
       }
@@ -90,10 +91,10 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
       }
 
       .schedule-print-table th {
-        padding: 4px 3px;
+        padding: 3px 2px;
         background: #e2e8f0;
         color: #111827;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 800;
         text-align: center;
         line-height: 1.1;
@@ -101,12 +102,17 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
 
       .schedule-print-table td {
         width: 14.285%;
-        height: 21mm;
-        padding: 3px;
+        height: 18mm;
+        padding: 2px;
         vertical-align: top;
         background: #ffffff;
         text-align: center;
         line-height: 1.1;
+        overflow: hidden;
+      }
+
+      .schedule-print-sheet--weeks-6 .schedule-print-table td {
+        height: 16mm;
       }
 
       .schedule-print-empty {
@@ -122,17 +128,19 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
         align-items: center;
         justify-content: center;
         gap: 4px;
-        margin-bottom: 3px;
-        padding-bottom: 2px;
+        margin-bottom: 2px;
+        padding-bottom: 1px;
         border-bottom: 1px solid #cbd5e1;
-        font-size: 9px;
+        font-size: 8px;
         font-weight: 800;
         line-height: 1.1;
       }
 
       .schedule-print-assignments {
         display: grid;
-        gap: 2px;
+        gap: 1px;
+        max-height: calc(100% - 14px);
+        overflow: hidden;
       }
 
       .schedule-print-assignment {
@@ -140,10 +148,11 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
         grid-template-columns: 1fr;
         gap: 1px;
         align-items: start;
-        font-size: 8px;
-        line-height: 1.1;
+        font-size: 7px;
+        line-height: 1.05;
         text-align: center;
-        padding-top: 2px;
+        padding-top: 1px;
+        overflow: hidden;
       }
 
       .schedule-print-assignment + .schedule-print-assignment {
@@ -157,6 +166,7 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
       .schedule-print-assignment span {
         word-break: keep-all;
         text-align: center;
+        overflow: hidden;
       }
 
       .schedule-print-name-highlight {
@@ -169,7 +179,7 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
 
       .schedule-print-empty-line {
         color: #94a3b8;
-        font-size: 8px;
+        font-size: 7px;
         line-height: 1.1;
       }
     </style>

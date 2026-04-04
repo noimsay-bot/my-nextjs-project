@@ -61,6 +61,7 @@ export function renderSchedulePrintHtml({
 }) {
   const cells = buildCalendarCells(days);
   const weeks = Array.from({ length: Math.ceil(cells.length / 7) }, (_, index) => cells.slice(index * 7, index * 7 + 7));
+  const weekCount = weeks.length;
 
   const rowsHtml = weeks
     .map(
@@ -97,7 +98,7 @@ export function renderSchedulePrintHtml({
     .join("");
 
   return `
-    <section data-print-frame="true" class="schedule-print-sheet">
+    <section data-print-frame="true" class="schedule-print-sheet schedule-print-sheet--weeks-${weekCount}" data-week-count="${weekCount}">
       <header class="schedule-print-header">
         <strong>${escapeHtml(title)}</strong>
       </header>
