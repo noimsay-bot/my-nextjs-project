@@ -15,6 +15,7 @@ import {
   VacationMonthState,
   waitForVacationStoreWrite,
 } from "@/lib/vacation/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState } from "@/lib/schedule/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -175,7 +176,7 @@ export default function ScheduleVacationsPage() {
   }, [selectionLoaded, year, month]);
 
   const loadMonth = async () => {
-    await Promise.all([refreshScheduleState(), refreshVacationStore()]);
+    await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshVacationStore()]);
     const overview = getVacationApplicantsOverview(year, month);
     setMonthState(overview.monthState);
     setManagedDateKeys(overview.managedDateKeys);
@@ -199,10 +200,12 @@ export default function ScheduleVacationsPage() {
     window.addEventListener("focus", onRefresh);
     window.addEventListener(VACATION_EVENT, onRefresh);
     window.addEventListener(VACATION_STATUS_EVENT, onStatus);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
     return () => {
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(VACATION_EVENT, onRefresh);
       window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
     };
   }, [year, month]);
 
@@ -231,7 +234,7 @@ export default function ScheduleVacationsPage() {
               <div className="chip">DESK 휴가 관리</div>
               <strong style={{ fontSize: 22 }}>{year}년 {month}월 휴가 추첨 현황</strong>
               <span className="muted">
-                DESK 페이지에서 작성한 근무표 날짜만 휴가 관리에 반영됩니다. 토요일과 일요일은 신청과 추첨에서 제외됩니다.
+                홈에 게시된 근무표 날짜만 휴가 관리에 반영됩니다. 토요일과 일요일은 신청과 추첨에서 제외됩니다.
               </span>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -281,7 +284,7 @@ export default function ScheduleVacationsPage() {
                 const compensatoryApplicantCount = countNamesByDateMap(compensatoryApplicants);
                 const result = runVacationLottery(year, month);
                 if (!result) {
-                  setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 없어 휴가 추첨을 진행할 수 없습니다.` });
+                  setMessage({ tone: "warn", text: `${year}년 ${month}월 홈 게시 근무표가 없어 휴가 추첨을 진행할 수 없습니다.` });
                   return;
                 }
                 const annualWinnerCount = countNamesByDateMap(result.annualWinners ?? {});
@@ -329,7 +332,7 @@ export default function ScheduleVacationsPage() {
 
           {!hasGeneratedSchedule ? (
             <div className="status note">
-              {year}년 {month}월 DESK 근무표가 아직 작성되지 않았습니다. 먼저 DESK 페이지에서 근무표를 작성하면 같은 날짜의 평일 시트가 자동으로 만들어집니다.
+              {year}년 {month}월 홈 게시 근무표가 아직 없습니다. 먼저 DESK 페이지에서 근무표를 작성하고 홈에 게시하면 같은 날짜의 평일 시트가 자동으로 만들어집니다.
             </div>
           ) : null}
 

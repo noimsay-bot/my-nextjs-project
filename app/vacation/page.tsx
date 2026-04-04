@@ -15,6 +15,7 @@ import {
   VacationCalendarDateItem,
   VacationRequest,
 } from "@/lib/vacation/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState } from "@/lib/schedule/storage";
 
 const vacationWeekdayLabels = ["월", "화", "수", "목", "금"];
@@ -98,7 +99,7 @@ export default function VacationPage() {
   }, [month, session?.username, year]);
 
   const loadRequests = useCallback(async () => {
-    await Promise.all([refreshScheduleState(), refreshVacationStore()]);
+    await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshVacationStore()]);
     syncFromCache();
   }, [syncFromCache]);
 
@@ -113,10 +114,12 @@ export default function VacationPage() {
     window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(VACATION_EVENT, syncFromCache);
     window.addEventListener(VACATION_STATUS_EVENT, onStatus);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     return () => {
       window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(VACATION_EVENT, syncFromCache);
       window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     };
   }, [loadRequests, syncFromCache]);
 
@@ -163,7 +166,7 @@ export default function VacationPage() {
 
   const handleSubmit = () => {
     if (!hasManagedSchedule) {
-      setMessage({ tone: "warn", text: `${year}년 ${month}월 DESK 근무표가 아직 작성되지 않아 휴가를 신청할 수 없습니다.` });
+      setMessage({ tone: "warn", text: `${year}년 ${month}월 홈 게시 근무표가 아직 없어 휴가를 신청할 수 없습니다.` });
       return;
     }
 
@@ -241,7 +244,7 @@ export default function VacationPage() {
             </div>
           ) : (
             <div className="status note">
-              {year}년 {month}월 DESK 근무표가 아직 작성되지 않았습니다. 먼저 DESK 페이지에서 해당 월 근무표를 작성해 주세요.
+              {year}년 {month}월 홈 게시 근무표가 아직 없습니다. 먼저 DESK 페이지에서 해당 월 근무표를 작성하고 홈에 게시해 주세요.
             </div>
           )}
 

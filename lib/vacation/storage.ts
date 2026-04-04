@@ -10,6 +10,7 @@ import {
   parseVacationMap,
   parseVacationEntry,
 } from "@/lib/schedule/engine";
+import { getPublishedSchedules } from "@/lib/schedule/published";
 import { readStoredScheduleState, saveScheduleState } from "@/lib/schedule/storage";
 import { DaySchedule, GeneratedSchedule, VacationType } from "@/lib/schedule/types";
 import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
@@ -399,12 +400,15 @@ function readScheduleState() {
   return readStoredScheduleState();
 }
 
-function getGeneratedScheduleForMonth(year: number, month: number, scheduleState = readScheduleState()) {
+function readPublishedScheduleHistory() {
+  return getPublishedSchedules()
+    .map((item) => item.schedule)
+    .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+}
+
+function getPublishedScheduleForMonth(year: number, month: number, schedules = readPublishedScheduleHistory()) {
   const monthKey = getMonthKey(year, month);
-  return (
-    scheduleState.generatedHistory.find((item) => item.monthKey === monthKey) ??
-    (scheduleState.generated?.monthKey === monthKey ? scheduleState.generated : null)
-  );
+  return schedules.find((item) => item.monthKey === monthKey) ?? null;
 }
 
 function getDateKeyBefore(dateKey: string) {
@@ -414,32 +418,36 @@ function getDateKeyBefore(dateKey: string) {
   return formatDateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
 }
 
-function getEffectiveGeneratedDateKeys(generated: GeneratedSchedule | null, scheduleState = readScheduleState()) {
-  if (!generated) return [];
-  const history = scheduleState.generatedHistory;
-  const generatedIndex = history.findIndex((item) => item.monthKey === generated.monthKey);
-  const previousGenerated = generatedIndex > 0 ? history[generatedIndex - 1] ?? null : null;
-  const startDateKey = previousGenerated?.nextStartDate ?? generated.days[0]?.dateKey ?? generated.nextStartDate;
-  const endDateKey = getDateKeyBefore(generated.nextStartDate);
+function getEffectiveScheduleDateKeys(schedule: GeneratedSchedule | null, schedules: GeneratedSchedule[] = []) {
+  if (!schedule) return [];
+  const history = [...schedules];
+  if (!history.some((item) => item.monthKey === schedule.monthKey)) {
+    history.push(schedule);
+    history.sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  }
+  const scheduleIndex = history.findIndex((item) => item.monthKey === schedule.monthKey);
+  const previousSchedule = scheduleIndex > 0 ? history[scheduleIndex - 1] ?? null : null;
+  const startDateKey = previousSchedule?.nextStartDate ?? schedule.days[0]?.dateKey ?? schedule.nextStartDate;
+  const endDateKey = getDateKeyBefore(schedule.nextStartDate);
   return uniqueDateKeys(
-    generated.days
+    schedule.days
       .map((day) => day.dateKey)
       .filter((dateKey) => dateKey >= startDateKey && dateKey <= endDateKey),
   );
 }
 
-function getManagedDateKeysFromGeneratedSchedule(generated: GeneratedSchedule | null, scheduleState = readScheduleState()) {
-  if (!generated) return [];
-  const dayMap = new Map(generated.days.map((day) => [day.dateKey, day] as const));
-  return getEffectiveGeneratedDateKeys(generated, scheduleState).filter((dateKey) => {
+function getManagedDateKeysFromSchedule(schedule: GeneratedSchedule | null, schedules: GeneratedSchedule[] = []) {
+  if (!schedule) return [];
+  const dayMap = new Map(schedule.days.map((day) => [day.dateKey, day] as const));
+  return getEffectiveScheduleDateKeys(schedule, schedules).filter((dateKey) => {
     if (isWeekendDateKey(dateKey)) return false;
     const day = dayMap.get(dateKey);
     return !(day?.isWeekdayHoliday || day?.isCustomHoliday);
   });
 }
 
-function getDisplayDateKeysFromGeneratedSchedule(generated: GeneratedSchedule | null, scheduleState = readScheduleState()) {
-  return getEffectiveGeneratedDateKeys(generated, scheduleState);
+function getDisplayDateKeysFromSchedule(schedule: GeneratedSchedule | null, schedules: GeneratedSchedule[] = []) {
+  return getEffectiveScheduleDateKeys(schedule, schedules);
 }
 
 function shuffleList<T>(items: T[]) {
@@ -601,10 +609,11 @@ function syncMonthStateToManagedDates(
   };
 }
 
-function syncMonthStateToGeneratedSchedule(store: VacationStore, year: number, month: number) {
-  const generated = getGeneratedScheduleForMonth(year, month);
-  const managedDateKeys = getManagedDateKeysFromGeneratedSchedule(generated);
-  return syncMonthStateToManagedDates(store, year, month, managedDateKeys, generated);
+function syncMonthStateToPublishedSchedule(store: VacationStore, year: number, month: number) {
+  const publishedSchedules = readPublishedScheduleHistory();
+  const published = getPublishedScheduleForMonth(year, month, publishedSchedules);
+  const managedDateKeys = getManagedDateKeysFromSchedule(published, publishedSchedules);
+  return syncMonthStateToManagedDates(store, year, month, managedDateKeys, published);
 }
 
 function getRequestsForMonth(store: VacationStore, monthKey: string) {
@@ -977,10 +986,11 @@ function getMyDutyLabels(day: DaySchedule | undefined, username: string) {
 }
 
 export function getVacationCalendarDateItems(year: number, month: number, username = ""): VacationCalendarDateItem[] {
-  const generated = getGeneratedScheduleForMonth(year, month);
-  if (!generated) return [];
-  const displayDateKeys = getDisplayDateKeysFromGeneratedSchedule(generated);
-  const dayMap = new Map(generated.days.map((day) => [day.dateKey, day] as const));
+  const publishedSchedules = readPublishedScheduleHistory();
+  const published = getPublishedScheduleForMonth(year, month, publishedSchedules);
+  if (!published) return [];
+  const displayDateKeys = getDisplayDateKeysFromSchedule(published, publishedSchedules);
+  const dayMap = new Map(published.days.map((day) => [day.dateKey, day] as const));
 
   return displayDateKeys
     .filter((dateKey) => !isWeekendDateKey(dateKey))
@@ -1002,7 +1012,7 @@ export function getVacationManagedDateKeys(year: number, month: number) {
 
 export function syncVacationMonthSheet(year: number, month: number) {
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
   if (synced.changed && synced.monthState) {
     writeStore(store);
   }
@@ -1011,14 +1021,14 @@ export function syncVacationMonthSheet(year: number, month: number) {
     monthState: synced.monthState,
     managedDateKeys: synced.managedDateKeys,
     message: synced.monthState
-      ? `${year}년 ${month}월 근무표 기준으로 휴가 관리 시트를 맞췄습니다.`
-      : `${year}년 ${month}월 DESK 근무표가 아직 없어 휴가 관리 시트를 만들 수 없습니다.`,
+      ? `${year}년 ${month}월 홈 게시 근무표 기준으로 휴가 관리 시트를 맞췄습니다.`
+      : `${year}년 ${month}월 홈 게시 근무표가 아직 없어 휴가 관리 시트를 만들 수 없습니다.`,
   };
 }
 
 export function syncVacationMonthSheetFromGeneratedSchedule(generated: GeneratedSchedule) {
   const store = readStore();
-  const managedDateKeys = getManagedDateKeysFromGeneratedSchedule(generated);
+  const managedDateKeys = getManagedDateKeysFromSchedule(generated, [generated]);
   const synced = syncMonthStateToManagedDates(store, generated.year, generated.month, managedDateKeys, generated);
   if (synced.changed && synced.monthState) {
     writeStore(store);
@@ -1028,14 +1038,14 @@ export function syncVacationMonthSheetFromGeneratedSchedule(generated: Generated
     monthState: synced.monthState,
     managedDateKeys: synced.managedDateKeys,
     message: synced.monthState
-      ? `${generated.year}년 ${generated.month}월 근무표 기준으로 휴가 관리 시트를 맞췄습니다.`
-      : `${generated.year}년 ${generated.month}월 DESK 근무표가 아직 없어 휴가 관리 시트를 만들 수 없습니다.`,
+      ? `${generated.year}년 ${generated.month}월 근무표 초안 기준으로 휴가 관리 시트를 맞췄습니다.`
+      : `${generated.year}년 ${generated.month}월 근무표 초안 기준 날짜를 확인할 수 없습니다.`,
   };
 }
 
 export function getVacationMonthState(year: number, month: number) {
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
   if (synced.changed && synced.monthState) {
     writeStore(store);
   }
@@ -1065,7 +1075,7 @@ function validateVacationRequestDates(input: {
   if (managedDateKeys.length === 0) {
     return {
       ok: false as const,
-      message: `${input.year}년 ${input.month}월 DESK 근무표가 아직 작성되지 않아 휴가를 신청할 수 없습니다.`,
+      message: `${input.year}년 ${input.month}월 홈 게시 근무표가 아직 없어 휴가를 신청할 수 없습니다.`,
     };
   }
 
@@ -1086,7 +1096,7 @@ function validateVacationRequestDates(input: {
         blockedDays.length > 0
           ? `평일 휴일로 지정된 날짜는 신청할 수 없습니다: ${blockedDays.join(", ")}`
           : unavailableDays.length > 0
-          ? `DESK 근무표에 작성된 날짜만 신청할 수 있습니다: ${unavailableDays.join(", ")}`
+          ? `홈에 게시된 근무표 날짜만 신청할 수 있습니다: ${unavailableDays.join(", ")}`
           : parsedDates.invalid.length > 0
             ? `입력한 날짜를 확인해 주세요: ${parsedDates.invalid.join(", ")}`
             : "휴가 날짜를 입력해 주세요.",
@@ -1141,12 +1151,12 @@ export function submitVacationRequests(input: {
   }
 
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, input.year, input.month);
+  const synced = syncMonthStateToPublishedSchedule(store, input.year, input.month);
   const monthState = synced.monthState;
   if (!monthState) {
     return {
       ok: false as const,
-      message: `${input.year}년 ${input.month}월 DESK 근무표가 아직 작성되지 않아 휴가를 신청할 수 없습니다.`,
+      message: `${input.year}년 ${input.month}월 홈 게시 근무표가 아직 없어 휴가를 신청할 수 없습니다.`,
     };
   }
 
@@ -1201,7 +1211,9 @@ export function submitVacationRequests(input: {
 export function getVacationApplicantsOverview(year: number, month: number) {
   const store = readStore();
   const monthKey = getMonthKey(year, month);
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
+  const publishedSchedules = readPublishedScheduleHistory();
+  const published = getPublishedScheduleForMonth(year, month, publishedSchedules);
   if (synced.changed && synced.monthState) {
     writeStore(store);
   }
@@ -1209,7 +1221,7 @@ export function getVacationApplicantsOverview(year: number, month: number) {
   return {
     monthState: synced.monthState,
     managedDateKeys: synced.managedDateKeys,
-    displayDateKeys: getDisplayDateKeysFromGeneratedSchedule(synced.generated),
+    displayDateKeys: getDisplayDateKeysFromSchedule(published, publishedSchedules),
     hasGeneratedSchedule: synced.managedDateKeys.length > 0,
     annualApplicants: synced.monthState ? getApplicantsByType(store, monthKey, "연차") : ({} as Record<string, string[]>),
     compensatoryApplicants: synced.monthState ? getApplicantsByType(store, monthKey, "대휴") : ({} as Record<string, string[]>),
@@ -1219,7 +1231,7 @@ export function getVacationApplicantsOverview(year: number, month: number) {
 
 export function setVacationCapacity(year: number, month: number, dateKey: string, limit: number) {
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
   const monthState = synced.monthState;
   if (!monthState || !monthState.managedDateKeys.includes(dateKey)) return null;
   monthState.limits[dateKey] = Math.max(1, Math.min(10, Math.trunc(limit) || DEFAULT_VACATION_CAPACITY));
@@ -1230,7 +1242,7 @@ export function setVacationCapacity(year: number, month: number, dateKey: string
 
 export function runAnnualVacationLottery(year: number, month: number) {
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
   const monthState = synced.monthState;
   if (!monthState) return null;
   if (hasLotteryResults(monthState.annualWinners)) {
@@ -1248,7 +1260,7 @@ export function runAnnualVacationLottery(year: number, month: number) {
 
 export function runCompensatoryVacationLottery(year: number, month: number) {
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
   const monthState = synced.monthState;
   if (!monthState) return null;
   if (hasLotteryResults(monthState.compensatoryWinners)) {
@@ -1278,7 +1290,7 @@ export function runCompensatoryVacationLottery(year: number, month: number) {
 
 export function runVacationLottery(year: number, month: number) {
   const store = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(store, year, month);
+  const synced = syncMonthStateToPublishedSchedule(store, year, month);
   const monthState = synced.monthState;
   if (!monthState) return null;
   if (hasLotteryResults(monthState.annualWinners) || hasLotteryResults(monthState.compensatoryWinners)) {
@@ -1299,11 +1311,11 @@ export function applyVacationMonthToSchedule(year: number, month: number) {
   }
 
   const vacationStore = readStore();
-  const synced = syncMonthStateToGeneratedSchedule(vacationStore, year, month);
+  const synced = syncMonthStateToPublishedSchedule(vacationStore, year, month);
   const monthState = synced.monthState;
   const generated = synced.generated;
   if (!monthState || !generated) {
-    return { ok: false as const, message: `${year}년 ${month}월 DESK 근무표가 없어 근무 반영을 할 수 없습니다.` };
+    return { ok: false as const, message: `${year}년 ${month}월 홈 게시 근무표가 없어 근무 반영을 할 수 없습니다.` };
   }
 
   const approvedMap = getApprovedEntriesForMonth(vacationStore, monthState.monthKey);

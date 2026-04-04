@@ -30,6 +30,9 @@ const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const MOBILE_VIEWPORT_MAX = 720;
 const TOUCH_DESKTOP_SHORT_EDGE_MIN = 760;
+const MOBILE_SCHEDULE_ZOOM_MIN = 1;
+const MOBILE_SCHEDULE_ZOOM_MAX = 4;
+const MOBILE_SCHEDULE_ZOOM_STEP = 0.25;
 const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 
 function getWeekdayLabel(dow: number) {
@@ -501,6 +504,7 @@ export function PublishedSchedulesPanel() {
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [shouldAutoFitSchedule, setShouldAutoFitSchedule] = useState(false);
+  const [mobileZoomFactor, setMobileZoomFactor] = useState(1);
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
@@ -587,7 +591,7 @@ export function PublishedSchedulesPanel() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const syncViewport = () => {
-      setIsMobileViewport(false);
+      setIsMobileViewport(isMobileScheduleViewport());
       setIsLandscapeViewport(window.innerWidth > window.innerHeight);
       setShouldAutoFitSchedule(shouldAutoFitScheduleViewport());
     };
@@ -600,6 +604,11 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener("orientationchange", syncViewport);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isMobileViewport) return;
+    setDisplayMode("daily");
+  }, [isMobileViewport, selectedMonthKey]);
 
   const selectedItem = useMemo(() => {
     if (items.length === 0) return null;
@@ -679,10 +688,10 @@ export function PublishedSchedulesPanel() {
   };
 
   const isMonthlyView = !isMobileViewport || displayMode === "monthly";
-  const isCompactMonthlyView = isMobileViewport && displayMode === "monthly";
-  const isCompactDailyView = isMobileViewport && displayMode === "daily";
-  const isCompactDailyLandscapeView = isCompactDailyView && isLandscapeViewport;
-  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
+  const isCompactMonthlyView = false;
+  const isCompactDailyView = false;
+  const isCompactDailyLandscapeView = false;
+  const appliedScheduleScale = (shouldAutoFitSchedule ? scheduleScale : 1) * (isMobileViewport ? mobileZoomFactor : 1);
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
 
@@ -995,13 +1004,25 @@ export function PublishedSchedulesPanel() {
         {isMobileViewport ? (
           <div className="schedule-toolbar">
             <div className="schedule-toolbar-actions">
-              <span className="muted">보기 방식</span>
-              <button className={`btn ${displayMode === "daily" ? "white" : ""}`} onClick={() => setDisplayMode("daily")}>
-                일별 보기
+              <span className="muted">배율</span>
+              <button
+                className="btn"
+                disabled={mobileZoomFactor <= MOBILE_SCHEDULE_ZOOM_MIN}
+                onClick={() => setMobileZoomFactor((current) => Math.max(MOBILE_SCHEDULE_ZOOM_MIN, Number((current - MOBILE_SCHEDULE_ZOOM_STEP).toFixed(2))))}
+              >
+                축소
               </button>
-              <button className={`btn ${displayMode === "monthly" ? "white" : ""}`} onClick={() => setDisplayMode("monthly")}>
-                월별 보기
+              <button className="btn" onClick={() => setMobileZoomFactor(1)}>
+                맞춤
               </button>
+              <button
+                className="btn"
+                disabled={mobileZoomFactor >= MOBILE_SCHEDULE_ZOOM_MAX}
+                onClick={() => setMobileZoomFactor((current) => Math.min(MOBILE_SCHEDULE_ZOOM_MAX, Number((current + MOBILE_SCHEDULE_ZOOM_STEP).toFixed(2))))}
+              >
+                확대
+              </button>
+              <span className="muted" style={{ fontWeight: 800 }}>{Math.round(appliedScheduleScale * 100)}%</span>
             </div>
           </div>
         ) : null}
@@ -1382,8 +1403,10 @@ export function PublishedSchedulesPanel() {
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
                 style={{
-                  overflowX: shouldAutoFitSchedule ? "hidden" : undefined,
-                  overflowY: shouldAutoFitSchedule ? "hidden" : undefined,
+                  overflowX: isMobileViewport ? "auto" : shouldAutoFitSchedule ? "hidden" : undefined,
+                  overflowY: isMobileViewport ? "auto" : shouldAutoFitSchedule ? "hidden" : undefined,
+                  touchAction: isMobileViewport ? "pan-x pan-y pinch-zoom" : undefined,
+                  WebkitOverflowScrolling: isMobileViewport ? "touch" : undefined,
                 }}
               >
               <div
@@ -1626,13 +1649,15 @@ export function PublishedSchedulesPanel() {
                                       <FittedNameText
                                         text={assignmentDisplay.name}
                                         className="schedule-name-chip__text"
-                                        minFontSize={9}
-                                        maxFontSize={isCompactMonthlyView ? 16 : 18}
+                                        minFontSize={isMobileViewport ? 8 : 9}
+                                        maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                         style={{
                                           display: "inline-block",
                                           flex: "0 1 auto",
                                           width: "100%",
                                           margin: "0 auto",
+                                          overflow: isMobileViewport ? "hidden" : "visible",
+                                          textOverflow: isMobileViewport ? "ellipsis" : "clip",
                                         }}
                                       />
                                       {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 11 }}>요청중</span> : null}
