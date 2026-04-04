@@ -106,9 +106,9 @@ const vacationLegendStyles = {
 
 const dutyLegendStyles = {
   조근: {
-    background: "rgba(250,204,21,.78)",
-    border: "1px solid rgba(253,224,71,.92)",
-    color: "#fde68a",
+    background: "rgba(254, 249, 195, 0.98)",
+    border: "1px solid rgba(234, 179, 8, 0.95)",
+    color: "#713f12",
   },
 } as const;
 
@@ -1264,11 +1264,13 @@ export function ScheduleApp() {
               </div>
               <div className="schedule-calendar-scroll">
               <div className="schedule-calendar-grid">
-                {weekdayLabels.map((label) => (
-                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                {weekdayLabels.map((label) => {
+                  const isWeekendLabel = label === "토" || label === "일";
+                  return (
+                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#fecaca" : undefined, fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
-                ))}
+                )})}
                 {visibleDays.map((day) => {
                   const editMode =
                     state.generated?.monthKey === visibleSchedule.monthKey &&
@@ -2004,11 +2006,13 @@ export function ScheduleApp() {
               </div>
               <div className="schedule-calendar-scroll">
                 <div className="schedule-calendar-grid">
-                  {weekdayLabels.map((label) => (
-                    <div key={`preview-${label}`} className="schedule-weekday" style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: "1px solid var(--line)", background: "rgba(255,255,255,.03)", fontWeight: 900, fontSize: 14 }}>
+                  {weekdayLabels.map((label) => {
+                    const isWeekendLabel = label === "토" || label === "일";
+                    return (
+                    <div key={`preview-${label}`} className="schedule-weekday" style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#fecaca" : undefined, fontWeight: 900, fontSize: 14 }}>
                       {label}
                     </div>
-                  ))}
+                  )})}
                   {originalVisibleDays.map((day) => {
                     const dayCardStyle = getDayCardStyle(day);
                     const centeredDayLabel = getCenteredDayLabel(day);

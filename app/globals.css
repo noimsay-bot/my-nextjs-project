@@ -779,6 +779,11 @@ html[data-theme="light"] [style*="background: rgba(255, 255, 255, .05)"] {
   background: rgba(255, 255, 255, 0.86) !important;
 }
 
+html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
 @media (max-width: 0px) {
   .subgrid-4,
   .subgrid-3,
