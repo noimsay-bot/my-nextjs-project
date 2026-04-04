@@ -28,8 +28,8 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
-const MOBILE_VIEWPORT_MAX = 720;
-const TOUCH_DESKTOP_SHORT_EDGE_MIN = 680;
+const MOBILE_PHONE_SHORT_EDGE_MAX = 430;
+const TOUCH_TABLET_SHORT_EDGE_MIN = 431;
 const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 
 function getWeekdayLabel(dow: number) {
@@ -43,15 +43,26 @@ function isHandheldPhoneDevice() {
   return /iPhone|iPod|Android.+Mobile|Windows Phone|Mobile/i.test(navigator.userAgent);
 }
 
-function shouldUseDesktopScheduleLayoutOnTouch() {
-  if (typeof window === "undefined") return false;
+function getScheduleViewportMode() {
+  if (typeof window === "undefined") return "desktop" as const;
   const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  if (!isCoarsePointer) return false;
-  const deviceShortEdge = Math.min(
-    Math.max(window.innerWidth, window.screen.width),
-    Math.max(window.innerHeight, window.screen.height),
-  );
-  return deviceShortEdge >= TOUCH_DESKTOP_SHORT_EDGE_MIN;
+  if (!isCoarsePointer) return "desktop" as const;
+  const viewportShortEdge = Math.min(window.innerWidth, window.innerHeight);
+  const screenShortEdge = Math.min(window.screen.width, window.screen.height);
+  const deviceShortEdge = Math.max(viewportShortEdge, screenShortEdge);
+  const viewportLongEdge = Math.max(window.innerWidth, window.innerHeight);
+  const screenLongEdge = Math.max(window.screen.width, window.screen.height);
+  const deviceLongEdge = Math.max(viewportLongEdge, screenLongEdge);
+
+  if (deviceShortEdge <= MOBILE_PHONE_SHORT_EDGE_MAX) {
+    return "mobile" as const;
+  }
+
+  if (deviceShortEdge >= TOUCH_TABLET_SHORT_EDGE_MIN) {
+    return "tablet" as const;
+  }
+
+  return isHandheldPhoneDevice() ? "mobile" as const : deviceLongEdge > 900 ? "tablet" as const : "mobile" as const;
 }
 
 function shouldAutoFitScheduleViewport() {
@@ -60,12 +71,7 @@ function shouldAutoFitScheduleViewport() {
 
 function isMobileScheduleViewport() {
   if (typeof window === "undefined") return false;
-  if (shouldUseDesktopScheduleLayoutOnTouch()) return false;
-  if (window.innerWidth <= MOBILE_VIEWPORT_MAX) return true;
-  if (isHandheldPhoneDevice()) return true;
-  const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  const screenShortEdge = Math.min(window.innerWidth, window.innerHeight, window.screen.width, window.screen.height);
-  return isCoarsePointer && screenShortEdge <= 860;
+  return getScheduleViewportMode() === "mobile";
 }
 
 const vacationLegendStyles = {
@@ -98,9 +104,9 @@ const vacationLegendStyles = {
 
 const dutyLegendStyles = {
   조근: {
-    background: "rgba(254, 249, 195, 0.98)",
-    border: "1px solid rgba(234, 179, 8, 0.95)",
-    color: "#713f12",
+    background: "rgba(250, 204, 21, 0.14)",
+    border: "1px solid #eab308",
+    color: "#ffffff",
   },
 } as const;
 
@@ -494,7 +500,9 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [viewportMode, setViewportMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isWideTouchDesktopViewport, setIsWideTouchDesktopViewport] = useState(false);
   const [isLandscapeViewport, setIsLandscapeViewport] = useState(false);
   const [displayMode, setDisplayMode] = useState<"daily" | "monthly">("daily");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
@@ -590,7 +598,10 @@ export function PublishedSchedulesPanel() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const syncViewport = () => {
-      setIsMobileViewport(isMobileScheduleViewport());
+      const nextViewportMode = getScheduleViewportMode();
+      setViewportMode(nextViewportMode);
+      setIsWideTouchDesktopViewport(nextViewportMode === "tablet");
+      setIsMobileViewport(nextViewportMode === "mobile");
       setIsLandscapeViewport(window.innerWidth > window.innerHeight);
       setShouldAutoFitSchedule(shouldAutoFitScheduleViewport());
     };
@@ -714,7 +725,8 @@ export function PublishedSchedulesPanel() {
       const containerTop = scrollNode.getBoundingClientRect().top;
       const availableHeight = Math.max(0, window.innerHeight - containerTop - 16);
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const heightFitScale = isMobileViewport && availableHeight > 0 ? availableHeight / nextHeight : 1;
+      const heightFitScale =
+        isMobileViewport && !isWideTouchDesktopViewport && availableHeight > 0 ? availableHeight / nextHeight : 1;
       const autoFitCap = 1;
       const nextFitScale = shouldAutoFitSchedule
         ? Math.min(autoFitCap, Math.max(0.15, Math.min(widthFitScale, heightFitScale)))
@@ -747,6 +759,7 @@ export function PublishedSchedulesPanel() {
     username,
     isCompactMonthlyView,
     isMobileViewport,
+    isWideTouchDesktopViewport,
   ]);
 
   useEffect(() => {
@@ -911,7 +924,9 @@ export function PublishedSchedulesPanel() {
   }
 
   return (
-    <section className={`panel ${isMobileViewport ? "schedule-published-panel--mobile" : "schedule-published-panel--desktop"}`}>
+    <section
+      className={`panel schedule-published-panel--${viewportMode} ${viewportMode === "tablet" ? "schedule-published-panel--desktop" : viewportMode === "desktop" ? "schedule-published-panel--desktop" : ""}`}
+    >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
           <div
@@ -1384,7 +1399,7 @@ export function PublishedSchedulesPanel() {
               >
               <div
                 style={{
-                  minWidth: shouldAutoFitSchedule ? "100%" : undefined,
+                  minWidth: shouldAutoFitSchedule && !isWideTouchDesktopViewport ? "100%" : undefined,
                   width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
                   height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
                   margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,
@@ -1406,7 +1421,7 @@ export function PublishedSchedulesPanel() {
                 {weekdayLabels.map((label) => {
                   const isWeekendLabel = label === "토" || label === "일";
                   return (
-                  <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#fecaca" : undefined, fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 )})}
@@ -1594,13 +1609,13 @@ export function PublishedSchedulesPanel() {
                                             ? firstSelected
                                               ? "rgba(168,85,247,.28)"
                                               : "rgba(56,189,248,.22)"
-                                            : mineHighlighted
-                                              ? "rgba(148,163,184,.38)"
-                                              : dimOtherNames
+                                            : dimOtherNames
                                                 ? "rgba(255,255,255,.06)"
-                                                : assignmentDisplay.isVacation
-                                                ? assignmentDisplay.chipStyle?.background
-                                                : "rgba(255,255,255,.16)",
+                                                : assignmentDisplay.chipStyle?.background
+                                                  ? assignmentDisplay.chipStyle.background
+                                                  : mineHighlighted
+                                                    ? "rgba(148,163,184,.38)"
+                                                    : "rgba(255,255,255,.16)",
                                         border: personObject.pending
                                           ? "1px solid rgba(245,158,11,.35)"
                                           : routeSelected

@@ -637,7 +637,7 @@ button {
 }
 
 .schedule-published-panel--mobile .schedule-calendar-grid--daily {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(7, 176px);
   gap: 6px;
   align-items: start;
 }
@@ -647,8 +647,8 @@ button {
 }
 
 .schedule-published-panel--mobile .schedule-day-card {
-  width: 100% !important;
-  min-width: 170px;
+  width: 176px !important;
+  min-width: 176px;
   min-height: 216px !important;
   padding: 6px !important;
 }
@@ -662,17 +662,18 @@ button {
 }
 
 .schedule-published-panel--mobile .schedule-name-grid {
-  gap: 0 !important;
+  gap: 2px !important;
   justify-content: stretch !important;
 }
 
 .schedule-published-panel--mobile .schedule-name-chip {
-  font-size: clamp(8px, 1.02vw, 11px);
+  font-size: 10px;
   border-radius: 0 !important;
+  min-height: 28px;
 }
 
 .schedule-published-panel--mobile .schedule-name-chip--compact {
-  font-size: clamp(8px, 0.96vw, 10px);
+  font-size: 9px;
 }
 
 .schedule-published-panel--mobile .schedule-name-chip__text {
@@ -681,6 +682,25 @@ button {
   text-overflow: ellipsis;
   word-break: keep-all;
   text-align: center;
+}
+
+.schedule-published-panel--tablet .schedule-calendar-scroll--daily {
+  overflow-x: hidden;
+}
+
+.schedule-published-panel--tablet .schedule-calendar-zoom--daily {
+  width: 100%;
+  min-width: 0;
+}
+
+.schedule-published-panel--tablet .schedule-calendar-grid--daily {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.schedule-published-panel--tablet .schedule-day-card {
+  min-width: 170px;
 }
 
 .schedule-day-date {

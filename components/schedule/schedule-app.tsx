@@ -106,9 +106,9 @@ const vacationLegendStyles = {
 
 const dutyLegendStyles = {
   조근: {
-    background: "rgba(254, 249, 195, 0.98)",
-    border: "1px solid rgba(234, 179, 8, 0.95)",
-    color: "#713f12",
+    background: "rgba(250, 204, 21, 0.14)",
+    border: "1px solid #eab308",
+    color: "#ffffff",
   },
 } as const;
 
@@ -1267,7 +1267,7 @@ export function ScheduleApp() {
                 {weekdayLabels.map((label) => {
                   const isWeekendLabel = label === "토" || label === "일";
                   return (
-                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#fecaca" : undefined, fontWeight: 900, fontSize: 14 }}>
+                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
                     {label}
                   </div>
                 )})}
@@ -1606,8 +1606,8 @@ export function ScheduleApp() {
                                                 ? weekendConflict
                                                   ? "rgba(34,211,238,.28)"
                                                   : "rgba(239,68,68,.22)"
-                                                : assignmentDisplay.isVacation
-                                                  ? assignmentDisplay.chipStyle?.background
+                                                : assignmentDisplay.chipStyle?.background
+                                                  ? assignmentDisplay.chipStyle.background
                                                   : highlighted
                                                     ? "rgba(34,211,238,.22)"
                                                     : "rgba(255,255,255,.16)",
@@ -2009,7 +2009,7 @@ export function ScheduleApp() {
                   {weekdayLabels.map((label) => {
                     const isWeekendLabel = label === "토" || label === "일";
                     return (
-                    <div key={`preview-${label}`} className="schedule-weekday" style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#fecaca" : undefined, fontWeight: 900, fontSize: 14 }}>
+                    <div key={`preview-${label}`} className="schedule-weekday" style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
                       {label}
                     </div>
                   )})}
