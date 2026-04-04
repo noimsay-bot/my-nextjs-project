@@ -5,17 +5,11 @@ import { refreshUsers } from "@/lib/auth/storage";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
-  addSelectedFinalCutQuarter,
-  FinalCutQuarterGroup,
-  formatFinalCutQuarterLabel,
   getContributionSummaryRows,
-  getFinalCutQuarterGroups,
   getFinalCutSummaryRows,
   getOverallScoreCards,
-  getSelectedFinalCutQuarterKeys,
   getVideoReviewSummaryRows,
   refreshScoreboardState,
-  removeSelectedFinalCutQuarter,
   TEAM_LEAD_SCOREBOARD_EVENT,
   TeamLeadFinalCutSummaryRow,
   TeamLeadOverallScoreCard,
@@ -46,11 +40,15 @@ function WeightedQuarterSummaryTable({
   title,
   groupLabel,
   weightLabel,
+  midLabel,
+  getMidValue,
   rows,
 }: {
   title: string;
   groupLabel: string;
   weightLabel: string;
+  midLabel: string;
+  getMidValue: (row: TeamLeadWeightedQuarterSummaryRow) => number;
   rows: TeamLeadWeightedQuarterSummaryRow[];
 }) {
   return (
@@ -58,15 +56,15 @@ function WeightedQuarterSummaryTable({
       <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
         <strong style={{ fontSize: 18 }}>{title}</strong>
         <div style={{ overflowX: "auto" }}>
-          <table className="table-like team-lead-summary-table" style={{ minWidth: 980 }}>
+          <table className="table-like team-lead-summary-table" style={{ minWidth: 1120 }}>
             <thead>
               <tr>
                 <th rowSpan={2} style={{ minWidth: 72 }}>순위</th>
                 <th rowSpan={2} style={{ minWidth: 120 }}>이름</th>
-                <th colSpan={6} style={{ textAlign: "center" }}>{groupLabel}</th>
+                <th colSpan={7} style={{ textAlign: "center" }}>{groupLabel}</th>
               </tr>
               <tr>
-                {["12-2월", "3-5월", "6-8월", "9-11월", "합산", weightLabel].map((label) => (
+                {["12-2월", "3-5월", midLabel, "6-8월", "9-11월", "합산", weightLabel].map((label) => (
                   <th key={`${title}-${label}`} style={{ textAlign: "center", minWidth: 110 }}>
                     {label}
                   </th>
@@ -75,14 +73,14 @@ function WeightedQuarterSummaryTable({
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={`${title}-${row.name}`}>
+                <tr key={`${title}-${row.name}-${index}`}>
                   <td style={{ fontWeight: 800 }}>{index + 1}</td>
                   <td style={{ fontWeight: 800 }}>{row.name}</td>
-                  {row.quarterScores.map((item) => (
-                    <td key={`${title}-${row.name}-${item.key}`} style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                      {formatScore(item.score)}
-                    </td>
-                  ))}
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatScore(row.quarterScores[0]?.score ?? 0)}</td>
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatScore(row.quarterScores[1]?.score ?? 0)}</td>
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap", fontWeight: 800 }}>{formatScore(getMidValue(row))}</td>
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatScore(row.quarterScores[2]?.score ?? 0)}</td>
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatScore(row.quarterScores[3]?.score ?? 0)}</td>
                   <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatScore(row.totalScore)}</td>
                   <td style={{ textAlign: "center", whiteSpace: "nowrap", fontWeight: 800 }}>
                     {formatScore(row.convertedScore)}
@@ -111,11 +109,17 @@ function FinalCutSummaryTable({ rows }: { rows: TeamLeadFinalCutSummaryRow[] }) 
               <tr>
                 <th rowSpan={3} style={{ width: 48, textAlign: "center" }}>순위</th>
                 <th rowSpan={3} style={{ width: 74, textAlign: "center" }}>이름</th>
-                <th colSpan={14} style={{ textAlign: "center" }}>정제본 제작</th>
+                <th colSpan={15} style={{ textAlign: "center" }}>정제본 제작</th>
               </tr>
               <tr>
                 {["12-2월", "3-5월", "6-8월", "9-11월"].map((label) => (
                   <th key={`final-cut-group-${label}`} colSpan={3} style={{ textAlign: "center" }}>
+                    {label}
+                  </th>
+                )).slice(0, 2)}
+                <th rowSpan={2} style={{ textAlign: "center", width: 78 }}>중간 합계</th>
+                {["6-8월", "9-11월"].map((label) => (
+                  <th key={`final-cut-group-tail-${label}`} colSpan={3} style={{ textAlign: "center" }}>
                     {label}
                   </th>
                 ))}
@@ -137,10 +141,30 @@ function FinalCutSummaryTable({ rows }: { rows: TeamLeadFinalCutSummaryRow[] }) 
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={`final-cut-summary-${row.name}`}>
+                <tr key={`final-cut-summary-${row.name}-${index}`}>
                   <td style={{ fontWeight: 800 }}>{index + 1}</td>
                   <td style={{ fontWeight: 800 }}>{row.name}</td>
-                  {row.quarterScores.flatMap((item) => [
+                  {row.quarterScores.slice(0, 2).flatMap((item) => [
+                    <td key={`${row.name}-${item.key}-count`} style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                      {item.itemCount}
+                    </td>,
+                    <td key={`${row.name}-${item.key}-earned`} style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                      {formatScore(item.earnedScore)}
+                    </td>,
+                    <td key={`${row.name}-${item.key}-rate`} style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                      {formatPercent(item.ratePercent)}
+                    </td>,
+                  ])}
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap", fontWeight: 800 }}>
+                    {formatPercent(
+                      (() => {
+                        const halfItemCount = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.itemCount, 0);
+                        const halfEarnedScore = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.earnedScore, 0);
+                        return halfItemCount > 0 ? (halfEarnedScore / halfItemCount) * 100 : 0;
+                      })(),
+                    )}
+                  </td>
+                  {row.quarterScores.slice(2).flatMap((item) => [
                     <td key={`${row.name}-${item.key}-count`} style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                       {item.itemCount}
                     </td>,
@@ -167,8 +191,6 @@ function FinalCutSummaryTable({ rows }: { rows: TeamLeadFinalCutSummaryRow[] }) 
 
 export function OverallScoreSummaryPage() {
   const [cards, setCards] = useState<TeamLeadOverallScoreCard[]>([]);
-  const [quarterGroups, setQuarterGroups] = useState<FinalCutQuarterGroup[]>([]);
-  const [selectedQuarterKeys, setSelectedQuarterKeys] = useState<string[]>([]);
   const [videoReviewRows, setVideoReviewRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
   const [contributionRows, setContributionRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
   const [finalCutRows, setFinalCutRows] = useState<TeamLeadFinalCutSummaryRow[]>([]);
@@ -176,8 +198,6 @@ export function OverallScoreSummaryPage() {
 
   const syncFromCache = useCallback(() => {
     setCards(getOverallScoreCards());
-    setQuarterGroups(getFinalCutQuarterGroups());
-    setSelectedQuarterKeys(getSelectedFinalCutQuarterKeys());
     setVideoReviewRows(getVideoReviewSummaryRows());
     setContributionRows(getContributionSummaryRows());
     setFinalCutRows(getFinalCutSummaryRows());
@@ -248,35 +268,6 @@ export function OverallScoreSummaryPage() {
           <div className="chip">종합점수</div>
           <strong style={{ fontSize: 24 }}>종합점수</strong>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-        </div>
-      </article>
-
-      <article className="panel">
-        <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <strong style={{ fontSize: 18 }}>정제본 반영 분기</strong>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {quarterGroups.map((group) => {
-              const selected = selectedQuarterKeys.includes(group.key);
-              return (
-                <button
-                  key={group.key}
-                  type="button"
-                  className={`btn ${selected ? "white" : ""}`}
-                  style={{ padding: "6px 10px", fontSize: 12 }}
-                  onClick={() => {
-                    if (selected) {
-                      removeSelectedFinalCutQuarter(group.key);
-                    } else {
-                      addSelectedFinalCutQuarter(group.key);
-                    }
-                    setMessage({ tone: "ok", text: "정제본 반영 분기를 저장했습니다." });
-                  }}
-                >
-                  {selected ? "제외" : "추가"} | {formatFinalCutQuarterLabel(group)}
-                </button>
-              );
-            })}
-          </div>
         </div>
       </article>
 
@@ -365,7 +356,7 @@ export function OverallScoreSummaryPage() {
               </thead>
               <tbody>
                 {ranking.map((card, index) => (
-                  <tr key={`overall-summary-${card.name}`}>
+                  <tr key={`overall-summary-${card.name}-${index}`}>
                     <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)", fontWeight: 800 }}>{index + 1}</td>
                     <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)", fontWeight: 800 }}>{card.name}</td>
                     <td style={{ padding: "12px", borderBottom: "1px solid rgba(255,255,255,.07)" }}>{formatScore(card.totalScore)}점</td>
@@ -386,6 +377,8 @@ export function OverallScoreSummaryPage() {
         title="영상평가"
         groupLabel="영상평가"
         weightLabel="20%환산"
+        midLabel="중간 합계"
+        getMidValue={(row) => ((row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)) * 0.2}
         rows={videoReviewRows}
       />
 
@@ -393,6 +386,8 @@ export function OverallScoreSummaryPage() {
         title="참여/기여도"
         groupLabel="참여/기여도"
         weightLabel="30%환산"
+        midLabel="중간 합계"
+        getMidValue={(row) => (row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)}
         rows={contributionRows}
       />
 

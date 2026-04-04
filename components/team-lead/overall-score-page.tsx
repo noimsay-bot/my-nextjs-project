@@ -1,20 +1,19 @@
-﻿"use client";
+"use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
-  addSelectedFinalCutQuarter,
-  FinalCutQuarterGroup,
-  formatFinalCutQuarterLabel,
-  getFinalCutQuarterGroups,
+  getContributionSummaryRows,
+  getFinalCutSummaryRows,
   getOverallScoreCards,
-  getSelectedFinalCutQuarterKeys,
-  removeSelectedFinalCutQuarter,
+  getVideoReviewSummaryRows,
   refreshScoreboardState,
   TEAM_LEAD_SCOREBOARD_EVENT,
+  TeamLeadFinalCutSummaryRow,
   TeamLeadOverallScoreCard,
+  TeamLeadWeightedQuarterSummaryRow,
 } from "@/lib/team-lead/scoreboard";
 import {
   TEAM_LEAD_CONTRIBUTION_EVENT,
@@ -28,16 +27,315 @@ function formatScore(score: number) {
   return score.toFixed(1);
 }
 
+function formatPercent(score: number) {
+  return `${score.toFixed(1)}%`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function maskName(name: string, selectedName: string) {
+  return name === selectedName ? name : "";
+}
+
+function getPrintEvaluationMeta(baseDate = new Date()) {
+  const month = baseDate.getMonth() + 1;
+  const year = baseDate.getFullYear();
+
+  if (month >= 6 && month <= 10) {
+    return {
+      label: `${year}년 중간 평가`,
+    };
+  }
+
+  return {
+    label: `${month <= 5 ? year - 1 : year}년 최종 평가`,
+  };
+}
+
+function renderPrintRankingTable(cards: TeamLeadOverallScoreCard[], selectedName: string) {
+  const rows = [...cards]
+    .sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"))
+    .map(
+      (card, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(maskName(card.name, selectedName))}</td>
+          <td>${formatScore(card.totalScore)}점</td>
+          <td>${formatScore(card.finalCutScore)}점</td>
+          <td>${formatScore(card.videoReviewScore)}점</td>
+          <td>${formatScore(card.contributionScore)}점</td>
+          <td>${formatScore(card.broadcastAccidentScore)}점</td>
+          <td>${formatScore(card.liveSafetyScore)}점</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <section class="print-page print-page--ranking">
+      <h1>종합점수 - 전체 순위</h1>
+      <table>
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>이름</th>
+            <th>총점</th>
+            <th>정제본</th>
+            <th>평가 평균</th>
+            <th>기여도</th>
+            <th>장비/인적 사고</th>
+            <th>LIVE 무사고</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </section>`;
+}
+
+function renderPrintWeightedTable(
+  title: string,
+  rows: TeamLeadWeightedQuarterSummaryRow[],
+  selectedName: string,
+  midValueLabel: string,
+  getMidValue: (row: TeamLeadWeightedQuarterSummaryRow) => number,
+) {
+  const body = rows
+    .map(
+      (row, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(maskName(row.name, selectedName))}</td>
+          <td>${formatScore(row.quarterScores[0]?.score ?? 0)}</td>
+          <td>${formatScore(row.quarterScores[1]?.score ?? 0)}</td>
+          <td>${formatScore(getMidValue(row))}</td>
+          <td>${formatScore(row.quarterScores[2]?.score ?? 0)}</td>
+          <td>${formatScore(row.quarterScores[3]?.score ?? 0)}</td>
+          <td>${formatScore(row.totalScore)}</td>
+          <td>${formatScore(row.convertedScore)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <section class="print-page print-page--weighted">
+      <h1>${escapeHtml(title)}</h1>
+      <table>
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>이름</th>
+            <th>12-2월</th>
+            <th>3-5월</th>
+            <th>${escapeHtml(midValueLabel)}</th>
+            <th>6-8월</th>
+            <th>9-11월</th>
+            <th>합산</th>
+            <th>환산</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </section>`;
+}
+
+function renderPrintFinalCutTable(rows: TeamLeadFinalCutSummaryRow[], selectedName: string) {
+  const body = rows
+    .map((row, index) => {
+      const halfItemCount = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.itemCount, 0);
+      const halfEarnedScore = row.quarterScores.slice(0, 2).reduce((sum, item) => sum + item.earnedScore, 0);
+      const halfRate = halfItemCount > 0 ? (halfEarnedScore / halfItemCount) * 100 : 0;
+
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(maskName(row.name, selectedName))}</td>
+          <td>${row.quarterScores[0]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[0]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[0]?.ratePercent ?? 0)}</td>
+          <td>${row.quarterScores[1]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[1]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[1]?.ratePercent ?? 0)}</td>
+          <td>${formatPercent(halfRate)}</td>
+          <td>${row.quarterScores[2]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[2]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[2]?.ratePercent ?? 0)}</td>
+          <td>${row.quarterScores[3]?.itemCount ?? 0}</td>
+          <td>${formatScore(row.quarterScores[3]?.earnedScore ?? 0)}</td>
+          <td>${formatPercent(row.quarterScores[3]?.ratePercent ?? 0)}</td>
+          <td>${formatPercent(row.overallRatePercent)}</td>
+          <td>${formatScore(row.convertedScore)}</td>
+        </tr>`;
+    })
+    .join("");
+
+  return `
+    <section class="print-page print-page--final-cut">
+      <h1>정제본 제작</h1>
+      <table>
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>이름</th>
+            <th>12-2 일정수</th>
+            <th>12-2 정제본</th>
+            <th>12-2 수행률</th>
+            <th>3-5 일정수</th>
+            <th>3-5 정제본</th>
+            <th>3-5 수행률</th>
+            <th>중간 합계</th>
+            <th>6-8 일정수</th>
+            <th>6-8 정제본</th>
+            <th>6-8 수행률</th>
+            <th>9-11 일정수</th>
+            <th>9-11 정제본</th>
+            <th>9-11 수행률</th>
+            <th>전체수행률</th>
+            <th>10%환산</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </section>`;
+}
+
+function renderPrintCoverPage(selectedName: string, evaluationLabel: string) {
+  return `
+    <section class="print-page print-cover">
+      <div class="cover-wrap">
+        <h1>${escapeHtml(evaluationLabel)}</h1>
+        <strong class="cover-name">${escapeHtml(selectedName)}</strong>
+      </div>
+    </section>`;
+}
+
+function buildPrintHtml(
+  selectedName: string,
+  cards: TeamLeadOverallScoreCard[],
+  videoReviewRows: TeamLeadWeightedQuarterSummaryRow[],
+  contributionRows: TeamLeadWeightedQuarterSummaryRow[],
+  finalCutRows: TeamLeadFinalCutSummaryRow[],
+) {
+  const evaluationMeta = getPrintEvaluationMeta();
+
+  return `<!doctype html>
+  <html lang="ko">
+    <head>
+      <meta charset="utf-8" />
+      <title></title>
+      <style>
+        @page {
+          size: A4 landscape;
+          margin: 12mm;
+        }
+        * {
+          box-sizing: border-box;
+        }
+        body {
+          margin: 0;
+          font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+          color: #111827;
+          background: #ffffff;
+        }
+        h1 {
+          margin: 0 0 6px;
+          font-size: 16px;
+          text-align: center;
+          line-height: 1.2;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+          font-size: 9px;
+        }
+        th, td {
+          border: 1px solid #cbd5e1;
+          padding: 3px 4px;
+          text-align: center;
+          word-break: break-word;
+          line-height: 1.15;
+        }
+        th {
+          background: #f8fafc;
+          font-weight: 700;
+        }
+        .print-page {
+          width: 100%;
+          min-height: 180mm;
+          height: 180mm;
+          page-break-after: always;
+          display: grid;
+          align-content: start;
+          gap: 6px;
+          overflow: hidden;
+        }
+        .print-page:last-child {
+          page-break-after: auto;
+        }
+        .print-page table,
+        .print-page tr,
+        .print-page td,
+        .print-page th {
+          page-break-inside: avoid;
+        }
+        .print-page--ranking table {
+          font-size: 9.5px;
+        }
+        .print-page--weighted table {
+          font-size: 9px;
+        }
+        .print-page--final-cut table {
+          font-size: 7.1px;
+        }
+        .print-page--final-cut th,
+        .print-page--final-cut td {
+          padding: 2px 2px;
+        }
+        .print-cover {
+          align-content: start;
+          justify-items: center;
+          padding-top: 22mm;
+        }
+        .cover-wrap {
+          display: grid;
+          gap: 16px;
+          justify-items: center;
+          text-align: center;
+        }
+        .cover-name {
+          font-size: 34px;
+          font-weight: 800;
+        }
+      </style>
+    </head>
+    <body>
+      ${renderPrintCoverPage(selectedName, evaluationMeta.label)}
+      ${renderPrintRankingTable(cards, selectedName)}
+      ${renderPrintWeightedTable("영상평가", videoReviewRows, selectedName, "중간 합계", (row) => ((row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0)) * 0.2)}
+      ${renderPrintWeightedTable("참여/기여도", contributionRows, selectedName, "중간 합계", (row) => (row.quarterScores[0]?.score ?? 0) + (row.quarterScores[1]?.score ?? 0))}
+      ${renderPrintFinalCutTable(finalCutRows, selectedName)}
+    </body>
+  </html>`;
+}
+
 export function OverallScorePage() {
   const [cards, setCards] = useState<TeamLeadOverallScoreCard[]>([]);
+  const [videoReviewRows, setVideoReviewRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
+  const [contributionRows, setContributionRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
+  const [finalCutRows, setFinalCutRows] = useState<TeamLeadFinalCutSummaryRow[]>([]);
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
-  const [quarterGroups, setQuarterGroups] = useState<FinalCutQuarterGroup[]>([]);
-  const [selectedQuarterKeys, setSelectedQuarterKeys] = useState<string[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+
   const syncFromCache = useCallback(() => {
     setCards(getOverallScoreCards());
-    setQuarterGroups(getFinalCutQuarterGroups());
-    setSelectedQuarterKeys(getSelectedFinalCutQuarterKeys());
+    setVideoReviewRows(getVideoReviewSummaryRows());
+    setContributionRows(getContributionSummaryRows());
+    setFinalCutRows(getFinalCutSummaryRows());
   }, []);
 
   useEffect(() => {
@@ -85,6 +383,60 @@ export function OverallScorePage() {
     );
   };
 
+  const printPayloadReady = useMemo(
+    () => cards.length > 0 && videoReviewRows.length > 0 && contributionRows.length > 0 && finalCutRows.length > 0,
+    [cards, contributionRows, finalCutRows, videoReviewRows],
+  );
+
+  const handlePrint = (selectedName: string) => {
+    if (!printPayloadReady) {
+      setMessage({ tone: "warn", text: "출력용 데이터를 아직 불러오는 중입니다. 잠시 후 다시 시도해 주세요." });
+      return;
+    }
+
+    const existingFrame = document.getElementById("overall-score-print-frame");
+    if (existingFrame) {
+      existingFrame.remove();
+    }
+
+    const frame = document.createElement("iframe");
+    frame.id = "overall-score-print-frame";
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.position = "fixed";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    frame.style.visibility = "hidden";
+    document.body.appendChild(frame);
+
+    const printWindow = frame.contentWindow;
+    if (!printWindow) {
+      frame.remove();
+      setMessage({ tone: "warn", text: "출력 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+      return;
+    }
+
+    const html = buildPrintHtml(selectedName, cards, videoReviewRows, contributionRows, finalCutRows);
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        frame.remove();
+      }, 300);
+    };
+
+    printWindow.onafterprint = cleanup;
+    window.setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+      window.setTimeout(cleanup, 2000);
+    }, 250);
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
@@ -93,7 +445,7 @@ export function OverallScorePage() {
           <strong style={{ fontSize: 24 }}>개인별 점수</strong>
           <div className="status note">
             활성 사용자 기준으로 개인별 기여도, 베스트리포트 평가 평균, 정제본, 장비/인적 사고, LIVE 무사고 점수를 합산합니다.
-            정제본 점수는 선택한 분기만 반영됩니다.
+            정제본 점수는 현재까지 반영된 수행 결과를 기준으로 계산합니다.
           </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
@@ -107,8 +459,8 @@ export function OverallScorePage() {
           alignItems: "start",
         }}
       >
-        {cards.map((card) => (
-          <article key={card.name} className="panel" style={{ alignSelf: "start" }}>
+        {cards.map((card, index) => (
+          <article key={`${card.name}-${index}`} className="panel" style={{ alignSelf: "start" }}>
             <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
               <button
                 type="button"
@@ -148,6 +500,15 @@ export function OverallScorePage() {
 
               {expandedNames.includes(card.name) ? (
                 <div style={{ display: "grid", gap: 10 }}>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => handlePrint(card.name)}
+                    style={{ justifySelf: "start" }}
+                  >
+                    출력
+                  </button>
+
                   <div
                     style={{
                       display: "grid",
@@ -162,53 +523,9 @@ export function OverallScorePage() {
                       <strong>정제본</strong>
                       <strong>{formatScore(card.finalCutScore)}점</strong>
                     </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {quarterGroups.map((group) => {
-                        const selected = selectedQuarterKeys.includes(group.key);
-                        return (
-                          <button
-                            key={group.key}
-                            type="button"
-                            className={`btn ${selected ? "white" : ""}`}
-                            style={{ padding: "6px 10px", fontSize: 12 }}
-                            onClick={() => {
-                              if (selected) {
-                                removeSelectedFinalCutQuarter(group.key);
-                              } else {
-                                addSelectedFinalCutQuarter(group.key);
-                              }
-                              setMessage({ tone: "ok", text: "정제본 반영 분기를 저장했습니다." });
-                            }}
-                          >
-                            {selected ? "제외" : "추가"} | {formatFinalCutQuarterLabel(group)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {card.finalCutQuarterScores.length > 0 ? (
-                      <div style={{ display: "grid", gap: 6 }}>
-                        {card.finalCutQuarterScores.map((item) => (
-                          <div
-                            key={`${card.name}-${item.key}`}
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              gap: 8,
-                              flexWrap: "wrap",
-                              color: "#cbd5e1",
-                              fontSize: 14,
-                            }}
-                          >
-                            <span>{item.label}</span>
-                            <span>
-                              {item.itemCount}건 | {item.ratePercent.toFixed(1)}% | {item.convertedScore.toFixed(1)}점
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="muted">선택된 정제본 분기가 없습니다.</span>
-                    )}
+                    <span className="muted" style={{ fontSize: 14 }}>
+                      현재까지 반영된 정제본 점수입니다.
+                    </span>
                   </div>
 
                   <div
@@ -255,7 +572,7 @@ export function OverallScorePage() {
                       background: "rgba(15,23,42,.16)",
                     }}
                   >
-                <strong>장비/인적 사고</strong>
+                    <strong>장비/인적 사고</strong>
                     <strong>{formatScore(card.broadcastAccidentScore)}점</strong>
                   </div>
 
@@ -283,4 +600,3 @@ export function OverallScorePage() {
     </section>
   );
 }
-

@@ -141,6 +141,9 @@ const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
 const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
 const TEAM_LEAD_REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 const TEAM_LEAD_REFERENCE_NOTES_STATE_KEY = "reference_notes_v1";
+const TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY = "best_report_quarters_v1";
+const TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY = "best_report_current_v1";
+export const TEAM_LEAD_BEST_REPORT_EVENT = "j-team-lead-best-report-updated";
 
 interface TeamLeadScheduleAssignmentRow {
   month_key: string;
@@ -1127,10 +1130,28 @@ export interface TeamLeadBestReportResultsRow {
   trimmedAverage: number | null;
 }
 
+export type TeamLeadBestReportQuarterNumber = 1 | 2 | 3 | 4;
+
+export interface TeamLeadBestReportQuarterTarget {
+  key: string;
+  label: string;
+  year: number;
+  quarter: TeamLeadBestReportQuarterNumber;
+}
+
+export interface TeamLeadBestReportQuarterSnapshot extends TeamLeadBestReportQuarterTarget {
+  savedAt: string;
+  reviewers: TeamLeadBestReportReviewer[];
+  rows: TeamLeadBestReportResultsRow[];
+  reviewerDetails: TeamLeadBestReportReviewerDetailRow[];
+}
+
 export interface TeamLeadBestReportResultsWorkspace {
   reviewers: TeamLeadBestReportReviewer[];
   rows: TeamLeadBestReportResultsRow[];
   reviewerDetails: TeamLeadBestReportReviewerDetailRow[];
+  savedQuarters: TeamLeadBestReportQuarterSnapshot[];
+  nextQuarter: TeamLeadBestReportQuarterTarget;
 }
 
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
@@ -1265,6 +1286,139 @@ function getTrimmedReviewAverage(scores: number[]) {
   const middleScores = sorted.slice(1, -1);
   if (middleScores.length === 0) return null;
   return roundScore(middleScores.reduce((sum, score) => sum + score, 0) / middleScores.length);
+}
+
+function isBestReportQuarterNumber(value: unknown): value is TeamLeadBestReportQuarterNumber {
+  return value === 1 || value === 2 || value === 3 || value === 4;
+}
+
+function getBestReportQuarterKey(year: number, quarter: TeamLeadBestReportQuarterNumber) {
+  return `${year}-Q${quarter}`;
+}
+
+function getBestReportQuarterLabel(year: number, quarter: TeamLeadBestReportQuarterNumber) {
+  return `${year}년 ${quarter}분기`;
+}
+
+function normalizeBestReportQuarterTarget(
+  value: Partial<TeamLeadBestReportQuarterTarget> | null | undefined,
+): TeamLeadBestReportQuarterTarget | null {
+  const year = Number(value?.year);
+  const quarter = Number(value?.quarter);
+  if (!Number.isInteger(year) || year < 2000 || !isBestReportQuarterNumber(quarter)) {
+    return null;
+  }
+
+  return {
+    year,
+    quarter,
+    key: getBestReportQuarterKey(year, quarter),
+    label: getBestReportQuarterLabel(year, quarter),
+  };
+}
+
+function normalizeBestReportQuarterSnapshots(raw: unknown) {
+  if (!Array.isArray(raw)) return [] as TeamLeadBestReportQuarterSnapshot[];
+
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Partial<TeamLeadBestReportQuarterSnapshot>;
+      const target = normalizeBestReportQuarterTarget(record);
+      if (!target) return null;
+
+      return {
+        ...target,
+        savedAt: typeof record.savedAt === "string" ? record.savedAt : "",
+        reviewers: Array.isArray(record.reviewers) ? record.reviewers : [],
+        rows: Array.isArray(record.rows) ? record.rows : [],
+        reviewerDetails: Array.isArray(record.reviewerDetails) ? record.reviewerDetails : [],
+      } satisfies TeamLeadBestReportQuarterSnapshot;
+    })
+    .filter((item): item is TeamLeadBestReportQuarterSnapshot => Boolean(item))
+    .sort((left, right) => left.year - right.year || left.quarter - right.quarter);
+}
+
+function normalizeBestReportCurrentState(raw: unknown) {
+  if (!raw || typeof raw !== "object") {
+    return { resetAt: "" };
+  }
+
+  const record = raw as { resetAt?: unknown };
+  return {
+    resetAt: typeof record.resetAt === "string" ? record.resetAt : "",
+  };
+}
+
+function getNextBestReportQuarterTarget(
+  snapshots: TeamLeadBestReportQuarterSnapshot[],
+): TeamLeadBestReportQuarterTarget {
+  const latest = snapshots[snapshots.length - 1];
+  if (!latest) {
+    const year = new Date().getFullYear();
+    return {
+      year,
+      quarter: 1,
+      key: getBestReportQuarterKey(year, 1),
+      label: getBestReportQuarterLabel(year, 1),
+    };
+  }
+
+  if (latest.quarter < 4) {
+    const quarter = (latest.quarter + 1) as TeamLeadBestReportQuarterNumber;
+    return {
+      year: latest.year,
+      quarter,
+      key: getBestReportQuarterKey(latest.year, quarter),
+      label: getBestReportQuarterLabel(latest.year, quarter),
+    };
+  }
+
+  const year = latest.year + 1;
+  return {
+    year,
+    quarter: 1,
+    key: getBestReportQuarterKey(year, 1),
+    label: getBestReportQuarterLabel(year, 1),
+  };
+}
+
+async function getSavedBestReportQuarterSnapshots() {
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+      return [] as TeamLeadBestReportQuarterSnapshot[];
+    }
+    throw new Error(error.message);
+  }
+
+  return normalizeBestReportQuarterSnapshots(data?.state);
+}
+
+async function getBestReportCurrentResetAt() {
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+      return "";
+    }
+    throw new Error(error.message);
+  }
+
+  return normalizeBestReportCurrentState(data?.state).resetAt;
 }
 
 async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementWorkspace> {
@@ -1517,6 +1671,8 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   }
 
   const supabase = await getPrivilegedSupabaseClient();
+  const savedQuarters = await getSavedBestReportQuarterSnapshots();
+  const currentResetAt = await getBestReportCurrentResetAt();
   const reviewerProfiles = await getGrantedReviewerProfiles();
   const reviewers = reviewerProfiles.map((profile) => ({
     id: profile.id,
@@ -1534,8 +1690,11 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
     throw new Error(submissionError.message);
   }
 
-  const submissionIds = (submissionRows ?? []).map((row) => row.id);
-  const authorIds = Array.from(new Set((submissionRows ?? []).map((row) => row.author_id)));
+  const currentSubmissionRows = (submissionRows ?? []).filter((row) =>
+    currentResetAt ? row.updated_at > currentResetAt : true,
+  );
+  const submissionIds = currentSubmissionRows.map((row) => row.id);
+  const authorIds = Array.from(new Set(currentSubmissionRows.map((row) => row.author_id)));
 
   const { data: authorProfiles, error: authorProfileError } =
     authorIds.length > 0
@@ -1573,13 +1732,14 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
 
   const authorNameMap = new Map((authorProfiles ?? []).map((profile) => [profile.id, profile.name.trim()] as const));
   const reviewerNameMap = new Map(reviewers.map((reviewer) => [reviewer.id, reviewer.name] as const));
-  const submissionAuthorMap = new Map((submissionRows ?? []).map((row) => [row.id, row.author_id] as const));
-  const submissionMap = new Map((submissionRows ?? []).map((row) => [row.id, row] as const));
+  const submissionAuthorMap = new Map(currentSubmissionRows.map((row) => [row.id, row.author_id] as const));
+  const submissionMap = new Map(currentSubmissionRows.map((row) => [row.id, row] as const));
   const scoreMap = new Map<string, Map<string, number[]>>();
   const reviewerDetailMap = new Map<string, TeamLeadBestReportReviewerDetailRow>();
 
   (reviewRows ?? []).forEach((row) => {
     if (!row.completed_at) return;
+    if (currentResetAt && row.completed_at <= currentResetAt) return;
     const authorId = submissionAuthorMap.get(row.submission_id);
     const total = Number(row.total);
     if (!authorId || !Number.isFinite(total)) return;
@@ -1655,6 +1815,8 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
     reviewers,
     rows,
     reviewerDetails,
+    savedQuarters,
+    nextQuarter: getNextBestReportQuarterTarget(savedQuarters),
   };
 }
 
@@ -1663,6 +1825,77 @@ export async function getTeamLeadBestReportScoreMap() {
   return new Map(
     workspace.rows.map((row) => [row.authorName.trim(), roundScore(row.trimmedAverage ?? 0)] as const),
   );
+}
+
+export async function saveCurrentBestReportResultsAsNextQuarter() {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "베스트리포트 분기 저장 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const workspace = await getTeamLeadBestReportResultsWorkspace();
+  const hasScoredRows = workspace.rows.some((row) => row.reviewerScores.some((score) => score.score !== null));
+  if (!hasScoredRows) {
+    return { ok: false as const, message: "저장할 베스트리포트 평가 결과가 없습니다." };
+  }
+
+  const nextSnapshot: TeamLeadBestReportQuarterSnapshot = {
+    ...workspace.nextQuarter,
+    savedAt: new Date().toISOString(),
+    reviewers: workspace.reviewers,
+    rows: workspace.rows,
+    reviewerDetails: workspace.reviewerDetails,
+  };
+  const previousSnapshots = [...workspace.savedQuarters];
+  const nextSnapshots = [...previousSnapshots, nextSnapshot];
+  const resetAt = new Date().toISOString();
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY, nextSnapshots);
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "분기 결과 저장에 실패했습니다.",
+    };
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY, {
+      resetAt,
+    });
+  } catch (error) {
+    await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY, previousSnapshots);
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "현재 분기 초기화에 실패했습니다.",
+    };
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+      profileIds: [],
+    });
+  } catch (error) {
+    await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY, previousSnapshots);
+    await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY, {
+      resetAt: "",
+    });
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "평가자 명단 초기화에 실패했습니다.",
+    };
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(TEAM_LEAD_BEST_REPORT_EVENT));
+  }
+
+  return {
+    ok: true as const,
+    message: `${workspace.nextQuarter.label} 결과를 저장하고 현재 결과를 초기화했습니다.`,
+    savedQuarter: nextSnapshot,
+  };
 }
 
 export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {

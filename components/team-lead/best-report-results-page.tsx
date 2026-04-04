@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { subscribeToReviewWorkspaceChanges } from "@/lib/portal/data";
+import { refreshScoreboardState } from "@/lib/team-lead/scoreboard";
 import {
   getTeamLeadBestReportResultsWorkspace,
+  saveCurrentBestReportResultsAsNextQuarter,
+  TeamLeadBestReportQuarterSnapshot,
   TeamLeadBestReportReviewerDetailRow,
   TeamLeadBestReportResultsRow,
   TeamLeadBestReportReviewer,
@@ -18,8 +21,12 @@ export function BestReportResultsPage() {
   const [reviewers, setReviewers] = useState<TeamLeadBestReportReviewer[]>([]);
   const [rows, setRows] = useState<TeamLeadBestReportResultsRow[]>([]);
   const [reviewerDetails, setReviewerDetails] = useState<TeamLeadBestReportReviewerDetailRow[]>([]);
+  const [savedQuarters, setSavedQuarters] = useState<TeamLeadBestReportQuarterSnapshot[]>([]);
+  const [nextQuarterLabel, setNextQuarterLabel] = useState("1분기");
+  const [selectedResultKey, setSelectedResultKey] = useState("current");
   const [selectedReviewerId, setSelectedReviewerId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [savingQuarter, setSavingQuarter] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   async function refresh() {
@@ -29,10 +36,15 @@ export function BestReportResultsPage() {
       setReviewers(workspace.reviewers);
       setRows(workspace.rows);
       setReviewerDetails(workspace.reviewerDetails);
-      setSelectedReviewerId((current) =>
-        workspace.reviewers.some((reviewer) => reviewer.id === current) ? current : (workspace.reviewers[0]?.id ?? ""),
+      setSavedQuarters(workspace.savedQuarters);
+      setNextQuarterLabel(`${workspace.nextQuarter.quarter}분기`);
+      setSelectedResultKey((current) =>
+        current === "current" || workspace.savedQuarters.some((quarter) => quarter.key === current) ? current : "current",
       );
-      setMessage(null);
+      setSelectedReviewerId((current) => {
+        if (!current) return "";
+        return workspace.reviewers.some((reviewer) => reviewer.id === current) ? current : "";
+      });
     } catch (error) {
       setMessage({
         tone: "warn",
@@ -73,34 +85,53 @@ export function BestReportResultsPage() {
     };
   }, []);
 
+  const selectedQuarter = useMemo(
+    () => savedQuarters.find((quarter) => quarter.key === selectedResultKey) ?? null,
+    [savedQuarters, selectedResultKey],
+  );
+
+  const displayedReviewers = selectedQuarter?.reviewers ?? reviewers;
+  const displayedRows = selectedQuarter?.rows ?? rows;
+  const displayedReviewerDetails = selectedQuarter?.reviewerDetails ?? reviewerDetails;
+  const selectedResultLabel = selectedQuarter ? selectedQuarter.label : "현재 결과";
+
+  useEffect(() => {
+    setSelectedReviewerId((current) => {
+      if (!current) return "";
+      return displayedReviewers.some((reviewer) => reviewer.id === current) ? current : "";
+    });
+  }, [displayedReviewers]);
+
   const reviewerCards = useMemo(
     () =>
-      reviewers.map((reviewer) => ({
+      displayedReviewers.map((reviewer) => ({
         ...reviewer,
-        scoredCount: rows.filter((row) =>
+        scoredCount: displayedRows.filter((row) =>
           row.reviewerScores.some((score) => score.reviewerId === reviewer.id && score.score !== null),
         ).length,
       })),
-    [reviewers, rows],
+    [displayedReviewers, displayedRows],
   );
 
   const selectedReviewer = useMemo(
-    () => reviewers.find((reviewer) => reviewer.id === selectedReviewerId) ?? null,
-    [reviewers, selectedReviewerId],
+    () => displayedReviewers.find((reviewer) => reviewer.id === selectedReviewerId) ?? null,
+    [displayedReviewers, selectedReviewerId],
   );
 
   const selectedReviewerRows = useMemo(
     () =>
-      reviewerDetails
+      displayedReviewerDetails
         .filter((row) => row.reviewerId === selectedReviewerId)
         .sort((left, right) => left.authorName.localeCompare(right.authorName, "ko")),
-    [reviewerDetails, selectedReviewerId],
+    [displayedReviewerDetails, selectedReviewerId],
   );
 
   const completedRowCount = useMemo(
-    () => rows.filter((row) => row.reviewerScores.some((score) => score.score !== null)).length,
-    [rows],
+    () => displayedRows.filter((row) => row.reviewerScores.some((score) => score.score !== null)).length,
+    [displayedRows],
   );
+
+  const canSaveQuarter = selectedResultKey === "current" && completedRowCount > 0 && !loading && !savingQuarter;
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
@@ -113,7 +144,7 @@ export function BestReportResultsPage() {
         </article>
         <article className="kpi">
           <div className="kpi-label">피평가자</div>
-          <div className="kpi-value">{rows.length}</div>
+          <div className="kpi-value">{displayedRows.length}</div>
         </article>
         <article className="kpi">
           <div className="kpi-label">점수 반영 행</div>
@@ -124,7 +155,37 @@ export function BestReportResultsPage() {
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">베스트리포트 평가 결과</div>
-          <strong style={{ fontSize: 24 }}>평가 결과 매트릭스</strong>
+          <strong style={{ fontSize: 24 }}>{selectedResultLabel} 평가 결과 매트릭스</strong>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!canSaveQuarter}
+              onClick={async () => {
+                setSavingQuarter(true);
+                try {
+                  const result = await saveCurrentBestReportResultsAsNextQuarter();
+                  if (result.ok) {
+                    setSelectedResultKey(result.savedQuarter.key);
+                    await refreshScoreboardState();
+                    await refresh();
+                    setMessage({ tone: "ok", text: result.message });
+                  } else {
+                    setMessage({ tone: "warn", text: result.message });
+                  }
+                } finally {
+                  setSavingQuarter(false);
+                }
+              }}
+            >
+              {savingQuarter ? `${nextQuarterLabel} 저장 중...` : `${nextQuarterLabel} 결과 저장`}
+            </button>
+            <span className="muted">
+              {selectedResultKey === "current"
+                ? `저장하면 현재 결과를 ${nextQuarterLabel} 스냅샷으로 보관하고, 결과 페이지는 비워져 다음 분기 데이터를 새로 받습니다.`
+                : "저장된 분기 결과를 보고 있는 중입니다. 다시 누르면 현재 결과로 돌아갑니다."}
+            </span>
+          </div>
           <div className="status note">
             세로축은 피평가자, 가로축은 평가자입니다. 각 칸에는 해당 평가자가 1~3개 리포트에 입력한 점수 중 최고점만 표시하고,
             마지막 열에는 최고점과 최저점 각 1개를 제외한 평균을 표시합니다. 평균은 3명 이상 점수가 있어야 계산합니다.
@@ -138,6 +199,83 @@ export function BestReportResultsPage() {
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
+          <div className="chip">저장된 분기</div>
+          <strong style={{ fontSize: 22 }}>저장된 베스트리포트 결과</strong>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setSelectedResultKey("current")}
+              style={{
+                display: "grid",
+                gap: 4,
+                minWidth: 160,
+                padding: "12px 14px",
+                borderRadius: 16,
+                border:
+                  selectedResultKey === "current"
+                    ? "1px solid rgba(56,189,248,.55)"
+                    : "1px solid rgba(255,255,255,.08)",
+                background:
+                  selectedResultKey === "current"
+                    ? "rgba(14,165,233,.16)"
+                    : "rgba(255,255,255,.04)",
+                color: "#f8fbff",
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              <strong>현재 결과</strong>
+              <span className="muted" style={{ fontSize: 12 }}>
+                피평가자 {rows.length}명
+              </span>
+            </button>
+            {savedQuarters.length > 0 ? (
+              [...savedQuarters]
+                .sort((left, right) => right.year - left.year || right.quarter - left.quarter)
+                .map((quarter) => (
+                  <button
+                    key={quarter.key}
+                    type="button"
+                    onClick={() =>
+                      setSelectedResultKey((current) => (current === quarter.key ? "current" : quarter.key))
+                    }
+                    style={{
+                      display: "grid",
+                      gap: 4,
+                      minWidth: 160,
+                      padding: "12px 14px",
+                      borderRadius: 16,
+                      border:
+                        selectedResultKey === quarter.key
+                          ? "1px solid rgba(56,189,248,.55)"
+                          : "1px solid rgba(255,255,255,.08)",
+                      background:
+                        selectedResultKey === quarter.key
+                          ? "rgba(14,165,233,.16)"
+                          : "rgba(255,255,255,.04)",
+                      color: "#f8fbff",
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <strong>{quarter.label}</strong>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      피평가자 {quarter.rows.length}명
+                    </span>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      저장 {new Date(quarter.savedAt).toLocaleString("ko-KR")}
+                    </span>
+                  </button>
+                ))
+            ) : (
+              <div className="status note">아직 저장된 분기 결과가 없습니다.</div>
+            )}
+          </div>
+        </div>
+      </article>
+
+      <article className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">평가자 명단</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {reviewerCards.length > 0 ? (
@@ -145,7 +283,9 @@ export function BestReportResultsPage() {
                 <button
                   key={reviewer.id}
                   type="button"
-                  onClick={() => setSelectedReviewerId(reviewer.id)}
+                  onClick={() =>
+                    setSelectedReviewerId((current) => (current === reviewer.id ? "" : reviewer.id))
+                  }
                   style={{
                     display: "grid",
                     gap: 4,
@@ -239,18 +379,18 @@ export function BestReportResultsPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">결과 표</div>
           <div style={{ overflowX: "auto" }}>
-            <table className="table-like" style={{ minWidth: Math.max(760, 220 + reviewers.length * 140) }}>
+            <table className="table-like" style={{ minWidth: Math.max(760, 220 + displayedReviewers.length * 140) }}>
               <thead>
                 <tr>
                   <th style={{ minWidth: 160 }}>피평가자</th>
-                  {reviewers.map((reviewer) => (
+                  {displayedReviewers.map((reviewer) => (
                     <th key={reviewer.id} style={{ minWidth: 120, textAlign: "center" }}>{reviewer.name}</th>
                   ))}
                   <th style={{ minWidth: 140, textAlign: "center" }}>최고/최저 제외 평균</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {displayedRows.map((row) => (
                   <tr key={row.authorId}>
                     <td>
                       <strong>{row.authorName}</strong>
@@ -284,7 +424,7 @@ export function BestReportResultsPage() {
               </tbody>
             </table>
           </div>
-          {!rows.length ? (
+          {!displayedRows.length ? (
             <div className="status note">{loading ? "결과 표를 불러오는 중입니다." : "표시할 제출 데이터가 없습니다."}</div>
           ) : null}
         </div>

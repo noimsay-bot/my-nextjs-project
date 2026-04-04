@@ -8,13 +8,13 @@ import {
 import {
   emitTeamLeadStorageStatus,
   FinalCutPersonCard,
+  TeamLeadBestReportQuarterNumber,
+  TeamLeadBestReportQuarterSnapshot,
   getContributionCards,
   getContributionPeriod,
   getFinalCutCards,
   getTeamLeadBestReportResultsWorkspace,
   getTeamLeadSchedules,
-  TeamLeadBestReportReviewer,
-  TeamLeadBestReportReviewerDetailRow,
 } from "@/lib/team-lead/storage";
 
 export const TEAM_LEAD_SCOREBOARD_EVENT = "j-team-lead-scoreboard-updated";
@@ -116,8 +116,7 @@ const SUMMARY_QUARTERS = [
 
 let scoreboardCache = createEmptyScoreboardStore();
 let videoReviewScoreCache = new Map<string, number>();
-let videoReviewReviewerCache: TeamLeadBestReportReviewer[] = [];
-let videoReviewReviewerDetailCache: TeamLeadBestReportReviewerDetailRow[] = [];
+let videoReviewQuarterCache: TeamLeadBestReportQuarterSnapshot[] = [];
 let scoreboardRefreshPromise: Promise<void> | null = null;
 
 function roundScore(score: number) {
@@ -235,8 +234,7 @@ export async function refreshScoreboardState() {
     if (!session?.approved) {
       scoreboardCache = createEmptyScoreboardStore();
       videoReviewScoreCache = new Map();
-      videoReviewReviewerCache = [];
-      videoReviewReviewerDetailCache = [];
+      videoReviewQuarterCache = [];
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -261,8 +259,7 @@ export async function refreshScoreboardState() {
         console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_state"));
         scoreboardCache = createEmptyScoreboardStore();
         videoReviewScoreCache = new Map();
-        videoReviewReviewerCache = [];
-        videoReviewReviewerDetailCache = [];
+        videoReviewQuarterCache = [];
 
         if (typeof window !== "undefined") {
           window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -274,11 +271,31 @@ export async function refreshScoreboardState() {
     }
 
     scoreboardCache = normalizeScoreboardStore(stateRow?.state);
-    videoReviewScoreCache = new Map(
-      nextVideoWorkspace.rows.map((row) => [row.authorName.trim(), roundScore(row.trimmedAverage ?? 0)] as const),
+    const liveQuarterHasScores = nextVideoWorkspace.rows.some((row) =>
+      row.reviewerScores.some((score) => score.score !== null),
     );
-    videoReviewReviewerCache = [...nextVideoWorkspace.reviewers];
-    videoReviewReviewerDetailCache = [...nextVideoWorkspace.reviewerDetails];
+    const effectiveVideoReviewQuarters = [
+      ...nextVideoWorkspace.savedQuarters,
+      ...(liveQuarterHasScores
+        ? [
+            {
+              ...nextVideoWorkspace.nextQuarter,
+              savedAt: "",
+              reviewers: nextVideoWorkspace.reviewers,
+              rows: nextVideoWorkspace.rows,
+              reviewerDetails: nextVideoWorkspace.reviewerDetails,
+            } satisfies TeamLeadBestReportQuarterSnapshot,
+          ]
+        : []),
+    ];
+    const latestVideoReviewYear = Math.max(...effectiveVideoReviewQuarters.map((quarter) => quarter.year), 0);
+    videoReviewQuarterCache =
+      latestVideoReviewYear > 0
+        ? effectiveVideoReviewQuarters
+            .filter((quarter) => quarter.year === latestVideoReviewYear)
+            .sort((left, right) => left.quarter - right.quarter)
+        : [];
+    videoReviewScoreCache = buildVideoReviewScoreMapFromQuarters(videoReviewQuarterCache);
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -306,12 +323,15 @@ function setManualStoreByCategory(
 }
 
 function getEligibleUsers() {
-  return getUsers()
-    .filter((user) => user.status === "ACTIVE")
-    .filter((user) => user.role !== "team_lead" && user.role !== "desk")
-    .map((user) => user.username.trim())
-    .filter(Boolean)
-    .sort((left, right) => left.localeCompare(right, "ko"));
+  return Array.from(
+    new Set(
+      getUsers()
+        .filter((user) => user.status === "ACTIVE")
+        .filter((user) => user.role !== "team_lead" && user.role !== "desk")
+        .map((user) => user.username.trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right, "ko"));
 }
 
 export function getTeamLeadManualScoreItems(category: TeamLeadManualScoreCategory, name: string) {
@@ -493,6 +513,32 @@ function getVideoReviewScoreMap() {
   return new Map(videoReviewScoreCache);
 }
 
+function getBestReportSummaryQuarterKey(quarter: TeamLeadBestReportQuarterNumber): TeamLeadSummaryQuarterKey {
+  if (quarter === 1) return "12-2";
+  if (quarter === 2) return "3-5";
+  if (quarter === 3) return "6-8";
+  return "9-11";
+}
+
+function buildVideoReviewScoreMapFromQuarters(quarters: TeamLeadBestReportQuarterSnapshot[]) {
+  const rawScoreMap = new Map<string, number>();
+
+  quarters.forEach((quarter) => {
+    quarter.rows.forEach((row) => {
+      const name = row.authorName.trim();
+      if (!name) return;
+      rawScoreMap.set(name, roundScore((rawScoreMap.get(name) ?? 0) + roundScore(row.trimmedAverage ?? 0)));
+    });
+  });
+
+  return new Map(
+    Array.from(rawScoreMap.entries()).map(([name, rawTotalScore]) => [
+      name,
+      roundScore((rawTotalScore / 100) * 20),
+    ] as const),
+  );
+}
+
 function isMonthKeyInContributionPeriod(monthKey: string, startMonthKey: string, endMonthKey: string) {
   return monthKey >= startMonthKey && monthKey <= endMonthKey;
 }
@@ -513,48 +559,30 @@ function getSummaryQuarterKeyInCurrentPeriod(monthKey: string) {
   return getSummaryQuarterKey(monthKey);
 }
 
-function getTrimmedQuarterAverage(scores: number[]) {
-  if (scores.length < 3) return 0;
-  const sorted = [...scores].sort((left, right) => left - right);
-  const middleScores = sorted.slice(1, -1);
-  if (middleScores.length === 0) return 0;
-  return roundScore(middleScores.reduce((sum, score) => sum + score, 0) / middleScores.length);
-}
-
 export function getVideoReviewSummaryRows() {
   const eligibleNames = getEligibleUsers();
-  const authorQuarterReviewerScores = new Map<string, Map<TeamLeadSummaryQuarterKey, Map<string, number>>>();
+  const authorQuarterScoreMap = new Map<string, Map<TeamLeadSummaryQuarterKey, number>>();
 
-  videoReviewReviewerDetailCache.forEach((detail) => {
-    const authorName = detail.authorName.trim();
-    if (!authorName) return;
+  videoReviewQuarterCache.forEach((quarter) => {
+    const quarterKey = getBestReportSummaryQuarterKey(quarter.quarter);
+    quarter.rows.forEach((row) => {
+      const authorName = row.authorName.trim();
+      if (!authorName) return;
 
-    detail.reports.forEach((report) => {
-      const monthKey = report.completedAt.slice(0, 7);
-      const quarterKey = getSummaryQuarterKeyInCurrentPeriod(monthKey);
-      if (!quarterKey) return;
-
-      const quarterMap = authorQuarterReviewerScores.get(authorName) ?? new Map<TeamLeadSummaryQuarterKey, Map<string, number>>();
-      const reviewerMap = quarterMap.get(quarterKey) ?? new Map<string, number>();
-      reviewerMap.set(detail.reviewerId, Math.max(reviewerMap.get(detail.reviewerId) ?? 0, roundScore(report.score)));
-      quarterMap.set(quarterKey, reviewerMap);
-      authorQuarterReviewerScores.set(authorName, quarterMap);
+      const quarterMap = authorQuarterScoreMap.get(authorName) ?? new Map<TeamLeadSummaryQuarterKey, number>();
+      quarterMap.set(quarterKey, roundScore(row.trimmedAverage ?? 0));
+      authorQuarterScoreMap.set(authorName, quarterMap);
     });
   });
 
   return eligibleNames
     .map((name) => {
-      const reviewerQuarterMap = authorQuarterReviewerScores.get(name) ?? new Map();
+      const reviewerQuarterMap = authorQuarterScoreMap.get(name) ?? new Map();
       const quarterScores = SUMMARY_QUARTERS.map((quarter) => {
-        const reviewerMap = reviewerQuarterMap.get(quarter.key) ?? new Map<string, number>();
-        const scores = videoReviewReviewerCache
-          .map((reviewer) => reviewerMap.get(reviewer.id))
-          .filter((score): score is number => Number.isFinite(score));
-
         return {
           key: quarter.key,
           label: quarter.label,
-          score: getTrimmedQuarterAverage(scores),
+          score: roundScore(reviewerQuarterMap.get(quarter.key) ?? 0),
         } satisfies TeamLeadQuarterSummaryScore;
       });
       const totalScore = roundScore(quarterScores.reduce((sum, item) => sum + item.score, 0));
@@ -672,17 +700,24 @@ export function getFinalCutSummaryRows() {
 export function getOverallScoreCards() {
   const names = getEligibleUsers();
   const contributionSummaryRows = new Map(getContributionSummaryRows().map((row) => [row.name, row] as const));
+  const finalCutSummaryRows = new Map(getFinalCutSummaryRows().map((row) => [row.name, row] as const));
   const videoReviewScoreMap = getVideoReviewScoreMap();
   const broadcastScoreMap = new Map(getBroadcastAccidentCards().map((card) => [card.name, card] as const));
   const liveScoreMap = new Map(getLiveSafetyCards().map((card) => [card.name, card] as const));
-  const finalCutCards = new Map(getFinalCutCards().map((card) => [card.name, card] as const));
-  const selectedQuarterKeys = getSelectedFinalCutQuarterKeys();
 
   return names
     .map((name) => {
       const contributionSummaryRow = contributionSummaryRows.get(name);
-      const finalCutQuarterScores = getFinalCutQuarterScoreItems(finalCutCards.get(name), selectedQuarterKeys);
-      const finalCutScore = roundScore(finalCutQuarterScores.reduce((sum, item) => sum + item.convertedScore, 0));
+      const finalCutSummaryRow = finalCutSummaryRows.get(name);
+      const finalCutQuarterScores = (finalCutSummaryRow?.quarterScores ?? []).map((item) => ({
+        key: item.key,
+        label: item.label,
+        itemCount: item.itemCount,
+        earnedScore: item.earnedScore,
+        ratePercent: item.ratePercent,
+        convertedScore: item.itemCount > 0 ? roundScore((item.earnedScore / item.itemCount) * 10) : 0,
+      })) satisfies FinalCutQuarterScoreItem[];
+      const finalCutScore = roundScore(finalCutSummaryRow?.convertedScore ?? 0);
       const videoReviewScore = roundScore(videoReviewScoreMap.get(name) ?? 0);
       const contributionScore = roundScore(contributionSummaryRow?.convertedScore ?? 0);
       const broadcastAccidentScore = roundScore(broadcastScoreMap.get(name)?.totalScore ?? TEAM_LEAD_SCORE_BASE);
