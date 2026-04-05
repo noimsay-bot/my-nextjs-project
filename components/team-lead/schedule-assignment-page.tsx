@@ -144,9 +144,9 @@ const vacationBadgeStyles = {
     color: "#d1fae5",
   },
   근속휴가: {
-    borderColor: "rgba(252,211,77,.45)",
-    background: "rgba(251,191,36,.16)",
-    color: "#fde68a",
+    borderColor: "rgba(251,146,60,.45)",
+    background: "rgba(249,115,22,.14)",
+    color: "#fed7aa",
   },
   건강검진: {
     borderColor: "rgba(251,113,133,.45)",

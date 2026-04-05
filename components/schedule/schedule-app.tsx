@@ -88,9 +88,9 @@ const vacationLegendStyles = {
     color: "#d1fae5",
   },
   근속휴가: {
-    background: "rgba(251,191,36,.22)",
-    border: "1px solid rgba(252,211,77,.5)",
-    color: "#fde68a",
+    background: "rgba(249,115,22,.18)",
+    border: "1px solid rgba(251,146,60,.5)",
+    color: "#fed7aa",
   },
   건강검진: {
     background: "rgba(244,114,182,.2)",

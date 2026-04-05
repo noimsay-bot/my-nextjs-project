@@ -28,8 +28,8 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
-const MOBILE_PHONE_SHORT_EDGE_MAX = 412;
-const FIT_SCHEDULE_SHORT_EDGE_MAX = 430;
+const MOBILE_SCHEDULE_MEDIA_QUERY =
+  "(max-width: 960px), (any-pointer: coarse) and (orientation: landscape) and (max-width: 1400px) and (max-height: 1100px)";
 const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
@@ -37,36 +37,6 @@ const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대",
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
-}
-
-function getViewportShortEdge() {
-  if (typeof window === "undefined") return Number.POSITIVE_INFINITY;
-  const viewportWidth = Math.round(window.visualViewport?.width ?? window.innerWidth);
-  const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
-  return Math.min(viewportWidth, viewportHeight);
-}
-
-function getScheduleViewportMode() {
-  if (typeof window === "undefined") return "desktop" as const;
-  const viewportShortEdge = getViewportShortEdge();
-
-  if (viewportShortEdge <= MOBILE_PHONE_SHORT_EDGE_MAX) {
-    return "mobile" as const;
-  }
-  if (viewportShortEdge <= FIT_SCHEDULE_SHORT_EDGE_MAX) {
-    return "tablet" as const;
-  }
-  return "desktop" as const;
-}
-
-function shouldAutoFitScheduleViewport() {
-  if (typeof window === "undefined") return true;
-  return getViewportShortEdge() <= FIT_SCHEDULE_SHORT_EDGE_MAX;
-}
-
-function isMobileScheduleViewport() {
-  if (typeof window === "undefined") return false;
-  return getScheduleViewportMode() === "mobile";
 }
 
 const vacationLegendStyles = {
@@ -81,9 +51,9 @@ const vacationLegendStyles = {
     color: "#d1fae5",
   },
   근속휴가: {
-    background: "rgba(251,191,36,.22)",
-    border: "1px solid rgba(252,211,77,.5)",
-    color: "#fde68a",
+    background: "rgba(249,115,22,.18)",
+    border: "1px solid rgba(251,146,60,.5)",
+    color: "#fed7aa",
   },
   건강검진: {
     background: "rgba(244,114,182,.2)",
@@ -495,14 +465,13 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
-  const [shouldAutoFitSchedule, setShouldAutoFitSchedule] = useState(false);
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleZoomFactor, setScheduleZoomFactor] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
@@ -585,30 +554,34 @@ export function PublishedSchedulesPanel() {
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
-  }, [editMode, selectedMonthKey]);
+  }, [editMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const mobileMediaQuery = window.matchMedia(MOBILE_SCHEDULE_MEDIA_QUERY);
     const syncViewport = () => {
-      const nextViewportMode = getScheduleViewportMode();
-      setIsMobileViewport(nextViewportMode === "mobile");
-      setShouldAutoFitSchedule(shouldAutoFitScheduleViewport());
+      setIsMobileLayout(mobileMediaQuery.matches);
     };
-
+    const syncViewportByOrientation = () => {
+      syncViewport();
+    };
     syncViewport();
-    window.addEventListener("resize", syncViewport);
-    window.addEventListener("orientationchange", syncViewport);
+    mobileMediaQuery.addEventListener?.("change", syncViewport);
+    mobileMediaQuery.addListener?.(syncViewport);
+    window.addEventListener("orientationchange", syncViewportByOrientation);
     return () => {
-      window.removeEventListener("resize", syncViewport);
-      window.removeEventListener("orientationchange", syncViewport);
+      mobileMediaQuery.removeEventListener?.("change", syncViewport);
+      mobileMediaQuery.removeListener?.(syncViewport);
+      window.removeEventListener("orientationchange", syncViewportByOrientation);
     };
   }, []);
 
   useEffect(() => {
+    const shouldAutoFitSchedule = isMobileLayout;
     if (!shouldAutoFitSchedule) {
       setScheduleZoomFactor(1);
     }
-  }, [shouldAutoFitSchedule]);
+  }, [isMobileLayout]);
 
   const selectedItem = useMemo(() => {
     if (items.length === 0) return null;
@@ -690,6 +663,7 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
+  const shouldAutoFitSchedule = isMobileLayout;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
@@ -745,7 +719,6 @@ export function PublishedSchedulesPanel() {
     showMine,
     username,
     isCompactMonthlyView,
-    isMobileViewport,
   ]);
 
   useEffect(() => {
@@ -812,8 +785,26 @@ export function PublishedSchedulesPanel() {
     setScheduleZoomFactor(1);
   };
 
+  const removeRouteEntry = (index: number) => {
+    setSelectedRoute((current) => {
+      if (index < 0 || index >= current.length) return current;
+      if (index === 0) return [];
+      return current.filter((_, entryIndex) => entryIndex !== index);
+    });
+    setConfirmConflictRequest(false);
+    setRequestMessage("");
+    setRequestMessageTone("ok");
+  };
+
   const handleNameClick = (person: ScheduleNameObject) => {
     if (!editMode || !username || person.pending) return;
+
+    const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
+    if (existingIndex >= 0) {
+      removeRouteEntry(existingIndex);
+      return;
+    }
+
     if (person.ref.dateKey <= todayKey) {
       setRequestMessage("오늘 이후 근무만 변경 요청할 수 있습니다.");
       setRequestMessageTone("warn");
@@ -827,26 +818,6 @@ export function PublishedSchedulesPanel() {
         return;
       }
       setSelectedRoute([person.ref]);
-      setConfirmConflictRequest(false);
-      setRequestMessage("");
-      setRequestMessageTone("ok");
-      return;
-    }
-
-    const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
-    if (existingIndex >= 0) {
-      if (selectedRoute.length === 1 && existingIndex === 0) {
-        clearRoute();
-        return;
-      }
-      if (existingIndex === selectedRoute.length - 1) {
-        setSelectedRoute(selectedRoute.slice(0, -1));
-        setConfirmConflictRequest(false);
-        setRequestMessage("");
-        setRequestMessageTone("ok");
-        return;
-      }
-      setSelectedRoute(selectedRoute.slice(0, existingIndex + 1));
       setConfirmConflictRequest(false);
       setRequestMessage("");
       setRequestMessageTone("ok");
@@ -927,7 +898,7 @@ export function PublishedSchedulesPanel() {
 
   return (
     <section
-      className={`panel schedule-published-panel--desktop schedule-published-panel--desktop-layout ${shouldAutoFitSchedule ? "schedule-published-panel--fit" : ""}`}
+      className={`panel schedule-published-panel schedule-published-panel--desktop schedule-published-panel--desktop-layout ${shouldAutoFitSchedule ? "schedule-published-panel--mobile-layout schedule-published-panel--fit" : ""}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
@@ -943,9 +914,23 @@ export function PublishedSchedulesPanel() {
           >
             <strong>요청 경로</strong>
             {selectedRoute.length > 0 ? (
-              <div className="muted">{describeRoute(selectedRoute)}</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div className="muted">{describeRoute(selectedRoute)}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {selectedRoute.map((ref, index) => (
+                    <button
+                      key={`${ref.monthKey}-${ref.dateKey}-${ref.category}-${ref.index}-${ref.name}`}
+                      type="button"
+                      className="btn"
+                      onClick={() => removeRouteEntry(index)}
+                    >
+                      {describeRef(ref)} 삭제
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : (
-              <div className="muted">먼저 내 이름을 누른 뒤, {routeScopeLabel} 전체에서 미래 날짜의 교환 또는 삼각 트레이드 상대를 선택하세요.</div>
+              <div className="muted">먼저 내 이름을 누른 뒤, {routeScopeLabel} 전체에서 미래 날짜의 교환 또는 삼각 트레이드 상대를 선택하세요. 달을 바꿔도 선택 경로는 유지됩니다.</div>
             )}
 
             {firstSelectedRef ? (
@@ -1486,7 +1471,7 @@ export function PublishedSchedulesPanel() {
                                         cursor: editMode && !personObject.pending ? "pointer" : "default",
                                       }}
                                     >
-                                      <FittedNameText
+                                        <FittedNameText
                                         text={assignmentDisplay.name}
                                         className="schedule-name-chip__text"
                                         minFontSize={shouldAutoFitSchedule ? 5 : 9}

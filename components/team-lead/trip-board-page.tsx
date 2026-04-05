@@ -37,6 +37,7 @@ export function TripBoardPage({
   showAllUsers?: boolean;
 }) {
   const [cards, setCards] = useState<TeamLeadTripPersonCard[]>([]);
+  const [expandedNames, setExpandedNames] = useState<string[]>([]);
 
   useEffect(() => {
     const syncCards = () => {
@@ -80,6 +81,16 @@ export function TripBoardPage({
     };
   }, [showAllUsers, travelTypes]);
 
+  useEffect(() => {
+    setExpandedNames((current) => current.filter((name) => cards.some((card) => card.name === name)));
+  }, [cards]);
+
+  const toggleCard = (name: string) => {
+    setExpandedNames((current) =>
+      current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+    );
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
@@ -103,14 +114,49 @@ export function TripBoardPage({
           {cards.map((card) => (
             <article key={card.name} className="panel">
               <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <strong style={{ fontSize: 20 }}>{card.name}</strong>
-                  <span className="muted">
-                    {card.items.length}건 / {card.items.reduce((sum, item) => sum + item.dayCount, 0)}일
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => toggleCard(card.name)}
+                  aria-expanded={expandedNames.includes(card.name)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                    alignItems: "center",
+                    gap: 12,
+                    width: "100%",
+                    padding: "12px 14px",
+                    textAlign: "left",
+                    borderRadius: 18,
+                  }}
+                >
+                  <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                    <strong style={{ fontSize: 20 }}>{card.name}</strong>
+                    <span className="muted">
+                      {card.items.length}건 / {card.items.reduce((sum, item) => sum + item.dayCount, 0)}일
+                    </span>
                   </span>
-                </div>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 30,
+                      height: 30,
+                      borderRadius: 999,
+                      border: "1px solid rgba(148,163,184,.22)",
+                      background: "rgba(255,255,255,.05)",
+                      fontSize: 16,
+                      transform: expandedNames.includes(card.name) ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 160ms ease",
+                    }}
+                  >
+                    ˅
+                  </span>
+                </button>
 
-                {card.items.length > 0 ? (
+                {expandedNames.includes(card.name) ? card.items.length > 0 ? (
                   <div style={{ display: "grid", gap: 10 }}>
                     {card.items.map((item) => (
                       <div
@@ -178,7 +224,7 @@ export function TripBoardPage({
                   >
                     <span className="muted">등록된 출장 일정이 없습니다.</span>
                   </div>
-                )}
+                ) : null}
               </div>
             </article>
           ))}
