@@ -1,50 +1,51 @@
 :root {
   color-scheme: dark;
-  --bg: #07111f;
-  --bg-top-glow: rgba(59, 130, 246, 0.2);
-  --bg-start: #07111f;
-  --bg-mid: #0b1628;
-  --bg-end: #101c31;
-  --panel: rgba(255, 255, 255, 0.09);
-  --panel-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
-  --line: rgba(255, 255, 255, 0.1);
-  --text: #f8fbff;
-  --muted: #9bb0c7;
-  --accent: #22d3ee;
-  --accent-2: #3b82f6;
-  --accent-3: #f97316;
-  --field-bg: rgba(255, 255, 255, 0.05);
-  --status-note-bg: rgba(255, 255, 255, 0.04);
-  --nav-bg: rgba(255, 255, 255, 0.04);
-  --nav-active-bg: rgba(59, 130, 246, 0.18);
-  --nav-active-line: rgba(59, 130, 246, 0.4);
-  --brand-border: rgba(125, 211, 252, 0.28);
-  --brand-glow-1: rgba(34, 211, 238, 0.16);
-  --brand-glow-2: rgba(59, 130, 246, 0.18);
-  --brand-glow-3: rgba(249, 115, 22, 0.16);
-  --brand-surface: rgba(255, 255, 255, 0.04);
-  --brand-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 18px 36px rgba(0, 0, 0, 0.22);
+  --bg: #193d82;
+  --bg-top-glow: rgba(74, 200, 194, 0.08);
+  --bg-start: #193d82;
+  --bg-mid: #2e67ac;
+  --bg-end: #48c8c0;
+  --panel: rgba(11, 30, 68, 0.18);
+  --panel-shadow: 0 18px 40px rgba(4, 11, 28, 0.16);
+  --line: rgba(226, 247, 255, 0.12);
+  --text: #f5fbff;
+  --muted: #d6e6f4;
+  --accent: #48c8c0;
+  --accent-2: #57a3da;
+  --accent-3: #245395;
+  --field-bg: rgba(9, 28, 64, 0.22);
+  --status-note-bg: rgba(9, 28, 64, 0.2);
+  --nav-bg: rgba(8, 25, 58, 0.16);
+  --nav-active-bg: rgba(255, 255, 255, 0.14);
+  --nav-active-line: rgba(233, 248, 255, 0.22);
+  --brand-border: transparent;
+  --brand-glow-1: #193d82;
+  --brand-glow-2: #2e67ac;
+  --brand-glow-3: #48c8c0;
+  --brand-gradient: linear-gradient(90deg, #193d82 0%, #1f4b8f 20%, #2e67ac 54%, #3c8fca 76%, #48c8c0 100%);
+  --brand-surface: transparent;
+  --brand-shadow: none;
   --brand-text: #f8fbff;
-  --chip-border: rgba(34, 211, 238, 0.24);
-  --chip-bg: rgba(34, 211, 238, 0.1);
-  --chip-text: #d8fbff;
-  --kpi-bg: rgba(255, 255, 255, 0.04);
-  --kpi-label-text: #c8d4e4;
-  --select-bg: rgba(11, 22, 40, 0.96);
-  --select-arrow: #f8fbff;
-  --select-option-bg: #0b1628;
-  --select-option-text: #f8fbff;
-  --status-ok-text: #c8ffdf;
+  --chip-border: rgba(232, 247, 255, 0.14);
+  --chip-bg: rgba(8, 25, 58, 0.16);
+  --chip-text: #dcfffd;
+  --kpi-bg: rgba(8, 25, 58, 0.16);
+  --kpi-label-text: #e0edf8;
+  --select-bg: rgba(15, 42, 88, 0.88);
+  --select-arrow: #f5fbff;
+  --select-option-bg: #224d90;
+  --select-option-text: #f5fbff;
+  --status-ok-text: #ddffec;
   --status-ok-border: rgba(16, 185, 129, 0.3);
   --status-ok-bg: rgba(16, 185, 129, 0.12);
-  --status-warn-text: #ffd0d0;
+  --status-warn-text: #ffe0e0;
   --status-warn-border: rgba(239, 68, 68, 0.3);
   --status-warn-bg: rgba(239, 68, 68, 0.12);
-  --btn-white-bg: #ffffff;
-  --btn-white-text: #08111d;
-  --btn-primary-bg: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
-  --btn-primary-text: #f8fbff;
-  --btn-primary-border: transparent;
+  --btn-white-bg: #ecf8ff;
+  --btn-white-text: #0f2854;
+  --btn-primary-bg: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.08));
+  --btn-primary-text: #f5fbff;
+  --btn-primary-border: rgba(233, 248, 255, 0.18);
   --team-personal-border: rgba(251, 191, 36, 0.34);
   --team-personal-bg: rgba(245, 158, 11, 0.14);
   --team-personal-text: #fde68a;
@@ -70,13 +71,13 @@ html[data-theme="light"] {
   --nav-bg: rgba(255, 255, 255, 0.88);
   --nav-active-bg: rgba(219, 234, 254, 0.96);
   --nav-active-line: rgba(59, 130, 246, 0.28);
-  --brand-border: rgba(148, 163, 184, 0.24);
-  --brand-glow-1: rgba(186, 230, 253, 0.92);
-  --brand-glow-2: rgba(219, 234, 254, 0.96);
-  --brand-glow-3: rgba(255, 237, 213, 0.94);
-  --brand-surface: rgba(255, 255, 255, 0.94);
-  --brand-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 18px 36px rgba(148, 163, 184, 0.2);
-  --brand-text: #111827;
+  --brand-border: rgba(255, 255, 255, 0.08);
+  --brand-glow-1: #1b3f87;
+  --brand-glow-2: #2f63a7;
+  --brand-glow-3: #35c7be;
+  --brand-surface: transparent;
+  --brand-shadow: none;
+  --brand-text: #f8fbff;
   --chip-border: rgba(59, 130, 246, 0.18);
   --chip-bg: rgba(219, 234, 254, 0.92);
   --chip-text: #1d4ed8;
@@ -103,6 +104,7 @@ html[data-theme="light"] {
   --team-summary-border: rgba(16, 185, 129, 0.24);
   --team-summary-bg: rgba(236, 253, 245, 0.96);
   --team-summary-text: #065f46;
+  --brand-gradient: linear-gradient(90deg, #173a79 0%, #1f488d 16%, #2f66ad 54%, #4e97cf 78%, #64d3d6 100%);
 }
 
 * {
@@ -118,6 +120,14 @@ body {
     linear-gradient(180deg, var(--bg-start), var(--bg-mid) 48%, var(--bg-end));
   color: var(--text);
   font-family: "Segoe UI", "Pretendard", sans-serif;
+}
+
+html:not([data-theme="light"]) body {
+  background:
+    linear-gradient(180deg, rgba(7, 18, 42, 0.04) 0%, rgba(7, 18, 42, 0.18) 46%, rgba(7, 18, 42, 0.28) 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0) 26%),
+    linear-gradient(135deg, var(--bg-start) 0%, #234f96 24%, var(--bg-mid) 56%, #3f9ccc 78%, var(--bg-end) 100%);
+  background-attachment: fixed;
 }
 
 body {
@@ -151,6 +161,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 24px;
   box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(6px);
 }
 
 .panel-pad {
@@ -314,7 +325,7 @@ button {
   border-radius: 0;
   border: 1px solid var(--brand-border);
   background:
-    linear-gradient(90deg, var(--brand-glow-1), var(--brand-glow-2), var(--brand-glow-3)),
+    var(--brand-gradient),
     var(--brand-surface);
   box-shadow: var(--brand-shadow);
 }
@@ -323,9 +334,32 @@ button {
   width: 100%;
   text-align: center;
   color: var(--brand-text);
-  font-size: clamp(26px, 4vw, 40px);
+  font-size: clamp(24px, 3.6vw, 38px);
   font-weight: 900;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
+}
+
+html:not([data-theme="light"]) .portal-header-shell {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html:not([data-theme="light"]) .portal-header-shell .top-accent {
+  display: none;
+}
+
+html:not([data-theme="light"]) .portal-header-shell > .panel-pad {
+  padding-top: 0;
+  padding-left: 0;
+  padding-right: 0;
+  background: transparent;
+}
+
+html:not([data-theme="light"]) .portal-header-shell .brand-logo {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .nav a {
