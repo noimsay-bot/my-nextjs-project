@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import {
   AssignmentTripTagPhase,
@@ -132,33 +133,7 @@ interface ImportMessage {
   text: string;
 }
 
-const vacationBadgeStyles = {
-  연차: {
-    borderColor: "rgba(96,165,250,.45)",
-    background: "rgba(59,130,246,.16)",
-    color: "#dbeafe",
-  },
-  대휴: {
-    borderColor: "rgba(52,211,153,.45)",
-    background: "rgba(16,185,129,.16)",
-    color: "#d1fae5",
-  },
-  근속휴가: {
-    borderColor: "rgba(251,146,60,.45)",
-    background: "rgba(249,115,22,.14)",
-    color: "#fed7aa",
-  },
-  건강검진: {
-    borderColor: "rgba(251,113,133,.45)",
-    background: "rgba(244,114,182,.14)",
-    color: "#ffe4e6",
-  },
-  경조: {
-    borderColor: "rgba(196,181,253,.45)",
-    background: "rgba(167,139,250,.14)",
-    color: "#ede9fe",
-  },
-} as const;
+const vacationBadgeStyles = vacationStyleTones;
 const jcheckBadgeStyle = {
   borderColor: "rgba(255,255,255,.92)",
   background: "#ffffff",
@@ -798,7 +773,6 @@ export function ScheduleAssignmentPage() {
                               gap: 5,
                               padding: "7px 16px",
                               borderRadius: 999,
-                              border: "1px solid",
                               fontSize: 16,
                               fontWeight: 800,
                               lineHeight: 1.2,

@@ -44,6 +44,7 @@ import { getPublishedSchedules, publishSchedule, PublishedScheduleItem, refreshP
 import { PUBLISHED_SCHEDULES_STATUS_EVENT } from "@/lib/schedule/published";
 import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
+import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
 import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem } from "@/lib/schedule/types";
 
@@ -77,33 +78,7 @@ interface AddPersonDialogState {
   dayLabel: string;
 }
 
-const vacationLegendStyles = {
-  연차: {
-    background: "rgba(59,130,246,.22)",
-    border: "1px solid rgba(96,165,250,.5)",
-    color: "#dbeafe",
-  },
-  대휴: {
-    background: "rgba(16,185,129,.22)",
-    border: "1px solid rgba(52,211,153,.5)",
-    color: "#d1fae5",
-  },
-  근속휴가: {
-    background: "rgba(249,115,22,.18)",
-    border: "1px solid rgba(251,146,60,.5)",
-    color: "#fed7aa",
-  },
-  건강검진: {
-    background: "rgba(244,114,182,.2)",
-    border: "1px solid rgba(251,113,133,.48)",
-    color: "#ffe4e6",
-  },
-  경조: {
-    background: "rgba(167,139,250,.2)",
-    border: "1px solid rgba(196,181,253,.48)",
-    color: "#ede9fe",
-  },
-} as const;
+const vacationLegendStyles = vacationStyleTones;
 
 const dutyLegendStyles = {
   조근: {
