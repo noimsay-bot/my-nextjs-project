@@ -20,12 +20,14 @@ const links = [
   { href: "/admin", label: "관리자" },
 ];
 
-type PortalTheme = "dark" | "light";
+type PortalTheme = "dark" | "light" | "pink" | "green";
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
+const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
 
 function readStoredTheme(): PortalTheme {
   if (typeof window === "undefined") return "dark";
-  return window.localStorage.getItem(PORTAL_THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+  const storedTheme = window.localStorage.getItem(PORTAL_THEME_STORAGE_KEY);
+  return PORTAL_THEMES.includes(storedTheme as PortalTheme) ? (storedTheme as PortalTheme) : "dark";
 }
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
@@ -149,6 +151,20 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                     onClick={() => setTheme("dark")}
                   >
                     다크
+                  </button>
+                  <button
+                    type="button"
+                    className={`theme-toggle__button ${theme === "pink" ? "theme-toggle__button--active" : ""}`}
+                    onClick={() => setTheme("pink")}
+                  >
+                    핑크
+                  </button>
+                  <button
+                    type="button"
+                    className={`theme-toggle__button ${theme === "green" ? "theme-toggle__button--active" : ""}`}
+                    onClick={() => setTheme("green")}
+                  >
+                    그린
                   </button>
                 </div>
                 <span className="muted">
