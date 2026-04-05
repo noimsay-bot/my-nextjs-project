@@ -437,8 +437,10 @@ function collectConflicts(
   Object.entries(assignments).forEach(([category, names]) => {
     if (category === "휴가") return;
     names.forEach((name) => {
-      if (previousNight.includes(name)) {
-        pushConflict(category, name);
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (previousNight.includes(trimmed)) {
+        pushConflict(category, trimmed);
       }
     });
   });
@@ -447,9 +449,11 @@ function collectConflicts(
   Object.entries(assignments).forEach(([category, names]) => {
     if (category === "휴가") return;
     names.forEach((name) => {
-      const current = categoriesByName.get(name) ?? [];
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const current = categoriesByName.get(trimmed) ?? [];
       if (!current.includes(category)) current.push(category);
-      categoriesByName.set(name, current);
+      categoriesByName.set(trimmed, current);
     });
   });
 
@@ -464,7 +468,10 @@ function collectConflicts(
 function getAssignedNamesForDay(day: DaySchedule) {
   const assigned = new Set<string>();
   Object.values(day.assignments).forEach((names) => {
-    names.forEach((name) => assigned.add(name));
+    names.forEach((name) => {
+      const trimmed = name.trim();
+      if (trimmed) assigned.add(trimmed);
+    });
   });
   return assigned;
 }
@@ -1300,6 +1307,15 @@ export function openSnapshot(state: ScheduleState, snapshotId: string) {
 }
 
 function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule) {
+  const warnings: Array<{ date: string; category: string; name: string }> = [];
+  let previousNight: string[] = [];
+  generated.days.forEach((day) => {
+    day.conflicts = collectConflicts(day.assignments, previousNight, warnings, day.dateKey);
+    previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+    if (day.assignments["휴가"]) {
+      day.vacations = day.assignments["휴가"].map((name) => name.trim()).filter(Boolean);
+    }
+  });
   next.generated = generated;
   next.generatedHistory = next.generatedHistory.map((item) => (item.monthKey === generated.monthKey ? generated : item));
   return next;
@@ -1476,6 +1492,60 @@ export function movePerson(
   if (source.category === "휴가") sourceDay.vacations = sourceDay.assignments[source.category] ?? [];
   if (destination.category === "휴가") destinationDay.vacations = destinationDay.assignments[destination.category];
   next.selectedPerson = null;
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function swapPersonSlots(
+  state: ScheduleState,
+  source: { dateKey: string; category: string; index: number },
+  destination: { dateKey: string; category: string; index: number },
+) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const sourceDay = generated.days.find((item) => item.dateKey === source.dateKey);
+  const destinationDay = generated.days.find((item) => item.dateKey === destination.dateKey);
+  if (!sourceDay || !destinationDay) return state;
+
+  sourceDay.assignments[source.category] = [...(sourceDay.assignments[source.category] ?? [])];
+  if (sourceDay === destinationDay && source.category === destination.category) {
+    const list = sourceDay.assignments[source.category];
+    while (list.length <= Math.max(source.index, destination.index)) list.push("");
+    const sourceName = list[source.index]?.trim() ?? "";
+    if (!sourceName) return state;
+    const destinationName = list[destination.index] ?? "";
+    list[source.index] = destinationName;
+    list[destination.index] = sourceName;
+  } else {
+    destinationDay.assignments[destination.category] = [...(destinationDay.assignments[destination.category] ?? [])];
+    const sourceList = sourceDay.assignments[source.category];
+    const destinationList = destinationDay.assignments[destination.category];
+    while (sourceList.length <= source.index) sourceList.push("");
+    while (destinationList.length <= destination.index) destinationList.push("");
+    const sourceName = sourceList[source.index]?.trim() ?? "";
+    if (!sourceName) return state;
+    const destinationName = destinationList[destination.index] ?? "";
+    sourceList[source.index] = destinationName;
+    destinationList[destination.index] = sourceName;
+  }
+
+  next.selectedPerson = null;
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function compactGeneratedAssignments(state: ScheduleState) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  generated.days.forEach((day) => {
+    day.assignments = Object.fromEntries(
+      Object.entries(day.assignments).map(([category, names]) => [
+        category,
+        (names ?? []).map((name) => name.trim()).filter(Boolean),
+      ]),
+    );
+    day.vacations = (day.assignments["휴가"] ?? []).map((name) => name.trim()).filter(Boolean);
+  });
   return syncGeneratedSchedule(next, generated);
 }
 

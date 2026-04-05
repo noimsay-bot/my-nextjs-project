@@ -23,6 +23,7 @@ import {
   autoRebalance,
   cycleVacationEntryType,
   cloneScheduleState,
+  compactGeneratedAssignments,
   formatVacationEntry,
   generateSchedule,
   getCategoryPeople,
@@ -30,13 +31,13 @@ import {
   getMonthKey,
   getStartPointerRawIndex,
   getUniquePeople,
-  parseVacationEntry,
   moveAssignmentCategory,
-  movePerson,
+  parseVacationEntry,
   removeAssignmentCategory,
   removePersonFromCategory,
   sanitizeScheduleState,
   setMonthStartPointer,
+  swapPersonSlots,
   updateDayHeaderName,
   updateManualAssignment,
 } from "@/lib/schedule/engine";
@@ -169,6 +170,24 @@ function parseScheduleDragPayload(value: string): ScheduleDragPayload | null {
   }
 }
 
+function isEmptyScheduleSlot(value: string | null | undefined) {
+  return !value || value.trim().length === 0;
+}
+
+function getEditableSlotNames(names: string[]) {
+  const slots = names.map((name) => (typeof name === "string" ? name : ""));
+  if (!slots.some((name) => isEmptyScheduleSlot(name))) slots.push("");
+  return slots;
+}
+
+function isSameSelectedSlot(
+  left: { dateKey: string; category: string; index: number } | null,
+  right: { dateKey: string; category: string; index: number },
+) {
+  if (!left) return false;
+  return left.dateKey === right.dateKey && left.category === right.category && left.index === right.index;
+}
+
 function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], targetMonth?: number) {
   if (days.length === 0) return days;
   const first = days[0];
@@ -260,6 +279,7 @@ export function ScheduleApp() {
   const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴" | "경조">("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
@@ -390,6 +410,19 @@ export function ScheduleApp() {
     setAddPersonName("");
   }, [activeEditMonthKey, addPersonDialog, isAllDaysEditMode, state.editDateKey, visibleMonthKey]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const update = () => setIsCoarsePointer(media.matches);
+    update();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update);
+      return () => media.removeEventListener("change", update);
+    }
+    media.addListener(update);
+    return () => media.removeListener(update);
+  }, []);
+
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
   const totalCount = uniquePeople.length;
   const targetMonthKey = useMemo(() => getMonthKey(state.year, state.month), [state.month, state.year]);
@@ -506,6 +539,26 @@ export function ScheduleApp() {
 
   const updateEditingState = (recipe: (current: ScheduleState) => ScheduleState) => {
     setState((current) => sanitizeScheduleState(recipe(current)));
+  };
+
+  const handlePersonSlotActivate = (ref: { dateKey: string; category: string; index: number }) => {
+    updateEditingState((current) => {
+      if (!current.editDateKey) return current;
+      if (!current.selectedPerson) {
+        return { ...current, selectedPerson: ref };
+      }
+      if (isSameSelectedSlot(current.selectedPerson, ref)) {
+        return { ...current, selectedPerson: null };
+      }
+      return swapPersonSlots(current, current.selectedPerson, ref);
+    });
+  };
+
+  const handleBlankSlotActivate = (ref: { dateKey: string; category: string; index: number }) => {
+    updateEditingState((current) => {
+      if (!current.editDateKey || !current.selectedPerson) return current;
+      return swapPersonSlots(current, current.selectedPerson, ref);
+    });
   };
 
   const closeAddPersonDialog = () => {
@@ -655,7 +708,7 @@ export function ScheduleApp() {
     const messageText = isAllDaysEditMode ? "근무표 수정 내용이 반영되었습니다." : "날짜 수정 내용이 반영되었습니다.";
     setState((current) =>
       sanitizeScheduleState({
-        ...current,
+        ...compactGeneratedAssignments(current),
         editDateKey: null,
         editingMonthKey: null,
         selectedPerson: null,
@@ -778,6 +831,7 @@ export function ScheduleApp() {
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
           {isEditingDate ? <div className="status note">{isAllDaysEditMode ? "근무표 전체 수정 중입니다. 수정 완료 또는 취소 후 다른 작업을 진행해 주세요." : "날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요."}</div> : null}
+          {isEditingDate && isCoarsePointer ? <div className="status note">모바일에서는 이름을 먼저 누른 뒤, 다른 이름이나 빈칸을 눌러 자리를 교환할 수 있습니다.</div> : null}
           {overwriteConfirmOpen ? (
             <div className="status warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <span>이미 작성된 {state.month}월 근무표가 있습니다. 다시 작성하시겠습니까?</span>
@@ -1278,6 +1332,7 @@ export function ScheduleApp() {
                   return (
                     <article
                       key={day.dateKey}
+                      data-date-key={day.dateKey}
                       className="panel schedule-day-card"
                       style={{
                         padding: 6,
@@ -1396,12 +1451,16 @@ export function ScheduleApp() {
                         </div>
                       </div>
                       <div style={{ display: "grid", gap: 1 }}>
-                        {visibleAssignments.map(([category, names]) => (
+                        {visibleAssignments.map(([category, names]) => {
+                          const slotNames = editMode ? getEditableSlotNames(names) : names.map((name) => name.trim()).filter(Boolean);
+
+                          return (
                           <article
                             key={`${day.dateKey}-${category}`}
-                            draggable={editMode && isEditingVisibleMonth}
+                            data-category={category}
+                            draggable={editMode && isEditingVisibleMonth && !isCoarsePointer}
                             onDragStart={(event) => {
-                              if (!editMode || !isEditingVisibleMonth) return;
+                              if (!editMode || !isEditingVisibleMonth || isCoarsePointer) return;
                               event.dataTransfer.effectAllowed = "move";
                               event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "category", dateKey: day.dateKey, category }));
                             }}
@@ -1416,10 +1475,7 @@ export function ScheduleApp() {
                               if (!payload) return;
                               const source = parseScheduleDragPayload(payload);
                               if (!source) return;
-                              if (source.kind === "person") {
-                                updateEditingState((current) => movePerson(current, source, { dateKey: day.dateKey, category }));
-                                return;
-                              }
+                              if (source.kind === "person") return;
                               if (editMode && source.dateKey === day.dateKey) {
                                 updateEditingState((current) => moveAssignmentCategory(current, day.dateKey, source.category, category));
                               }
@@ -1521,8 +1577,59 @@ export function ScheduleApp() {
                                   width: "100%",
                                 }}
                               >
-                              {names.length > 0 ? (
-                                names.map((name, index) => {
+                              {slotNames.length > 0 ? (
+                                slotNames.map((name, index) => {
+                                  const isBlankSlot = isEmptyScheduleSlot(name);
+                                  if (isBlankSlot) {
+                                    return (
+                                      <div
+                                        key={`${category}-blank-${index}`}
+                                        onDragOver={(event) => {
+                                          if (!editMode) return;
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                        }}
+                                        onDrop={(event) => {
+                                          if (!editMode) return;
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          const payload = event.dataTransfer.getData("text/plain");
+                                          if (!payload) return;
+                                          const source = parseScheduleDragPayload(payload);
+                                          if (!source || source.kind !== "person") return;
+                                          updateEditingState((current) =>
+                                            swapPersonSlots(current, source, { dateKey: day.dateKey, category, index }),
+                                          );
+                                        }}
+                                        style={{ width: "100%" }}
+                                      >
+                                        <button
+                                          type="button"
+                                          className="schedule-name-chip schedule-name-chip--edit schedule-name-chip--empty"
+                                          onClick={() => handleBlankSlotActivate({ dateKey: day.dateKey, category, index })}
+                                          style={{
+                                            display: "grid",
+                                            placeItems: "center",
+                                            width: "100%",
+                                            minWidth: 0,
+                                            minHeight: 32,
+                                            padding: "3px 4px",
+                                            borderRadius: 0,
+                                            border: "1px dashed rgba(148,163,184,.45)",
+                                            background: "rgba(255,255,255,.03)",
+                                            color: "rgba(226,232,240,.7)",
+                                            fontWeight: 700,
+                                            lineHeight: 1,
+                                            appearance: "none",
+                                            cursor: state.selectedPerson ? "pointer" : "default",
+                                          }}
+                                        >
+                                          빈칸
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const ref: SchedulePersonRef = {
                                     monthKey: visibleSchedule.monthKey,
@@ -1550,6 +1657,23 @@ export function ScheduleApp() {
                                   return (
                                     <div
                                       key={personObject.key}
+                                      onDragOver={(event) => {
+                                        if (!editMode) return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                      }}
+                                      onDrop={(event) => {
+                                        if (!editMode) return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        const payload = event.dataTransfer.getData("text/plain");
+                                        if (!payload) return;
+                                        const source = parseScheduleDragPayload(payload);
+                                        if (!source || source.kind !== "person") return;
+                                        updateEditingState((current) =>
+                                          swapPersonSlots(current, source, { dateKey: day.dateKey, category, index }),
+                                        );
+                                      }}
                                       style={{
                                         position: "relative",
                                         width: "100%",
@@ -1558,7 +1682,8 @@ export function ScheduleApp() {
                                     >
                                       <div
                                         className={`schedule-name-chip ${editMode ? "schedule-name-chip--edit" : ""}`}
-                                        draggable={editMode}
+                                        data-selected={selected ? "true" : undefined}
+                                        draggable={editMode && !isCoarsePointer}
                                         onClick={() => {
                                           if (!editMode) return;
                                           if (category === "휴가") {
@@ -1567,13 +1692,10 @@ export function ScheduleApp() {
                                             );
                                             return;
                                           }
-                                          setState((current) => ({
-                                            ...current,
-                                            selectedPerson: selected ? null : { dateKey: day.dateKey, category, index },
-                                          }));
+                                          handlePersonSlotActivate({ dateKey: day.dateKey, category, index });
                                         }}
                                         onDragStart={(event) => {
-                                          if (!editMode) return;
+                                          if (!editMode || isCoarsePointer) return;
                                           event.stopPropagation();
                                           event.dataTransfer.effectAllowed = "move";
                                           event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "person", dateKey: day.dateKey, category, index }));
@@ -1665,7 +1787,7 @@ export function ScheduleApp() {
                                   );
                                 })
                               ) : null}
-                              {names.length > 0 && names.length % 2 === 1 ? (
+                              {slotNames.length > 0 && slotNames.length % 2 === 1 ? (
                                 <span
                                   aria-hidden="true"
                                   style={{
@@ -1679,7 +1801,7 @@ export function ScheduleApp() {
                               </div>
                             </div>
                           </article>
-                        ))}
+                        )})}
                         {editMode && isEditingVisibleMonth ? (
                           <button className="btn" onClick={() => {
                             const label = window.prompt("추가칸 이름을 입력하세요", "추가칸");

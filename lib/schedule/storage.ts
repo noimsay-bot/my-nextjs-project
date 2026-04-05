@@ -13,6 +13,8 @@ export const SCHEDULE_STATE_EVENT = "j-special-force-schedule-state-updated";
 export const SCHEDULE_PERSIST_STATUS_EVENT = "j-special-force-schedule-state-persist-status";
 
 const SCHEDULE_SETTINGS_KEY = "global";
+const E2E_SCHEDULE_STATE_SEED_KEY = "codex-e2e-schedule-state";
+const E2E_SCHEDULE_STATE_SEED_ENABLED = process.env.NEXT_PUBLIC_E2E === "1";
 
 interface ScheduleSettingsRow {
   key: string;
@@ -44,6 +46,22 @@ function emitSchedulePersistStatus(detail: { ok: boolean; message: string }) {
 
 function cloneScheduleStateValue(state: ScheduleState) {
   return sanitizeScheduleState(JSON.parse(JSON.stringify(state)) as Partial<ScheduleState>);
+}
+
+function readE2eScheduleStateSeed() {
+  if (!E2E_SCHEDULE_STATE_SEED_ENABLED || typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(E2E_SCHEDULE_STATE_SEED_KEY);
+  if (!raw) return null;
+  try {
+    return sanitizeScheduleState(JSON.parse(raw) as Partial<ScheduleState>);
+  } catch {
+    return null;
+  }
+}
+
+function writeE2eScheduleStateSeed(state: ScheduleState) {
+  if (!E2E_SCHEDULE_STATE_SEED_ENABLED || typeof window === "undefined") return;
+  window.localStorage.setItem(E2E_SCHEDULE_STATE_SEED_KEY, JSON.stringify(state));
 }
 
 function buildSettingsState(state: ScheduleState): Partial<ScheduleState> {
@@ -101,6 +119,11 @@ function mergeScheduleRows(
 }
 
 async function loadScheduleStateFromDb() {
+  const seededState = readE2eScheduleStateSeed();
+  if (seededState) {
+    return cloneScheduleStateValue(seededState);
+  }
+
   const session = await getPortalSession();
   if (!session?.approved) {
     return sanitizeScheduleState(defaultScheduleState);
@@ -260,5 +283,9 @@ export async function refreshScheduleState() {
 export function saveScheduleState(state: ScheduleState) {
   scheduleStateCache = cloneScheduleStateValue(state);
   emitScheduleStateEvent();
+  if (E2E_SCHEDULE_STATE_SEED_ENABLED) {
+    writeE2eScheduleStateSeed(scheduleStateCache);
+    return Promise.resolve(readStoredScheduleState());
+  }
   return schedulePersist(scheduleStateCache);
 }

@@ -902,14 +902,14 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
 .schedule-published-panel--tablet .schedule-calendar-grid--daily {
   width: max-content;
   min-width: 0;
-  grid-template-columns: repeat(7, 176px);
+  grid-template-columns: repeat(7, 208px);
   gap: 6px;
   align-items: start;
 }
 
 .schedule-published-panel--tablet .schedule-day-card {
-  width: 176px !important;
-  min-width: 176px;
+  width: 208px !important;
+  min-width: 208px;
   min-height: 216px !important;
   padding: 6px !important;
 }
@@ -920,7 +920,7 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
 }
 
 .schedule-published-panel--tablet .schedule-name-chip {
-  font-size: 10px;
+  font-size: 9px;
   border-radius: 0 !important;
   min-height: 28px;
 }
@@ -982,6 +982,11 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
   text-overflow: ellipsis;
   text-align: center;
   word-break: keep-all;
+}
+
+.schedule-name-chip--empty {
+  justify-content: center;
+  text-align: center;
 }
 
 html[data-theme="light"] [style*="background: rgba(15, 23, 42"],

@@ -1414,10 +1414,10 @@ export const presetScheduleMonths: GeneratedSchedule[] = [
             "유연경",
             "김진광",
             "정상원",
-            "황현우"
+            "황현우",
+            "장후원"
           ],
           "석근": [
-            "장후원",
             "신동환",
             "방극철"
           ],
@@ -2190,10 +2190,10 @@ export const presetScheduleMonths: GeneratedSchedule[] = [
           "일반": [
             "박재현",
             "정철원",
-            "조용희"
+            "조용희",
+            "이주원"
           ],
           "석근": [
-            "이주원",
             "정재우"
           ],
           "야근": [
