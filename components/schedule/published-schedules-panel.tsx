@@ -29,6 +29,7 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const MOBILE_PHONE_SHORT_EDGE_MAX = 412;
+const FIT_SCHEDULE_SHORT_EDGE_MAX = 430;
 const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
@@ -38,23 +39,29 @@ function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
 
-function getScheduleViewportMode() {
-  if (typeof window === "undefined") return "desktop" as const;
-  const isCoarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-  if (!isCoarsePointer) return "desktop" as const;
+function getViewportShortEdge() {
+  if (typeof window === "undefined") return Number.POSITIVE_INFINITY;
   const viewportWidth = Math.round(window.visualViewport?.width ?? window.innerWidth);
   const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
-  const viewportShortEdge = Math.min(viewportWidth, viewportHeight);
+  return Math.min(viewportWidth, viewportHeight);
+}
+
+function getScheduleViewportMode() {
+  if (typeof window === "undefined") return "desktop" as const;
+  const viewportShortEdge = getViewportShortEdge();
 
   if (viewportShortEdge <= MOBILE_PHONE_SHORT_EDGE_MAX) {
     return "mobile" as const;
   }
-  return "tablet" as const;
+  if (viewportShortEdge <= FIT_SCHEDULE_SHORT_EDGE_MAX) {
+    return "tablet" as const;
+  }
+  return "desktop" as const;
 }
 
 function shouldAutoFitScheduleViewport() {
   if (typeof window === "undefined") return true;
-  return getScheduleViewportMode() !== "desktop";
+  return getViewportShortEdge() <= FIT_SCHEDULE_SHORT_EDGE_MAX;
 }
 
 function isMobileScheduleViewport() {
