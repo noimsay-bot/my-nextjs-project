@@ -105,7 +105,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
           <div style={{ display: "flex", justifyContent: "stretch" }}>
             <Link href="/" className="brand-logo" aria-label="홈으로 이동">
-              <span className="brand-logo-text">JTBC Newscamera Hub</span>
+              <span className="brand-logo-text">JTBC News Camera Hub</span>
             </Link>
           </div>
           {!isLogin ? (

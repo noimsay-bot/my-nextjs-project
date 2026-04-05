@@ -5,7 +5,7 @@ import { PortalShell } from "@/components/portal-shell";
 import { ThemeScript } from "@/components/theme/theme-script";
 
 export const metadata: Metadata = {
-  title: "JTBC Newscamera Hub",
+  title: "JTBC News Camera Hub",
   description: "근무표와 베스트리포트 평가 운영용 포털",
 };
 

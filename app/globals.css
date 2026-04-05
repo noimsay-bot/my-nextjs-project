@@ -1,23 +1,23 @@
 :root {
   color-scheme: dark;
-  --bg: #193d82;
-  --bg-top-glow: rgba(74, 200, 194, 0.08);
-  --bg-start: #193d82;
-  --bg-mid: #2e67ac;
-  --bg-end: #48c8c0;
-  --panel: rgba(11, 30, 68, 0.18);
-  --panel-shadow: 0 18px 40px rgba(4, 11, 28, 0.16);
-  --line: rgba(226, 247, 255, 0.12);
+  --bg: #102852;
+  --bg-top-glow: rgba(74, 200, 194, 0.05);
+  --bg-start: #12305e;
+  --bg-mid: #214a84;
+  --bg-end: #317f9f;
+  --panel: rgba(7, 18, 42, 0.3);
+  --panel-shadow: 0 18px 40px rgba(2, 7, 20, 0.24);
+  --line: rgba(226, 247, 255, 0.1);
   --text: #f5fbff;
   --muted: #d6e6f4;
   --accent: #48c8c0;
   --accent-2: #57a3da;
   --accent-3: #245395;
-  --field-bg: rgba(9, 28, 64, 0.22);
-  --status-note-bg: rgba(9, 28, 64, 0.2);
-  --nav-bg: rgba(8, 25, 58, 0.16);
-  --nav-active-bg: rgba(255, 255, 255, 0.14);
-  --nav-active-line: rgba(233, 248, 255, 0.22);
+  --field-bg: rgba(6, 18, 42, 0.28);
+  --status-note-bg: rgba(6, 18, 42, 0.24);
+  --nav-bg: rgba(6, 18, 42, 0.22);
+  --nav-active-bg: rgba(255, 255, 255, 0.1);
+  --nav-active-line: rgba(233, 248, 255, 0.18);
   --brand-border: transparent;
   --brand-glow-1: #193d82;
   --brand-glow-2: #2e67ac;
@@ -25,13 +25,13 @@
   --brand-gradient: linear-gradient(90deg, #193d82 0%, #1f4b8f 20%, #2e67ac 54%, #3c8fca 76%, #48c8c0 100%);
   --brand-surface: transparent;
   --brand-shadow: none;
-  --brand-text: #f8fbff;
-  --chip-border: rgba(232, 247, 255, 0.14);
-  --chip-bg: rgba(8, 25, 58, 0.16);
+  --brand-text: #ffffff;
+  --chip-border: rgba(232, 247, 255, 0.12);
+  --chip-bg: rgba(6, 18, 42, 0.2);
   --chip-text: #dcfffd;
-  --kpi-bg: rgba(8, 25, 58, 0.16);
+  --kpi-bg: rgba(6, 18, 42, 0.22);
   --kpi-label-text: #e0edf8;
-  --select-bg: rgba(15, 42, 88, 0.88);
+  --select-bg: rgba(10, 27, 59, 0.94);
   --select-arrow: #f5fbff;
   --select-option-bg: #224d90;
   --select-option-text: #f5fbff;
@@ -43,9 +43,9 @@
   --status-warn-bg: rgba(239, 68, 68, 0.12);
   --btn-white-bg: #ecf8ff;
   --btn-white-text: #0f2854;
-  --btn-primary-bg: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.08));
+  --btn-primary-bg: linear-gradient(90deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
   --btn-primary-text: #f5fbff;
-  --btn-primary-border: rgba(233, 248, 255, 0.18);
+  --btn-primary-border: rgba(233, 248, 255, 0.14);
   --team-personal-border: rgba(251, 191, 36, 0.34);
   --team-personal-bg: rgba(245, 158, 11, 0.14);
   --team-personal-text: #fde68a;
@@ -124,9 +124,9 @@ body {
 
 html:not([data-theme="light"]) body {
   background:
-    linear-gradient(180deg, rgba(7, 18, 42, 0.04) 0%, rgba(7, 18, 42, 0.18) 46%, rgba(7, 18, 42, 0.28) 100%),
-    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0) 26%),
-    linear-gradient(135deg, var(--bg-start) 0%, #234f96 24%, var(--bg-mid) 56%, #3f9ccc 78%, var(--bg-end) 100%);
+    linear-gradient(180deg, rgba(4, 10, 24, 0.22) 0%, rgba(4, 10, 24, 0.34) 48%, rgba(4, 10, 24, 0.5) 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0) 22%),
+    linear-gradient(135deg, var(--bg-start) 0%, #1b3f76 24%, var(--bg-mid) 56%, #2b7293 78%, var(--bg-end) 100%);
   background-attachment: fixed;
 }
 
