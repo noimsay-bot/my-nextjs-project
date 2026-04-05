@@ -1564,6 +1564,10 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   justify-content: flex-end;
 }
 
+.schedule-published-zoom-controls--hidden {
+  display: none;
+}
+
 .schedule-published-panel--mobile .schedule-published-zoom-controls {
   justify-content: center;
 }

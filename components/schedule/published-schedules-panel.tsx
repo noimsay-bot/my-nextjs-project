@@ -28,7 +28,7 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
-const MOBILE_PHONE_SHORT_EDGE_MAX = 430;
+const MOBILE_PHONE_SHORT_EDGE_MAX = 412;
 const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
@@ -1249,7 +1249,7 @@ export function PublishedSchedulesPanel() {
               </div>
               {isMobileViewport ? <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div> : null}
               {canControlScheduleZoom ? (
-                <div className="schedule-published-zoom-controls">
+                <div className="schedule-published-zoom-controls schedule-published-zoom-controls--hidden" aria-hidden="true">
                   <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
                     축소
                   </button>
