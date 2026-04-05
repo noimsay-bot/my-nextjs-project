@@ -488,9 +488,7 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [viewportMode, setViewportMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [isLandscapeViewport, setIsLandscapeViewport] = useState(false);
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
@@ -586,9 +584,7 @@ export function PublishedSchedulesPanel() {
     if (typeof window === "undefined") return;
     const syncViewport = () => {
       const nextViewportMode = getScheduleViewportMode();
-      setViewportMode(nextViewportMode);
       setIsMobileViewport(nextViewportMode === "mobile");
-      setIsLandscapeViewport(window.innerWidth > window.innerHeight);
       setShouldAutoFitSchedule(shouldAutoFitScheduleViewport());
     };
 
@@ -924,7 +920,7 @@ export function PublishedSchedulesPanel() {
 
   return (
     <section
-      className={`panel schedule-published-panel--${viewportMode} ${viewportMode === "desktop" ? "schedule-published-panel--desktop" : ""} schedule-published-panel--desktop-layout ${shouldAutoFitSchedule ? "schedule-published-panel--fit" : ""}`}
+      className={`panel schedule-published-panel--desktop schedule-published-panel--desktop-layout ${shouldAutoFitSchedule ? "schedule-published-panel--fit" : ""}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
@@ -994,172 +990,10 @@ export function PublishedSchedulesPanel() {
           </div>
         ) : null}
 
-        {isMobileViewport ? (
-          <div className="schedule-toolbar">
-            <div className="chip">게시된 근무표</div>
-            <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
-              <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
-              <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
-                {showMine ? "전체 보기" : "내 근무 보기"}
-              </button>
-              <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
-                {editMode ? "근무 수정 완료" : "근무 수정"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
         {editMode && username ? (
           <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 {routeScopeLabel} 전체에서 미래 날짜 근무를 요청 경로에 넣을 수 있습니다.</div>
         ) : null}
         {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
-
-        {isMobileViewport ? (
-          <div className="schedule-toolbar">
-            <div className="schedule-toolbar-actions">
-              {items.map((item) => (
-                <button
-                  key={item.monthKey}
-                  className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
-                  onClick={() => setSelectedMonthKey(item.monthKey)}
-                >
-                  {item.schedule.year}년 {item.schedule.month}월
-                </button>
-              ))}
-            </div>
-            {selectedItem ? (
-              <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
-                <strong
-                  className="schedule-current-title"
-                  style={{
-                    fontSize: 18,
-                    textAlign: "center",
-                    justifySelf: "center",
-                    width: "100%",
-                  }}
-                >
-                  {selectedItem.title}
-                </strong>
-                <div
-                  className="schedule-toolbar-actions schedule-toolbar-actions--meta"
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "fit-content",
-                    maxWidth: "100%",
-                    justifySelf: "center",
-                  }}
-                >
-                  <div className="schedule-toolbar-actions schedule-toolbar-actions--legend">
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.연차,
-                      }}
-                    >
-                      연차
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.대휴,
-                      }}
-                    >
-                      대휴
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.근속휴가,
-                      }}
-                    >
-                      근속
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.건강검진,
-                      }}
-                    >
-                      검진
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.경조,
-                      }}
-                    >
-                      경조
-                    </span>
-                  </div>
-                  <div className="schedule-toolbar-actions schedule-toolbar-actions--nav" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
-                    <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
-                      이전 달
-                    </button>
-                    <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
-                      다음 달
-                    </button>
-                    <button className="btn" onClick={printSelectedSchedule}>
-                      출력
-                    </button>
-                    {canDelete ? (
-                      <button
-                        className="btn"
-                        onClick={() => {
-                          const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
-                          if (!ok) return;
-                          const next = removePublishedSchedule(selectedItem.monthKey);
-                          setItems(next);
-                          setSelectedMonthKey(getPreferredPublishedMonthKey(next));
-                        }}
-                      >
-                        게시 해제
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
 
         {selectedItem ? (
           <>
@@ -1247,7 +1081,6 @@ export function PublishedSchedulesPanel() {
                   <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                 </div>
               </div>
-              {isMobileViewport ? <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div> : null}
               {canControlScheduleZoom ? (
                 <div className="schedule-published-zoom-controls schedule-published-zoom-controls--hidden" aria-hidden="true">
                   <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
@@ -1261,152 +1094,150 @@ export function PublishedSchedulesPanel() {
                   </button>
                 </div>
               ) : null}
-              {!isMobileViewport ? (
-                <div className="schedule-published-hero">
-                  <div className="schedule-published-hero__left">
-                    <div className="chip">게시된 근무표</div>
-                    <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
-                    <div className="schedule-toolbar-actions schedule-published-hero__months">
-                      {items.map((item) => (
+              <div className="schedule-published-hero">
+                <div className="schedule-published-hero__left">
+                  <div className="chip">게시된 근무표</div>
+                  <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
+                  <div className="schedule-toolbar-actions schedule-published-hero__months">
+                    {items.map((item) => (
+                      <button
+                        key={item.monthKey}
+                        className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
+                        onClick={() => setSelectedMonthKey(item.monthKey)}
+                      >
+                        {item.schedule.year}년 {item.schedule.month}월
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="schedule-published-hero__center">
+                  <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
+                </div>
+                <div className="schedule-published-hero__right">
+                  <div className="schedule-toolbar-actions schedule-published-hero__user">
+                    <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
+                    <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
+                      {showMine ? "전체 보기" : "내 근무 보기"}
+                    </button>
+                    <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
+                      {editMode ? "근무 수정 완료" : "근무 수정"}
+                    </button>
+                  </div>
+                  <div className="schedule-published-hero__footer">
+                    <div className="schedule-calendar-top-legend">
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "5px 12px",
+                          borderRadius: 999,
+                          fontSize: 14,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                          ...vacationLegendStyles.연차,
+                        }}
+                      >
+                        연차
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "5px 12px",
+                          borderRadius: 999,
+                          fontSize: 14,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                          ...vacationLegendStyles.대휴,
+                        }}
+                      >
+                        대휴
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "5px 12px",
+                          borderRadius: 999,
+                          fontSize: 14,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                          ...vacationLegendStyles.근속휴가,
+                        }}
+                      >
+                        근속
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "5px 12px",
+                          borderRadius: 999,
+                          fontSize: 14,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                          ...vacationLegendStyles.건강검진,
+                        }}
+                      >
+                        검진
+                      </span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "5px 12px",
+                          borderRadius: 999,
+                          fontSize: 14,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                          ...vacationLegendStyles.경조,
+                        }}
+                      >
+                        경조
+                      </span>
+                    </div>
+                    <div className="schedule-calendar-top-actions">
+                      <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
+                        이전 달
+                      </button>
+                      <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
+                        다음 달
+                      </button>
+                      <button className="btn" onClick={printSelectedSchedule}>
+                        출력
+                      </button>
+                      {canDelete ? (
                         <button
-                          key={item.monthKey}
-                          className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
-                          onClick={() => setSelectedMonthKey(item.monthKey)}
+                          className="btn"
+                          onClick={() => {
+                            const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
+                            if (!ok) return;
+                            const next = removePublishedSchedule(selectedItem.monthKey);
+                            setItems(next);
+                            setSelectedMonthKey(getPreferredPublishedMonthKey(next));
+                          }}
                         >
-                          {item.schedule.year}년 {item.schedule.month}월
+                          게시 해제
                         </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="schedule-published-hero__center">
-                    <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
-                  </div>
-                  <div className="schedule-published-hero__right">
-                    <div className="schedule-toolbar-actions schedule-published-hero__user">
-                      <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
-                      <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
-                        {showMine ? "전체 보기" : "내 근무 보기"}
-                      </button>
-                      <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
-                        {editMode ? "근무 수정 완료" : "근무 수정"}
-                      </button>
-                    </div>
-                    <div className="schedule-published-hero__footer">
-                      <div className="schedule-calendar-top-legend">
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            padding: "5px 12px",
-                            borderRadius: 999,
-                            fontSize: 14,
-                            fontWeight: 800,
-                            lineHeight: 1.2,
-                            ...vacationLegendStyles.연차,
-                          }}
-                        >
-                          연차
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            padding: "5px 12px",
-                            borderRadius: 999,
-                            fontSize: 14,
-                            fontWeight: 800,
-                            lineHeight: 1.2,
-                            ...vacationLegendStyles.대휴,
-                          }}
-                        >
-                          대휴
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            padding: "5px 12px",
-                            borderRadius: 999,
-                            fontSize: 14,
-                            fontWeight: 800,
-                            lineHeight: 1.2,
-                            ...vacationLegendStyles.근속휴가,
-                          }}
-                        >
-                          근속
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            padding: "5px 12px",
-                            borderRadius: 999,
-                            fontSize: 14,
-                            fontWeight: 800,
-                            lineHeight: 1.2,
-                            ...vacationLegendStyles.건강검진,
-                          }}
-                        >
-                          검진
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            padding: "5px 12px",
-                            borderRadius: 999,
-                            fontSize: 14,
-                            fontWeight: 800,
-                            lineHeight: 1.2,
-                            ...vacationLegendStyles.경조,
-                          }}
-                        >
-                          경조
-                        </span>
-                      </div>
-                      <div className="schedule-calendar-top-actions">
-                        <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
-                          이전 달
-                        </button>
-                        <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
-                          다음 달
-                        </button>
-                        <button className="btn" onClick={printSelectedSchedule}>
-                          출력
-                        </button>
-                        {canDelete ? (
-                          <button
-                            className="btn"
-                            onClick={() => {
-                              const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
-                              if (!ok) return;
-                              const next = removePublishedSchedule(selectedItem.monthKey);
-                              setItems(next);
-                              setSelectedMonthKey(getPreferredPublishedMonthKey(next));
-                            }}
-                          >
-                            게시 해제
-                          </button>
-                        ) : null}
-                      </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
-              ) : null}
+              </div>
 
               <div
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
                 style={{
-                  overflowX: shouldAutoFitSchedule ? "auto" : viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
-                  overflowY: shouldAutoFitSchedule ? "auto" : viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
-                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y" : viewportMode === "desktop" ? undefined : "pan-x pan-y pinch-zoom",
-                  WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : viewportMode === "desktop" ? undefined : "touch",
+                  overflowX: shouldAutoFitSchedule ? "auto" : undefined,
+                  overflowY: shouldAutoFitSchedule ? "auto" : undefined,
+                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y" : undefined,
+                  WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
                 }}
               >
               <div
@@ -1651,15 +1482,15 @@ export function PublishedSchedulesPanel() {
                                       <FittedNameText
                                         text={assignmentDisplay.name}
                                         className="schedule-name-chip__text"
-                                        minFontSize={isMobileViewport ? 8 : 9}
+                                        minFontSize={shouldAutoFitSchedule ? 8 : 9}
                                         maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                         style={{
                                           display: "inline-block",
                                           flex: "0 1 auto",
                                           width: "100%",
                                           margin: "0 auto",
-                                          overflow: isMobileViewport ? "hidden" : "visible",
-                                          textOverflow: isMobileViewport ? "ellipsis" : "clip",
+                                          overflow: shouldAutoFitSchedule ? "hidden" : "visible",
+                                          textOverflow: shouldAutoFitSchedule ? "ellipsis" : "clip",
                                         }}
                                       />
                                       {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 11 }}>요청중</span> : null}
