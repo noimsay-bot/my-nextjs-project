@@ -29,6 +29,9 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const MOBILE_PHONE_SHORT_EDGE_MAX = 430;
+const TOUCH_SCHEDULE_ZOOM_MIN = 1;
+const TOUCH_SCHEDULE_ZOOM_MAX = 3;
+const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 
 function getWeekdayLabel(dow: number) {
@@ -51,7 +54,7 @@ function getScheduleViewportMode() {
 
 function shouldAutoFitScheduleViewport() {
   if (typeof window === "undefined") return true;
-  return getScheduleViewportMode() === "desktop";
+  return getScheduleViewportMode() !== "desktop";
 }
 
 function isMobileScheduleViewport() {
@@ -487,9 +490,7 @@ export function PublishedSchedulesPanel() {
   const [editMode, setEditMode] = useState(false);
   const [viewportMode, setViewportMode] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [isWideTouchDesktopViewport, setIsWideTouchDesktopViewport] = useState(false);
   const [isLandscapeViewport, setIsLandscapeViewport] = useState(false);
-  const [displayMode, setDisplayMode] = useState<"daily" | "monthly">("daily");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
@@ -498,6 +499,7 @@ export function PublishedSchedulesPanel() {
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [shouldAutoFitSchedule, setShouldAutoFitSchedule] = useState(false);
   const [scheduleScale, setScheduleScale] = useState(1);
+  const [scheduleZoomFactor, setScheduleZoomFactor] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
@@ -585,7 +587,6 @@ export function PublishedSchedulesPanel() {
     const syncViewport = () => {
       const nextViewportMode = getScheduleViewportMode();
       setViewportMode(nextViewportMode);
-      setIsWideTouchDesktopViewport(nextViewportMode === "tablet");
       setIsMobileViewport(nextViewportMode === "mobile");
       setIsLandscapeViewport(window.innerWidth > window.innerHeight);
       setShouldAutoFitSchedule(shouldAutoFitScheduleViewport());
@@ -601,9 +602,10 @@ export function PublishedSchedulesPanel() {
   }, []);
 
   useEffect(() => {
-    if (!isMobileViewport) return;
-    setDisplayMode("daily");
-  }, [isMobileViewport, selectedMonthKey]);
+    if (!shouldAutoFitSchedule) {
+      setScheduleZoomFactor(1);
+    }
+  }, [shouldAutoFitSchedule]);
 
   const selectedItem = useMemo(() => {
     if (items.length === 0) return null;
@@ -682,13 +684,14 @@ export function PublishedSchedulesPanel() {
     setRequestMessageTone("ok");
   };
 
-  const isMonthlyView = !isMobileViewport || displayMode === "monthly";
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
+  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
+  const canControlScheduleZoom = shouldAutoFitSchedule;
+  const scheduleZoomPercent = Math.round(appliedScheduleScale * 100);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -740,7 +743,6 @@ export function PublishedSchedulesPanel() {
     username,
     isCompactMonthlyView,
     isMobileViewport,
-    isWideTouchDesktopViewport,
   ]);
 
   useEffect(() => {
@@ -789,6 +791,22 @@ export function PublishedSchedulesPanel() {
         highlightedName: showMine ? username : null,
       }),
     });
+  };
+
+  const zoomOutSchedule = () => {
+    setScheduleZoomFactor((current) =>
+      Math.max(TOUCH_SCHEDULE_ZOOM_MIN, Number((current - TOUCH_SCHEDULE_ZOOM_STEP).toFixed(2))),
+    );
+  };
+
+  const zoomInSchedule = () => {
+    setScheduleZoomFactor((current) =>
+      Math.min(TOUCH_SCHEDULE_ZOOM_MAX, Number((current + TOUCH_SCHEDULE_ZOOM_STEP).toFixed(2))),
+    );
+  };
+
+  const resetScheduleZoom = () => {
+    setScheduleZoomFactor(1);
   };
 
   const handleNameClick = (person: ScheduleNameObject) => {
@@ -906,7 +924,7 @@ export function PublishedSchedulesPanel() {
 
   return (
     <section
-      className={`panel schedule-published-panel--${viewportMode} ${viewportMode === "desktop" ? "schedule-published-panel--desktop" : ""}`}
+      className={`panel schedule-published-panel--${viewportMode} ${viewportMode === "desktop" ? "schedule-published-panel--desktop" : ""} schedule-published-panel--desktop-layout ${shouldAutoFitSchedule ? "schedule-published-panel--fit" : ""}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
@@ -1230,6 +1248,19 @@ export function PublishedSchedulesPanel() {
                 </div>
               </div>
               {isMobileViewport ? <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div> : null}
+              {canControlScheduleZoom ? (
+                <div className="schedule-published-zoom-controls">
+                  <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
+                    축소
+                  </button>
+                  <button className="btn" onClick={resetScheduleZoom}>
+                    맞춤 {scheduleZoomPercent}%
+                  </button>
+                  <button className="btn" disabled={scheduleZoomFactor >= TOUCH_SCHEDULE_ZOOM_MAX} onClick={zoomInSchedule}>
+                    확대
+                  </button>
+                </div>
+              ) : null}
               {!isMobileViewport ? (
                 <div className="schedule-published-hero">
                   <div className="schedule-published-hero__left">
@@ -1372,15 +1403,15 @@ export function PublishedSchedulesPanel() {
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
                 style={{
-                  overflowX: viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
-                  overflowY: viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
-                  touchAction: viewportMode === "desktop" ? undefined : "pan-x pan-y pinch-zoom",
-                  WebkitOverflowScrolling: viewportMode === "desktop" ? undefined : "touch",
+                  overflowX: shouldAutoFitSchedule ? "auto" : viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
+                  overflowY: shouldAutoFitSchedule ? "auto" : viewportMode === "desktop" ? (shouldAutoFitSchedule ? "hidden" : undefined) : "auto",
+                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y" : viewportMode === "desktop" ? undefined : "pan-x pan-y pinch-zoom",
+                  WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : viewportMode === "desktop" ? undefined : "touch",
                 }}
               >
               <div
                 style={{
-                  minWidth: shouldAutoFitSchedule && !isWideTouchDesktopViewport ? "100%" : undefined,
+                  minWidth: shouldAutoFitSchedule ? "100%" : undefined,
                   width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
                   height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
                   margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,

@@ -1556,3 +1556,176 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
     justify-content: flex-start !important;
   }
 }
+
+.schedule-published-zoom-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.schedule-published-panel--mobile .schedule-published-zoom-controls {
+  justify-content: center;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr) 460px;
+  align-items: end;
+  gap: 20px;
+  min-height: 102px;
+  margin-bottom: 10px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__left,
+.schedule-published-panel--desktop-layout .schedule-published-hero__center,
+.schedule-published-panel--desktop-layout .schedule-published-hero__right {
+  display: grid;
+  align-content: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__left {
+  justify-items: start;
+  padding: 2px 0 4px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__center {
+  justify-items: center;
+  padding: 0 12px 10px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__right {
+  justify-items: end;
+  padding: 0 0 2px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__title {
+  font-size: 51px;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__published {
+  margin-top: 0;
+  font-size: 13px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__user {
+  justify-content: flex-end;
+  width: 100%;
+  gap: 10px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__left .schedule-toolbar-actions {
+  gap: 10px;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__months {
+  flex-wrap: wrap;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__footer {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+  width: 100%;
+}
+
+.schedule-published-panel--desktop-layout .schedule-published-hero__right .schedule-calendar-top-legend,
+.schedule-published-panel--desktop-layout .schedule-published-hero__right .schedule-calendar-top-actions {
+  width: 100%;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schedule-published-panel--fit .schedule-calendar-scroll--daily {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.schedule-published-panel--fit .schedule-calendar-zoom--daily,
+.schedule-published-panel--fit .schedule-calendar-grid--daily {
+  width: max-content;
+  min-width: 0;
+}
+
+.schedule-published-panel--fit .schedule-calendar-grid--daily {
+  grid-template-columns: repeat(7, 170px);
+  gap: 6px;
+  align-items: start;
+}
+
+.schedule-published-panel--fit .schedule-weekday {
+  display: block !important;
+}
+
+.schedule-published-panel--fit .schedule-day-card {
+  width: 170px !important;
+  min-width: 170px;
+  min-height: 216px !important;
+  padding: 6px !important;
+}
+
+.schedule-published-panel--fit .schedule-day-head {
+  row-gap: 0 !important;
+}
+
+.schedule-published-panel--fit .schedule-assignment-label {
+  font-size: 14px !important;
+}
+
+.schedule-published-panel--fit .schedule-name-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  justify-content: stretch !important;
+}
+
+.schedule-published-panel--fit .schedule-name-chip {
+  font-size: 10px;
+  border-radius: 0 !important;
+  min-height: 30px;
+}
+
+.schedule-published-panel--fit .schedule-name-chip--compact {
+  font-size: 10px;
+}
+
+.schedule-published-panel--fit .schedule-name-chip__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .schedule-published-panel--desktop-layout .schedule-published-hero {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    min-height: 0;
+  }
+
+  .schedule-published-panel--desktop-layout .schedule-published-hero__center,
+  .schedule-published-panel--desktop-layout .schedule-published-hero__right {
+    justify-items: start;
+    padding: 0;
+  }
+
+  .schedule-published-panel--desktop-layout .schedule-published-hero__title {
+    font-size: 34px;
+    text-align: left;
+  }
+
+  .schedule-published-panel--desktop-layout .schedule-published-hero__user,
+  .schedule-published-panel--desktop-layout .schedule-published-hero__footer,
+  .schedule-published-panel--desktop-layout .schedule-published-hero__right .schedule-calendar-top-legend,
+  .schedule-published-panel--desktop-layout .schedule-published-hero__right .schedule-calendar-top-actions {
+    justify-content: flex-start;
+    justify-items: start;
+  }
+}
