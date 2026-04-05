@@ -1,0 +1,5 @@
+2026/04/05-12:40:46.309 3668 Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_vercel.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/05-12:40:46.311 3668 Recovering log #11
+2026/04/05-12:40:46.312 3668 Reusing old log C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_vercel.com_0.indexeddb.leveldb/000011.log 
+2026/04/05-12:40:46.313 3668 Delete type=2 #9
+2026/04/05-12:40:46.325 36c4 Manual compaction at level-0 from '\x00\x07\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x08\x00\x00\x00' @ 0 : 0; will stop at (end)

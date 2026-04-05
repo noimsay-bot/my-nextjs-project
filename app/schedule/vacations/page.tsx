@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { getUsers, refreshUsers, type UserAccount } from "@/lib/auth/storage";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS } from "@/lib/schedule/constants";
 import {
   applyVacationMonthToSchedule,
@@ -153,6 +154,8 @@ export default function ScheduleVacationsPage() {
   const [hasGeneratedSchedule, setHasGeneratedSchedule] = useState(false);
   const [annualApplicants, setAnnualApplicants] = useState<Record<string, string[]>>({});
   const [compensatoryApplicants, setCompensatoryApplicants] = useState<Record<string, string[]>>({});
+  const [monthRequests, setMonthRequests] = useState<Array<{ requesterId: string | null; requesterName: string }>>([]);
+  const [users, setUsers] = useState<UserAccount[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   useEffect(() => {
@@ -176,7 +179,12 @@ export default function ScheduleVacationsPage() {
   }, [selectionLoaded, year, month]);
 
   const loadMonth = async () => {
-    await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshVacationStore()]);
+    const [, , , loadedUsers] = await Promise.all([
+      refreshScheduleState(),
+      refreshPublishedSchedules(),
+      refreshVacationStore(),
+      refreshUsers(),
+    ]);
     const overview = getVacationApplicantsOverview(year, month);
     setMonthState(overview.monthState);
     setManagedDateKeys(overview.managedDateKeys);
@@ -184,6 +192,13 @@ export default function ScheduleVacationsPage() {
     setHasGeneratedSchedule(overview.hasGeneratedSchedule);
     setAnnualApplicants(overview.annualApplicants);
     setCompensatoryApplicants(overview.compensatoryApplicants);
+    setMonthRequests(
+      overview.requests.map((request) => ({
+        requesterId: request.requesterId,
+        requesterName: request.requesterName,
+      })),
+    );
+    setUsers(Array.isArray(loadedUsers) ? loadedUsers : getUsers());
   };
 
   useEffect(() => {
@@ -224,6 +239,27 @@ export default function ScheduleVacationsPage() {
       ),
     [annualApplicants, compensatoryApplicants, monthState?.annualWinners, monthState?.compensatoryWinners],
   );
+  const missingApplicants = useMemo(() => {
+    const submittedIds = new Set<string>();
+    const submittedNames = new Set<string>();
+
+    monthRequests.forEach((request) => {
+      if (request.requesterId) {
+        submittedIds.add(request.requesterId);
+      }
+      const trimmedName = request.requesterName.trim();
+      if (trimmedName) {
+        submittedNames.add(trimmedName);
+      }
+    });
+
+    return users
+      .filter((user) => user.status === "ACTIVE" && (user.role === "member" || user.role === "reviewer"))
+      .filter((user) => !submittedIds.has(user.id) && !submittedNames.has(user.username.trim()))
+      .map((user) => user.username.trim())
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, "ko"));
+  }, [monthRequests, users]);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -327,6 +363,39 @@ export default function ScheduleVacationsPage() {
             >
               근무 반영
             </button>
+            <div style={{ display: "grid", gap: 6, flex: "1 1 320px", minWidth: 240 }}>
+              <strong style={{ fontSize: 13, color: "#f8fbff" }}>
+                휴가 미제출 명단
+              </strong>
+              <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                {missingApplicants.length > 0 ? `휴가 미제출: ${missingApplicants.join(", ")}` : "휴가 미제출: 없음"}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {missingApplicants.length > 0 ? (
+                  missingApplicants.map((name) => (
+                    <span
+                      key={`missing-vacation-${name}`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "4px 9px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        background: "rgba(248,113,113,.16)",
+                        border: "1px solid rgba(248,113,113,.32)",
+                        color: "#fecaca",
+                      }}
+                    >
+                      {name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="muted">제출 대상자는 전원 제출했습니다.</span>
+                )}
+              </div>
+            </div>
             {monthState?.appliedAt ? <span className="muted">최근 반영: {monthState.appliedAt}</span> : null}
           </div>
 

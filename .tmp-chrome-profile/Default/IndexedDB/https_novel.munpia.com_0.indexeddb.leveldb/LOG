@@ -1,0 +1,7 @@
+2026/04/02-16:51:36.615 201c Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_novel.munpia.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/02-16:51:36.617 201c Recovering log #3
+2026/04/02-16:51:36.618 201c Reusing old log C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_novel.munpia.com_0.indexeddb.leveldb/000003.log 
+2026/04/02-16:51:38.647 201c Level-0 table #5: started
+2026/04/02-16:51:38.655 201c Level-0 table #5: 5486 bytes OK
+2026/04/02-16:51:38.663 201c Delete type=0 #3
+2026/04/02-16:51:38.664 201c Manual compaction at level-0 from (begin) .. (end); will stop at (end)

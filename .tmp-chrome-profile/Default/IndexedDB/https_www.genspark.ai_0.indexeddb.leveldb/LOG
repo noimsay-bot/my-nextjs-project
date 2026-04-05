@@ -1,0 +1,6 @@
+2026/03/19-16:03:00.043 34ec Creating DB C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_www.genspark.ai_0.indexeddb.leveldb since it was missing.
+2026/03/19-16:03:00.075 34ec Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_www.genspark.ai_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/19-16:03:41.035 34cc Level-0 table #5: started
+2026/03/19-16:03:41.046 34cc Level-0 table #5: 16887 bytes OK
+2026/03/19-16:03:41.054 34cc Delete type=0 #3
+2026/03/19-16:03:41.055 34cc Manual compaction at level-0 from (begin) .. (end); will stop at (end)

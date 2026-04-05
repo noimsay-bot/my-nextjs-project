@@ -1,0 +1,6 @@
+2026/04/01-07:33:37.400 b5c Creating DB C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_www.coupang.com_0.indexeddb.leveldb since it was missing.
+2026/04/01-07:33:37.429 b5c Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_www.coupang.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/01-07:33:40.639 b5c Level-0 table #5: started
+2026/04/01-07:33:40.648 b5c Level-0 table #5: 833 bytes OK
+2026/04/01-07:33:40.662 b5c Delete type=0 #3
+2026/04/01-07:33:40.663 b5c Manual compaction at level-0 from (begin) .. (end); will stop at (end)

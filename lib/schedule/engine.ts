@@ -137,6 +137,14 @@ export function formatVacationEntry(type: VacationType, name: string) {
   return `${type}:${name.trim()}`;
 }
 
+const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "근속휴가", "건강검진", "경조"];
+
+function getNextVacationType(type: VacationType): VacationType {
+  const currentIndex = VACATION_TYPE_SEQUENCE.indexOf(type);
+  if (currentIndex < 0) return VACATION_TYPE_SEQUENCE[0];
+  return VACATION_TYPE_SEQUENCE[(currentIndex + 1) % VACATION_TYPE_SEQUENCE.length];
+}
+
 function getVacationNames(entries: string[]) {
   return entries.map((entry) => parseVacationEntry(entry).name).filter(Boolean);
 }
@@ -1389,14 +1397,64 @@ export function addPersonToCategory(state: ScheduleState, dateKey: string, categ
   return syncGeneratedSchedule(next, generated);
 }
 
-export function removePersonFromCategory(state: ScheduleState, dateKey: string, category: string, index: number) {
+export function removePersonFromCategory(
+  state: ScheduleState,
+  dateKey: string,
+  category: string,
+  index: number,
+  name?: string,
+) {
   if (!state.generated) return state;
   const next = cloneScheduleState(state);
   const generated = next.generated as GeneratedSchedule;
   const day = generated.days.find((item) => item.dateKey === dateKey);
-  if (!day || !day.assignments[category]) return state;
-  day.assignments[category].splice(index, 1);
+  const assignments = day?.assignments[category];
+  if (!day || !assignments?.length) return state;
+  let removeIndex = index;
+  if (removeIndex < 0 || removeIndex >= assignments.length || (name && assignments[removeIndex] !== name)) {
+    removeIndex = typeof name === "string" ? assignments.findIndex((item) => item === name) : -1;
+  }
+  if (removeIndex < 0 || removeIndex >= assignments.length) return state;
+  assignments.splice(removeIndex, 1);
   if (category === "휴가") day.vacations = day.assignments[category];
+  if (next.selectedPerson?.dateKey === dateKey && next.selectedPerson.category === category) {
+    if (next.selectedPerson.index === removeIndex) {
+      next.selectedPerson = null;
+    } else if (next.selectedPerson.index > removeIndex) {
+      next.selectedPerson = {
+        ...next.selectedPerson,
+        index: next.selectedPerson.index - 1,
+      };
+    }
+  }
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function cycleVacationEntryType(
+  state: ScheduleState,
+  dateKey: string,
+  index: number,
+  name?: string,
+) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  const assignments = day?.assignments["휴가"];
+  if (!day || !assignments?.length) return state;
+
+  let targetIndex = index;
+  if (targetIndex < 0 || targetIndex >= assignments.length || (name && assignments[targetIndex] !== name)) {
+    targetIndex = typeof name === "string" ? assignments.findIndex((item) => item === name) : -1;
+  }
+  if (targetIndex < 0 || targetIndex >= assignments.length) return state;
+
+  const parsed = parseVacationEntry(assignments[targetIndex]);
+  if (!parsed.name) return state;
+
+  assignments[targetIndex] = formatVacationEntry(getNextVacationType(parsed.type), parsed.name);
+  day.vacations = day.assignments["휴가"];
+
   return syncGeneratedSchedule(next, generated);
 }
 

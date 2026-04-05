@@ -1,0 +1,15 @@
+2026/04/05-12:40:41.100 3630 Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_supabase.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/05-12:40:41.105 3630 Recovering log #4
+2026/04/05-12:40:41.105 3630 Reusing old log C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_supabase.com_0.indexeddb.leveldb/000004.log 
+2026/04/05-12:40:45.576 3630 Level-0 table #8: started
+2026/04/05-12:40:45.588 3630 Level-0 table #8: 1603 bytes OK
+2026/04/05-12:40:45.597 3630 Delete type=0 #4
+2026/04/05-12:40:45.598 3630 Manual compaction at level-0 from (begin) .. (end); will stop at (end)
+2026/04/05-12:40:45.599 3630 Manual compaction at level-1 from (begin) .. (end); will stop at '\x00\x01\x01\x02\x01\x14\x00u\x00k\x00y\x00j\x00n\x00z\x00g\x00y\x00r\x00v\x00d\x00c\x00c\x00g\x00j\x00n\x00w\x00k\x00k\x00c' @ 99 : 1
+2026/04/05-12:40:45.599 3630 Compacting 1@1 + 1@2 files
+2026/04/05-12:40:45.609 3630 Generated table #9@1: 21 keys, 833 bytes
+2026/04/05-12:40:45.609 3630 Compacted 1@1 + 1@2 files => 833 bytes
+2026/04/05-12:40:45.616 3630 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/04/05-12:40:45.618 3630 Delete type=2 #5
+2026/04/05-12:40:45.618 3630 Delete type=2 #8
+2026/04/05-12:40:45.620 3630 Manual compaction at level-1 from '\x00\x01\x01\x02\x01\x14\x00u\x00k\x00y\x00j\x00n\x00z\x00g\x00y\x00r\x00v\x00d\x00c\x00c\x00g\x00j\x00n\x00w\x00k\x00k\x00c' @ 99 : 1 .. (end); will stop at (end)

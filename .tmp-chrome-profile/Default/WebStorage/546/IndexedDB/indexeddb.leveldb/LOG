@@ -1,0 +1,7 @@
+2026/03/19-17:29:05.696 34c0 Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\WebStorage\546\IndexedDB\indexeddb.leveldb/MANIFEST-000001
+2026/03/19-17:29:05.697 34c0 Recovering log #3
+2026/03/19-17:29:05.699 34c0 Reusing old log C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\WebStorage\546\IndexedDB\indexeddb.leveldb/000003.log 
+2026/03/19-21:29:42.472 34cc Level-0 table #5: started
+2026/03/19-21:29:42.485 34cc Level-0 table #5: 295844 bytes OK
+2026/03/19-21:29:42.493 34cc Delete type=0 #3
+2026/03/19-21:29:42.495 34cc Manual compaction at level-0 from (begin) .. (end); will stop at (end)

@@ -21,6 +21,7 @@ import {
   addManualField,
   addPersonToCategory,
   autoRebalance,
+  cycleVacationEntryType,
   cloneScheduleState,
   formatVacationEntry,
   generateSchedule,
@@ -287,6 +288,7 @@ export function ScheduleApp() {
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
+  const isEditingDateRef = useRef(false);
   const session = getSession();
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
@@ -365,7 +367,15 @@ export function ScheduleApp() {
   }, [session?.username]);
 
   useEffect(() => {
+    isEditingDateRef.current = isEditingDate;
+  }, [isEditingDate]);
+
+  useEffect(() => {
     const onRefresh = () => {
+      if (isEditingDateRef.current) {
+        void Promise.all([loadRequests(), loadPublishedItems()]);
+        return;
+      }
       void Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
     };
     window.addEventListener("focus", onRefresh);
@@ -403,7 +413,6 @@ export function ScheduleApp() {
     if (activeEditMonthKey === visibleMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
     setAddPersonDialog(null);
     setAddPersonName("");
-    setAddPersonVacationType("연차");
   }, [activeEditMonthKey, addPersonDialog, isAllDaysEditMode, state.editDateKey, visibleMonthKey]);
 
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
@@ -527,7 +536,6 @@ export function ScheduleApp() {
   const closeAddPersonDialog = () => {
     setAddPersonDialog(null);
     setAddPersonName("");
-    setAddPersonVacationType("연차");
   };
 
   const startOrderOffEdit = (categoryKey: CategoryKey) => {
@@ -605,9 +613,6 @@ export function ScheduleApp() {
         : trimmed;
     updateEditingState((current) => addPersonToCategory(current, addPersonDialog.dateKey, addPersonDialog.category, value));
     setAddPersonName("");
-    if (addPersonDialog.category === "휴가") {
-      setAddPersonVacationType("연차");
-    }
     if (typeof window !== "undefined") {
       window.requestAnimationFrame(() => {
         addPersonInputRef.current?.focus();
@@ -1489,7 +1494,6 @@ export function ScheduleApp() {
                                         dayLabel: `${day.month}/${day.day}`,
                                       });
                                       setAddPersonName("");
-                                      setAddPersonVacationType("연차");
                                     }}
                                   >
                                     +
@@ -1582,6 +1586,12 @@ export function ScheduleApp() {
                                         draggable={editMode}
                                         onClick={() => {
                                           if (!editMode) return;
+                                          if (category === "휴가") {
+                                            updateEditingState((current) =>
+                                              cycleVacationEntryType(current, day.dateKey, index, name),
+                                            );
+                                            return;
+                                          }
                                           setState((current) => ({
                                             ...current,
                                             selectedPerson: selected ? null : { dateKey: day.dateKey, category, index },
@@ -1604,6 +1614,7 @@ export function ScheduleApp() {
                                         gap: 5,
                                         width: "100%",
                                         minWidth: 0,
+                                        cursor: editMode ? (category === "휴가" ? "pointer" : "grab") : "default",
                                         minHeight: 32,
                                         padding: editMode ? "3px 4px" : "4px 4px",
                                         borderRadius: 0,
@@ -1667,7 +1678,9 @@ export function ScheduleApp() {
                                             event.stopPropagation();
                                             const ok = window.confirm("이 인원을 삭제하시겠습니까?");
                                             if (!ok) return;
-                                            updateEditingState((current) => removePersonFromCategory(current, day.dateKey, category, index));
+                                            updateEditingState((current) =>
+                                              removePersonFromCategory(current, day.dateKey, category, index, name),
+                                            );
                                           }}
                                         >
                                           -
@@ -2228,8 +2241,16 @@ export function ScheduleApp() {
                             padding: "8px 12px",
                             fontWeight: 800,
                             ...vacationLegendStyles[type],
-                            boxShadow: selected ? "0 0 0 1px rgba(255,255,255,.22) inset" : undefined,
-                            transform: selected ? "translateY(-1px)" : undefined,
+                            border: selected ? "2px solid rgba(255,255,255,.96)" : vacationLegendStyles[type].border,
+                            color: selected ? "#ffffff" : vacationLegendStyles[type].color,
+                            background: selected
+                              ? `linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.04)), ${vacationLegendStyles[type].background}`
+                              : vacationLegendStyles[type].background,
+                            boxShadow: selected
+                              ? "0 0 0 2px rgba(255,255,255,.18), 0 10px 24px rgba(15,23,42,.34), inset 0 1px 0 rgba(255,255,255,.22)"
+                              : "inset 0 1px 0 rgba(255,255,255,.08)",
+                            transform: selected ? "translateY(-1px) scale(1.02)" : undefined,
+                            filter: selected ? "saturate(1.15) brightness(1.08)" : "saturate(.92)",
                           }}
                         >
                           {type}

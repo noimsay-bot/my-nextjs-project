@@ -1,0 +1,18 @@
+2026/03/19-13:43:54.840 34c0 Creating DB C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_www.notion.so_0.indexeddb.leveldb since it was missing.
+2026/03/19-13:43:54.889 34c0 Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_www.notion.so_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/19-13:43:55.503 34ec Level-0 table #5: started
+2026/03/19-13:43:55.523 34ec Level-0 table #5: 1115 bytes OK
+2026/03/19-13:43:55.540 34ec Delete type=0 #3
+2026/03/19-13:43:55.541 34c0 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/03/19-13:47:15.743 34cc Level-0 table #7: started
+2026/03/19-13:47:15.751 34cc Level-0 table #7: 27404 bytes OK
+2026/03/19-13:47:15.760 34cc Delete type=0 #4
+2026/03/19-13:47:15.761 34cc Manual compaction at level-0 from (begin) .. (end); will stop at (end)
+2026/03/19-13:47:15.761 34cc Manual compaction at level-1 from (begin) .. (end); will stop at '\x00\x03\x02"\x01$\x003\x001\x00d\x00d\x008\x007\x002\x00b\x00-\x005\x009\x004\x00c\x00-\x008\x001\x00a\x001\x00-\x00a\x00a\x000\x009\x00-\x000\x000\x000\x002\x00e\x000\x00a\x00f\x005\x002\x00e\x00c\x00\x03\x00\x00\x00\x00\x00\x00\x18@' @ 787 : 1
+2026/03/19-13:47:15.761 34cc Compacting 1@1 + 1@2 files
+2026/03/19-13:47:15.772 34cc Generated table #8@1: 105 keys, 3131 bytes
+2026/03/19-13:47:15.772 34cc Compacted 1@1 + 1@2 files => 3131 bytes
+2026/03/19-13:47:15.780 34cc compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/03/19-13:47:15.780 34cc Delete type=2 #5
+2026/03/19-13:47:15.780 34cc Delete type=2 #7
+2026/03/19-13:47:15.782 34cc Manual compaction at level-1 from '\x00\x03\x02"\x01$\x003\x001\x00d\x00d\x008\x007\x002\x00b\x00-\x005\x009\x004\x00c\x00-\x008\x001\x00a\x001\x00-\x00a\x00a\x000\x009\x00-\x000\x000\x000\x002\x00e\x000\x00a\x00f\x005\x002\x00e\x00c\x00\x03\x00\x00\x00\x00\x00\x00\x18@' @ 787 : 1 .. (end); will stop at (end)

@@ -1,0 +1,6 @@
+2026/03/24-09:42:17.255 372c Creating DB C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\WebStorage\549\IndexedDB\indexeddb.leveldb since it was missing.
+2026/03/24-09:42:17.280 372c Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\WebStorage\549\IndexedDB\indexeddb.leveldb/MANIFEST-000001
+2026/03/24-09:42:49.259 3738 Level-0 table #5: started
+2026/03/24-09:42:49.268 3738 Level-0 table #5: 1293 bytes OK
+2026/03/24-09:42:49.276 3738 Delete type=0 #3
+2026/03/24-09:42:49.277 3738 Manual compaction at level-0 from (begin) .. (end); will stop at (end)

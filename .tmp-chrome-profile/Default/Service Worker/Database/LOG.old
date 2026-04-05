@@ -1,0 +1,9 @@
+2026/04/05-08:51:44.022 36f0 Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\Service Worker\Database/MANIFEST-000001
+2026/04/05-08:51:44.027 36f0 Recovering log #20
+2026/04/05-08:51:44.028 36f0 Reusing old log C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\Service Worker\Database/000020.log 
+2026/04/05-12:15:45.075 36c4 Compacting 1@1 + 1@2 files
+2026/04/05-12:15:45.090 36c4 Generated table #23@1: 131 keys, 13892 bytes
+2026/04/05-12:15:45.090 36c4 Compacted 1@1 + 1@2 files => 13892 bytes
+2026/04/05-12:15:45.095 36c4 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/04/05-12:15:45.096 36c4 Delete type=2 #18
+2026/04/05-12:15:45.096 36c4 Delete type=2 #21

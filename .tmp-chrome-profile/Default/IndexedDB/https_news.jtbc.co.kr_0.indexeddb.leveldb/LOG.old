@@ -1,0 +1,25 @@
+2026/03/24-14:20:53.777 372c Reusing MANIFEST C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_news.jtbc.co.kr_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/24-14:20:53.780 372c Recovering log #280
+2026/03/24-14:20:53.781 372c Reusing old log C:\Users\Jnote\AppData\Local\Google\Chrome\User Data\Default\IndexedDB\https_news.jtbc.co.kr_0.indexeddb.leveldb/000280.log 
+2026/03/24-14:20:53.781 372c Delete type=2 #279
+2026/03/24-14:20:53.828 377c Level-0 table #285: started
+2026/03/24-14:20:53.846 377c Level-0 table #285: 653 bytes OK
+2026/03/24-14:20:53.855 377c Delete type=0 #280
+2026/03/24-14:20:53.856 372c Manual compaction at level-0 from '\x00\\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00]\x00\x00\x00' @ 0 : 0; will stop at '\x00\\x00\x00\x05' @ 1757 : 1
+2026/03/24-14:20:53.856 372c Compacting 1@0 + 1@1 files
+2026/03/24-14:20:53.866 372c Generated table #286@0: 51 keys, 1023 bytes
+2026/03/24-14:20:53.866 372c Compacted 1@0 + 1@1 files => 1023 bytes
+2026/03/24-14:20:53.870 372c compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/24-14:20:53.871 372c Delete type=2 #285
+2026/03/24-14:20:53.872 372c Manual compaction at level-0 from '\x00\\x00\x00\x05' @ 1757 : 1 .. '\x00]\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/03/24-14:20:53.967 3780 Level-0 table #288: started
+2026/03/24-14:20:53.991 3780 Level-0 table #288: 656 bytes OK
+2026/03/24-14:20:53.996 3780 Delete type=2 #282
+2026/03/24-14:20:53.996 3780 Delete type=0 #284
+2026/03/24-14:20:53.997 372c Manual compaction at level-0 from '\x00]\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00^\x00\x00\x00' @ 0 : 0; will stop at '\x00]\x00\x00\x05' @ 1774 : 1
+2026/03/24-14:20:53.998 372c Compacting 1@0 + 1@1 files
+2026/03/24-14:20:54.007 372c Generated table #289@0: 51 keys, 1018 bytes
+2026/03/24-14:20:54.007 372c Compacted 1@0 + 1@1 files => 1018 bytes
+2026/03/24-14:20:54.011 372c compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/24-14:20:54.012 372c Delete type=2 #288
+2026/03/24-14:20:54.012 372c Manual compaction at level-0 from '\x00]\x00\x00\x05' @ 1774 : 1 .. '\x00^\x00\x00\x00' @ 0 : 0; will stop at (end)
