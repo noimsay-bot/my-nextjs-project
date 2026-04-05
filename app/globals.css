@@ -1,23 +1,23 @@
 :root {
   color-scheme: dark;
-  --bg: #102852;
-  --bg-top-glow: rgba(74, 200, 194, 0.05);
-  --bg-start: #12305e;
-  --bg-mid: #214a84;
-  --bg-end: #317f9f;
-  --panel: rgba(7, 18, 42, 0.3);
-  --panel-shadow: 0 18px 40px rgba(2, 7, 20, 0.24);
-  --line: rgba(226, 247, 255, 0.1);
-  --text: #f5fbff;
-  --muted: #d6e6f4;
+  --bg: #173764;
+  --bg-top-glow: rgba(74, 200, 194, 0.09);
+  --bg-start: #1a3e6d;
+  --bg-mid: #2d5a95;
+  --bg-end: #4191b1;
+  --panel: rgba(16, 31, 62, 0.4);
+  --panel-shadow: 0 18px 40px rgba(2, 7, 20, 0.18);
+  --line: rgba(226, 247, 255, 0.17);
+  --text: #f7fcff;
+  --muted: #e5eff8;
   --accent: #48c8c0;
   --accent-2: #57a3da;
   --accent-3: #245395;
-  --field-bg: rgba(6, 18, 42, 0.28);
-  --status-note-bg: rgba(6, 18, 42, 0.24);
-  --nav-bg: rgba(6, 18, 42, 0.22);
-  --nav-active-bg: rgba(255, 255, 255, 0.1);
-  --nav-active-line: rgba(233, 248, 255, 0.18);
+  --field-bg: rgba(14, 29, 57, 0.38);
+  --status-note-bg: rgba(14, 29, 57, 0.34);
+  --nav-bg: rgba(14, 29, 57, 0.32);
+  --nav-active-bg: rgba(255, 255, 255, 0.16);
+  --nav-active-line: rgba(233, 248, 255, 0.26);
   --brand-border: transparent;
   --brand-glow-1: #193d82;
   --brand-glow-2: #2e67ac;
@@ -26,12 +26,12 @@
   --brand-surface: transparent;
   --brand-shadow: none;
   --brand-text: #ffffff;
-  --chip-border: rgba(232, 247, 255, 0.12);
-  --chip-bg: rgba(6, 18, 42, 0.2);
+  --chip-border: rgba(232, 247, 255, 0.18);
+  --chip-bg: rgba(14, 29, 57, 0.28);
   --chip-text: #dcfffd;
-  --kpi-bg: rgba(6, 18, 42, 0.22);
-  --kpi-label-text: #e0edf8;
-  --select-bg: rgba(10, 27, 59, 0.94);
+  --kpi-bg: rgba(14, 29, 57, 0.3);
+  --kpi-label-text: #e7f1fa;
+  --select-bg: rgba(22, 44, 84, 0.95);
   --select-arrow: #f5fbff;
   --select-option-bg: #224d90;
   --select-option-text: #f5fbff;
@@ -43,9 +43,9 @@
   --status-warn-bg: rgba(239, 68, 68, 0.12);
   --btn-white-bg: #ecf8ff;
   --btn-white-text: #0f2854;
-  --btn-primary-bg: linear-gradient(90deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  --btn-primary-bg: linear-gradient(90deg, rgba(255,255,255,0.18), rgba(255,255,255,0.1));
   --btn-primary-text: #f5fbff;
-  --btn-primary-border: rgba(233, 248, 255, 0.14);
+  --btn-primary-border: rgba(233, 248, 255, 0.2);
   --team-personal-border: rgba(251, 191, 36, 0.34);
   --team-personal-bg: rgba(245, 158, 11, 0.14);
   --team-personal-text: #fde68a;
@@ -77,7 +77,7 @@ html[data-theme="light"] {
   --brand-glow-3: #35c7be;
   --brand-surface: transparent;
   --brand-shadow: none;
-  --brand-text: #f8fbff;
+  --brand-text: #ffffff;
   --chip-border: rgba(59, 130, 246, 0.18);
   --chip-bg: rgba(219, 234, 254, 0.92);
   --chip-text: #1d4ed8;
@@ -337,6 +337,25 @@ button {
   font-size: clamp(24px, 3.6vw, 38px);
   font-weight: 900;
   letter-spacing: 0.06em;
+}
+
+html[data-theme="light"] .portal-header-shell {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="light"] .portal-header-shell > .panel-pad {
+  padding-top: 0;
+  padding-left: 0;
+  padding-right: 0;
+  background: transparent;
+}
+
+html[data-theme="light"] .portal-header-shell .brand-logo,
+html[data-theme="light"] .portal-header-shell .brand-logo *,
+html[data-theme="light"] .portal-header-shell .brand-logo .brand-logo-text {
+  color: #ffffff !important;
 }
 
 html:not([data-theme="light"]) .portal-header-shell {

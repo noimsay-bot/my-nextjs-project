@@ -101,7 +101,6 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       <section className="panel portal-header-shell">
-        <div className="top-accent" />
         <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
           <div style={{ display: "flex", justifyContent: "stretch" }}>
             <Link href="/" className="brand-logo" aria-label="홈으로 이동">
