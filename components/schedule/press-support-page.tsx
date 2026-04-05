@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
+import { refreshTeamLeadState } from "@/lib/team-lead/storage";
 import {
+  getPressSupportPeriods,
   getPressSupportRows,
-  savePressSupportRows,
-  togglePressSupportCell,
   PressSupportCategory,
+  PressSupportPeriod,
   PressSupportRow,
 } from "@/lib/schedule/press-support";
 
@@ -17,17 +18,24 @@ const columns: Array<{ key: PressSupportCategory; label: string }> = [
 
 export function PressSupportPage() {
   const [rows, setRows] = useState<PressSupportRow[]>([]);
+  const [periods, setPeriods] = useState<PressSupportPeriod[]>([]);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<{ tone: "ok" | "note"; text: string } | null>(null);
 
   useEffect(() => {
     let active = true;
 
     const refresh = async () => {
       setLoading(true);
-      await refreshUsers();
+      await Promise.all([refreshUsers(), refreshTeamLeadState()]);
       if (!active) return;
-      setRows(getPressSupportRows());
+      const nextPeriods = getPressSupportPeriods();
+      setPeriods(nextPeriods);
+      setSelectedYear((current) =>
+        nextPeriods.some((period) => period.year === current)
+          ? current
+          : (nextPeriods[0]?.year ?? new Date().getFullYear()),
+      );
       setLoading(false);
     };
 
@@ -40,14 +48,15 @@ export function PressSupportPage() {
     };
   }, []);
 
-  const handleToggle = (name: string, category: PressSupportCategory) => {
-    setRows((current) => {
-      const next = togglePressSupportCell(current, name, category);
-      savePressSupportRows(next);
-      return next;
-    });
-    setMessage({ tone: "ok", text: `${name} ${columns.find((column) => column.key === category)?.label ?? ""} 지원 여부를 저장했습니다.` });
-  };
+  useEffect(() => {
+    if (selectedYear === null) return;
+    setRows(getPressSupportRows(selectedYear));
+  }, [selectedYear]);
+
+  const selectedPeriod =
+    periods.find((period) => period.year === selectedYear) ??
+    periods[0] ??
+    null;
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
@@ -55,14 +64,32 @@ export function PressSupportPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">DESK 출입처 지원</div>
           <strong style={{ fontSize: 24 }}>출입처 지원</strong>
-          <div className="status note">세로열은 사람 이름, 가로열은 출입처입니다. 각 칸을 눌러 지원 여부를 바로 저장할 수 있습니다.</div>
-          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+          <div className="status note">일정배정의 일정 내용 중 `국회 지원`, `검찰 지원` 문구를 연도별로 자동 집계해 보여줍니다.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span className="chip">집계 기간</span>
+            <select
+              className="field-select"
+              value={selectedYear ?? ""}
+              onChange={(event) => setSelectedYear(Number(event.target.value))}
+              disabled={periods.length === 0}
+              style={{ minWidth: 220 }}
+            >
+              {periods.map((period) => (
+                <option key={period.year} value={period.year}>
+                  {period.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </article>
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">지원 표</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            <div className="chip">지원 표</div>
+            {selectedPeriod ? <div className="muted">{selectedPeriod.label}</div> : null}
+          </div>
           <div style={{ overflowX: "auto" }}>
             <table className="table-like" style={{ minWidth: 620 }}>
               <thead>
@@ -82,22 +109,22 @@ export function PressSupportPage() {
                       <strong>{row.name}</strong>
                     </td>
                     {columns.map((column) => {
-                      const active = row[column.key];
+                      const count = row[column.key];
                       return (
                         <td key={`${row.name}-${column.key}`} style={{ textAlign: "center" }}>
-                          <button
-                            type="button"
+                          <span
                             className="btn"
-                            onClick={() => handleToggle(row.name, column.key)}
                             style={{
                               minWidth: 104,
-                              borderColor: active ? "rgba(250,204,21,.58)" : "rgba(148,163,184,.24)",
-                              background: active ? "rgba(250,204,21,.22)" : undefined,
-                              color: active ? "#facc15" : undefined,
+                              display: "inline-flex",
+                              justifyContent: "center",
+                              borderColor: count > 0 ? "rgba(250,204,21,.58)" : "rgba(148,163,184,.24)",
+                              background: count > 0 ? "rgba(250,204,21,.22)" : undefined,
+                              color: count > 0 ? "#facc15" : undefined,
                             }}
                           >
-                            {active ? "지원" : "-"}
-                          </button>
+                            {count}건
+                          </span>
                         </td>
                       );
                     })}
@@ -106,7 +133,7 @@ export function PressSupportPage() {
                 {rows.length === 0 ? (
                   <tr>
                     <td colSpan={columns.length + 1}>
-                      <div className="status note">{loading ? "불러오는 중입니다." : "표시할 인원이 없습니다."}</div>
+                      <div className="status note">{loading ? "불러오는 중입니다." : "집계된 출입처 지원 일정이 없습니다."}</div>
                     </td>
                   </tr>
                 ) : null}
