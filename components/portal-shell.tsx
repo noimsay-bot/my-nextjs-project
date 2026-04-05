@@ -136,7 +136,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                   </Link>
                 ))}
               </nav>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="portal-header-utility" style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
                   <button
                     type="button"
@@ -171,7 +171,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                   {session?.username} / {session?.role}
                 </span>
                 <button
-                  className="btn"
+                  className="btn portal-header-logout"
                   onClick={async () => {
                     await logoutUser();
                     window.location.href = "/login";
