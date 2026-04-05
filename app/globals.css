@@ -1318,3 +1318,241 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
     flex-wrap: wrap;
   }
 }
+
+@media (max-width: 960px) {
+  .subgrid-4,
+  .subgrid-3,
+  .subgrid-2,
+  .schedule-side-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .review-layout,
+  .review-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-preview-panel {
+    order: 1;
+  }
+
+  .review-criteria-panel {
+    order: 2;
+  }
+
+  .brand-logo {
+    min-width: 100%;
+    padding: 14px 18px;
+    gap: 12px;
+  }
+
+  .brand-logo-mark {
+    width: 44px;
+    height: 44px;
+    font-size: 22px;
+  }
+
+  .brand-logo-text {
+    letter-spacing: 0.16em;
+    text-indent: 0.16em;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 16px 12px 48px;
+  }
+
+  .panel {
+    border-radius: 20px;
+  }
+
+  .panel-pad {
+    padding: 16px;
+  }
+
+  .schedule-toolbar {
+    align-items: stretch;
+  }
+
+  .schedule-toolbar-actions {
+    width: 100%;
+  }
+
+  .schedule-toolbar-actions--controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-toolbar-actions--controls > .muted,
+  .schedule-toolbar-actions--controls > .schedule-current-title,
+  .schedule-toolbar-actions--controls > .schedule-current-range {
+    grid-column: 1 / -1;
+    text-align: center;
+    justify-self: stretch;
+  }
+
+  .schedule-toolbar-actions--controls > .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .schedule-calendar-scroll {
+    overflow-x: visible;
+  }
+
+  .schedule-calendar-scroll--monthly {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+  }
+
+  .schedule-calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-calendar-grid--daily {
+    justify-items: center;
+  }
+
+  .schedule-calendar-grid--monthly {
+    grid-template-columns: repeat(7, minmax(120px, 1fr)) !important;
+    min-width: 840px;
+    gap: 4px;
+  }
+
+  .schedule-calendar-zoom--daily {
+    width: 100%;
+  }
+
+  .schedule-weekday {
+    display: none;
+  }
+
+  .schedule-weekday--monthly {
+    display: block !important;
+  }
+
+  .schedule-day-card {
+    min-height: auto !important;
+    padding: 10px !important;
+    width: min(100%, 760px);
+    justify-self: center;
+  }
+
+  .schedule-day-card--monthly {
+    min-height: 148px !important;
+    padding: 6px !important;
+    width: 100%;
+    min-width: 0;
+    justify-self: stretch;
+  }
+
+  .schedule-day-head {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    row-gap: 6px !important;
+  }
+
+  .schedule-day-head--monthly {
+    row-gap: 4px !important;
+    margin-bottom: 4px !important;
+  }
+
+  .schedule-day-date {
+    gap: 0;
+  }
+
+  .schedule-assignment-label {
+    min-height: auto !important;
+    font-size: 13px !important;
+  }
+
+  .schedule-name-grid {
+    grid-template-columns: 1fr !important;
+    min-height: auto !important;
+  }
+
+  .schedule-name-grid--monthly {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+  }
+
+  .schedule-name-chip {
+    font-size: clamp(15px, 3.6vw, 20px);
+  }
+
+  .schedule-name-chip--edit {
+    font-size: clamp(14px, 3.2vw, 18px);
+  }
+
+  .schedule-name-chip--compact {
+    font-size: clamp(11px, 2vw, 14px);
+  }
+
+  .schedule-name-chip--featured {
+    font-size: clamp(16px, 4vw, 21px);
+  }
+
+  .schedule-order-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-assignment-day-head {
+    grid-template-columns: 1fr !important;
+    align-items: start !important;
+  }
+
+  .schedule-assignment-day-badges {
+    justify-content: flex-start !important;
+  }
+
+  .schedule-assignment-day-badge {
+    padding: 6px 12px !important;
+    font-size: 13px !important;
+  }
+
+  .schedule-assignment-day-actions {
+    justify-self: start !important;
+  }
+
+  .schedule-assignment-table {
+    min-width: 980px !important;
+  }
+
+  .schedule-assignment-schedule-cell {
+    min-width: 360px !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .schedule-assignment-trip-tag {
+    width: 100% !important;
+  }
+
+  .schedule-assignment-schedule-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 540px) {
+  .schedule-toolbar-actions--controls {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-assignment-table-wrap {
+    margin-inline: -4px;
+    padding-inline: 4px;
+  }
+
+  .schedule-assignment-table {
+    min-width: 900px !important;
+  }
+
+  .schedule-assignment-schedule-cell {
+    min-width: 300px !important;
+  }
+
+  .schedule-assignment-day-badge {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+}

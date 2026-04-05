@@ -770,6 +770,7 @@ export function ScheduleAssignmentPage() {
           >
             <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
               <div
+                className="schedule-assignment-day-head"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "minmax(220px, auto) minmax(0, 1fr) auto",
@@ -785,9 +786,10 @@ export function ScheduleAssignmentPage() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
                   {vacationPeople.length > 0 || jcheckPeople.length > 0 || nightOffPeople.length > 0 ? (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
+                      <div className="schedule-assignment-day-badges" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end" }}>
                         {vacationPeople.map((vacation, index) => (
                           <span
+                            className="schedule-assignment-day-badge"
                             key={`${day.dateKey}-vacation-${vacation.type}-${vacation.name}-${index}`}
                             style={{
                               display: "inline-flex",
@@ -810,6 +812,7 @@ export function ScheduleAssignmentPage() {
                         ))}
                         {jcheckPeople.map((name, index) => (
                           <span
+                            className="schedule-assignment-day-badge"
                             key={`${day.dateKey}-jcheck-${name}-${index}`}
                             style={{
                               display: "inline-flex",
@@ -832,6 +835,7 @@ export function ScheduleAssignmentPage() {
                         ))}
                         {nightOffPeople.map((name, index) => (
                           <span
+                            className="schedule-assignment-day-badge"
                             key={`${day.dateKey}-night-off-${name}-${index}`}
                             style={{
                               display: "inline-flex",
@@ -855,7 +859,7 @@ export function ScheduleAssignmentPage() {
                       </div>
                     ) : null}
                   </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifySelf: "end" }}>
+                <div className="schedule-assignment-day-actions" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifySelf: "end" }}>
                   <span className="muted">{rows.length}명</span>
                   {isEditingPeople ? (
                     <>
@@ -877,8 +881,8 @@ export function ScheduleAssignmentPage() {
                 </div>
               </div>
 
-              <div style={{ overflowX: "auto" }}>
-                <table className="table-like" style={{ minWidth: 1140 }}>
+              <div className="schedule-assignment-table-wrap" style={{ overflowX: "auto" }}>
+                <table className="table-like schedule-assignment-table" style={{ minWidth: 1140 }}>
                   <thead>
                     <tr>
                       <th>이름</th>
@@ -1052,6 +1056,7 @@ export function ScheduleAssignmentPage() {
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div
+                              className="schedule-assignment-schedule-cell"
                               style={{
                                 display: "grid",
                                 gridTemplateColumns: visibleTripTag || entry.travelType ? "max-content minmax(0, 1fr)" : "minmax(0, 1fr)",
@@ -1061,7 +1066,7 @@ export function ScheduleAssignmentPage() {
                               }}
                             >
                               {visibleTripTag || entry.travelType || isEditingCurrentTripTag ? (
-                                <div style={{ display: "grid", gap: 4, alignContent: "start", alignSelf: "start", width: "fit-content", minHeight: 32 }}>
+                                <div className="schedule-assignment-trip-tag" style={{ display: "grid", gap: 4, alignContent: "start", alignSelf: "start", width: "fit-content", minHeight: 32 }}>
                                   {visibleTripTag || isEditingCurrentTripTag ? (
                                     <>
                                       {isEditingCurrentTripTag ? (
@@ -1174,7 +1179,7 @@ export function ScheduleAssignmentPage() {
                               <div style={{ display: "grid", gap: 3 }}>
                                 {safeSchedules.map((schedule, index) => (
                                   <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
-                                  <div style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
+                                  <div className="schedule-assignment-schedule-row" style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
                                     <input disabled={isEditingPeople} className="field-input" value={schedule} style={{ flex: 1 }} placeholder="일정 내용 입력" onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item) }))} />
                                     <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
                                     <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: isEditingPeople ? "default" : "pointer", overflow: "hidden", opacity: isEditingPeople ? 0.6 : 1 }}>
