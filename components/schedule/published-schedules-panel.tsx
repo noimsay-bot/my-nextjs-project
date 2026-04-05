@@ -1243,7 +1243,7 @@ export function PublishedSchedulesPanel() {
                 style={{
                   overflowX: shouldAutoFitSchedule ? "auto" : undefined,
                   overflowY: shouldAutoFitSchedule ? "auto" : undefined,
-                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y" : undefined,
+                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y pinch-zoom" : undefined,
                   WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
                 }}
               >
@@ -1489,15 +1489,15 @@ export function PublishedSchedulesPanel() {
                                       <FittedNameText
                                         text={assignmentDisplay.name}
                                         className="schedule-name-chip__text"
-                                        minFontSize={shouldAutoFitSchedule ? 8 : 9}
+                                        minFontSize={shouldAutoFitSchedule ? 5 : 9}
                                         maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                         style={{
                                           display: "inline-block",
                                           flex: "0 1 auto",
                                           width: "100%",
                                           margin: "0 auto",
-                                          overflow: shouldAutoFitSchedule ? "hidden" : "visible",
-                                          textOverflow: shouldAutoFitSchedule ? "ellipsis" : "clip",
+                                          overflow: "visible",
+                                          textOverflow: "clip",
                                         }}
                                       />
                                       {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 11 }}>요청중</span> : null}

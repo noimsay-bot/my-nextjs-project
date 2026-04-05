@@ -1701,8 +1701,8 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 
 .schedule-published-panel--fit .schedule-name-chip__text {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   word-break: keep-all;
   text-align: center;
 }
