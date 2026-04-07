@@ -255,14 +255,16 @@ export default function VacationPage() {
                 const selected = activeType === type;
                 const toneStyle = type === "연차"
                   ? {
-                      borderColor: selected ? "rgba(96,165,250,.72)" : "rgba(96,165,250,.35)",
+                      border: selected ? "2px solid #ffffff" : "1px solid rgba(96,165,250,.35)",
                       background: selected ? "rgba(59,130,246,.22)" : "rgba(59,130,246,.08)",
-                      color: selected ? "#dbeafe" : "#bfdbfe",
+                      color: selected ? "#ffffff" : "#bfdbfe",
+                      fontWeight: selected ? 800 : undefined,
                     }
                   : {
-                      borderColor: selected ? "rgba(74,222,128,.72)" : "rgba(74,222,128,.35)",
+                      border: selected ? "2px solid #ffffff" : "1px solid rgba(74,222,128,.35)",
                       background: selected ? "rgba(16,185,129,.22)" : "rgba(16,185,129,.08)",
-                      color: selected ? "#d1fae5" : "#bbf7d0",
+                      color: selected ? "#ffffff" : "#bbf7d0",
+                      fontWeight: selected ? 800 : undefined,
                     };
                 return (
                   <button

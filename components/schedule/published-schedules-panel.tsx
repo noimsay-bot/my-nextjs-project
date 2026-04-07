@@ -1,4 +1,4 @@
-﻿"use client";
+﻿﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
@@ -1401,15 +1401,15 @@ export function PublishedSchedulesPanel() {
                                       className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
                                       onClick={() => handleNameClick(personObject)}
                                       style={{
-                                        display: personObject.pending ? "flex" : "grid",
+                                        display: "flex",
+                                        flexDirection: "column",
                                         gridColumn: "auto",
                                         justifySelf: "stretch",
                                         alignItems: "center",
-                                        placeItems: personObject.pending ? undefined : "center",
-                                        justifyContent: personObject.pending ? "space-between" : "center",
+                                        justifyContent: "center",
                                         width: "100%",
                                         maxWidth: "100%",
-                                        gap: 5,
+                                        gap: personObject.pending ? 0 : 5,
                                         minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
                                         padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
                                         borderRadius: 0,
@@ -1460,7 +1460,7 @@ export function PublishedSchedulesPanel() {
                                           textOverflow: "clip",
                                         }}
                                       />
-                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 10 : 11 }}>요청중</span> : null}
+                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
                                     </button>
                                   );
                                 })

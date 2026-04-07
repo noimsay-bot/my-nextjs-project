@@ -26,6 +26,28 @@ import {
   ScheduleAssignmentVisibleTripTag,
 } from "@/lib/team-lead/storage";
 
+const dutyOptions = [
+  "조근",
+  "일반",
+  "연장",
+  "석근",
+  "철야",
+  "야퇴",
+  "청와대",
+  "국회",
+  "서울청사",
+  "국방부",
+  "시청",
+  "법조",
+  "수원",
+  "국회지원",
+  "법조지원",
+  "국내출장",
+  "해외출장",
+  "오후반차",
+  "오전반차",
+];
+
 const travelOptions: Array<{ value: AssignmentTravelType; label: string }> = [
   { value: "", label: "선택" },
   { value: "국내출장", label: "국내출장" },
@@ -388,16 +410,6 @@ export function ScheduleAssignmentPage() {
   );
   const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [schedules, store]);
 
-  const dutyOptions = useMemo(() => {
-    const set = new Set<string>();
-    schedules.forEach((schedule) => schedule.days.forEach((day) => getScheduleAssignmentRows(day).forEach((row) => row.duty && set.add(row.duty))));
-    Object.values(store.rows).forEach((month) => Object.values(month).forEach((dayRows) => {
-      dayRows.addedRows.forEach((row) => row.duty && set.add(row.duty));
-      Object.values(dayRows.rowOverrides).forEach((row) => row.duty && set.add(row.duty));
-    }));
-    return Array.from(set);
-  }, [schedules, store.rows]);
-
   useEffect(() => {
     if (selectedMonthKey !== todayMonthKey) return;
     if (!monthDays.some((day) => day.dateKey === todayDateKey)) return;
@@ -755,9 +767,16 @@ export function ScheduleAssignmentPage() {
               >
                 <div style={{ display: "grid", gap: 4, justifySelf: "start" }}>
                   <div className="chip">{day.dateKey}</div>
-                  <strong style={{ fontSize: 22, color: day.dateKey === todayDateKey ? "#8fe7ff" : undefined }}>
-                    {day.month}월 {day.day}일 일정배정
-                  </strong>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <strong style={{ fontSize: 22, color: day.dateKey === todayDateKey ? "#8fe7ff" : undefined }}>
+                      {day.month}월 {day.day}일 일정배정
+                    </strong>
+                    {!isEditingPeople && (
+                      <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => startPeopleEdit(day.dateKey)}>
+                        인원 수정
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
                   {vacationPeople.length > 0 || jcheckPeople.length > 0 || nightOffPeople.length > 0 ? (
@@ -835,23 +854,6 @@ export function ScheduleAssignmentPage() {
                   </div>
                 <div className="schedule-assignment-day-actions" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifySelf: "end" }}>
                   <span className="muted">{rows.length}명</span>
-                  {isEditingPeople ? (
-                    <>
-                      <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12, minWidth: 34 }} onClick={() => addEditingRow(day.dateKey)}>
-                        +
-                      </button>
-                      <button type="button" className="btn primary" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => confirmPeopleEdit(day.dateKey)}>
-                        확인
-                      </button>
-                      <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => cancelPeopleEdit(day.dateKey)}>
-                        취소
-                      </button>
-                    </>
-                  ) : (
-                    <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => startPeopleEdit(day.dateKey)}>
-                      인원 수정
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -1216,6 +1218,20 @@ export function ScheduleAssignmentPage() {
                   </tbody>
                 </table>
               </div>
+
+              {isEditingPeople && (
+                <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+                  <button type="button" className="btn primary" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => confirmPeopleEdit(day.dateKey)}>
+                    확인
+                  </button>
+                  <button type="button" className="btn" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => cancelPeopleEdit(day.dateKey)}>
+                    취소
+                  </button>
+                  <button type="button" className="btn" style={{ padding: "6px 12px", minWidth: 44, fontSize: 13 }} onClick={() => addEditingRow(day.dateKey)}>
+                    +
+                  </button>
+                </div>
+              )}
 
             </div>
           </article>

@@ -11,9 +11,6 @@ export const SCHEDULE_MONTHS = Array.from({ length: 12 }, (_, index) => index + 
 export const DEFAULT_JCHECK_COUNT = 1;
 
 export function getScheduleCategoryLabel(category: string) {
-  if (category === "주말조근") return "조근";
-  if (category === "주말일반근무") return "일반";
-  if (category === "일반") return "석근";
   return category;
 }
 
