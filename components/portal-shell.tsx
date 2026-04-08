@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import {
+  setRoleExperience,
   getSession,
   logoutUser,
   subscribeToAuth,
+  type UserRole,
 } from "@/lib/auth/storage";
 
 const links = [
@@ -23,6 +25,14 @@ const links = [
 type PortalTheme = "dark" | "light" | "pink" | "green";
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
 const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
+const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "reviewer", "desk", "team_lead", "admin"];
+const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
+  member: "일반",
+  reviewer: "평가자",
+  desk: "DESK",
+  team_lead: "팀장",
+  admin: "관리자",
+};
 
 function readStoredTheme(): PortalTheme {
   if (typeof window === "undefined") return "dark";
@@ -32,9 +42,11 @@ function readStoredTheme(): PortalTheme {
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const isLogin = pathname === "/login";
   const [session, setSession] = useState(() => getSession());
   const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
+  const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>(() => getSession()?.experienceRole ?? getSession()?.actualRole ?? "admin");
 
   useEffect(() => {
     let mounted = true;
@@ -55,6 +67,11 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem(PORTAL_THEME_STORAGE_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!session?.actualRole) return;
+    setExperienceDraftRole(session.experienceRole ?? session.actualRole);
+  }, [session?.actualRole, session?.experienceRole]);
 
   const visibleLinks = useMemo(() => {
     switch (session?.role) {
@@ -99,6 +116,39 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
     }
   }, [session?.canReview, session?.role]);
+
+  const sessionLabel = useMemo(() => {
+    if (!session) return "";
+    if (!session.experienceRole) {
+      return `${session.username} / ${session.role}`;
+    }
+    return `${session.username} / ${session.role} 체험중 · 실권한 ${session.actualRole}`;
+  }, [session]);
+
+  const adminSession = session?.actualRole === "admin" ? session : null;
+
+  const cycleExperienceRole = () => {
+    setExperienceDraftRole((current) => {
+      const currentIndex = ROLE_EXPERIENCE_OPTIONS.indexOf(current);
+      if (currentIndex < 0) return ROLE_EXPERIENCE_OPTIONS[0];
+      return ROLE_EXPERIENCE_OPTIONS[(currentIndex + 1) % ROLE_EXPERIENCE_OPTIONS.length] ?? ROLE_EXPERIENCE_OPTIONS[0];
+    });
+  };
+
+  const confirmRoleExperience = () => {
+    if (!adminSession) return;
+
+    const nextExperienceRole = experienceDraftRole === adminSession.actualRole ? null : experienceDraftRole;
+    const confirmed = window.confirm(
+      nextExperienceRole
+        ? `${ROLE_EXPERIENCE_LABELS[nextExperienceRole]} 권한으로 전환하시겠습니까?`
+        : "관리자 기본 모드로 돌아가시겠습니까?",
+    );
+    if (!confirmed) return;
+
+    setRoleExperience(nextExperienceRole);
+    router.refresh();
+  };
 
   return (
     <div className="shell">
@@ -167,8 +217,18 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                     그린
                   </button>
                 </div>
+                {adminSession ? (
+                  <>
+                    <button type="button" className="btn" onClick={cycleExperienceRole}>
+                      권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
+                    </button>
+                    <button type="button" className="btn primary" onClick={confirmRoleExperience}>
+                      확인
+                    </button>
+                  </>
+                ) : null}
                 <span className="muted">
-                  {session?.username} / {session?.role}
+                  {sessionLabel}
                 </span>
                 <button
                   className="btn portal-header-logout"

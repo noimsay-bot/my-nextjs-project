@@ -818,7 +818,7 @@ export function getScheduleAssignmentRows(
     isCustom: true,
   }));
 
-  return [...baseRows, ...addedRows] satisfies ScheduleAssignmentRow[];
+  return [...addedRows, ...baseRows] satisfies ScheduleAssignmentRow[];
 }
 
 interface TripTimelineRow {

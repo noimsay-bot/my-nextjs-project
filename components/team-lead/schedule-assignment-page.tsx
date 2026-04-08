@@ -501,7 +501,7 @@ export function ScheduleAssignmentPage() {
   const addEditingRow = (dateKey: string) => {
     updateEditingDayRows(dateKey, (dayRows) => ({
       ...dayRows,
-      addedRows: [...dayRows.addedRows, { id: createCustomRowId(), name: "", duty: dutyOptions[0] ?? "" }],
+      addedRows: [{ id: createCustomRowId(), name: "", duty: dutyOptions[0] ?? "" }, ...dayRows.addedRows],
     }));
   };
 
@@ -767,14 +767,46 @@ export function ScheduleAssignmentPage() {
               >
                 <div style={{ display: "grid", gap: 4, justifySelf: "start" }}>
                   <div className="chip">{day.dateKey}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <strong style={{ fontSize: 22, color: day.dateKey === todayDateKey ? "#8fe7ff" : undefined }}>
                       {day.month}월 {day.day}일 일정배정
                     </strong>
-                    {!isEditingPeople && (
-                      <button type="button" className="btn" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => startPeopleEdit(day.dateKey)}>
+                    {!isEditingPeople ? (
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: "8px 16px", fontSize: 15, fontWeight: 700 }}
+                        onClick={() => startPeopleEdit(day.dateKey)}
+                      >
                         인원 수정
                       </button>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "8px 16px", fontSize: 15, fontWeight: 700 }}
+                          onClick={() => addEditingRow(day.dateKey)}
+                        >
+                          추가
+                        </button>
+                        <button
+                          type="button"
+                          className="btn primary"
+                          style={{ padding: "8px 16px", fontSize: 15, fontWeight: 700 }}
+                          onClick={() => confirmPeopleEdit(day.dateKey)}
+                        >
+                          확인
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "8px 16px", fontSize: 15, fontWeight: 700 }}
+                          onClick={() => cancelPeopleEdit(day.dateKey)}
+                        >
+                          취소
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1218,20 +1250,6 @@ export function ScheduleAssignmentPage() {
                   </tbody>
                 </table>
               </div>
-
-              {isEditingPeople && (
-                <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
-                  <button type="button" className="btn primary" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => confirmPeopleEdit(day.dateKey)}>
-                    확인
-                  </button>
-                  <button type="button" className="btn" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => cancelPeopleEdit(day.dateKey)}>
-                    취소
-                  </button>
-                  <button type="button" className="btn" style={{ padding: "6px 12px", minWidth: 44, fontSize: 13 }} onClick={() => addEditingRow(day.dateKey)}>
-                    +
-                  </button>
-                </div>
-              )}
 
             </div>
           </article>

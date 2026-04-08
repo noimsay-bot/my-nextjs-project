@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
-import { getSession, hasDeskAccess } from "@/lib/auth/storage";
+import {
+  getSession,
+  hasDeskAccess,
+  subscribeToAuth,
+} from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
 import { getAssignmentDisplayRank, getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
@@ -10,7 +14,9 @@ import {
   CHANGE_REQUESTS_EVENT,
   CHANGE_REQUESTS_STATUS_EVENT,
   createScheduleChangeRequest,
+  deleteScheduleChangeRequest,
   getScheduleChangeRequests,
+  getRequestRoute,
   isPendingRef,
   refreshScheduleChangeRequests,
 } from "@/lib/schedule/change-requests";
@@ -252,6 +258,22 @@ function routeIncludes(route: SchedulePersonRef[], ref: SchedulePersonRef) {
   return route.some((candidate) => sameRef(candidate, ref));
 }
 
+function findOwnPendingRequestForRef(
+  requests: ScheduleChangeRequest[],
+  ref: SchedulePersonRef,
+  requesterId: string | null | undefined,
+) {
+  if (!requesterId) return null;
+  return (
+    requests.find(
+      (item) =>
+        item.status === "pending" &&
+        item.requesterId === requesterId &&
+        getRequestRoute(item).some((candidate) => sameRef(candidate, ref)),
+    ) ?? null
+  );
+}
+
 function hasCompatibleVacationType(left: SchedulePersonRef, right: SchedulePersonRef) {
   if (left.category !== "휴가" || right.category !== "휴가") return true;
   return parseVacationEntry(left.name).type === parseVacationEntry(right.name).type;
@@ -450,13 +472,19 @@ export function PublishedSchedulesPanel() {
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleZoomFactor, setScheduleZoomFactor] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
+  const [session, setSession] = useState(() => getSession());
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
-  const session = getSession();
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
+
+  useEffect(() => {
+    return subscribeToAuth((nextSession) => {
+      setSession(nextSession);
+    });
+  }, []);
 
   const loadItems = async () => {
     await refreshPublishedSchedules();
@@ -771,8 +799,29 @@ export function PublishedSchedulesPanel() {
     setRequestMessageTone("ok");
   };
 
-  const handleNameClick = (person: ScheduleNameObject) => {
-    if (!editMode || !username || person.pending) return;
+  const handleNameClick = async (person: ScheduleNameObject) => {
+    if (!editMode || !username) return;
+
+    if (person.pending) {
+      const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, person.ref, session?.id);
+      if (!ownPendingRequest) return;
+
+      const confirmed = window.confirm("변경요청을 취소하시겠습니까?");
+      if (!confirmed) return;
+
+      const result = await deleteScheduleChangeRequest(ownPendingRequest.id);
+      if (!result.ok) {
+        setRequestMessage("근무 변경 요청을 취소하지 못했습니다.");
+        setRequestMessageTone("warn");
+        return;
+      }
+
+      clearRoute();
+      await loadRequests();
+      setRequestMessage("근무 변경 요청을 취소했습니다.");
+      setRequestMessageTone("ok");
+      return;
+    }
 
     const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
     if (existingIndex >= 0) {
@@ -863,9 +912,9 @@ export function PublishedSchedulesPanel() {
   if (items.length === 0) {
     return (
       <section className="panel">
-        <div className="panel-pad">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="chip">게시된 근무표</div>
-          <div className="status note" style={{ marginTop: 16 }}>게시된 근무표가 없습니다.</div>
+          <div className="status note">게시된 근무표가 없습니다.</div>
         </div>
       </section>
     );
@@ -1389,6 +1438,7 @@ export function PublishedSchedulesPanel() {
                                     ref,
                                     pending: isPendingRef(allPendingRequests, ref),
                                   };
+                                  const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                   const isMine = Boolean(username) && username === assignmentDisplay.name;
                                   const mineHighlighted = isMine && (showMine || editMode);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
@@ -1399,7 +1449,7 @@ export function PublishedSchedulesPanel() {
                                       key={personObject.key}
                                       type="button"
                                       className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
-                                      onClick={() => handleNameClick(personObject)}
+                                      onClick={() => void handleNameClick(personObject)}
                                       style={{
                                         display: "flex",
                                         flexDirection: "column",
@@ -1443,7 +1493,7 @@ export function PublishedSchedulesPanel() {
                                         boxShadow: "none",
                                         textShadow: undefined,
                                         opacity: dimOtherNames ? 0.42 : 1,
-                                        cursor: editMode && !personObject.pending ? "pointer" : "default",
+                                        cursor: editMode && (!personObject.pending || ownPendingRequest) ? "pointer" : "default",
                                       }}
                                     >
                                         <FittedNameText

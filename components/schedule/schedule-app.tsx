@@ -831,6 +831,7 @@ export function ScheduleApp() {
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
           {isEditingDate ? <div className="status note">{isAllDaysEditMode ? "근무표 전체 수정 중입니다. 수정 완료 또는 취소 후 다른 작업을 진행해 주세요." : "날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요."}</div> : null}
+          {isAllDaysEditMode && !isCoarsePointer ? <div className="status note">수정 모드에서는 이름칩을 다른 이름칩 위에 놓아 1:1로 교환하고, 근무유형칸은 다른 칸 위에 놓아 순서를 밀어내며 재배치할 수 있습니다.</div> : null}
           {isEditingDate && isCoarsePointer ? <div className="status note">모바일에서는 이름을 먼저 누른 뒤, 다른 이름이나 빈칸을 눌러 자리를 교환할 수 있습니다.</div> : null}
           {overwriteConfirmOpen ? (
             <div className="status warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -1316,6 +1317,8 @@ export function ScheduleApp() {
                   const editMode =
                     isEditingVisibleMonth &&
                     (isAllDaysEditMode || state.editDateKey === day.dateKey);
+                  const canDragAssignments = isAllDaysEditMode && isEditingVisibleMonth && !isCoarsePointer;
+                  const canDropAssignments = isAllDaysEditMode && isEditingVisibleMonth;
                   const currentUser = state.currentUser.trim();
                   const editLocked = Boolean(state.editDateKey && !isAllDaysEditMode && state.editDateKey !== day.dateKey);
                   const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
@@ -1458,25 +1461,26 @@ export function ScheduleApp() {
                           <article
                             key={`${day.dateKey}-${category}`}
                             data-category={category}
-                            draggable={editMode && isEditingVisibleMonth && !isCoarsePointer}
+                            draggable={canDragAssignments}
                             onDragStart={(event) => {
-                              if (!editMode || !isEditingVisibleMonth || isCoarsePointer) return;
+                              if (!canDragAssignments) return;
+                              event.stopPropagation();
                               event.dataTransfer.effectAllowed = "move";
                               event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "category", dateKey: day.dateKey, category }));
                             }}
                             onDragOver={(event) => {
-                              if (!editMode) return;
+                              if (!canDropAssignments) return;
                               event.preventDefault();
                             }}
                             onDrop={(event) => {
-                              if (!editMode) return;
+                              if (!canDropAssignments) return;
                               event.preventDefault();
                               const payload = event.dataTransfer.getData("text/plain");
                               if (!payload) return;
                               const source = parseScheduleDragPayload(payload);
                               if (!source) return;
                               if (source.kind === "person") return;
-                              if (editMode && source.dateKey === day.dateKey) {
+                              if (source.dateKey === day.dateKey) {
                                 updateEditingState((current) => moveAssignmentCategory(current, day.dateKey, source.category, category));
                               }
                             }}
@@ -1485,7 +1489,7 @@ export function ScheduleApp() {
                               borderRadius: 10,
                               padding: 6,
                               background: "rgba(9,17,30,.34)",
-                              cursor: editMode && isEditingVisibleMonth ? "grab" : "default",
+                              cursor: canDragAssignments ? "grab" : "default",
                             }}
                           >
                             <div
@@ -1585,12 +1589,12 @@ export function ScheduleApp() {
                                       <div
                                         key={`${category}-blank-${index}`}
                                         onDragOver={(event) => {
-                                          if (!editMode) return;
+                                          if (!canDropAssignments) return;
                                           event.preventDefault();
                                           event.stopPropagation();
                                         }}
                                         onDrop={(event) => {
-                                          if (!editMode) return;
+                                          if (!canDropAssignments) return;
                                           event.preventDefault();
                                           event.stopPropagation();
                                           const payload = event.dataTransfer.getData("text/plain");
@@ -1658,12 +1662,12 @@ export function ScheduleApp() {
                                     <div
                                       key={personObject.key}
                                       onDragOver={(event) => {
-                                        if (!editMode) return;
+                                        if (!canDropAssignments) return;
                                         event.preventDefault();
                                         event.stopPropagation();
                                       }}
                                       onDrop={(event) => {
-                                        if (!editMode) return;
+                                        if (!canDropAssignments) return;
                                         event.preventDefault();
                                         event.stopPropagation();
                                         const payload = event.dataTransfer.getData("text/plain");
@@ -1683,7 +1687,7 @@ export function ScheduleApp() {
                                       <div
                                         className={`schedule-name-chip ${editMode ? "schedule-name-chip--edit" : ""}`}
                                         data-selected={selected ? "true" : undefined}
-                                        draggable={editMode && !isCoarsePointer}
+                                        draggable={canDragAssignments}
                                         onClick={() => {
                                           if (!editMode) return;
                                           if (category === "휴가") {
@@ -1695,13 +1699,20 @@ export function ScheduleApp() {
                                           handlePersonSlotActivate({ dateKey: day.dateKey, category, index });
                                         }}
                                         onDragStart={(event) => {
-                                          if (!editMode || isCoarsePointer) return;
+                                          if (!canDragAssignments) return;
                                           event.stopPropagation();
                                           event.dataTransfer.effectAllowed = "move";
                                           event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "person", dateKey: day.dateKey, category, index }));
                                           setState((current) => ({
                                             ...current,
                                             selectedPerson: { dateKey: day.dateKey, category, index },
+                                          }));
+                                        }}
+                                        onDragEnd={() => {
+                                          if (!canDragAssignments) return;
+                                          setState((current) => ({
+                                            ...current,
+                                            selectedPerson: null,
                                           }));
                                         }}
                                         style={{
@@ -1711,7 +1722,7 @@ export function ScheduleApp() {
                                         gap: 5,
                                         width: "100%",
                                         minWidth: 0,
-                                        cursor: editMode ? (category === "휴가" ? "pointer" : "grab") : "default",
+                                        cursor: canDragAssignments ? "grab" : editMode ? "pointer" : "default",
                                         minHeight: 32,
                                         padding: editMode ? "3px 4px" : "4px 4px",
                                         borderRadius: 0,

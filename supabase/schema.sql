@@ -611,6 +611,17 @@ using (
   and public.current_profile_approved() = true
 );
 
+drop policy if exists "schedule_change_requests_delete_requester_pending" on public.schedule_change_requests;
+create policy "schedule_change_requests_delete_requester_pending"
+on public.schedule_change_requests
+for delete
+to authenticated
+using (
+  requester_id = auth.uid()
+  and status = 'pending'
+  and public.current_profile_approved() = true
+);
+
 create table if not exists public.vacation_requests (
   id uuid primary key default gen_random_uuid(),
   requester_id uuid not null references public.profiles (id) on delete cascade,
@@ -747,17 +758,18 @@ using (
   and public.current_profile_approved() = true
 );
 
+drop policy if exists "team_lead_schedule_assignments_manage_privileged" on public.team_lead_schedule_assignments;
 drop policy if exists "team_lead_schedule_assignments_manage_team_lead_admin" on public.team_lead_schedule_assignments;
-create policy "team_lead_schedule_assignments_manage_team_lead_admin"
+create policy "team_lead_schedule_assignments_manage_privileged"
 on public.team_lead_schedule_assignments
 for all
 to authenticated
 using (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() in ('team_lead', 'admin', 'desk')
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() in ('team_lead', 'admin', 'desk')
   and public.current_profile_approved() = true
 );
 
@@ -799,6 +811,22 @@ using (
 with check (
   public.current_profile_role() in ('team_lead', 'admin')
   and public.current_profile_approved() = true
+);
+
+drop policy if exists "team_lead_state_manage_desk_final_cut" on public.team_lead_state;
+create policy "team_lead_state_manage_desk_final_cut"
+on public.team_lead_state
+for all
+to authenticated
+using (
+  public.current_profile_role() = 'desk'
+  and public.current_profile_approved() = true
+  and key = 'final_cut_v1'
+)
+with check (
+  public.current_profile_role() = 'desk'
+  and public.current_profile_approved() = true
+  and key = 'final_cut_v1'
 );
 
 create or replace function public.current_profile_has_review_access()

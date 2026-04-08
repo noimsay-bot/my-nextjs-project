@@ -27,9 +27,12 @@ export interface SessionUser {
   loginId: string;
   username: string;
   role: UserRole;
+  actualRole: UserRole;
+  experienceRole: UserRole | null;
   approved: boolean;
   mustChangePassword: boolean;
   canReview: boolean;
+  actualCanReview: boolean;
 }
 
 export interface ResetMailLog {
@@ -57,11 +60,13 @@ type BrowserRealtimeChannel = ReturnType<BrowserSupabaseClient["channel"]>;
 
 const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
 const USERS_CACHE_KEY = "j-special-force-users-cache-v2";
+const ROLE_EXPERIENCE_CACHE_KEY = "j-special-force-role-experience-v1";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
 const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
-let cachedSession = readJson<SessionUser | null>(AUTH_CACHE_KEY, null);
+let cachedExperienceRole = readStoredExperienceRole();
+let cachedSession = normalizeStoredSession(readJson<SessionUser | null>(AUTH_CACHE_KEY, null));
 let cachedUsers = readJson<UserAccount[]>(USERS_CACHE_KEY, []);
 let authInitialized = false;
 let refreshPromise: Promise<SessionUser | null> | null = null;
@@ -93,6 +98,19 @@ function writeJson<T>(key: string, value: T) {
 function clearJson(key: string) {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(key);
+}
+
+function readStoredExperienceRole() {
+  if (typeof window === "undefined") return null;
+
+  const raw = window.localStorage.getItem(ROLE_EXPERIENCE_CACHE_KEY);
+  if (!raw) return null;
+
+  try {
+    return normalizeExperienceRole(JSON.parse(raw));
+  } catch {
+    return normalizeExperienceRole(raw);
+  }
 }
 
 function getSupabaseClient() {
@@ -224,8 +242,80 @@ function normalizeRole(value: string | null | undefined): UserRole {
     : "member";
 }
 
+function normalizeExperienceRole(value: unknown): UserRole | null {
+  if (
+    value === "member" ||
+    value === "reviewer" ||
+    value === "desk" ||
+    value === "team_lead" ||
+    value === "admin"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function hasIntrinsicReviewAccess(role: UserRole) {
   return role === "reviewer" || role === "team_lead" || role === "admin";
+}
+
+function buildSessionWithExperience(
+  base: Omit<SessionUser, "role" | "experienceRole" | "canReview" | "actualRole" | "actualCanReview"> & {
+    role: UserRole;
+    canReview: boolean;
+    actualRole?: UserRole;
+    actualCanReview?: boolean;
+  },
+  requestedExperienceRole = cachedExperienceRole,
+): SessionUser {
+  const actualRole = base.actualRole ?? base.role;
+  const actualCanReview = base.actualCanReview ?? base.canReview;
+  const experienceRole =
+    actualRole === "admin"
+      ? normalizeExperienceRole(requestedExperienceRole)
+      : null;
+  const effectiveExperienceRole =
+    experienceRole && experienceRole !== actualRole ? experienceRole : null;
+  const effectiveRole = effectiveExperienceRole ?? actualRole;
+
+  return {
+    ...base,
+    role: effectiveRole,
+    actualRole,
+    experienceRole: effectiveExperienceRole,
+    approved: base.approved,
+    mustChangePassword: base.mustChangePassword,
+    canReview: effectiveExperienceRole ? hasIntrinsicReviewAccess(effectiveRole) : actualCanReview,
+    actualCanReview,
+  };
+}
+
+function normalizeStoredSession(session: SessionUser | null) {
+  if (!session) return null;
+
+  return buildSessionWithExperience(
+    {
+      ...session,
+      role: session.actualRole ?? session.role,
+      actualRole: session.actualRole ?? session.role,
+      canReview: session.actualCanReview ?? session.canReview,
+      actualCanReview: session.actualCanReview ?? session.canReview,
+    },
+    session.experienceRole ?? cachedExperienceRole,
+  );
+}
+
+function persistExperienceRole(role: UserRole | null) {
+  cachedExperienceRole = normalizeExperienceRole(role);
+
+  if (typeof window === "undefined") return;
+
+  if (cachedExperienceRole) {
+    writeJson(ROLE_EXPERIENCE_CACHE_KEY, cachedExperienceRole);
+    return;
+  }
+
+  clearJson(ROLE_EXPERIENCE_CACHE_KEY);
 }
 
 function normalizeReviewAccessState(raw: unknown) {
@@ -259,16 +349,18 @@ async function fetchGrantedReviewAccessProfileIds() {
 }
 
 function profileToSession(profile: ProfileRow, canReview: boolean): SessionUser {
-  return {
+  return buildSessionWithExperience({
     id: profile.id,
     email: profile.email,
     loginId: profile.login_id ?? "",
     username: profile.name,
     role: profile.role,
+    actualRole: profile.role,
     approved: profile.approved,
     mustChangePassword: false,
     canReview,
-  };
+    actualCanReview: canReview,
+  });
 }
 
 function profileToAccount(profile: ProfileRow): UserAccount {
@@ -291,7 +383,7 @@ function fallbackSessionFromUser(user: User): SessionUser {
   const role = normalizeRole(
     typeof user.user_metadata.role === "string" ? user.user_metadata.role : "member",
   );
-  return {
+  return buildSessionWithExperience({
     id: user.id,
     email: user.email ?? "",
     loginId: typeof user.user_metadata.login_id === "string" ? user.user_metadata.login_id : "",
@@ -300,10 +392,12 @@ function fallbackSessionFromUser(user: User): SessionUser {
         ? user.user_metadata.name.trim()
         : user.email ?? "User",
     role,
+    actualRole: role,
     approved: true,
     mustChangePassword: false,
     canReview: hasIntrinsicReviewAccess(role),
-  };
+    actualCanReview: hasIntrinsicReviewAccess(role),
+  });
 }
 
 function notifySessionChange(session: SessionUser | null) {
@@ -311,15 +405,15 @@ function notifySessionChange(session: SessionUser | null) {
 }
 
 function setCachedSession(session: SessionUser | null) {
-  cachedSession = session;
+  cachedSession = normalizeStoredSession(session);
 
-  if (!session) {
+  if (!cachedSession) {
     clearJson(AUTH_CACHE_KEY);
   } else {
-    writeJson(AUTH_CACHE_KEY, session);
+    writeJson(AUTH_CACHE_KEY, cachedSession);
   }
 
-  notifySessionChange(session);
+  notifySessionChange(cachedSession);
 }
 
 function setCachedUsers(users: UserAccount[]) {
@@ -330,6 +424,7 @@ function setCachedUsers(users: UserAccount[]) {
 async function forceLogoutForUnapprovedUser() {
   clearProfileSubscription();
   clearReviewAccessSubscription();
+  persistExperienceRole(null);
   setCachedUsers([]);
   setCachedSession(null);
 
@@ -545,6 +640,34 @@ export function getSession() {
   return cachedSession;
 }
 
+export function setRoleExperience(role: UserRole | null) {
+  if (!cachedSession || cachedSession.actualRole !== "admin") {
+    return cachedSession;
+  }
+
+  const nextExperienceRole =
+    role && role !== cachedSession.actualRole ? normalizeExperienceRole(role) : null;
+  persistExperienceRole(nextExperienceRole);
+
+  const nextSession = buildSessionWithExperience(
+    {
+      ...cachedSession,
+      role: cachedSession.actualRole,
+      actualRole: cachedSession.actualRole,
+      canReview: cachedSession.actualCanReview,
+      actualCanReview: cachedSession.actualCanReview,
+    },
+    nextExperienceRole,
+  );
+
+  setCachedSession(nextSession);
+  return nextSession;
+}
+
+export function clearRoleExperience() {
+  return setRoleExperience(null);
+}
+
 export async function getSessionAsync() {
   return refreshSession();
 }
@@ -704,6 +827,7 @@ export async function loginUser(input: { loginId: string; password: string }) {
 export async function logoutUser() {
   const supabase = getSupabaseClient();
   await supabase.auth.signOut();
+  persistExperienceRole(null);
   setCachedSession(null);
   setCachedUsers([]);
 }
