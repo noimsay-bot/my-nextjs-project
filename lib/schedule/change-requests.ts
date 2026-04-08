@@ -170,6 +170,11 @@ function requestToRow(request: ScheduleChangeRequest) {
   };
 }
 
+function requestToUpdateRow(request: ScheduleChangeRequest) {
+  const { id, ...rest } = requestToRow(request);
+  return rest;
+}
+
 function findRefSlot(schedule: GeneratedSchedule, ref: SchedulePersonRef) {
   const day = schedule.days.find((item) => item.dateKey === ref.dateKey);
   if (!day) return null;
@@ -234,10 +239,14 @@ async function applyRequestToScheduleState(request: ScheduleChangeRequest) {
   const snapshots = current.generatedHistory
     .filter((item) => monthKeys.has(item.monthKey))
     .map((item) => cloneValue(item));
-  if (snapshots.length === 0) return { applied: false, snapshots: [] as GeneratedSchedule[] };
+  if (snapshots.length === 0) {
+    return { matched: false, applied: false, snapshots: [] as GeneratedSchedule[] };
+  }
 
   const changed = rotateAssignmentsAcrossSchedules(scheduleMap, request.route);
-  if (!changed) return { applied: false, snapshots: [] as GeneratedSchedule[] };
+  if (!changed) {
+    return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
+  }
 
   const generatedHistory = current.generatedHistory.map((item) => scheduleMap.get(item.monthKey) ?? item);
   const generated = current.generated ? scheduleMap.get(current.generated.monthKey) ?? current.generated : null;
@@ -246,8 +255,12 @@ async function applyRequestToScheduleState(request: ScheduleChangeRequest) {
     generated,
     generatedHistory,
   } satisfies ScheduleState;
-  await saveScheduleState(nextState);
-  return { applied: true, snapshots };
+  try {
+    await saveScheduleState(nextState);
+    return { matched: true, applied: true, snapshots };
+  } catch {
+    return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
+  }
 }
 
 async function applyRequestToPublishedSchedules(request: ScheduleChangeRequest) {
@@ -261,17 +274,25 @@ async function applyRequestToPublishedSchedules(request: ScheduleChangeRequest) 
   const snapshots = items
     .filter((item) => monthKeys.has(item.monthKey))
     .map((item) => cloneValue(item.schedule));
-  if (snapshots.length === 0) return { applied: false, snapshots: [] as GeneratedSchedule[] };
+  if (snapshots.length === 0) {
+    return { matched: false, applied: false, snapshots: [] as GeneratedSchedule[] };
+  }
 
   const changed = rotateAssignmentsAcrossSchedules(scheduleMap, request.route);
-  if (!changed) return { applied: false, snapshots: [] as GeneratedSchedule[] };
+  if (!changed) {
+    return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
+  }
 
   const nextItems = items.map((item) => {
     const schedule = scheduleMap.get(item.monthKey);
     return schedule ? { ...item, schedule } : item;
   });
-  await savePublishedSchedules(nextItems);
-  return { applied: true, snapshots };
+  try {
+    await savePublishedSchedules(nextItems);
+    return { matched: true, applied: true, snapshots };
+  } catch {
+    return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
+  }
 }
 
 async function restoreScheduleStateSnapshots(appliedState: ScheduleChangeRequestAppliedState | null) {
@@ -281,12 +302,16 @@ async function restoreScheduleStateSnapshots(appliedState: ScheduleChangeRequest
   const snapshotMap = new Map(appliedState.scheduleMonths.map((item) => [item.monthKey, cloneValue(item)]));
   const generatedHistory = current.generatedHistory.map((item) => snapshotMap.get(item.monthKey) ?? item);
   const generated = current.generated ? snapshotMap.get(current.generated.monthKey) ?? current.generated : null;
-  await saveScheduleState({
-    ...current,
-    generated,
-    generatedHistory,
-  });
-  return true;
+  try {
+    await saveScheduleState({
+      ...current,
+      generated,
+      generatedHistory,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function restorePublishedScheduleSnapshots(appliedState: ScheduleChangeRequestAppliedState | null) {
@@ -298,8 +323,12 @@ async function restorePublishedScheduleSnapshots(appliedState: ScheduleChangeReq
     const schedule = snapshotMap.get(item.monthKey);
     return schedule ? { ...item, schedule } : item;
   });
-  await savePublishedSchedules(nextItems);
-  return true;
+  try {
+    await savePublishedSchedules(nextItems);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getRequestRoute(request: ScheduleChangeRequest) {
@@ -433,12 +462,15 @@ export function isPendingRef(requests: ScheduleChangeRequest[], ref: SchedulePer
 export async function resolveScheduleChangeRequest(
   requestId: string,
   action: "accepted" | "rejected" | "rolledBack",
-  resolverName: string,
+  resolverName?: string,
 ) {
   const session = await getPortalSession();
   if (!session?.approved) {
     return { ok: false as const, applied: false };
   }
+
+  const resolverId = session.id;
+  const resolverLabel = resolverName?.trim() || session.username || "관리자";
 
   const items = getScheduleChangeRequests();
   const target = items.find((item) => item.id === requestId);
@@ -462,8 +494,8 @@ export async function resolveScheduleChangeRequest(
       ...target,
       status: "rolledBack",
       rolledBackAt,
-      rolledBackBy: resolverName,
-      history: appendHistory(target, "rolledBack", resolverName, rolledBackAt),
+      rolledBackBy: resolverId,
+      history: appendHistory(target, "rolledBack", resolverLabel, rolledBackAt),
     };
   } else if (action === "rejected") {
     if (target.status !== "pending") {
@@ -475,8 +507,8 @@ export async function resolveScheduleChangeRequest(
       ...target,
       status: "rejected",
       resolvedAt,
-      resolvedBy: resolverName,
-      history: appendHistory(target, "rejected", resolverName, resolvedAt),
+      resolvedBy: resolverId,
+      history: appendHistory(target, "rejected", resolverLabel, resolvedAt),
     };
   } else {
     if (target.status !== "pending") {
@@ -485,6 +517,30 @@ export async function resolveScheduleChangeRequest(
 
     const scheduleResult = await applyRequestToScheduleState(target);
     const publishedResult = await applyRequestToPublishedSchedules(target);
+    const hasApplyFailure =
+      (scheduleResult.matched && !scheduleResult.applied) || (publishedResult.matched && !publishedResult.applied);
+
+    if (hasApplyFailure) {
+      if (scheduleResult.applied) {
+        await restoreScheduleStateSnapshots({
+          scheduleMonths: scheduleResult.snapshots,
+          publishedMonths: [],
+        });
+      }
+      if (publishedResult.applied) {
+        await restorePublishedScheduleSnapshots({
+          scheduleMonths: [],
+          publishedMonths: publishedResult.snapshots,
+        });
+      }
+      emitChangeRequestStatus({
+        ok: false,
+        message: "근무 변경 요청 반영에 실패했습니다. 변경 내용을 되돌렸습니다.",
+      });
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
+      return { ok: false as const, applied: false };
+    }
+
     applied = scheduleResult.applied || publishedResult.applied;
     const resolvedAt = nowStamp();
 
@@ -492,12 +548,12 @@ export async function resolveScheduleChangeRequest(
       ...target,
       status: "accepted",
       resolvedAt,
-      resolvedBy: resolverName,
+      resolvedBy: resolverId,
       appliedState: {
         scheduleMonths: scheduleResult.snapshots,
         publishedMonths: publishedResult.snapshots,
       },
-      history: appendHistory(target, "accepted", resolverName, resolvedAt),
+      history: appendHistory(target, "accepted", resolverLabel, resolvedAt),
     };
   }
 
@@ -507,9 +563,17 @@ export async function resolveScheduleChangeRequest(
 
   try {
     const supabase = await getPortalSupabaseClient();
-    const { error } = await supabase.from("schedule_change_requests").upsert(requestToRow(nextItem));
+    const { data, error } = await supabase
+      .from("schedule_change_requests")
+      .update(requestToUpdateRow(nextItem))
+      .eq("id", requestId)
+      .select("id")
+      .returns<Array<{ id: string }>>();
     if (error) {
       throw new Error(error.message);
+    }
+    if (!data || data.length !== 1) {
+      throw new Error("근무 변경 요청을 처리할 권한이 없거나 요청이 이미 변경되었습니다.");
     }
     return { ok: true as const, applied };
   } catch (error) {
@@ -540,9 +604,17 @@ export async function deleteScheduleChangeRequest(requestId: string) {
 
   try {
     const supabase = await getPortalSupabaseClient();
-    const { error } = await supabase.from("schedule_change_requests").delete().eq("id", requestId);
+    const { data, error } = await supabase
+      .from("schedule_change_requests")
+      .delete()
+      .eq("id", requestId)
+      .select("id")
+      .returns<Array<{ id: string }>>();
     if (error) {
       throw new Error(error.message);
+    }
+    if (!data || data.length !== 1) {
+      throw new Error("근무 변경 요청을 삭제할 권한이 없거나 요청이 이미 삭제되었습니다.");
     }
     return { ok: true as const };
   } catch (error) {

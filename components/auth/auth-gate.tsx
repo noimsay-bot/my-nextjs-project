@@ -17,7 +17,7 @@ function hasAccess(pathname: string, session: SessionUser) {
   }
 
   if (pathname.startsWith("/schedule/vacations")) {
-    return session.role === "desk" || session.role === "admin";
+    return session.role === "desk" || session.role === "admin" || session.role === "team_lead";
   }
 
   switch (session.role) {

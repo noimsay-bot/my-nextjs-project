@@ -959,5 +959,5 @@ export function deleteUser(_userId: string) {
 }
 
 export function hasDeskAccess(role: UserRole | null | undefined) {
-  return role === "desk" || role === "admin";
+  return role === "desk" || role === "admin" || role === "team_lead";
 }

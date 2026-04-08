@@ -251,10 +251,10 @@ function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null
   );
 }
 
-function describeRequest(request: ScheduleChangeRequest) {
+function describeRequestSummary(request: ScheduleChangeRequest) {
   const route = getRequestRoute(request);
   const labels = route.map(
-    (ref) => `${ref.dateKey} ${getScheduleCategoryLabel(ref.category)} ${ref.name}`,
+    (ref) => `${ref.name} (${ref.dateKey} · ${getScheduleCategoryLabel(ref.category)})`,
   );
   if (labels.length <= 2) {
     return labels.join(" ↔ ");
@@ -933,7 +933,7 @@ export function ScheduleApp() {
                       >
                         <div style={{ display: "grid", gap: 4 }}>
                           <strong>{request.requesterName}</strong>
-                          <span className="muted">{describeRequest(request)}</span>
+                          <span className="muted">{describeRequestSummary(request)}</span>
                           {request.hasConflictWarning ? (
                             <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 12 }}>
                               변경시 충돌이 발생합니다.
@@ -948,6 +948,10 @@ export function ScheduleApp() {
                               void (async () => {
                                 const result = await resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
                                 await Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+                                if (!result.ok) {
+                                  setMessage({ tone: "warn", text: "근무 변경 요청 승인에 실패했습니다." });
+                                  return;
+                                }
                                 setMessage({
                                   tone: result.applied ? "ok" : "warn",
                                   text: result.applied
@@ -963,8 +967,12 @@ export function ScheduleApp() {
                             className="btn"
                             onClick={() => {
                               void (async () => {
-                                await resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
+                                const result = await resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
                                 await loadRequests();
+                                if (!result.ok) {
+                                  setMessage({ tone: "warn", text: "근무 변경 요청 거절에 실패했습니다." });
+                                  return;
+                                }
                                 setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
                               })();
                             }}
@@ -978,8 +986,11 @@ export function ScheduleApp() {
                               if (!ok) return;
                               void (async () => {
                                 const result = await deleteScheduleChangeRequest(request.id);
-                                if (!result.ok) return;
                                 await loadRequests();
+                                if (!result.ok) {
+                                  setMessage({ tone: "warn", text: "근무 변경 요청 삭제에 실패했습니다." });
+                                  return;
+                                }
                                 setMessage({ tone: "note", text: "근무 변경 요청을 삭제했습니다." });
                               })();
                             }}
@@ -1018,7 +1029,7 @@ export function ScheduleApp() {
                                 ? "수락 취소"
                                 : "거절"}
                           </strong>
-                          <span className="muted">{describeRequest(request)}</span>
+                          <span className="muted">{describeRequestSummary(request)}</span>
                           {request.hasConflictWarning ? (
                             <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 12 }}>
                               변경시 충돌이 발생합니다.
@@ -1038,6 +1049,10 @@ export function ScheduleApp() {
                                 void (async () => {
                                   const result = await resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
                                   await Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+                                  if (!result.ok) {
+                                    setMessage({ tone: "warn", text: "근무 변경 수락 취소에 실패했습니다." });
+                                    return;
+                                  }
                                   setMessage({
                                     tone: result.applied ? "note" : "warn",
                                     text: result.applied
@@ -1056,8 +1071,11 @@ export function ScheduleApp() {
                                 if (!ok) return;
                                 void (async () => {
                                   const result = await deleteScheduleChangeRequest(request.id);
-                                  if (!result.ok) return;
                                   await loadRequests();
+                                  if (!result.ok) {
+                                    setMessage({ tone: "warn", text: "근무 변경 요청 기록 삭제에 실패했습니다." });
+                                    return;
+                                  }
                                   setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
                                 })();
                               }}
@@ -1074,8 +1092,11 @@ export function ScheduleApp() {
                                 if (!ok) return;
                                 void (async () => {
                                   const result = await deleteScheduleChangeRequest(request.id);
-                                  if (!result.ok) return;
                                   await loadRequests();
+                                  if (!result.ok) {
+                                    setMessage({ tone: "warn", text: "근무 변경 요청 기록 삭제에 실패했습니다." });
+                                    return;
+                                  }
                                   setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
                                 })();
                               }}

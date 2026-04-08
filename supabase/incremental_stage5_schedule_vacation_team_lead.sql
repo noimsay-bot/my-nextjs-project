@@ -29,17 +29,18 @@ for select
 to authenticated
 using (public.current_profile_approved() = true);
 
+drop policy if exists "schedule_settings_manage_privileged" on public.schedule_settings;
 drop policy if exists "schedule_settings_manage_desk_admin" on public.schedule_settings;
-create policy "schedule_settings_manage_desk_admin"
+create policy "schedule_settings_manage_privileged"
 on public.schedule_settings
 for all
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 );
 
@@ -76,17 +77,18 @@ for select
 to authenticated
 using (public.current_profile_approved() = true);
 
+drop policy if exists "schedule_months_manage_privileged" on public.schedule_months;
 drop policy if exists "schedule_months_manage_desk_admin" on public.schedule_months;
-create policy "schedule_months_manage_desk_admin"
+create policy "schedule_months_manage_privileged"
 on public.schedule_months
 for all
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 );
 
@@ -165,11 +167,11 @@ on public.schedule_change_requests
 for update
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 );
 
@@ -179,7 +181,7 @@ on public.schedule_change_requests
 for delete
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 );
 
@@ -308,17 +310,18 @@ for select
 to authenticated
 using (public.current_profile_approved() = true);
 
+drop policy if exists "vacation_months_manage_privileged" on public.vacation_months;
 drop policy if exists "vacation_months_manage_desk_admin" on public.vacation_months;
-create policy "vacation_months_manage_desk_admin"
+create policy "vacation_months_manage_privileged"
 on public.vacation_months
 for all
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('desk', 'admin')
+  public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 );
 

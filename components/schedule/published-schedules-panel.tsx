@@ -254,6 +254,10 @@ function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null
   );
 }
 
+function getRefKey(ref: SchedulePersonRef) {
+  return `${ref.monthKey}:${ref.dateKey}:${ref.category}:${ref.index}:${ref.name}`;
+}
+
 function routeIncludes(route: SchedulePersonRef[], ref: SchedulePersonRef) {
   return route.some((candidate) => sameRef(candidate, ref));
 }
@@ -353,17 +357,6 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
     if (ref.category === "야근" && hasWorkAfterNightShift(dayIndex, name, ref.dateKey)) return true;
     return false;
   });
-}
-
-function describeRef(ref: SchedulePersonRef | null) {
-  if (!ref) return "";
-  return `${ref.dateKey} ${getScheduleCategoryLabel(ref.category)} ${ref.name}`;
-}
-
-function describeRoute(route: SchedulePersonRef[]) {
-  const labels = route.map((ref) => describeRef(ref));
-  if (labels.length <= 2) return labels.join(" ↔ ");
-  return `${labels.join(" → ")} → ${labels[0]}`;
 }
 
 function toDateKey(date: Date) {
@@ -645,6 +638,10 @@ export function PublishedSchedulesPanel() {
       .filter((ref) => isSwapCandidateValid(firstSelectedRef, ref, publishedDayIndex, todayKey))
       .sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.name.localeCompare(right.name));
   }, [allPendingRequests, editMode, firstSelectedRef, items, publishedDayIndex, todayKey]);
+  const recommendedCandidateKeys = useMemo(
+    () => new Set(recommendedCandidates.map((candidate) => getRefKey(candidate))),
+    [recommendedCandidates],
+  );
 
   const routeScopeLabel = useMemo(() => {
     if (items.length === 0) return "게시된 근무표";
@@ -936,22 +933,12 @@ export function PublishedSchedulesPanel() {
               gap: 10,
             }}
           >
-            <strong>요청 경로</strong>
             {selectedRoute.length > 0 ? (
-              <div style={{ display: "grid", gap: 8 }}>
-                <div className="muted">{describeRoute(selectedRoute)}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {selectedRoute.map((ref, index) => (
-                    <button
-                      key={`${ref.monthKey}-${ref.dateKey}-${ref.category}-${ref.index}-${ref.name}`}
-                      type="button"
-                      className="btn"
-                      onClick={() => removeRouteEntry(index)}
-                    >
-                      {describeRef(ref)} 삭제
-                    </button>
-                  ))}
-                </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <span className="muted">선택된 인원 {selectedRoute.length}명</span>
+                <button type="button" className="btn" onClick={clearRoute}>
+                  선택 초기화
+                </button>
               </div>
             ) : (
               <div className="muted">먼저 내 이름을 누른 뒤, {routeScopeLabel} 전체에서 미래 날짜의 교환 또는 삼각 트레이드 상대를 선택하세요. 달을 바꿔도 선택 경로는 유지됩니다.</div>
@@ -1443,6 +1430,11 @@ export function PublishedSchedulesPanel() {
                                   const mineHighlighted = isMine && (showMine || editMode);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
+                                  const recommendedHighlighted =
+                                    Boolean(firstSelectedRef) &&
+                                    !routeSelected &&
+                                    !personObject.pending &&
+                                    recommendedCandidateKeys.has(getRefKey(ref));
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
                                   return (
                                     <button
@@ -1469,6 +1461,8 @@ export function PublishedSchedulesPanel() {
                                             ? firstSelected
                                               ? "rgba(168,85,247,.28)"
                                               : "rgba(56,189,248,.22)"
+                                            : recommendedHighlighted
+                                              ? "rgba(124,58,237,.32)"
                                             : dimOtherNames
                                                 ? "rgba(255,255,255,.06)"
                                                 : assignmentDisplay.chipStyle?.background
@@ -1482,12 +1476,14 @@ export function PublishedSchedulesPanel() {
                                             ? firstSelected
                                               ? "1px solid rgba(192,132,252,.78)"
                                               : "1px solid rgba(56,189,248,.75)"
+                                            : recommendedHighlighted
+                                              ? "3px solid rgba(255,255,255,.95)"
                                             : mineHighlighted
                                               ? "2px solid rgba(226,232,240,.82)"
                                             : dimOtherNames
                                                 ? "1px solid rgba(255,255,255,.08)"
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: routeSelected && firstSelected ? "#f5eaff" : mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        color: routeSelected && firstSelected ? "#f5eaff" : recommendedHighlighted || mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
                                         lineHeight: 1.3,
                                         boxShadow: "none",

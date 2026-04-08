@@ -254,7 +254,8 @@ async function persistVacationStore(store: VacationStore) {
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
-  const canManageVacationMonths = session.role === "desk" || session.role === "admin";
+  const canManageVacationMonths =
+    session.role === "desk" || session.role === "admin" || session.role === "team_lead";
 
   const supabase = await getPortalSupabaseClient();
   const sanitized = sanitizeVacationStore(store);

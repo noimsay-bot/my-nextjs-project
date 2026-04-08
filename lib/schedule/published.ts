@@ -144,19 +144,21 @@ async function persistPublishedItem(monthKey: string, payload: { published_state
   }
 }
 
-export function savePublishedSchedules(items: PublishedScheduleItem[]) {
+export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
   const previous = cloneItems(publishedSchedulesCache);
   publishedSchedulesCache = cloneItems(items).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
   emitPublishedSchedulesEvent();
 
-  void Promise.all(
-    publishedSchedulesCache.map((item) =>
-      persistPublishedItem(item.monthKey, {
-        published_state: item.schedule,
-        published_at: item.publishedAt || new Date().toISOString(),
-      }),
-    ),
-  ).catch(async () => {
+  try {
+    await Promise.all(
+      publishedSchedulesCache.map((item) =>
+        persistPublishedItem(item.monthKey, {
+          published_state: item.schedule,
+          published_at: item.publishedAt || new Date().toISOString(),
+        }),
+      ),
+    );
+  } catch (error) {
     emitPublishedSchedulesStatus({
       ok: false,
       message: "게시 근무표 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
@@ -164,7 +166,8 @@ export function savePublishedSchedules(items: PublishedScheduleItem[]) {
     publishedSchedulesCache = previous;
     emitPublishedSchedulesEvent();
     await refreshPublishedSchedules();
-  });
+    throw error;
+  }
 
   return getPublishedSchedules();
 }
