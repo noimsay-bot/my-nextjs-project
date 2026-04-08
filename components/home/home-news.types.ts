@@ -1,6 +1,8 @@
 export const HOME_NEWS_CATEGORIES = ["politics", "society", "economy", "world"] as const;
+export const HOME_NEWS_TEMPORARY_SECTION_IDS = ["local_election"] as const;
 
 export type HomeNewsCategory = (typeof HOME_NEWS_CATEGORIES)[number];
+export type HomeNewsTemporarySectionId = (typeof HOME_NEWS_TEMPORARY_SECTION_IDS)[number];
 
 export type HomeNewsDatasetSourceKind =
   | "official_issue_set"
@@ -50,9 +52,16 @@ export type HomeNewsCardItem = {
 
 export type HomeNewsCardsByCategory = Record<HomeNewsCategory, HomeNewsCardItem[]>;
 
+export type HomeNewsTemporarySection = {
+  id: HomeNewsTemporarySectionId;
+  label: string;
+  items: HomeNewsCardItem[];
+};
+
 export type HomeNewsDataset = {
   tickerItems: HomeNewsTickerItem[];
   cardsByCategory: Partial<HomeNewsCardsByCategory>;
+  temporarySections?: HomeNewsTemporarySection[];
   recommendedCategory?: HomeNewsCategory;
   sourceKind?: HomeNewsDatasetSourceKind;
   issueSet?: HomeNewsIssueSetMeta;

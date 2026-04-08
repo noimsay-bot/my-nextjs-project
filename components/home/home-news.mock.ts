@@ -2,6 +2,13 @@ import { HomeNewsDataset } from "@/components/home/home-news.types";
 
 export const homeNewsMockData: HomeNewsDataset = {
   sourceKind: "fallback_mock",
+  temporarySections: [
+    {
+      id: "local_election",
+      label: "지방선거",
+      items: [],
+    },
+  ],
   tickerItems: [
     {
       id: "politics-budget",

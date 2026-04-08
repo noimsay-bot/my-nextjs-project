@@ -103,6 +103,8 @@ function extractOccurredAt(text: string, publishedAt: string | null) {
 const NATIONAL_POLITICS_CATEGORY_PATTERNS = /(대통령실|대통령|국회|정당|여당|야당|당대표|원내대표|비대위원장|총리|장관|청문회|탄핵|선거|법안|본회의|상임위|예산안|국정조사|개헌|당정|정권|개각)/;
 const POLITICAL_JUDICIAL_PATTERNS = /(김건희|윤석열|이재명|한동훈|조국|명태균|영부인|대선자금|선거법|정치자금|공천개입|도이치모터스)/;
 const CRIME_SOCIETY_PATTERNS = /(방화|폭행|살인|흉기|강도|납치|사망|부상|실종|피의자|용의자|피해자|사건|사고|참사|화재|산불|폭발|붕괴|침수|추락|구속영장|영장|소환|출석|조사|압수수색|기소|재판|선고|법원|검찰|경찰|공수처|특검)/;
+const SEOUL_DOWNTOWN_RALLY_PATTERNS = /(서울|광화문|시청|여의도|용산|종로|중구).*(집회|시위|행진|대규모 집회|찬반 집회)|(?:집회|시위|행진).*(서울|광화문|시청|여의도|용산|종로|중구)/;
+const LOCAL_ELECTION_MAJOR_RACE_PATTERNS = /(서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|경기도지사|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사|경기지사|강원지사|제주도지사).*(후보 확정|공천 확정|경선 확정|전략공천|단수공천|후보 선출|후보 결정|지방선거)|(?:후보 확정|공천 확정|경선 확정|전략공천|단수공천|후보 선출|후보 결정|지방선거).*(서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|경기도지사|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사|경기지사|강원지사|제주도지사)|((민주당|국민의힘|개혁신당|조국혁신당|진보당).*(경기도지사|서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사).*(후보|공천|경선))/;
 
 function inferCategory(text: string, hint?: HomeNewsCategory): HomeNewsCategory {
   if (/(환율|증시|금리|물가|관세|반도체|실적|주가|수출|경제)/.test(text)) {
@@ -110,6 +112,12 @@ function inferCategory(text: string, hint?: HomeNewsCategory): HomeNewsCategory 
   }
   if (/(미국|중국|일본|유럽|러시아|우크라|가자|이스라엘|해외|세계)/.test(text)) {
     return "world";
+  }
+  if (LOCAL_ELECTION_MAJOR_RACE_PATTERNS.test(text)) {
+    return "politics";
+  }
+  if (SEOUL_DOWNTOWN_RALLY_PATTERNS.test(text)) {
+    return "society";
   }
   if (POLITICAL_JUDICIAL_PATTERNS.test(text)) {
     return "politics";
@@ -149,6 +157,10 @@ function inferTags(text: string, feedTags: string[] = []) {
     [/(조사)/, "조사"],
     [/(영장)/, "영장"],
     [/(실질심사|영장심사)/, "영장심사"],
+    [/(지방선거|광역단체장)/, "지방선거"],
+    [/(후보 확정|공천 확정|전략공천|단수공천|경선 확정)/, "후보확정"],
+    [/(집회|시위|행진)/, "집회"],
+    [/(광화문|시청|여의도|용산|종로)/, "서울도심"],
     [/(지진)/, "지진"],
     [/(화재|불길)/, "화재"],
     [/(산불)/, "산불"],
@@ -167,6 +179,12 @@ function inferTags(text: string, feedTags: string[] = []) {
 
 function inferPriority(text: string, category: HomeNewsCategory, eventStage: HomeNewsEventStage): NewsBriefingPriority {
   if (/(지진|화재|참사|산불|폭발|대형 사고|재난|침수|붕괴)/.test(text)) {
+    return "high";
+  }
+  if (LOCAL_ELECTION_MAJOR_RACE_PATTERNS.test(text)) {
+    return "high";
+  }
+  if (SEOUL_DOWNTOWN_RALLY_PATTERNS.test(text)) {
     return "high";
   }
   if (eventStage === "attending" || eventStage === "under_questioning" || eventStage === "warrant_issued") {

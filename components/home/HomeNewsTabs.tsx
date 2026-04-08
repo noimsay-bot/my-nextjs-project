@@ -8,44 +8,93 @@ import {
   HOME_NEWS_CATEGORY_LABELS,
   HomeNewsCardsByCategory,
   HomeNewsCategory,
+  HomeNewsTemporarySection,
+  HomeNewsTemporarySectionId,
 } from "@/components/home/home-news.types";
 
 function getInitialCategory(cardsByCategory: Partial<HomeNewsCardsByCategory>) {
   return HOME_NEWS_CATEGORIES.find((category) => (cardsByCategory[category] ?? []).length > 0) ?? HOME_NEWS_CATEGORIES[0];
 }
 
+type HomeNewsTabKey = HomeNewsCategory | HomeNewsTemporarySectionId;
+
+function getInitialTab(
+  cardsByCategory: Partial<HomeNewsCardsByCategory>,
+  temporarySections: HomeNewsTemporarySection[],
+) {
+  const baseCategory = getInitialCategory(cardsByCategory);
+  if ((cardsByCategory[baseCategory] ?? []).length > 0) {
+    return baseCategory;
+  }
+
+  return temporarySections.find((section) => section.items.length > 0)?.id ?? baseCategory;
+}
+
 type HomeNewsTabsProps = {
   cardsByCategory: Partial<HomeNewsCardsByCategory>;
+  temporarySections?: HomeNewsTemporarySection[];
   recommendedCategory?: HomeNewsCategory;
   loading?: boolean;
+  requestedOpenItemId?: string | null;
+  requestedOpenToken?: number;
   togglingPreferenceId?: string | null;
   onSetPreference?: (itemId: string, nextPreference: "like" | "dislike" | null) => void;
 };
 
 export function HomeNewsTabs({
   cardsByCategory,
+  temporarySections = [],
   recommendedCategory,
   loading = false,
+  requestedOpenItemId = null,
+  requestedOpenToken = 0,
   togglingPreferenceId = null,
   onSetPreference,
 }: HomeNewsTabsProps) {
   const groupId = useId();
-  const [activeCategory, setActiveCategory] = useState<HomeNewsCategory>(() => recommendedCategory ?? getInitialCategory(cardsByCategory));
+  const leadingTabs = HOME_NEWS_CATEGORIES.slice(0, 1).map((category) => ({
+    key: category as HomeNewsTabKey,
+    label: HOME_NEWS_CATEGORY_LABELS[category],
+    items: cardsByCategory[category] ?? [],
+  }));
+  const trailingTabs = HOME_NEWS_CATEGORIES.slice(1).map((category) => ({
+    key: category as HomeNewsTabKey,
+    label: HOME_NEWS_CATEGORY_LABELS[category],
+    items: cardsByCategory[category] ?? [],
+  }));
+  const tabs = [
+    ...leadingTabs,
+    ...temporarySections.map((section) => ({
+      key: section.id as HomeNewsTabKey,
+      label: section.label,
+      items: section.items,
+    })),
+    ...trailingTabs,
+  ];
+  const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => recommendedCategory ?? getInitialTab(cardsByCategory, temporarySections));
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
-  const items = cardsByCategory[activeCategory] ?? [];
+  const items = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
 
   useEffect(() => {
-    const nextCategory = recommendedCategory ?? getInitialCategory(cardsByCategory);
-    const currentItems = cardsByCategory[activeCategory] ?? [];
-    if (currentItems.length === 0 && (cardsByCategory[nextCategory] ?? []).length > 0) {
+    const nextCategory = recommendedCategory ?? getInitialTab(cardsByCategory, temporarySections);
+    const currentItems = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
+    const nextItems = tabs.find((tab) => tab.key === nextCategory)?.items ?? [];
+    if (currentItems.length === 0 && nextItems.length > 0) {
       setActiveCategory(nextCategory);
     }
-  }, [activeCategory, cardsByCategory, recommendedCategory]);
+  }, [activeCategory, cardsByCategory, recommendedCategory, tabs, temporarySections]);
 
   useEffect(() => {
-    setExpandedCardId(null);
-  }, [activeCategory]);
+    if (!requestedOpenItemId) return;
+
+    const matchedTab = tabs.find((tab) => tab.items.some((item) => item.id === requestedOpenItemId));
+    if (!matchedTab) return;
+
+    setHasUserSelectedCategory(true);
+    setActiveCategory(matchedTab.key);
+    setExpandedCardId(requestedOpenItemId);
+  }, [requestedOpenItemId, requestedOpenToken, tabs]);
 
   useEffect(() => {
     if (!recommendedCategory || hasUserSelectedCategory) return;
@@ -56,25 +105,26 @@ export function HomeNewsTabs({
   return (
     <div className={styles.tabs}>
       <div className={styles.tabList} role="tablist" aria-label="뉴스 카테고리">
-        {HOME_NEWS_CATEGORIES.map((category) => {
-          const isActive = category === activeCategory;
+        {tabs.map((tab) => {
+          const isActive = tab.key === activeCategory;
           return (
             <button
-              key={category}
-              id={`${groupId}-${category}-tab`}
+              key={tab.key}
+              id={`${groupId}-${tab.key}-tab`}
               type="button"
               role="tab"
               aria-selected={isActive}
-              aria-controls={`${groupId}-${category}-panel`}
+              aria-controls={`${groupId}-${tab.key}-panel`}
               tabIndex={isActive ? 0 : -1}
               className={`${styles.tabButton} ${isActive ? styles.tabButtonActive : ""}`}
               onClick={() => {
                 setHasUserSelectedCategory(true);
-                setActiveCategory(category);
+                setActiveCategory(tab.key);
+                setExpandedCardId(null);
               }}
             >
-              <span>{HOME_NEWS_CATEGORY_LABELS[category]}</span>
-              <span className={styles.tabCount}>{(cardsByCategory[category] ?? []).length}</span>
+              <span>{tab.label}</span>
+              <span className={styles.tabCount}>{tab.items.length}</span>
             </button>
           );
         })}

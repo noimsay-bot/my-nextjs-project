@@ -3,6 +3,7 @@ import {
   HomeNewsCategory,
   HomeNewsDataset,
   HomeNewsDatasetSourceKind,
+  HomeNewsTemporarySection,
   HomeNewsTickerItem,
   HOME_NEWS_CATEGORIES,
 } from "@/components/home/home-news.types";
@@ -58,6 +59,9 @@ type BuildHomeNewsDatasetOptions = {
   runtimeBriefing?: HomeNewsDataset["runtimeBriefing"];
 };
 
+const LOCAL_ELECTION_SECTION_EXPIRES_AT = "2026-06-05T00:00:00+09:00";
+const LOCAL_ELECTION_SECTION_PATTERNS = /(지방선거|광역단체장|서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|경기도지사|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사|후보 확정|공천 확정|경선 확정|전략공천|단수공천|후보 선출|후보 결정)/;
+
 export function sortHomeNewsBriefings(left: HomeNewsBriefingRecord, right: HomeNewsBriefingRecord) {
   return sortHomeNewsByImportance(left, right);
 }
@@ -99,6 +103,41 @@ function sanitizeRecord(record: HomeNewsBriefingRecord): HomeNewsBriefingRecord 
     occurred_at: record.occurred_at ?? null,
     briefing_slot: record.briefing_slot ?? "morning_6",
     is_active: record.is_active ?? true,
+  };
+}
+
+function isLocalElectionSectionEnabled(now: Date) {
+  return now.getTime() < new Date(LOCAL_ELECTION_SECTION_EXPIRES_AT).getTime();
+}
+
+function isLocalElectionRecord(record: HomeNewsBriefingRecord) {
+  const combinedText = `${record.title} ${record.summary_lines?.join(" ") ?? ""} ${(record.tags ?? []).join(" ")}`.trim();
+  return LOCAL_ELECTION_SECTION_PATTERNS.test(combinedText);
+}
+
+function toCardItem(item: HomeNewsBriefingRecord): HomeNewsCardItem {
+  return {
+    id: item.id,
+    category: item.category,
+    title: item.title,
+    summary:
+      item.summary_lines && item.summary_lines.length > 0
+        ? item.summary_lines.map((line, index) =>
+            index === 0 ? prependOccurredAt(line, item.occurred_at) : line,
+          )
+        : [prependOccurredAt(item.briefing_text?.trim() || item.title, item.occurred_at)],
+    whyItMatters: item.why_it_matters?.trim() || "추가 브리핑이 들어오면 이 영역에서 중요도를 함께 설명합니다.",
+    checkPoints:
+      item.check_points && item.check_points.length > 0
+        ? item.check_points
+        : ["후속 업데이트가 들어오면 이 자리에서 오늘 확인할 포인트를 안내합니다."],
+    priority: item.priority ?? undefined,
+    publishedAt: item.published_at ?? undefined,
+    occurredAt: item.occurred_at ?? undefined,
+    tags: item.tags ?? [],
+    eventStage: item.event_stage,
+    likesCount: item.likes_count ?? 0,
+    viewerHasLiked: false,
   };
 }
 
@@ -154,35 +193,23 @@ export function buildHomeNewsDataset(
       category,
       ordered
         .filter((item) => item.category === category)
-        .map<HomeNewsCardItem>((item) => ({
-          id: item.id,
-          category: item.category,
-          title: item.title,
-          summary:
-            item.summary_lines && item.summary_lines.length > 0
-              ? item.summary_lines.map((line, index) =>
-                  index === 0 ? prependOccurredAt(line, item.occurred_at) : line,
-                )
-              : [prependOccurredAt(item.briefing_text?.trim() || item.title, item.occurred_at)],
-          whyItMatters: item.why_it_matters?.trim() || "추가 브리핑이 들어오면 이 영역에서 중요도를 함께 설명합니다.",
-          checkPoints:
-            item.check_points && item.check_points.length > 0
-              ? item.check_points
-              : ["후속 업데이트가 들어오면 이 자리에서 오늘 확인할 포인트를 안내합니다."],
-          priority: item.priority ?? undefined,
-          publishedAt: item.published_at ?? undefined,
-          occurredAt: item.occurred_at ?? undefined,
-          tags: item.tags ?? [],
-          eventStage: item.event_stage,
-          likesCount: item.likes_count ?? 0,
-          viewerHasLiked: false,
-        })),
+        .filter((item) => !(category === "politics" && isLocalElectionSectionEnabled(now) && isLocalElectionRecord(item)))
+        .map<HomeNewsCardItem>(toCardItem),
     ]),
   ) as HomeNewsDataset["cardsByCategory"];
+
+  const temporarySections: HomeNewsTemporarySection[] = isLocalElectionSectionEnabled(now)
+    ? [{
+        id: "local_election" as const,
+        label: "지방선거",
+        items: ordered.filter(isLocalElectionRecord).slice(0, MAX_HOME_NEWS_ITEMS).map(toCardItem),
+      }]
+    : [];
 
   return {
     tickerItems,
     cardsByCategory,
+    temporarySections,
     sourceKind,
     issueSet: options.issueSet,
     runtimeBriefing: options.runtimeBriefing,

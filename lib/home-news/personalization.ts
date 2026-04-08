@@ -29,10 +29,19 @@ export function applyHomeNewsPersonalization(
       })),
     ]),
   ) as Partial<HomeNewsCardsByCategory>;
+  const nextTemporarySections = (dataset.temporarySections ?? []).map((section) => ({
+    ...section,
+    items: section.items.map((item) => ({
+      ...item,
+      viewerHasLiked: likedIdSet.has(item.id),
+      viewerHasDisliked: dislikedIdSet.has(item.id),
+    })),
+  }));
 
   return {
     ...dataset,
     cardsByCategory: nextCardsByCategory,
+    temporarySections: nextTemporarySections,
     recommendedCategory: dataset.recommendedCategory ?? chooseFirstCategory(nextCardsByCategory),
   } satisfies HomeNewsDataset;
 }

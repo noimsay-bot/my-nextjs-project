@@ -51,6 +51,7 @@ export function HomeNewsPortal() {
   const [likeWorkspace, setLikeWorkspace] = useState<Awaited<ReturnType<typeof fetchHomeNewsLikeWorkspace>> | null>(null);
   const [loading, setLoading] = useState(true);
   const [togglingPreferenceId, setTogglingPreferenceId] = useState<string | null>(null);
+  const [requestedOpen, setRequestedOpen] = useState<{ id: string; token: number } | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
   const personalizedBaseData = useMemo(() => applyHomeNewsPersonalization(baseData, likeWorkspace), [baseData, likeWorkspace]);
   const personalizedPreviewData = useMemo(
@@ -92,6 +93,28 @@ export function HomeNewsPortal() {
           }),
         ]),
       ) as Partial<HomeNewsCardsByCategory>,
+      temporarySections: (dataset.temporarySections ?? []).map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          if (item.id !== itemId) return item;
+          const likesCount = item.likesCount ?? 0;
+          const nextLikesCount =
+            nextPreference === "like"
+              ? item.viewerHasLiked
+                ? likesCount
+                : likesCount + 1
+              : item.viewerHasLiked
+                ? Math.max(0, likesCount - 1)
+                : likesCount;
+
+          return {
+            ...item,
+            viewerHasLiked: nextPreference === "like",
+            viewerHasDisliked: nextPreference === "dislike",
+            likesCount: nextLikesCount,
+          };
+        }),
+      })),
     };
   }
 
@@ -100,9 +123,15 @@ export function HomeNewsPortal() {
       <HomeNewsSection
         data={activeData}
         loading={loading}
+        requestedOpenItemId={requestedOpen?.id ?? null}
+        requestedOpenToken={requestedOpen?.token ?? 0}
         togglingPreferenceId={togglingPreferenceId}
+        onSelectTickerItem={(itemId) => setRequestedOpen({ id: itemId, token: Date.now() })}
         onSetPreference={(itemId, nextPreference) => {
-          const allItems = Object.values(activeData.cardsByCategory).flatMap((items) => items ?? []);
+          const allItems = [
+            ...Object.values(activeData.cardsByCategory).flatMap((items) => items ?? []),
+            ...(activeData.temporarySections ?? []).flatMap((section) => section.items ?? []),
+          ];
           const targetItem = allItems.find((item) => item.id === itemId) ?? null;
           if (!targetItem) return;
 

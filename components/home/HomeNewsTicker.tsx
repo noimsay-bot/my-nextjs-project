@@ -4,9 +4,10 @@ import { HomeNewsTickerItem, HOME_NEWS_CATEGORY_LABELS } from "@/components/home
 type HomeNewsTickerProps = {
   items: HomeNewsTickerItem[];
   loading?: boolean;
+  onSelectItem?: (itemId: string) => void;
 };
 
-export function HomeNewsTicker({ items, loading = false }: HomeNewsTickerProps) {
+export function HomeNewsTicker({ items, loading = false, onSelectItem }: HomeNewsTickerProps) {
   if (loading) {
     return (
       <div className={styles.tickerSkeleton} aria-hidden="true">
@@ -38,7 +39,7 @@ export function HomeNewsTicker({ items, loading = false }: HomeNewsTickerProps) 
                 aria-label={`${HOME_NEWS_CATEGORY_LABELS[item.category]} 브리핑`}
                 aria-hidden={groupIndex === 1}
                 tabIndex={groupIndex === 1 ? -1 : 0}
-                onClick={() => undefined}
+                onClick={() => onSelectItem?.(item.id)}
               >
                 <span className={styles.tickerCategory}>{HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
                 <span className={styles.tickerText}>{item.text}</span>

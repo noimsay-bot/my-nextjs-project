@@ -1,4 +1,5 @@
 import { ExternalNewsBatch, ExternalNewsCandidate, ExternalNewsWorkspace } from "@/lib/home-news/external-source-types";
+import { getHomeNewsSlotTimeWindow } from "@/lib/home-news/current-issue-set";
 import { HomeNewsBriefingSlot } from "@/lib/home-news/transform";
 import { toNewsTimestamp } from "@/lib/home-news/ranking";
 
@@ -42,8 +43,17 @@ function toBatchHeadline(slot: HomeNewsBriefingSlot, count: number) {
   return count > 0 ? "오후 3시 브리핑용 우선 검토 후보" : "오후 3시용 후보가 아직 없습니다.";
 }
 
-function buildBatch(slot: HomeNewsBriefingSlot, candidates: ExternalNewsCandidate[]): ExternalNewsBatch {
+function isWithinSlotWindow(candidate: ExternalNewsCandidate, slot: HomeNewsBriefingSlot, generatedAt: Date) {
+  const referenceTimestamp = toNewsTimestamp(candidate.occurredAt ?? candidate.publishedAt);
+  if (!referenceTimestamp) return false;
+
+  const { startsAt, endsAt } = getHomeNewsSlotTimeWindow(slot, generatedAt);
+  return referenceTimestamp >= startsAt.getTime() && referenceTimestamp < endsAt.getTime();
+}
+
+function buildBatch(slot: HomeNewsBriefingSlot, candidates: ExternalNewsCandidate[], generatedAt: Date): ExternalNewsBatch {
   const items = candidates
+    .filter((candidate) => isWithinSlotWindow(candidate, slot, generatedAt))
     .map((candidate) => ({
       candidate: {
         ...candidate,
@@ -67,8 +77,8 @@ export function buildExternalNewsWorkspace(
   candidates: ExternalNewsCandidate[],
   trendHints: string[],
 ): ExternalNewsWorkspace {
-  const morningBatch = buildBatch("morning_6", candidates);
-  const afternoonBatch = buildBatch("afternoon_3", candidates);
+  const morningBatch = buildBatch("morning_6", candidates, generatedAt);
+  const afternoonBatch = buildBatch("afternoon_3", candidates, generatedAt);
 
   return {
     generatedAt: generatedAt.toISOString(),

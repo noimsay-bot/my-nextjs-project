@@ -7,24 +7,37 @@ import { HomeNewsDataset } from "@/components/home/home-news.types";
 type HomeNewsSectionProps = {
   data: HomeNewsDataset;
   loading?: boolean;
+  requestedOpenItemId?: string | null;
+  requestedOpenToken?: number;
   togglingPreferenceId?: string | null;
+  onSelectTickerItem?: (itemId: string) => void;
   onSetPreference?: (itemId: string, nextPreference: "like" | "dislike" | null) => void;
 };
 
 export function HomeNewsSection({
   data,
   loading = false,
+  requestedOpenItemId = null,
+  requestedOpenToken = 0,
   togglingPreferenceId = null,
+  onSelectTickerItem,
   onSetPreference,
 }: HomeNewsSectionProps) {
   return (
     <section className={styles.section} aria-label="뉴스 브리핑">
       <HomeNewsMeta data={data} />
-      <HomeNewsTicker items={data.tickerItems} loading={loading} />
+      <HomeNewsTicker
+        items={data.tickerItems}
+        loading={loading}
+        onSelectItem={onSelectTickerItem}
+      />
       <HomeNewsTabs
         cardsByCategory={data.cardsByCategory}
+        temporarySections={data.temporarySections}
         recommendedCategory={data.recommendedCategory}
         loading={loading}
+        requestedOpenItemId={requestedOpenItemId}
+        requestedOpenToken={requestedOpenToken}
         togglingPreferenceId={togglingPreferenceId}
         onSetPreference={onSetPreference}
       />
