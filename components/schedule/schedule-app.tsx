@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, orderCategories } from "@/lib/schedule/constants";
+import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, getVisibleAssignmentDisplayRank, orderCategories } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -1348,10 +1348,9 @@ export function ScheduleApp() {
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category]) => {
-                      if (isWeekendLike) return category !== "휴가" && category !== "제크";
+                      if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
                       return !["국회", "청사", "청와대"].includes(category);
-                    })
-                    .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory));
+                    });
 
                   return (
                     <article
@@ -1522,22 +1521,31 @@ export function ScheduleApp() {
                                 alignItems: "stretch",
                               }}
                             >
-                              <strong
-                                className="schedule-assignment-label"
+                              <div
                                 style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  alignSelf: "stretch",
-                                  fontSize: 14,
-                                  lineHeight: 1.1,
-                                  minHeight: 38,
-                                  whiteSpace: "pre-line",
-                                  textAlign: "center",
+                                  display: "grid",
+                                  gridTemplateColumns: "1fr",
+                                  alignItems: "stretch",
+                                  gap: 4,
                                 }}
                               >
-                                {getCategoryDisplayLabel(category)}
-                              </strong>
+                                <strong
+                                  className="schedule-assignment-label"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    alignSelf: "stretch",
+                                    fontSize: 14,
+                                    lineHeight: 1.1,
+                                    minHeight: 38,
+                                    whiteSpace: "pre-line",
+                                    textAlign: "center",
+                                  }}
+                                >
+                                  {getCategoryDisplayLabel(category)}
+                                </strong>
+                              </div>
                               {editMode && isEditingVisibleMonth ? (
                                 <div style={{ display: "grid", gap: 6, justifyItems: "end", gridColumn: 2, gridRow: 1 }}>
                                   <button
@@ -2166,9 +2174,17 @@ export function ScheduleApp() {
                     const dayCardStyle = getDayCardStyle(day);
                     const centeredDayLabel = getCenteredDayLabel(day);
                     const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
+                    const isWeekendLike = day.isWeekend || day.isHoliday;
                     const previewAssignments = Object.entries(day.assignments)
-                      .filter(([, names]) => names.length > 0)
-                      .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory));
+                      .filter(([category, names]) =>
+                        names.length > 0 &&
+                        (!isWeekendLike ? true : category !== "휴가" && category !== "제크" && category !== "청사"),
+                      )
+                      .sort(
+                        ([leftCategory], [rightCategory]) =>
+                          getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
+                          getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                      );
 
                     return (
                       <article

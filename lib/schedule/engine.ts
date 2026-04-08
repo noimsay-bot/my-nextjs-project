@@ -4,6 +4,7 @@
   DEFAULT_JCHECK_COUNT,
   defaultPointers,
   defaultScheduleState,
+  getStoredAssignmentDisplayRank,
   getScheduleCategoryLabel,
   SCHEDULE_MONTHS,
   SCHEDULE_YEAR_END,
@@ -23,6 +24,32 @@ import {
 
 export function cloneScheduleState(state: ScheduleState): ScheduleState {
   return JSON.parse(JSON.stringify(state)) as ScheduleState;
+}
+
+function normalizeDayAssignments(day: DaySchedule) {
+  const entries = Object.entries(day.assignments ?? {});
+  const isWeekendLike = day.isWeekend || day.isHoliday;
+  return Object.fromEntries(
+    entries
+      .map(([category, names], index) => ({ category, names, index }))
+      .sort((left, right) => {
+        const leftRank = getStoredAssignmentDisplayRank(left.category, isWeekendLike);
+        const rightRank = getStoredAssignmentDisplayRank(right.category, isWeekendLike);
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return left.index - right.index;
+      })
+      .map(({ category, names }) => [category, names]),
+  ) as Record<string, string[]>;
+}
+
+export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+  return {
+    ...schedule,
+    days: schedule.days.map((day) => ({
+      ...day,
+      assignments: normalizeDayAssignments(day),
+    })),
+  };
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number) {
@@ -66,6 +93,19 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
       new Set(input.offExcludeByCategory?.[category.key] ?? base.offExcludeByCategory[category.key]),
     );
   });
+  const snapshots = Object.fromEntries(
+    Object.entries(input.snapshots ?? {}).map(([monthKey, items]) => [
+      monthKey,
+      (items ?? []).map((item) => ({
+        ...item,
+        generated: normalizeGeneratedSchedule(item.generated),
+      })),
+    ]),
+  ) as Record<string, SnapshotItem[]>;
+  const generated = input.generated ? normalizeGeneratedSchedule(input.generated) : null;
+  const generatedHistory = (input.generatedHistory ?? (generated ? [generated] : [])).map((item) =>
+    normalizeGeneratedSchedule(item),
+  );
   return {
     ...base,
     ...input,
@@ -92,9 +132,9 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
       ]),
     ) as Record<string, Partial<Record<CategoryKey, string>>>,
     pendingSnapshotMonthKey: typeof input.pendingSnapshotMonthKey === "string" ? input.pendingSnapshotMonthKey : null,
-    snapshots: input.snapshots ?? {},
-    generated: input.generated ?? null,
-    generatedHistory: input.generatedHistory ?? (input.generated ? [input.generated] : []),
+    snapshots,
+    generated,
+    generatedHistory,
     currentUser: input.currentUser ?? base.currentUser,
     showMyWork: Boolean(input.showMyWork),
     editDateKey,
@@ -565,6 +605,8 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
       assignments["주말조근"] = weekendCrew.slice(0, 1);
       assignments["주말일반근무"] = weekendCrew.slice(1, 3);
       assignments["뉴스대기"] = weekendCrew.slice(3, 4);
+      assignments["청와대"] = [];
+      assignments["국회"] = [];
     } else {
       assignments["조근"] = takeSequentialCandidatesByOrder(nextState, "morning", 2, pointers);
 
@@ -1307,17 +1349,20 @@ export function openSnapshot(state: ScheduleState, snapshotId: string) {
 }
 
 function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule) {
+  const normalizedGenerated = normalizeGeneratedSchedule(generated);
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
-  generated.days.forEach((day) => {
+  normalizedGenerated.days.forEach((day) => {
     day.conflicts = collectConflicts(day.assignments, previousNight, warnings, day.dateKey);
     previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
     if (day.assignments["휴가"]) {
       day.vacations = day.assignments["휴가"].map((name) => name.trim()).filter(Boolean);
     }
   });
-  next.generated = generated;
-  next.generatedHistory = next.generatedHistory.map((item) => (item.monthKey === generated.monthKey ? generated : item));
+  next.generated = normalizedGenerated;
+  next.generatedHistory = next.generatedHistory.map((item) =>
+    item.monthKey === normalizedGenerated.monthKey ? normalizedGenerated : item,
+  );
   return next;
 }
 
@@ -1395,6 +1440,33 @@ export function moveAssignmentCategory(
   const targetIndex = reordered.indexOf(targetCategory);
   if (targetIndex < 0) return state;
   reordered.splice(targetIndex, 0, sourceCategory);
+  day.assignments = Object.fromEntries(reordered.map((key) => [key, day.assignments[key] ?? []]));
+
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function shiftAssignmentCategory(
+  state: ScheduleState,
+  dateKey: string,
+  category: string,
+  direction: "up" | "down",
+) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day) return state;
+
+  const order = Object.keys(day.assignments);
+  const sourceIndex = order.indexOf(category);
+  if (sourceIndex < 0) return state;
+
+  const targetIndex = direction === "up" ? sourceIndex - 1 : sourceIndex + 1;
+  if (targetIndex < 0 || targetIndex >= order.length) return state;
+
+  const reordered = [...order];
+  const [movedCategory] = reordered.splice(sourceIndex, 1);
+  reordered.splice(targetIndex, 0, movedCategory);
   day.assignments = Object.fromEntries(reordered.map((key) => [key, day.assignments[key] ?? []]));
 
   return syncGeneratedSchedule(next, generated);

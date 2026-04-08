@@ -1,4 +1,5 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
+import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -45,9 +46,10 @@ function normalizeAssignments(assignments: Record<string, string[]>) {
 }
 
 function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+  const normalizedSchedule = normalizeGeneratedSchedule(schedule);
   return {
-    ...schedule,
-    days: schedule.days.map((day) => {
+    ...normalizedSchedule,
+    days: normalizedSchedule.days.map((day) => {
       const assignments = normalizeAssignments(day.assignments ?? {});
       return {
         ...day,

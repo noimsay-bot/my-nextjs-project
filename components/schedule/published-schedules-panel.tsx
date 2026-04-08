@@ -8,7 +8,7 @@ import {
   subscribeToAuth,
 } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { getAssignmentDisplayRank, getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { getAssignmentDisplayRank, getScheduleCategoryLabel, getVisibleAssignmentDisplayRank } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -35,15 +35,24 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
-const MOBILE_SCHEDULE_MEDIA_QUERY =
-  "(max-width: 960px), (any-pointer: coarse) and (orientation: landscape) and (max-width: 1400px) and (max-height: 1100px)";
 const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
-const weekendAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
+type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
+function getPublishedScheduleLayoutMode(
+  viewportWidth: number,
+  viewportHeight: number,
+  hasCoarsePointer: boolean,
+): PublishedScheduleLayoutMode {
+  const shortSide = Math.min(viewportWidth, viewportHeight);
+  if (viewportWidth <= 820 || shortSide <= 420) return "mobile";
+  if (viewportWidth <= 1180 || shortSide <= 900 || (hasCoarsePointer && viewportWidth <= 1400)) return "tablet";
+  return "desktop";
 }
 
 const vacationLegendStyles = vacationStyleTones;
@@ -98,14 +107,6 @@ function getCenteredDayLabel(day: DaySchedule) {
 function getCategoryDisplayLabel(category: string) {
   const label = getScheduleCategoryLabel(category);
   return label === "뉴스대기" ? "뉴스\n대기" : label;
-}
-
-function getVisibleAssignmentRank(category: string, isWeekendLike: boolean) {
-  if (!isWeekendLike) return getAssignmentDisplayRank(category);
-  const normalized = getScheduleCategoryLabel(category);
-  const weekendIndex = weekendAssignmentOrder.indexOf(normalized as (typeof weekendAssignmentOrder)[number]);
-  if (weekendIndex >= 0) return weekendIndex;
-  return weekendAssignmentOrder.length + getAssignmentDisplayRank(category);
 }
 
 function getDayCardStyle(day: DaySchedule, sameSheet: boolean) {
@@ -455,7 +456,7 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
@@ -554,30 +555,38 @@ export function PublishedSchedulesPanel() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const mobileMediaQuery = window.matchMedia(MOBILE_SCHEDULE_MEDIA_QUERY);
+    const coarsePointerMediaQuery = window.matchMedia("(any-pointer: coarse)");
     const syncViewport = () => {
-      setIsMobileLayout(mobileMediaQuery.matches);
+      const viewportWidth = Math.round(window.visualViewport?.width ?? window.innerWidth);
+      const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      setScheduleLayoutMode(
+        getPublishedScheduleLayoutMode(viewportWidth, viewportHeight, coarsePointerMediaQuery.matches),
+      );
     };
     const syncViewportByOrientation = () => {
       syncViewport();
     };
     syncViewport();
-    mobileMediaQuery.addEventListener?.("change", syncViewport);
-    mobileMediaQuery.addListener?.(syncViewport);
+    coarsePointerMediaQuery.addEventListener?.("change", syncViewport);
+    coarsePointerMediaQuery.addListener?.(syncViewport);
+    window.addEventListener("resize", syncViewport);
     window.addEventListener("orientationchange", syncViewportByOrientation);
+    window.visualViewport?.addEventListener("resize", syncViewport);
     return () => {
-      mobileMediaQuery.removeEventListener?.("change", syncViewport);
-      mobileMediaQuery.removeListener?.(syncViewport);
+      coarsePointerMediaQuery.removeEventListener?.("change", syncViewport);
+      coarsePointerMediaQuery.removeListener?.(syncViewport);
+      window.removeEventListener("resize", syncViewport);
       window.removeEventListener("orientationchange", syncViewportByOrientation);
+      window.visualViewport?.removeEventListener("resize", syncViewport);
     };
   }, []);
 
   useEffect(() => {
-    const shouldAutoFitSchedule = isMobileLayout;
+    const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
     if (!shouldAutoFitSchedule) {
       setScheduleZoomFactor(1);
     }
-  }, [isMobileLayout]);
+  }, [scheduleLayoutMode]);
 
   const selectedItem = useMemo(() => {
     if (items.length === 0) return null;
@@ -663,7 +672,13 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const shouldAutoFitSchedule = isMobileLayout;
+  const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
+  const schedulePanelLayoutClassName =
+    scheduleLayoutMode === "mobile"
+      ? "schedule-published-panel--mobile schedule-published-panel--mobile-layout"
+      : scheduleLayoutMode === "tablet"
+        ? "schedule-published-panel--tablet schedule-published-panel--mobile-layout"
+        : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
@@ -919,7 +934,7 @@ export function PublishedSchedulesPanel() {
 
   return (
     <section
-      className={`panel schedule-published-panel schedule-published-panel--desktop schedule-published-panel--desktop-layout ${shouldAutoFitSchedule ? "schedule-published-panel--mobile-layout schedule-published-panel--fit" : ""}`}
+      className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {editMode && username ? (
@@ -1281,10 +1296,14 @@ export function PublishedSchedulesPanel() {
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category, names]) => {
                       if (!Array.isArray(names) || names.length === 0) return false;
-                      if (isWeekendLike) return category !== "휴가" && category !== "제크";
+                      if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
                       return !["국회", "청사", "청와대"].includes(category);
                     })
-                    .sort(([leftCategory], [rightCategory]) => getVisibleAssignmentRank(leftCategory, isWeekendLike) - getVisibleAssignmentRank(rightCategory, isWeekendLike));
+                    .sort(
+                      ([leftCategory], [rightCategory]) =>
+                        getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
+                        getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                    );
                   return (
                     <article
                       key={`${day.ownerMonthKey}-${day.dateKey}`}

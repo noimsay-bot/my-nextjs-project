@@ -11,8 +11,14 @@ export const SCHEDULE_MONTHS = Array.from({ length: 12 }, (_, index) => index + 
 export const DEFAULT_JCHECK_COUNT = 1;
 
 export function getScheduleCategoryLabel(category: string) {
+  if (category === "주말조근") return "조근";
+  if (category === "주말일반근무") return "일반";
   return category;
 }
+
+export const weekendScheduleAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "야근"] as const;
+export const weekdayStoredAssignmentOrder = ["조근", "연장", "일반", "야근", "제크", "휴가", "청와대", "국회", "청사"] as const;
+export const weekendStoredAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "야근", "휴가", "청사"] as const;
 
 const assignmentDisplayOrder = [
   "조근",
@@ -31,11 +37,31 @@ const assignmentDisplayOrder = [
 ] as const;
 
 export function getAssignmentDisplayRank(category: string) {
+  if (category === "주말조근" || category === "주말일반근무") {
+    const rawIndex = assignmentDisplayOrder.indexOf(category as (typeof assignmentDisplayOrder)[number]);
+    return rawIndex >= 0 ? rawIndex : assignmentDisplayOrder.length + 1;
+  }
   const normalized = getScheduleCategoryLabel(category);
   const index = assignmentDisplayOrder.indexOf(normalized as (typeof assignmentDisplayOrder)[number]);
   if (index >= 0) return index;
   const rawIndex = assignmentDisplayOrder.indexOf(category as (typeof assignmentDisplayOrder)[number]);
   return rawIndex >= 0 ? rawIndex : assignmentDisplayOrder.length + 1;
+}
+
+export function getVisibleAssignmentDisplayRank(category: string, isWeekendLike: boolean) {
+  if (!isWeekendLike) return getAssignmentDisplayRank(category);
+  const normalized = getScheduleCategoryLabel(category);
+  const weekendIndex = weekendScheduleAssignmentOrder.indexOf(
+    normalized as (typeof weekendScheduleAssignmentOrder)[number],
+  );
+  if (weekendIndex >= 0) return weekendIndex;
+  return weekendScheduleAssignmentOrder.length + getAssignmentDisplayRank(category);
+}
+
+export function getStoredAssignmentDisplayRank(category: string, isWeekendLike: boolean) {
+  const order: readonly string[] = isWeekendLike ? weekendStoredAssignmentOrder : weekdayStoredAssignmentOrder;
+  const index = order.indexOf(category);
+  return index >= 0 ? index : order.length + 1;
 }
 
 export const categories: CategoryDefinition[] = [
