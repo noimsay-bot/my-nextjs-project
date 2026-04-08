@@ -21,6 +21,7 @@ const HOME_NEWS_ADMIN_SELECT = `
   tags,
   event_stage,
   likes_count,
+  dislikes_count,
   created_at,
   updated_at
 `;

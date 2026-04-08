@@ -7,15 +7,15 @@ import { HomeNewsDataset } from "@/components/home/home-news.types";
 type HomeNewsSectionProps = {
   data: HomeNewsDataset;
   loading?: boolean;
-  togglingLikeId?: string | null;
-  onToggleLike?: (itemId: string, nextLiked: boolean) => void;
+  togglingPreferenceId?: string | null;
+  onSetPreference?: (itemId: string, nextPreference: "like" | "dislike" | null) => void;
 };
 
 export function HomeNewsSection({
   data,
   loading = false,
-  togglingLikeId = null,
-  onToggleLike,
+  togglingPreferenceId = null,
+  onSetPreference,
 }: HomeNewsSectionProps) {
   return (
     <section className={styles.section} aria-label="뉴스 브리핑">
@@ -25,8 +25,8 @@ export function HomeNewsSection({
         cardsByCategory={data.cardsByCategory}
         recommendedCategory={data.recommendedCategory}
         loading={loading}
-        togglingLikeId={togglingLikeId}
-        onToggleLike={onToggleLike}
+        togglingPreferenceId={togglingPreferenceId}
+        onSetPreference={onSetPreference}
       />
     </section>
   );

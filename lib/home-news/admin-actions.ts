@@ -18,7 +18,7 @@ import { getPortalSession, getPortalSupabaseClient, getSupabaseStorageErrorMessa
 const HOME_NEWS_TABLE = "home_news_briefings";
 const SLOT_MAX_ACTIVE_ITEMS = 3;
 const HOME_NEWS_RETURNING_SELECT =
-  "id, category, title, summary_lines, why_it_matters, check_points, priority, published_at, occurred_at, briefing_slot, briefing_text, is_active, source_label, tags, event_stage, likes_count, created_at, updated_at";
+  "id, category, title, summary_lines, why_it_matters, check_points, priority, published_at, occurred_at, briefing_slot, briefing_text, is_active, source_label, tags, event_stage, likes_count, dislikes_count, created_at, updated_at";
 
 type NewsBriefingMutationResult = {
   ok: boolean;

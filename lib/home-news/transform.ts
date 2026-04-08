@@ -45,6 +45,7 @@ export type HomeNewsBriefingRecord = {
   tags: string[] | null;
   event_stage: HomeNewsEventStage;
   likes_count: number | null;
+  dislikes_count?: number | null;
   created_at: string | null;
   updated_at: string | null;
 };

@@ -6,19 +6,20 @@ type HomeNewsCardProps = {
   item: HomeNewsCardItem;
   expanded: boolean;
   onToggle: () => void;
-  togglingLike?: boolean;
-  onToggleLike?: (nextLiked: boolean) => void;
+  togglingPreference?: boolean;
+  onSetPreference?: (nextPreference: "like" | "dislike" | null) => void;
 };
 
 export function HomeNewsCard({
   item,
   expanded,
   onToggle,
-  togglingLike = false,
-  onToggleLike,
+  togglingPreference = false,
+  onSetPreference,
 }: HomeNewsCardProps) {
   const panelId = useId();
   const viewerHasLiked = item.viewerHasLiked ?? false;
+  const viewerHasDisliked = item.viewerHasDisliked ?? false;
   const likesCount = item.likesCount ?? 0;
 
   return (
@@ -47,21 +48,34 @@ export function HomeNewsCard({
               <p key={`${item.id}-${index}`}>{line}</p>
             ))}
           </div>
-          {onToggleLike ? (
+          {onSetPreference ? (
             <div className={styles.cardActions}>
               <button
                 type="button"
-                className={`${styles.likeButton} ${viewerHasLiked ? styles.likeButtonActive : ""}`}
+                className={`${styles.feedbackButton} ${viewerHasLiked ? styles.feedbackButtonActive : ""}`}
                 aria-pressed={viewerHasLiked}
                 aria-label={viewerHasLiked ? "좋아요 취소" : "좋아요"}
-                disabled={togglingLike}
-                onClick={() => onToggleLike(!viewerHasLiked)}
+                disabled={togglingPreference}
+                onClick={() => onSetPreference(viewerHasLiked ? null : "like")}
               >
-                <span className={styles.likeButtonIcon} aria-hidden="true">
+                <span className={styles.feedbackButtonIcon} aria-hidden="true">
                   {viewerHasLiked ? "★" : "☆"}
                 </span>
-                <span>{viewerHasLiked ? "관심중" : "관심"}</span>
-                <span className={styles.likeCount}>{likesCount}</span>
+                <span>좋아요</span>
+                <span className={styles.feedbackCount}>{likesCount}</span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.feedbackButton} ${viewerHasDisliked ? styles.feedbackButtonMuted : ""}`}
+                aria-pressed={viewerHasDisliked}
+                aria-label={viewerHasDisliked ? "별로.. 취소" : "별로.."}
+                disabled={togglingPreference}
+                onClick={() => onSetPreference(viewerHasDisliked ? null : "dislike")}
+              >
+                <span className={styles.feedbackButtonIcon} aria-hidden="true">
+                  {viewerHasDisliked ? "●" : "○"}
+                </span>
+                <span>별로..</span>
               </button>
             </div>
           ) : null}

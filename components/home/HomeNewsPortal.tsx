@@ -6,9 +6,9 @@ import { HomeNewsSection } from "@/components/home/HomeNewsSection";
 import { HomeNewsCardItem, HomeNewsCardsByCategory, HomeNewsDataset } from "@/components/home/home-news.types";
 import { emptyHomeNewsDataset } from "@/lib/home-news/fallback";
 import { fetchHomeNewsDataset } from "@/lib/home-news/queries";
-import { toggleHomeNewsBriefingLike } from "@/lib/home-news/like-actions";
+import { setHomeNewsBriefingPreference } from "@/lib/home-news/like-actions";
 import { fetchHomeNewsLikeWorkspace } from "@/lib/home-news/like-queries";
-import { toHomeNewsLikePreferenceRecord } from "@/lib/home-news/like-types";
+import { toHomeNewsPreferenceRecord } from "@/lib/home-news/like-types";
 import { applyHomeNewsPersonalization } from "@/lib/home-news/personalization";
 import { generateTimedLivePreview } from "@/lib/home-news/timed-live-preview-actions";
 
@@ -50,80 +50,107 @@ export function HomeNewsPortal() {
   const [livePreviewData, setLivePreviewData] = useState<HomeNewsDataset | null>(null);
   const [likeWorkspace, setLikeWorkspace] = useState<Awaited<ReturnType<typeof fetchHomeNewsLikeWorkspace>> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [togglingLikeId, setTogglingLikeId] = useState<string | null>(null);
+  const [togglingPreferenceId, setTogglingPreferenceId] = useState<string | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
-  const personalizedBaseData = useMemo(
-    () => applyHomeNewsPersonalization(baseData, likeWorkspace),
-    [baseData, likeWorkspace],
+  const personalizedBaseData = useMemo(() => applyHomeNewsPersonalization(baseData, likeWorkspace), [baseData, likeWorkspace]);
+  const personalizedPreviewData = useMemo(
+    () => (livePreviewData ? applyHomeNewsPersonalization(livePreviewData, likeWorkspace) : null),
+    [likeWorkspace, livePreviewData],
   );
-  const activeData = livePreviewData ?? personalizedBaseData;
-  const previewActive = Boolean(livePreviewData);
+  const activeData = personalizedPreviewData ?? personalizedBaseData;
+
+  function updateDatasetPreferenceState(
+    dataset: HomeNewsDataset | null,
+    itemId: string,
+    nextPreference: "like" | "dislike" | null,
+  ) {
+    if (!dataset) return dataset;
+
+    return {
+      ...dataset,
+      cardsByCategory: Object.fromEntries(
+        Object.entries(dataset.cardsByCategory).map(([category, items]) => [
+          category,
+          (items ?? []).map((item) => {
+            if (item.id !== itemId) return item;
+            const likesCount = item.likesCount ?? 0;
+            const nextLikesCount =
+              nextPreference === "like"
+                ? item.viewerHasLiked
+                  ? likesCount
+                  : likesCount + 1
+                : item.viewerHasLiked
+                  ? Math.max(0, likesCount - 1)
+                  : likesCount;
+
+            return {
+              ...item,
+              viewerHasLiked: nextPreference === "like",
+              viewerHasDisliked: nextPreference === "dislike",
+              likesCount: nextLikesCount,
+            };
+          }),
+        ]),
+      ) as Partial<HomeNewsCardsByCategory>,
+    };
+  }
+
   const section = useMemo(
     () => (
       <HomeNewsSection
         data={activeData}
         loading={loading}
-        togglingLikeId={togglingLikeId}
-        onToggleLike={
-          previewActive
-            ? undefined
-            : (itemId, nextLiked) => {
-                const allItems = Object.values(activeData.cardsByCategory).flatMap((items) => items ?? []);
-                const targetItem = allItems.find((item) => item.id === itemId) ?? null;
-                if (!targetItem) return;
+        togglingPreferenceId={togglingPreferenceId}
+        onSetPreference={(itemId, nextPreference) => {
+          const allItems = Object.values(activeData.cardsByCategory).flatMap((items) => items ?? []);
+          const targetItem = allItems.find((item) => item.id === itemId) ?? null;
+          if (!targetItem) return;
 
-                setTogglingLikeId(itemId);
-                void (async () => {
-                  const result = await toggleHomeNewsBriefingLike(itemId, nextLiked);
-                  if (!result.ok) {
-                    console.warn(result.message);
-                    setTogglingLikeId(null);
-                    return;
-                  }
+          setTogglingPreferenceId(itemId);
+          void (async () => {
+            const isPreviewItem = itemId.startsWith("live-preview-");
 
-                  setBaseData((current) => ({
-                    ...current,
-                    cardsByCategory: Object.fromEntries(
-                      Object.entries(current.cardsByCategory).map(([category, items]) => [
-                        category,
-                        (items ?? []).map((item) =>
-                          item.id === itemId
-                            ? {
-                                ...item,
-                                viewerHasLiked: nextLiked,
-                                likesCount: result.likesCount ?? item.likesCount ?? 0,
-                              }
-                            : item,
-                        ),
-                      ]),
-                    ) as Partial<HomeNewsCardsByCategory>,
-                  }));
-
-                  setLikeWorkspace((current) => {
-                    const previous = current ?? { likedBriefingIds: [], preferences: [] };
-                    const likedBriefingIds = nextLiked
-                      ? Array.from(new Set([...previous.likedBriefingIds, itemId]))
-                      : previous.likedBriefingIds.filter((id) => id !== itemId);
-                    const preferences = nextLiked
-                      ? [
-                          toHomeNewsLikePreferenceRecord(targetItem as HomeNewsCardItem),
-                          ...previous.preferences.filter((item) => item.briefingId !== itemId),
-                        ]
-                      : previous.preferences.filter((item) => item.briefingId !== itemId);
-
-                    return {
-                      likedBriefingIds,
-                      preferences,
-                    };
-                  });
-
-                  setTogglingLikeId(null);
-                })();
+            if (!isPreviewItem) {
+              const result = await setHomeNewsBriefingPreference(itemId, nextPreference);
+              if (!result.ok) {
+                console.warn(result.message);
+                setTogglingPreferenceId(null);
+                return;
               }
-        }
+
+              setBaseData((current) => updateDatasetPreferenceState(current, itemId, nextPreference) ?? current);
+            } else {
+              setLivePreviewData((current) => updateDatasetPreferenceState(current, itemId, nextPreference));
+            }
+
+            setLikeWorkspace((current) => {
+              const previous = current ?? { likedBriefingIds: [], dislikedBriefingIds: [], preferences: [] };
+              const likedBriefingIds = nextPreference === "like"
+                ? Array.from(new Set([...previous.likedBriefingIds, itemId]))
+                : previous.likedBriefingIds.filter((id) => id !== itemId);
+              const dislikedBriefingIds = nextPreference === "dislike"
+                ? Array.from(new Set([...previous.dislikedBriefingIds, itemId]))
+                : previous.dislikedBriefingIds.filter((id) => id !== itemId);
+              const preferences = nextPreference
+                ? [
+                    toHomeNewsPreferenceRecord(targetItem as HomeNewsCardItem, nextPreference),
+                    ...previous.preferences.filter((item) => item.briefingId !== itemId),
+                  ]
+                : previous.preferences.filter((item) => item.briefingId !== itemId);
+
+              return {
+                likedBriefingIds,
+                dislikedBriefingIds,
+                preferences,
+              };
+            });
+
+            setTogglingPreferenceId(null);
+          })();
+        }}
       />
     ),
-    [activeData, loading, previewActive, togglingLikeId],
+    [activeData, loading, togglingPreferenceId],
   );
 
   useEffect(() => {

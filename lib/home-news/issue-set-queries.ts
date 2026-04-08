@@ -23,6 +23,7 @@ const HOME_NEWS_BRIEFING_SELECT = `
   tags,
   event_stage,
   likes_count,
+  dislikes_count,
   created_at,
   updated_at
 `;

@@ -18,16 +18,16 @@ type HomeNewsTabsProps = {
   cardsByCategory: Partial<HomeNewsCardsByCategory>;
   recommendedCategory?: HomeNewsCategory;
   loading?: boolean;
-  togglingLikeId?: string | null;
-  onToggleLike?: (itemId: string, nextLiked: boolean) => void;
+  togglingPreferenceId?: string | null;
+  onSetPreference?: (itemId: string, nextPreference: "like" | "dislike" | null) => void;
 };
 
 export function HomeNewsTabs({
   cardsByCategory,
   recommendedCategory,
   loading = false,
-  togglingLikeId = null,
-  onToggleLike,
+  togglingPreferenceId = null,
+  onSetPreference,
 }: HomeNewsTabsProps) {
   const groupId = useId();
   const [activeCategory, setActiveCategory] = useState<HomeNewsCategory>(() => recommendedCategory ?? getInitialCategory(cardsByCategory));
@@ -99,10 +99,10 @@ export function HomeNewsTabs({
                 item={item}
                 expanded={expandedCardId === item.id}
                 onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
-                togglingLike={togglingLikeId === item.id}
-                onToggleLike={
-                  onToggleLike
-                    ? (nextLiked) => onToggleLike(item.id, nextLiked)
+                togglingPreference={togglingPreferenceId === item.id}
+                onSetPreference={
+                  onSetPreference
+                    ? (nextPreference) => onSetPreference(item.id, nextPreference)
                     : undefined
                 }
               />

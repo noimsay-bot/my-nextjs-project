@@ -7,6 +7,8 @@ export type HomeNewsRankingRecord = {
   published_at: string | null;
   updated_at: string | null;
   created_at: string | null;
+  likes_count?: number | null;
+  dislikes_count?: number | null;
 };
 
 export const MAX_HOME_NEWS_ITEMS = 3;
@@ -53,12 +55,21 @@ export function getEffectiveEventTimestamp(record: Pick<HomeNewsRankingRecord, "
   return toNewsTimestamp(record.occurred_at) || toNewsTimestamp(record.published_at);
 }
 
+export function getAggregateReactionWeight(record: Pick<HomeNewsRankingRecord, "likes_count" | "dislikes_count">) {
+  const likesWeight = Math.max(record.likes_count ?? 0, 0) * 14;
+  const dislikesWeight = Math.max(record.dislikes_count ?? 0, 0) * 18;
+  return Math.max(-160, Math.min(160, likesWeight - dislikesWeight));
+}
+
 export function sortHomeNewsByImportance<T extends HomeNewsRankingRecord>(left: T, right: T) {
   const priorityDiff = getPriorityWeight(right.priority) - getPriorityWeight(left.priority);
   if (priorityDiff !== 0) return priorityDiff;
 
   const stageDiff = getEventStageWeight(right.event_stage) - getEventStageWeight(left.event_stage);
   if (stageDiff !== 0) return stageDiff;
+
+  const reactionDiff = getAggregateReactionWeight(right) - getAggregateReactionWeight(left);
+  if (reactionDiff !== 0) return reactionDiff;
 
   const eventTimeDiff = getEffectiveEventTimestamp(right) - getEffectiveEventTimestamp(left);
   if (eventTimeDiff !== 0) return eventTimeDiff;

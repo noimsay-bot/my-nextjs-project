@@ -1,8 +1,8 @@
 "use client";
 
-import { createEmptyHomeNewsLikeWorkspace, HomeNewsLikePreferenceRecord, HomeNewsLikeWorkspace } from "@/lib/home-news/like-types";
-import { getPortalSession, getPortalSupabaseClient } from "@/lib/supabase/portal";
 import { HomeNewsCategory } from "@/components/home/home-news.types";
+import { createEmptyHomeNewsLikeWorkspace, HomeNewsLikeWorkspace, HomeNewsPreferenceRecord } from "@/lib/home-news/like-types";
+import { getPortalSession, getPortalSupabaseClient } from "@/lib/supabase/portal";
 import { HomeNewsEventStage } from "@/lib/home-news/transform";
 
 type BriefingPreferenceRow = {
@@ -13,15 +13,16 @@ type BriefingPreferenceRow = {
   priority: "high" | "medium" | "low" | null;
 };
 
-function normalizePreferenceRows(
-  likeRows: Array<{ briefing_id: string; created_at: string }>,
+function buildPreferenceRecords(
+  rows: Array<{ briefing_id: string; created_at: string }>,
   briefingRows: BriefingPreferenceRow[],
+  preference: "like" | "dislike",
 ) {
   const briefingMap = new Map(briefingRows.map((row) => [row.id, row] as const));
 
-  return likeRows
-    .map<HomeNewsLikePreferenceRecord | null>((likeRow) => {
-      const briefing = briefingMap.get(likeRow.briefing_id);
+  return rows
+    .map<HomeNewsPreferenceRecord | null>((row) => {
+      const briefing = briefingMap.get(row.briefing_id);
       if (!briefing) return null;
 
       return {
@@ -30,10 +31,11 @@ function normalizePreferenceRows(
         tags: briefing.tags ?? [],
         eventStage: briefing.event_stage ?? null,
         priority: briefing.priority ?? null,
-        createdAt: likeRow.created_at,
+        preference,
+        createdAt: row.created_at,
       };
     })
-    .filter((item): item is HomeNewsLikePreferenceRecord => Boolean(item));
+    .filter((item): item is HomeNewsPreferenceRecord => Boolean(item));
 }
 
 export async function fetchHomeNewsLikeWorkspace(): Promise<HomeNewsLikeWorkspace> {
@@ -43,18 +45,30 @@ export async function fetchHomeNewsLikeWorkspace(): Promise<HomeNewsLikeWorkspac
   }
 
   const supabase = await getPortalSupabaseClient();
-  const { data: likeRows, error: likeError } = await supabase
-    .from("home_news_briefing_likes")
-    .select("briefing_id, created_at")
-    .eq("profile_id", session.id)
-    .order("created_at", { ascending: false })
-    .returns<Array<{ briefing_id: string; created_at: string }>>();
 
-  if (likeError || !likeRows || likeRows.length === 0) {
+  const [{ data: likeRows, error: likeError }, { data: dislikeRows, error: dislikeError }] = await Promise.all([
+    supabase
+      .from("home_news_briefing_likes")
+      .select("briefing_id, created_at")
+      .eq("profile_id", session.id)
+      .order("created_at", { ascending: false })
+      .returns<Array<{ briefing_id: string; created_at: string }>>(),
+    supabase
+      .from("home_news_briefing_dislikes")
+      .select("briefing_id, created_at")
+      .eq("profile_id", session.id)
+      .order("created_at", { ascending: false })
+      .returns<Array<{ briefing_id: string; created_at: string }>>(),
+  ]);
+
+  const safeLikeRows = !likeError && likeRows ? likeRows : [];
+  const safeDislikeRows = !dislikeError && dislikeRows ? dislikeRows : [];
+
+  if (safeLikeRows.length === 0 && safeDislikeRows.length === 0) {
     return createEmptyHomeNewsLikeWorkspace();
   }
 
-  const briefingIds = Array.from(new Set(likeRows.map((row) => row.briefing_id)));
+  const briefingIds = Array.from(new Set([...safeLikeRows, ...safeDislikeRows].map((row) => row.briefing_id)));
   const { data: briefingRows, error: briefingError } = await supabase
     .from("home_news_briefings")
     .select("id, category, tags, event_stage, priority")
@@ -63,13 +77,18 @@ export async function fetchHomeNewsLikeWorkspace(): Promise<HomeNewsLikeWorkspac
 
   if (briefingError || !briefingRows) {
     return {
-      likedBriefingIds: briefingIds,
+      likedBriefingIds: Array.from(new Set(safeLikeRows.map((row) => row.briefing_id))),
+      dislikedBriefingIds: Array.from(new Set(safeDislikeRows.map((row) => row.briefing_id))),
       preferences: [],
     };
   }
 
   return {
-    likedBriefingIds: briefingIds,
-    preferences: normalizePreferenceRows(likeRows, briefingRows),
+    likedBriefingIds: Array.from(new Set(safeLikeRows.map((row) => row.briefing_id))),
+    dislikedBriefingIds: Array.from(new Set(safeDislikeRows.map((row) => row.briefing_id))),
+    preferences: [
+      ...buildPreferenceRecords(safeLikeRows, briefingRows, "like"),
+      ...buildPreferenceRecords(safeDislikeRows, briefingRows, "dislike"),
+    ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
   };
 }

@@ -45,6 +45,7 @@ export type HomeNewsCardItem = {
   eventStage?: string | null;
   likesCount?: number;
   viewerHasLiked?: boolean;
+  viewerHasDisliked?: boolean;
 };
 
 export type HomeNewsCardsByCategory = Record<HomeNewsCategory, HomeNewsCardItem[]>;
