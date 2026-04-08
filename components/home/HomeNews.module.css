@@ -1,0 +1,486 @@
+.section {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.tickerViewport {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.tickerViewport:hover .tickerTrack,
+.tickerViewport:focus-within .tickerTrack {
+  animation-play-state: paused;
+}
+
+.tickerTrack {
+  display: flex;
+  width: max-content;
+  animation: tickerMarquee 68s linear infinite;
+  will-change: transform;
+}
+
+.tickerGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  flex-shrink: 0;
+}
+
+.tickerItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.028);
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+
+.tickerItem:hover,
+.tickerItem:focus-visible {
+  background: rgba(255, 255, 255, 0.072);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 20px rgba(3, 9, 23, 0.14);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.tickerItem:focus-visible {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.16),
+    0 8px 20px rgba(3, 9, 23, 0.14);
+}
+
+.tickerCategory {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.tickerText {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tickerSkeleton {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tickerSkeletonPill,
+.tickerSkeletonLine {
+  display: block;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tickerSkeletonPill {
+  width: 56px;
+  height: 26px;
+}
+
+.tickerSkeletonLine {
+  width: min(100%, 560px);
+  height: 14px;
+}
+
+.tabs {
+  display: grid;
+  gap: 12px;
+}
+
+.tabList {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tabButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.tabButton:hover,
+.tabButton:focus-visible {
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  outline: none;
+}
+
+.tabButtonActive {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.tabButton:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.14);
+}
+
+.tabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.panel {
+  display: grid;
+  min-height: 210px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cardSkeleton {
+  min-height: 220px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.025) 0%,
+      rgba(255, 255, 255, 0.06) 50%,
+      rgba(255, 255, 255, 0.025) 100%
+    );
+  background-size: 200% 100%;
+  animation: newsCardPulse 1.8s ease-in-out infinite;
+}
+
+.card {
+  display: grid;
+  gap: 0;
+  min-height: 100%;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.028);
+  box-shadow: 0 8px 20px rgba(3, 8, 20, 0.08);
+  overflow: hidden;
+}
+
+.cardToggle {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 18px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.cardToggle:hover,
+.cardToggle:focus-visible {
+  background: rgba(255, 255, 255, 0.035);
+  outline: none;
+}
+
+.cardToggle:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge,
+.tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.badge {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.tag {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--muted);
+}
+
+.cardBody {
+  display: grid;
+  gap: 8px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.36;
+  letter-spacing: -0.03em;
+}
+
+.cardPreview p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cardChevron {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.cardExpanded {
+  display: grid;
+  gap: 14px;
+  padding: 0 18px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.summary {
+  display: grid;
+  gap: 8px;
+}
+
+.summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.meta {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.metaRow dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.metaRow dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.56;
+}
+
+.checkList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.checkList li {
+  margin: 0;
+}
+
+.empty {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.empty strong,
+.empty p {
+  margin: 0;
+}
+
+.empty p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+@keyframes tickerMarquee {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(-50% - 6px));
+  }
+}
+
+@keyframes newsCardPulse {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel {
+    min-height: 190px;
+  }
+}
+
+@media (max-width: 760px) {
+  .section {
+    gap: 12px;
+  }
+
+  .tickerGroup {
+    gap: 10px;
+    padding: 7px 10px;
+  }
+
+  .tickerItem {
+    min-height: 30px;
+    padding: 6px 10px;
+    gap: 8px;
+  }
+
+  .tickerCategory {
+    min-width: 36px;
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .tickerText {
+    font-size: 12px;
+  }
+
+  .tickerSkeleton {
+    min-height: 46px;
+    padding: 8px 10px;
+  }
+
+  .tabList {
+    gap: 8px;
+    margin-inline: -2px;
+    padding-inline: 2px;
+  }
+
+  .tabButton {
+    min-height: 38px;
+    padding: 8px 13px;
+    font-size: 13px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cardSkeleton {
+    min-height: 176px;
+  }
+
+  .panel {
+    min-height: 0;
+  }
+
+  .cardToggle {
+    gap: 10px;
+    padding: 16px;
+  }
+
+  .cardExpanded {
+    gap: 12px;
+    padding: 0 16px 16px;
+  }
+
+  .cardTitle {
+    font-size: 17px;
+  }
+
+  .summary p,
+  .metaRow dd {
+    font-size: 13px;
+  }
+
+  .metaRow {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
