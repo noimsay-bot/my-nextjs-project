@@ -4,6 +4,7 @@ import { HomeNewsDataset, HOME_NEWS_CATEGORIES } from "@/components/home/home-ne
 export const emptyHomeNewsDataset: HomeNewsDataset = {
   tickerItems: [],
   cardsByCategory: Object.fromEntries(HOME_NEWS_CATEGORIES.map((category) => [category, []])) as HomeNewsDataset["cardsByCategory"],
+  sourceKind: "empty",
 };
 
 export type HomeNewsFallbackReason = "missing_env" | "query_error" | "schema_missing";

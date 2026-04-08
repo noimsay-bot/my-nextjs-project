@@ -2,10 +2,17 @@ import {
   HomeNewsCardItem,
   HomeNewsCategory,
   HomeNewsDataset,
+  HomeNewsDatasetSourceKind,
   HomeNewsTickerItem,
   HOME_NEWS_CATEGORIES,
 } from "@/components/home/home-news.types";
 import { emptyHomeNewsDataset } from "@/lib/home-news/fallback";
+import {
+  MAX_HOME_NEWS_ITEMS,
+  selectTopHomeNewsBriefings,
+  sortHomeNewsByImportance,
+  toNewsTimestamp,
+} from "@/lib/home-news/ranking";
 
 export type HomeNewsBriefingSlot = "morning_6" | "afternoon_3";
 
@@ -30,6 +37,7 @@ export type HomeNewsBriefingRecord = {
   check_points: string[] | null;
   priority: "high" | "medium" | "low" | null;
   published_at: string | null;
+  occurred_at: string | null;
   briefing_slot: HomeNewsBriefingSlot | null;
   briefing_text: string | null;
   is_active: boolean | null;
@@ -41,76 +49,41 @@ export type HomeNewsBriefingRecord = {
   updated_at: string | null;
 };
 
-const MAX_HOME_NEWS_ITEMS = 3;
-
-function getPriorityWeight(priority: HomeNewsBriefingRecord["priority"]) {
-  switch (priority) {
-    case "high":
-      return 30;
-    case "medium":
-      return 20;
-    case "low":
-      return 10;
-    default:
-      return 0;
-  }
-}
-
-function getEventStageWeight(eventStage: HomeNewsEventStage) {
-  // 수사 진행 단계 뉴스는 이후 개인화/가중치 확장 시 이 함수에서 우선순위를 강화하면 됩니다.
-  switch (eventStage) {
-    case "attending":
-    case "under_questioning":
-    case "warrant_issued":
-      return 4;
-    case "summon_scheduled":
-    case "warrant_review_scheduled":
-    case "warrant_requested":
-      return 3;
-    case "summon_requested":
-    case "warrant_denied":
-    case "investigation_update":
-      return 2;
-    default:
-      return 0;
-  }
-}
-
-function toTimestamp(value: string | null | undefined) {
-  if (!value) return 0;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : 0;
-}
-
-function getKstDateKey(value: string | null | undefined) {
-  const timestamp = toTimestamp(value);
-  if (!timestamp) return "0000-00-00";
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(timestamp));
-}
-
-function getPreferredBriefingSlots(now = new Date()): HomeNewsBriefingSlot[] {
-  const hour = now.getHours();
-  if (hour >= 15) return ["afternoon_3", "morning_6"];
-  if (hour >= 6) return ["morning_6", "afternoon_3"];
-  return ["afternoon_3", "morning_6"];
-}
+type BuildHomeNewsDatasetOptions = {
+  respectInputOrder?: boolean;
+  filterInactive?: boolean;
+  sourceKind?: HomeNewsDatasetSourceKind;
+  issueSet?: HomeNewsDataset["issueSet"];
+  runtimeBriefing?: HomeNewsDataset["runtimeBriefing"];
+};
 
 export function sortHomeNewsBriefings(left: HomeNewsBriefingRecord, right: HomeNewsBriefingRecord) {
-  const publishedDiff = toTimestamp(right.published_at) - toTimestamp(left.published_at);
-  if (publishedDiff !== 0) return publishedDiff;
+  return sortHomeNewsByImportance(left, right);
+}
 
-  const priorityDiff = getPriorityWeight(right.priority) - getPriorityWeight(left.priority);
-  if (priorityDiff !== 0) return priorityDiff;
+function formatOccurredAtLabel(value: string | null | undefined) {
+  const timestamp = toNewsTimestamp(value);
+  if (!timestamp) return "";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(new Date(timestamp))
+    .replace(/\s/g, " ")
+    .trim();
+}
 
-  const stageDiff = getEventStageWeight(right.event_stage) - getEventStageWeight(left.event_stage);
-  if (stageDiff !== 0) return stageDiff;
+function hasTimeReference(value: string) {
+  return /(오전|오후)\s*\d{1,2}시|\d{1,2}시\s*\d{0,2}분?|\d{1,2}:\d{2}/.test(value);
+}
 
-  return toTimestamp(right.updated_at ?? right.created_at) - toTimestamp(left.updated_at ?? left.created_at);
+function prependOccurredAt(value: string, occurredAt: string | null | undefined) {
+  const label = formatOccurredAtLabel(occurredAt);
+  if (!label) return value;
+  if (hasTimeReference(value)) return value;
+  return `${label} ${value}`.trim();
 }
 
 function sanitizeRecord(record: HomeNewsBriefingRecord): HomeNewsBriefingRecord | null {
@@ -122,57 +95,55 @@ function sanitizeRecord(record: HomeNewsBriefingRecord): HomeNewsBriefingRecord 
     why_it_matters: record.why_it_matters ?? "",
     briefing_text: record.briefing_text ?? "",
     priority: record.priority ?? "medium",
+    occurred_at: record.occurred_at ?? null,
     briefing_slot: record.briefing_slot ?? "morning_6",
     is_active: record.is_active ?? true,
   };
 }
 
-function pickBriefingBatch(records: HomeNewsBriefingRecord[], now = new Date()) {
-  const preferredSlots = getPreferredBriefingSlots(now);
-  const grouped = new Map<string, HomeNewsBriefingRecord[]>();
+export function buildHomeNewsDataset(
+  records: HomeNewsBriefingRecord[],
+  now = new Date(),
+  options: BuildHomeNewsDatasetOptions = {},
+): HomeNewsDataset {
+  const respectInputOrder = options.respectInputOrder ?? false;
+  const filterInactive = options.filterInactive ?? true;
+  const sourceKind = options.sourceKind ?? "active_fallback";
 
-  records.forEach((record) => {
-    const dateKey = getKstDateKey(record.published_at);
-    const slot = record.briefing_slot ?? "morning_6";
-    const batchKey = `${dateKey}:${slot}`;
-    const current = grouped.get(batchKey) ?? [];
-    current.push(record);
-    grouped.set(batchKey, current);
-  });
-
-  const batches = Array.from(grouped.entries())
-    .map(([batchKey, items]) => ({
-      batchKey,
-      slot: (items[0]?.briefing_slot ?? "morning_6") as HomeNewsBriefingSlot,
-      items: items.slice().sort(sortHomeNewsBriefings),
-      latestPublishedAt: Math.max(...items.map((item) => toTimestamp(item.published_at))),
-    }))
-    .sort((left, right) => right.latestPublishedAt - left.latestPublishedAt);
-
-  const preferredBatch =
-    preferredSlots
-      .map((slot) => batches.find((batch) => batch.slot === slot))
-      .find(Boolean) ?? batches[0];
-
-  return preferredBatch?.items.slice(0, MAX_HOME_NEWS_ITEMS) ?? [];
-}
-
-export function buildHomeNewsDataset(records: HomeNewsBriefingRecord[], now = new Date()): HomeNewsDataset {
   const sanitized = records
     .map(sanitizeRecord)
     .filter((item): item is HomeNewsBriefingRecord => Boolean(item))
-    .filter((item) => item.is_active)
-    .sort(sortHomeNewsBriefings);
+    .filter((item) => (filterInactive ? item.is_active : true));
 
-  if (sanitized.length === 0) return emptyHomeNewsDataset;
+  const ordered = respectInputOrder
+    ? sanitized
+    : sanitized.slice().sort(sortHomeNewsBriefings);
 
-  const selected = pickBriefingBatch(sanitized, now);
-  if (selected.length === 0) return emptyHomeNewsDataset;
+  if (ordered.length === 0) {
+    return {
+      ...emptyHomeNewsDataset,
+      sourceKind,
+      issueSet: options.issueSet,
+      runtimeBriefing: options.runtimeBriefing,
+    };
+  }
+
+  const selected = respectInputOrder
+    ? ordered.slice(0, MAX_HOME_NEWS_ITEMS)
+    : selectTopHomeNewsBriefings(ordered);
+  if (selected.length === 0) {
+    return {
+      ...emptyHomeNewsDataset,
+      sourceKind,
+      issueSet: options.issueSet,
+      runtimeBriefing: options.runtimeBriefing,
+    };
+  }
 
   const tickerItems: HomeNewsTickerItem[] = selected.map((item) => ({
     id: item.id,
     category: item.category,
-    text: item.briefing_text?.trim() || item.title,
+    text: prependOccurredAt(item.briefing_text?.trim() || item.title, item.occurred_at),
     priority: item.priority ?? undefined,
     publishedAt: item.published_at ?? undefined,
   }));
@@ -180,13 +151,18 @@ export function buildHomeNewsDataset(records: HomeNewsBriefingRecord[], now = ne
   const cardsByCategory = Object.fromEntries(
     HOME_NEWS_CATEGORIES.map((category) => [
       category,
-      selected
+      ordered
         .filter((item) => item.category === category)
         .map<HomeNewsCardItem>((item) => ({
           id: item.id,
           category: item.category,
           title: item.title,
-          summary: item.summary_lines && item.summary_lines.length > 0 ? item.summary_lines : [item.briefing_text?.trim() || item.title],
+          summary:
+            item.summary_lines && item.summary_lines.length > 0
+              ? item.summary_lines.map((line, index) =>
+                  index === 0 ? prependOccurredAt(line, item.occurred_at) : line,
+                )
+              : [prependOccurredAt(item.briefing_text?.trim() || item.title, item.occurred_at)],
           whyItMatters: item.why_it_matters?.trim() || "추가 브리핑이 들어오면 이 영역에서 중요도를 함께 설명합니다.",
           checkPoints:
             item.check_points && item.check_points.length > 0
@@ -194,6 +170,11 @@ export function buildHomeNewsDataset(records: HomeNewsBriefingRecord[], now = ne
               : ["후속 업데이트가 들어오면 이 자리에서 오늘 확인할 포인트를 안내합니다."],
           priority: item.priority ?? undefined,
           publishedAt: item.published_at ?? undefined,
+          occurredAt: item.occurred_at ?? undefined,
+          tags: item.tags ?? [],
+          eventStage: item.event_stage,
+          likesCount: item.likes_count ?? 0,
+          viewerHasLiked: false,
         })),
     ]),
   ) as HomeNewsDataset["cardsByCategory"];
@@ -201,5 +182,8 @@ export function buildHomeNewsDataset(records: HomeNewsBriefingRecord[], now = ne
   return {
     tickerItems,
     cardsByCategory,
+    sourceKind,
+    issueSet: options.issueSet,
+    runtimeBriefing: options.runtimeBriefing,
   };
 }

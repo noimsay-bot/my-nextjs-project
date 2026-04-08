@@ -1,5 +1,7 @@
 import { HomeNewsDataset } from "@/components/home/home-news.types";
 import { emptyHomeNewsDataset, getHomeNewsFallbackDataset } from "@/lib/home-news/fallback";
+import { fetchCurrentHomeIssueSet } from "@/lib/home-news/issue-set-home-queries";
+import { buildHomeNewsIssueSetDataset } from "@/lib/home-news/issue-set-home-transform";
 import { buildHomeNewsDataset, HomeNewsBriefingRecord } from "@/lib/home-news/transform";
 import { hasSupabaseEnv } from "@/lib/supabase/client";
 import {
@@ -18,6 +20,7 @@ const HOME_NEWS_SELECT = `
   check_points,
   priority,
   published_at,
+  occurred_at,
   briefing_slot,
   briefing_text,
   is_active,
@@ -31,7 +34,7 @@ const HOME_NEWS_SELECT = `
 
 export type HomeNewsLoadResult = {
   data: HomeNewsDataset;
-  source: "supabase" | "fallback" | "empty";
+  source: "issue_set" | "supabase" | "fallback" | "empty";
   errorMessage?: string;
 };
 
@@ -45,6 +48,25 @@ export async function fetchHomeNewsDataset(now = new Date()): Promise<HomeNewsLo
   }
 
   try {
+    try {
+      const officialIssueSet = await fetchCurrentHomeIssueSet(now);
+      if (officialIssueSet) {
+        const dataset = buildHomeNewsIssueSetDataset(
+          officialIssueSet.records,
+          officialIssueSet.issueSet,
+          now,
+        );
+        if (dataset.tickerItems.length > 0) {
+          return {
+            data: dataset,
+            source: "issue_set",
+          };
+        }
+      }
+    } catch {
+      // Official issue set lookup is optional. If it fails, keep the existing active-news fallback path.
+    }
+
     const supabase = await getPortalSupabaseClient();
     const { data, error } = await supabase
       .from(HOME_NEWS_TABLE)

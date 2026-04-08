@@ -6,33 +6,39 @@ type HomeNewsCardProps = {
   item: HomeNewsCardItem;
   expanded: boolean;
   onToggle: () => void;
+  togglingLike?: boolean;
+  onToggleLike?: (nextLiked: boolean) => void;
 };
 
-export function HomeNewsCard({ item, expanded, onToggle }: HomeNewsCardProps) {
+export function HomeNewsCard({
+  item,
+  expanded,
+  onToggle,
+  togglingLike = false,
+  onToggleLike,
+}: HomeNewsCardProps) {
   const panelId = useId();
+  const viewerHasLiked = item.viewerHasLiked ?? false;
+  const likesCount = item.likesCount ?? 0;
 
   return (
     <article className={styles.card}>
       <button
         type="button"
-        className={styles.cardToggle}
+        className={`${styles.cardToggle} ${!expanded ? styles.cardToggleCollapsed : ""}`}
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={onToggle}
       >
-        <div className={styles.cardHeader}>
-          <span className={styles.badge}>{HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
-          <span className={styles.tag}>{expanded ? "접기" : "펼치기"}</span>
-        </div>
-        <div className={styles.cardBody}>
-          <h3 className={styles.cardTitle}>{item.title}</h3>
-          <div className={styles.cardPreview}>
-            <p>{item.summary[0]}</p>
+        {expanded ? (
+          <div className={styles.cardHeader}>
+            <span className={styles.badge}>{HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
+            <span className={styles.tag}>접기</span>
           </div>
+        ) : null}
+        <div className={`${styles.cardBody} ${!expanded ? styles.cardBodyCollapsed : ""}`}>
+          <h3 className={`${styles.cardTitle} ${!expanded ? styles.cardTitleCollapsed : ""}`}>{item.title}</h3>
         </div>
-        <span className={styles.cardChevron} aria-hidden="true">
-          {expanded ? "−" : "+"}
-        </span>
       </button>
       {expanded ? (
         <div id={panelId} className={styles.cardExpanded}>
@@ -41,22 +47,24 @@ export function HomeNewsCard({ item, expanded, onToggle }: HomeNewsCardProps) {
               <p key={`${item.id}-${index}`}>{line}</p>
             ))}
           </div>
-          <dl className={styles.meta}>
-            <div className={styles.metaRow}>
-              <dt>왜 중요한지</dt>
-              <dd>{item.whyItMatters}</dd>
+          {onToggleLike ? (
+            <div className={styles.cardActions}>
+              <button
+                type="button"
+                className={`${styles.likeButton} ${viewerHasLiked ? styles.likeButtonActive : ""}`}
+                aria-pressed={viewerHasLiked}
+                aria-label={viewerHasLiked ? "좋아요 취소" : "좋아요"}
+                disabled={togglingLike}
+                onClick={() => onToggleLike(!viewerHasLiked)}
+              >
+                <span className={styles.likeButtonIcon} aria-hidden="true">
+                  {viewerHasLiked ? "★" : "☆"}
+                </span>
+                <span>{viewerHasLiked ? "관심중" : "관심"}</span>
+                <span className={styles.likeCount}>{likesCount}</span>
+              </button>
             </div>
-            <div className={styles.metaRow}>
-              <dt>오늘 체크 포인트</dt>
-              <dd>
-                <ul className={styles.checkList}>
-                  {item.checkPoints.map((point, index) => (
-                    <li key={`${item.id}-checkpoint-${index}`}>{point}</li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-          </dl>
+          ) : null}
         </div>
       ) : null}
     </article>

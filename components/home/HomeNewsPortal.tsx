@@ -3,9 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HomeNewsSection } from "@/components/home/HomeNewsSection";
-import { HomeNewsDataset } from "@/components/home/home-news.types";
+import { HomeNewsCardItem, HomeNewsCardsByCategory, HomeNewsDataset } from "@/components/home/home-news.types";
 import { emptyHomeNewsDataset } from "@/lib/home-news/fallback";
 import { fetchHomeNewsDataset } from "@/lib/home-news/queries";
+import { toggleHomeNewsBriefingLike } from "@/lib/home-news/like-actions";
+import { fetchHomeNewsLikeWorkspace } from "@/lib/home-news/like-queries";
+import { toHomeNewsLikePreferenceRecord } from "@/lib/home-news/like-types";
+import { applyHomeNewsPersonalization } from "@/lib/home-news/personalization";
+import { generateTimedLivePreview } from "@/lib/home-news/timed-live-preview-actions";
 
 const HOST_SELECTOR = '[data-home-news-slot="true"]';
 
@@ -31,19 +36,95 @@ function ensurePortalHost() {
     host.style.padding = "0";
   }
 
-  if (hero.nextSibling !== host) {
-    hero.insertAdjacentElement("afterend", host);
+  if (hero.previousSibling !== host) {
+    hero.insertAdjacentElement("beforebegin", host);
   }
 
   return host;
 }
 
 export function HomeNewsPortal() {
+  const isDev = process.env.NODE_ENV === "development";
   const [host, setHost] = useState<HTMLElement | null>(null);
-  const [data, setData] = useState<HomeNewsDataset>(emptyHomeNewsDataset);
+  const [baseData, setBaseData] = useState<HomeNewsDataset>(emptyHomeNewsDataset);
+  const [livePreviewData, setLivePreviewData] = useState<HomeNewsDataset | null>(null);
+  const [likeWorkspace, setLikeWorkspace] = useState<Awaited<ReturnType<typeof fetchHomeNewsLikeWorkspace>> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [togglingLikeId, setTogglingLikeId] = useState<string | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
-  const section = useMemo(() => <HomeNewsSection data={data} loading={loading} />, [data, loading]);
+  const personalizedBaseData = useMemo(
+    () => applyHomeNewsPersonalization(baseData, likeWorkspace),
+    [baseData, likeWorkspace],
+  );
+  const activeData = livePreviewData ?? personalizedBaseData;
+  const previewActive = Boolean(livePreviewData);
+  const section = useMemo(
+    () => (
+      <HomeNewsSection
+        data={activeData}
+        loading={loading}
+        togglingLikeId={togglingLikeId}
+        onToggleLike={
+          previewActive
+            ? undefined
+            : (itemId, nextLiked) => {
+                const allItems = Object.values(activeData.cardsByCategory).flatMap((items) => items ?? []);
+                const targetItem = allItems.find((item) => item.id === itemId) ?? null;
+                if (!targetItem) return;
+
+                setTogglingLikeId(itemId);
+                void (async () => {
+                  const result = await toggleHomeNewsBriefingLike(itemId, nextLiked);
+                  if (!result.ok) {
+                    console.warn(result.message);
+                    setTogglingLikeId(null);
+                    return;
+                  }
+
+                  setBaseData((current) => ({
+                    ...current,
+                    cardsByCategory: Object.fromEntries(
+                      Object.entries(current.cardsByCategory).map(([category, items]) => [
+                        category,
+                        (items ?? []).map((item) =>
+                          item.id === itemId
+                            ? {
+                                ...item,
+                                viewerHasLiked: nextLiked,
+                                likesCount: result.likesCount ?? item.likesCount ?? 0,
+                              }
+                            : item,
+                        ),
+                      ]),
+                    ) as Partial<HomeNewsCardsByCategory>,
+                  }));
+
+                  setLikeWorkspace((current) => {
+                    const previous = current ?? { likedBriefingIds: [], preferences: [] };
+                    const likedBriefingIds = nextLiked
+                      ? Array.from(new Set([...previous.likedBriefingIds, itemId]))
+                      : previous.likedBriefingIds.filter((id) => id !== itemId);
+                    const preferences = nextLiked
+                      ? [
+                          toHomeNewsLikePreferenceRecord(targetItem as HomeNewsCardItem),
+                          ...previous.preferences.filter((item) => item.briefingId !== itemId),
+                        ]
+                      : previous.preferences.filter((item) => item.briefingId !== itemId);
+
+                    return {
+                      likedBriefingIds,
+                      preferences,
+                    };
+                  });
+
+                  setTogglingLikeId(null);
+                })();
+              }
+        }
+      />
+    ),
+    [activeData, loading, previewActive, togglingLikeId],
+  );
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -67,7 +148,37 @@ export function HomeNewsPortal() {
       setLoading(true);
       const result = await fetchHomeNewsDataset();
       if (cancelled) return;
-      setData(result.data);
+      setBaseData(result.data);
+      try {
+        const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
+        if (!cancelled) {
+          setLikeWorkspace(nextLikeWorkspace);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
+          setLikeWorkspace(null);
+        }
+      }
+      if (isDev) {
+        try {
+          const previewResult = await generateTimedLivePreview();
+          if (!cancelled && previewResult.ok && previewResult.data) {
+            setLivePreviewData(previewResult.data);
+          }
+          if (!cancelled && !previewResult.ok) {
+            console.warn(previewResult.message);
+            setLivePreviewData(null);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            console.warn(error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.");
+            setLivePreviewData(null);
+          }
+        }
+      } else if (!cancelled) {
+        setLivePreviewData(null);
+      }
       setLoading(false);
       if (result.errorMessage) {
         console.warn(result.errorMessage);
@@ -93,7 +204,7 @@ export function HomeNewsPortal() {
         currentHost.remove();
       }
     };
-  }, []);
+  }, [isDev]);
 
   if (!host) return null;
   return createPortal(section, host);

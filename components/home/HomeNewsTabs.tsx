@@ -16,26 +16,42 @@ function getInitialCategory(cardsByCategory: Partial<HomeNewsCardsByCategory>) {
 
 type HomeNewsTabsProps = {
   cardsByCategory: Partial<HomeNewsCardsByCategory>;
+  recommendedCategory?: HomeNewsCategory;
   loading?: boolean;
+  togglingLikeId?: string | null;
+  onToggleLike?: (itemId: string, nextLiked: boolean) => void;
 };
 
-export function HomeNewsTabs({ cardsByCategory, loading = false }: HomeNewsTabsProps) {
+export function HomeNewsTabs({
+  cardsByCategory,
+  recommendedCategory,
+  loading = false,
+  togglingLikeId = null,
+  onToggleLike,
+}: HomeNewsTabsProps) {
   const groupId = useId();
-  const [activeCategory, setActiveCategory] = useState<HomeNewsCategory>(() => getInitialCategory(cardsByCategory));
+  const [activeCategory, setActiveCategory] = useState<HomeNewsCategory>(() => recommendedCategory ?? getInitialCategory(cardsByCategory));
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
+  const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
   const items = cardsByCategory[activeCategory] ?? [];
 
   useEffect(() => {
-    const nextCategory = getInitialCategory(cardsByCategory);
+    const nextCategory = recommendedCategory ?? getInitialCategory(cardsByCategory);
     const currentItems = cardsByCategory[activeCategory] ?? [];
     if (currentItems.length === 0 && (cardsByCategory[nextCategory] ?? []).length > 0) {
       setActiveCategory(nextCategory);
     }
-  }, [activeCategory, cardsByCategory]);
+  }, [activeCategory, cardsByCategory, recommendedCategory]);
 
   useEffect(() => {
     setExpandedCardId(null);
   }, [activeCategory]);
+
+  useEffect(() => {
+    if (!recommendedCategory || hasUserSelectedCategory) return;
+    if ((cardsByCategory[recommendedCategory] ?? []).length === 0) return;
+    setActiveCategory(recommendedCategory);
+  }, [cardsByCategory, hasUserSelectedCategory, recommendedCategory]);
 
   return (
     <div className={styles.tabs}>
@@ -52,7 +68,10 @@ export function HomeNewsTabs({ cardsByCategory, loading = false }: HomeNewsTabsP
               aria-controls={`${groupId}-${category}-panel`}
               tabIndex={isActive ? 0 : -1}
               className={`${styles.tabButton} ${isActive ? styles.tabButtonActive : ""}`}
-              onClick={() => setActiveCategory(category)}
+              onClick={() => {
+                setHasUserSelectedCategory(true);
+                setActiveCategory(category);
+              }}
             >
               <span>{HOME_NEWS_CATEGORY_LABELS[category]}</span>
               <span className={styles.tabCount}>{(cardsByCategory[category] ?? []).length}</span>
@@ -80,6 +99,12 @@ export function HomeNewsTabs({ cardsByCategory, loading = false }: HomeNewsTabsP
                 item={item}
                 expanded={expandedCardId === item.id}
                 onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
+                togglingLike={togglingLikeId === item.id}
+                onToggleLike={
+                  onToggleLike
+                    ? (nextLiked) => onToggleLike(item.id, nextLiked)
+                    : undefined
+                }
               />
             ))}
           </div>

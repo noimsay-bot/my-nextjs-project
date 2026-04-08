@@ -6,6 +6,26 @@
   padding: 0;
 }
 
+.metaBar {
+  display: grid;
+  gap: 4px;
+  padding: 2px 2px 0;
+}
+
+.metaBarTitle {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.45;
+}
+
+.metaBarDetail {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .tickerViewport {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -176,14 +196,14 @@
 }
 
 .panel {
-  display: grid;
-  min-height: 210px;
+  display: block;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+  align-items: start;
 }
 
 .cardSkeleton {
@@ -204,7 +224,7 @@
 .card {
   display: grid;
   gap: 0;
-  min-height: 100%;
+  min-height: 0;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.028);
@@ -223,6 +243,12 @@
   text-align: left;
   cursor: pointer;
   transition: background-color 160ms ease;
+}
+
+.cardToggleCollapsed {
+  gap: 0;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 .cardToggle:hover,
@@ -270,11 +296,22 @@
   gap: 8px;
 }
 
+.cardBodyCollapsed {
+  gap: 0;
+}
+
 .cardTitle {
   margin: 0;
   font-size: 19px;
   line-height: 1.36;
   letter-spacing: -0.03em;
+}
+
+.cardTitleCollapsed {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 .cardPreview p {
@@ -284,18 +321,67 @@
   line-height: 1.55;
 }
 
-.cardChevron {
-  justify-self: end;
+.cardPreviewCollapsed {
+  display: none;
+}
+
+.cardActions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.likeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.likeButton:hover,
+.likeButton:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
+  outline: none;
+}
+
+.likeButton:disabled {
+  opacity: 0.64;
+  cursor: wait;
+}
+
+.likeButtonActive {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--text);
+}
+
+.likeButtonIcon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.likeCount {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 20px;
-  line-height: 1;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .cardExpanded {
@@ -399,15 +485,19 @@
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .panel {
-    min-height: 190px;
-  }
 }
 
 @media (max-width: 760px) {
   .section {
     gap: 12px;
+  }
+
+  .metaBarTitle {
+    font-size: 11px;
+  }
+
+  .metaBarDetail {
+    font-size: 10px;
   }
 
   .tickerGroup {
@@ -456,13 +546,15 @@
     min-height: 176px;
   }
 
-  .panel {
-    min-height: 0;
-  }
-
   .cardToggle {
     gap: 10px;
     padding: 16px;
+  }
+
+  .cardToggleCollapsed {
+    gap: 6px;
+    padding-top: 10px;
+    padding-bottom: 10px;
   }
 
   .cardExpanded {
@@ -472,6 +564,10 @@
 
   .cardTitle {
     font-size: 17px;
+  }
+
+  .cardTitleCollapsed {
+    font-size: 16px;
   }
 
   .summary p,

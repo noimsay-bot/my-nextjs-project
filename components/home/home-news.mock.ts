@@ -1,6 +1,7 @@
 import { HomeNewsDataset } from "@/components/home/home-news.types";
 
 export const homeNewsMockData: HomeNewsDataset = {
+  sourceKind: "fallback_mock",
   tickerItems: [
     {
       id: "politics-budget",
