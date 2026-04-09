@@ -481,11 +481,14 @@ export function PublishedSchedulesPanel() {
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const pinchZoomStateRef = useRef<{ startDistance: number; startZoomFactor: number } | null>(null);
   const scheduleZoomFactorRef = useRef(1);
+  const pendingPinchZoomFactorRef = useRef(1);
+  const pinchZoomFrameRef = useRef(0);
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
 
   useEffect(() => {
     scheduleZoomFactorRef.current = scheduleZoomFactor;
+    pendingPinchZoomFactorRef.current = scheduleZoomFactor;
   }, [scheduleZoomFactor]);
 
   useEffect(() => {
@@ -813,12 +816,23 @@ export function PublishedSchedulesPanel() {
         TOUCH_SCHEDULE_ZOOM_MAX,
         Math.max(TOUCH_SCHEDULE_ZOOM_MIN, Number(rawZoomFactor.toFixed(2))),
       );
-
-      setScheduleZoomFactor((current) => (Math.abs(current - nextZoomFactor) < 0.01 ? current : nextZoomFactor));
+      pendingPinchZoomFactorRef.current = nextZoomFactor;
+      if (pinchZoomFrameRef.current) return;
+      pinchZoomFrameRef.current = window.requestAnimationFrame(() => {
+        pinchZoomFrameRef.current = 0;
+        const pendingZoomFactor = pendingPinchZoomFactorRef.current;
+        setScheduleZoomFactor((current) =>
+          Math.abs(current - pendingZoomFactor) < 0.01 ? current : pendingZoomFactor,
+        );
+      });
     };
 
     const endPinchZoom = () => {
       pinchZoomStateRef.current = null;
+      if (pinchZoomFrameRef.current) {
+        window.cancelAnimationFrame(pinchZoomFrameRef.current);
+        pinchZoomFrameRef.current = 0;
+      }
     };
 
     scrollNode.addEventListener("touchstart", handleTouchStart, { passive: true });
@@ -832,6 +846,10 @@ export function PublishedSchedulesPanel() {
       scrollNode.removeEventListener("touchend", endPinchZoom);
       scrollNode.removeEventListener("touchcancel", endPinchZoom);
       pinchZoomStateRef.current = null;
+      if (pinchZoomFrameRef.current) {
+        window.cancelAnimationFrame(pinchZoomFrameRef.current);
+        pinchZoomFrameRef.current = 0;
+      }
     };
   }, [selectedItem, shouldAutoFitSchedule]);
 
@@ -1339,6 +1357,7 @@ export function PublishedSchedulesPanel() {
                   position: shouldAutoFitSchedule ? "absolute" : undefined,
                   top: shouldAutoFitSchedule ? 0 : undefined,
                   left: shouldAutoFitSchedule ? 0 : undefined,
+                  willChange: shouldAutoFitSchedule ? "transform" : undefined,
                 }}
               >
               <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
