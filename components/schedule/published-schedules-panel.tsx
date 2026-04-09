@@ -466,6 +466,7 @@ export function PublishedSchedulesPanel() {
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleZoomFactor, setScheduleZoomFactor] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
+  const [scheduleViewportWidth, setScheduleViewportWidth] = useState(0);
   const [session, setSession] = useState(() => getSession());
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
@@ -682,6 +683,8 @@ export function PublishedSchedulesPanel() {
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
+  const isScheduleOverflowingX =
+    shouldAutoFitSchedule && scheduleViewportWidth > 0 && scaledScheduleWidth > scheduleViewportWidth + 1;
   const canControlScheduleZoom = false;
   const scheduleZoomPercent = Math.round(appliedScheduleScale * 100);
 
@@ -702,6 +705,7 @@ export function PublishedSchedulesPanel() {
       );
 
       const containerWidth = scrollNode.clientWidth;
+      setScheduleViewportWidth((current) => (current === containerWidth ? current : containerWidth));
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
       const autoFitCap = 1;
       const nextFitScale = shouldAutoFitSchedule
@@ -1256,7 +1260,8 @@ export function PublishedSchedulesPanel() {
                   minWidth: shouldAutoFitSchedule ? "100%" : undefined,
                   width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
                   height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
-                  margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,
+                  margin:
+                    shouldAutoFitSchedule && scaledScheduleWidth > 0 && !isScheduleOverflowingX ? "0 auto" : undefined,
                   position: shouldAutoFitSchedule ? "relative" : undefined,
                 }}
               >
