@@ -2063,6 +2063,7 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 }
 
 .schedule-assignment-page-shell {
+  position: relative;
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
   gap: 16px;
@@ -2070,13 +2071,71 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 }
 
 .schedule-assignment-page-rail {
+  grid-column: 1;
+  grid-row: 1;
   position: sticky;
   top: calc(50vh - 16px);
   align-self: start;
-  margin-left: 0;
+  margin-left: -10px;
   display: grid;
   gap: 10px;
   justify-items: start;
+}
+
+.schedule-assignment-date-nav {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  position: sticky;
+  top: calc(50vh + 34px);
+  transform: translateY(-50%);
+  margin-left: 0;
+  width: 24px;
+  max-height: calc(100vh - 156px);
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 10px 4px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(6px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  z-index: 2;
+}
+
+.schedule-assignment-date-nav__button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.schedule-assignment-date-nav__button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.schedule-assignment-date-nav__button--today {
+  background: rgba(143, 231, 255, 0.18);
+  color: var(--text);
+}
+
+.schedule-assignment-page-content {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
 }
 
 .schedule-assignment-top-button,
@@ -2101,6 +2160,22 @@ html[data-theme="light"] .schedule-assignment-top-button {
   color: #173a79;
   border: 1px solid rgba(37, 99, 235, 0.28);
   box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
+}
+
+html[data-theme="light"] .schedule-assignment-date-nav {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.1);
+}
+
+html[data-theme="light"] .schedule-assignment-date-nav__button:hover {
+  background: rgba(219, 234, 254, 0.9);
+  color: #173a79;
+}
+
+html[data-theme="light"] .schedule-assignment-date-nav__button--today {
+  background: rgba(191, 219, 254, 0.95);
+  color: #173a79;
 }
 
 @media (min-width: 961px) {
@@ -2184,6 +2259,10 @@ html[data-theme="light"] .schedule-assignment-top-button {
 @media (max-width: 960px) {
   .schedule-assignment-page-shell {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-assignment-date-nav {
+    display: none;
   }
 
   .schedule-assignment-page-rail {

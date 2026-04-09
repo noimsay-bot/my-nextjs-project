@@ -355,16 +355,20 @@ export function ScheduleAssignmentPage() {
   const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
+  const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const jumpToTodayPendingRef = useRef(false);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
-  const scrollTodayCardToTop = (behavior: ScrollBehavior) => {
-    const todayCard = todayCardRef.current;
-    if (!todayCard) return;
-    const targetTop = Math.max(0, window.scrollY + todayCard.getBoundingClientRect().top - 132);
+  const scrollCardToTop = (target: HTMLElement | null, behavior: ScrollBehavior) => {
+    if (!target) return;
+    const targetTop = Math.max(0, window.scrollY + target.getBoundingClientRect().top - 132);
     window.scrollTo({ top: targetTop, behavior });
+  };
+
+  const scrollTodayCardToTop = (behavior: ScrollBehavior) => {
+    scrollCardToTop(todayCardRef.current, behavior);
   };
 
   useEffect(() => {
@@ -448,6 +452,10 @@ export function ScheduleAssignmentPage() {
 
   const scrollToPageTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const jumpToDate = (dateKey: string) => {
+    scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
   };
 
   const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
@@ -753,7 +761,20 @@ export function ScheduleAssignmentPage() {
           오늘
         </button>
       </aside>
-      <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+      <aside className="schedule-assignment-date-nav" aria-label="해당 월 날짜 이동">
+        {monthDays.map((day) => (
+          <button
+            key={day.dateKey}
+            type="button"
+            className={`schedule-assignment-date-nav__button ${day.dateKey === todayDateKey ? "schedule-assignment-date-nav__button--today" : ""}`}
+            onClick={() => jumpToDate(day.dateKey)}
+            aria-label={`${day.month}월 ${day.day}일로 이동`}
+          >
+            {day.day}
+          </button>
+        ))}
+      </aside>
+      <div className="schedule-assignment-page-content">
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -793,6 +814,7 @@ export function ScheduleAssignmentPage() {
             key={day.dateKey}
             className="panel"
             ref={(element) => {
+              dayCardRefs.current[day.dateKey] = element;
               if (day.dateKey === todayDateKey) {
                 todayCardRef.current = element;
               }
