@@ -40,6 +40,13 @@ const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
+function getTouchDistance(touches: TouchList) {
+  if (touches.length < 2) return 0;
+  const first = touches[0];
+  const second = touches[1];
+  return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+}
+
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
@@ -472,8 +479,14 @@ export function PublishedSchedulesPanel() {
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pinchZoomStateRef = useRef<{ startDistance: number; startZoomFactor: number } | null>(null);
+  const scheduleZoomFactorRef = useRef(1);
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
+
+  useEffect(() => {
+    scheduleZoomFactorRef.current = scheduleZoomFactor;
+  }, [scheduleZoomFactor]);
 
   useEffect(() => {
     return subscribeToAuth((nextSession) => {
@@ -558,8 +571,8 @@ export function PublishedSchedulesPanel() {
     if (typeof window === "undefined") return;
     const coarsePointerMediaQuery = window.matchMedia("(any-pointer: coarse)");
     const syncViewport = () => {
-      const viewportWidth = Math.round(window.visualViewport?.width ?? window.innerWidth);
-      const viewportHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      const viewportWidth = Math.round(window.innerWidth);
+      const viewportHeight = Math.round(window.innerHeight);
       setScheduleLayoutMode(
         getPublishedScheduleLayoutMode(viewportWidth, viewportHeight, coarsePointerMediaQuery.matches),
       );
@@ -572,13 +585,11 @@ export function PublishedSchedulesPanel() {
     coarsePointerMediaQuery.addListener?.(syncViewport);
     window.addEventListener("resize", syncViewport);
     window.addEventListener("orientationchange", syncViewportByOrientation);
-    window.visualViewport?.addEventListener("resize", syncViewport);
     return () => {
       coarsePointerMediaQuery.removeEventListener?.("change", syncViewport);
       coarsePointerMediaQuery.removeListener?.(syncViewport);
       window.removeEventListener("resize", syncViewport);
       window.removeEventListener("orientationchange", syncViewportByOrientation);
-      window.visualViewport?.removeEventListener("resize", syncViewport);
     };
   }, []);
 
@@ -774,6 +785,55 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener("orientationchange", scheduleMeasure);
     };
   }, [displayDays, editMode, isCompactMonthlyView, requests, selectedRoute, showMine]);
+
+  useEffect(() => {
+    const scrollNode = scheduleScrollRef.current;
+    if (!scrollNode || !shouldAutoFitSchedule) return;
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length < 2) return;
+      const startDistance = getTouchDistance(event.touches);
+      if (startDistance <= 0) return;
+      pinchZoomStateRef.current = {
+        startDistance,
+        startZoomFactor: scheduleZoomFactorRef.current,
+      };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const pinchState = pinchZoomStateRef.current;
+      if (!pinchState || event.touches.length < 2) return;
+
+      const nextDistance = getTouchDistance(event.touches);
+      if (nextDistance <= 0) return;
+
+      event.preventDefault();
+      const rawZoomFactor = pinchState.startZoomFactor * (nextDistance / pinchState.startDistance);
+      const nextZoomFactor = Math.min(
+        TOUCH_SCHEDULE_ZOOM_MAX,
+        Math.max(TOUCH_SCHEDULE_ZOOM_MIN, Number(rawZoomFactor.toFixed(2))),
+      );
+
+      setScheduleZoomFactor((current) => (Math.abs(current - nextZoomFactor) < 0.01 ? current : nextZoomFactor));
+    };
+
+    const endPinchZoom = () => {
+      pinchZoomStateRef.current = null;
+    };
+
+    scrollNode.addEventListener("touchstart", handleTouchStart, { passive: true });
+    scrollNode.addEventListener("touchmove", handleTouchMove, { passive: false });
+    scrollNode.addEventListener("touchend", endPinchZoom);
+    scrollNode.addEventListener("touchcancel", endPinchZoom);
+
+    return () => {
+      scrollNode.removeEventListener("touchstart", handleTouchStart);
+      scrollNode.removeEventListener("touchmove", handleTouchMove);
+      scrollNode.removeEventListener("touchend", endPinchZoom);
+      scrollNode.removeEventListener("touchcancel", endPinchZoom);
+      pinchZoomStateRef.current = null;
+    };
+  }, [selectedItem, shouldAutoFitSchedule]);
 
   const printSelectedSchedule = () => {
     if (!selectedItem) return;
@@ -1251,7 +1311,7 @@ export function PublishedSchedulesPanel() {
                 style={{
                   overflowX: shouldAutoFitSchedule ? "auto" : undefined,
                   overflowY: shouldAutoFitSchedule ? "auto" : undefined,
-                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y pinch-zoom" : undefined,
+                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y" : undefined,
                   WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
                 }}
               >

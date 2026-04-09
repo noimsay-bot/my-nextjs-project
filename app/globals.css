@@ -1885,6 +1885,14 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   -webkit-overflow-scrolling: touch;
 }
 
+.schedule-published-panel--mobile-layout {
+  overflow: visible;
+}
+
+.schedule-published-panel--mobile-layout > .panel-pad {
+  overflow: visible;
+}
+
 .schedule-published-panel--desktop-layout .schedule-published-hero {
   width: 100%;
   display: grid;
