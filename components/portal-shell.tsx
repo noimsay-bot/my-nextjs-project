@@ -25,7 +25,6 @@ import {
 } from "@/lib/team-lead/storage";
 
 const links = [
-  { href: "/", label: "홈" },
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/schedule", label: "DESK" },
