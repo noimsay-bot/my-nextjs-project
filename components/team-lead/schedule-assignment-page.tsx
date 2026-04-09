@@ -356,8 +356,16 @@ export function ScheduleAssignmentPage() {
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
+  const jumpToTodayPendingRef = useRef(false);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
+
+  const scrollTodayCardToTop = (behavior: ScrollBehavior) => {
+    const todayCard = todayCardRef.current;
+    if (!todayCard) return;
+    const targetTop = Math.max(0, window.scrollY + todayCard.getBoundingClientRect().top - 132);
+    window.scrollTo({ top: targetTop, behavior });
+  };
 
   useEffect(() => {
     const syncFromCache = () => {
@@ -413,16 +421,34 @@ export function ScheduleAssignmentPage() {
   useEffect(() => {
     if (selectedMonthKey !== todayMonthKey) return;
     if (!monthDays.some((day) => day.dateKey === todayDateKey)) return;
-    if (autoScrolledMonthKeyRef.current === selectedMonthKey) return;
+    if (autoScrolledMonthKeyRef.current === selectedMonthKey && !jumpToTodayPendingRef.current) return;
 
     autoScrolledMonthKeyRef.current = selectedMonthKey;
 
     const timer = window.setTimeout(() => {
-      todayCardRef.current?.scrollIntoView({ block: "start" });
+      scrollTodayCardToTop(jumpToTodayPendingRef.current ? "smooth" : "auto");
+      jumpToTodayPendingRef.current = false;
     }, 0);
 
     return () => window.clearTimeout(timer);
   }, [monthDays, selectedMonthKey, todayDateKey, todayMonthKey]);
+
+  const jumpToToday = () => {
+    autoScrolledMonthKeyRef.current = null;
+    jumpToTodayPendingRef.current = true;
+    if (selectedMonthKey !== todayMonthKey) {
+      setSelectedMonthKey(todayMonthKey);
+      return;
+    }
+    window.setTimeout(() => {
+      scrollTodayCardToTop("smooth");
+      jumpToTodayPendingRef.current = false;
+    }, 0);
+  };
+
+  const scrollToPageTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
     setStore((current) => {
@@ -710,7 +736,24 @@ export function ScheduleAssignmentPage() {
   }
 
   return (
-    <section style={{ display: "grid", gap: 16 }}>
+    <section className="schedule-assignment-page-shell">
+      <aside className="schedule-assignment-page-rail">
+        <button
+          type="button"
+          className="btn white schedule-assignment-top-button"
+          onClick={scrollToPageTop}
+        >
+          상단
+        </button>
+        <button
+          type="button"
+          className="btn white schedule-assignment-today-button"
+          onClick={jumpToToday}
+        >
+          오늘
+        </button>
+      </aside>
+      <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -1255,6 +1298,7 @@ export function ScheduleAssignmentPage() {
           </article>
         );
       })}
+      </div>
     </section>
   );
 }
