@@ -47,6 +47,23 @@ function countUniqueItems(data: HomeNewsDataset) {
   return ids.size > 0 ? ids.size : data.tickerItems.length;
 }
 
+function getLatestDatasetTimestamp(data: HomeNewsDataset) {
+  const timestamps = [
+    ...data.tickerItems.map((item) => item.publishedAt).filter(Boolean),
+    ...Object.values(data.cardsByCategory)
+      .flatMap((items) => items ?? [])
+      .flatMap((item) => [item.publishedAt, item.occurredAt])
+      .filter(Boolean),
+  ];
+
+  const latest = timestamps
+    .map((value) => (value ? new Date(value).getTime() : Number.NaN))
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => right - left)[0];
+
+  return Number.isFinite(latest) ? new Date(latest).toISOString() : "";
+}
+
 export function HomeNewsMeta({ data }: HomeNewsMetaProps) {
   const itemCount = countUniqueItems(data);
 
@@ -88,9 +105,13 @@ export function HomeNewsMeta({ data }: HomeNewsMetaProps) {
     );
   }
 
+  const latestLabel = formatKstDateTime(getLatestDatasetTimestamp(data));
+
   return (
     <div className={styles.metaBar} aria-live="polite">
-      <div className={styles.metaBarTitle}>공식 발행본 없음 · 현재 중요 뉴스 자동 편성 표시 중</div>
+      <div className={styles.metaBarTitle}>
+        {latestLabel ? `${latestLabel} 업데이트 기준` : "업데이트 시각 확인 중"}
+      </div>
       <div className={styles.metaBarDetail}>
         {itemCount > 0 ? `${itemCount}건 표시` : "표시 가능한 뉴스 확인 중"}
       </div>

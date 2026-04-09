@@ -43,13 +43,59 @@ function normalizeDayAssignments(day: DaySchedule) {
   ) as Record<string, string[]>;
 }
 
+const REQUIRED_DAY_ASSIGNMENT_OVERRIDES: Record<
+  string,
+  {
+    isHoliday: boolean;
+    isCustomHoliday: boolean;
+    isWeekdayHoliday: boolean;
+    assignments: Record<string, string[]>;
+  }
+> = {
+  "2026-05-01": {
+    isHoliday: true,
+    isCustomHoliday: true,
+    isWeekdayHoliday: true,
+    assignments: {
+      조근: ["조용희"],
+      일반: ["구본준", "이지수", "김진광", "박대권"],
+      석근: ["이학진", "김재식", "김준택"],
+      야근: ["반일훈"],
+    },
+  },
+};
+
+function hasRequiredDayOverride(dateKey: string) {
+  return dateKey in REQUIRED_DAY_ASSIGNMENT_OVERRIDES;
+}
+
+function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
+  const override = REQUIRED_DAY_ASSIGNMENT_OVERRIDES[day.dateKey];
+  if (!override) {
+    return {
+      ...day,
+      assignments: normalizeDayAssignments(day),
+    };
+  }
+
+  return {
+    ...day,
+    isHoliday: override.isHoliday,
+    isCustomHoliday: override.isCustomHoliday,
+    isWeekdayHoliday: override.isWeekdayHoliday,
+    assignments: normalizeDayAssignments({
+      ...day,
+      isHoliday: override.isHoliday,
+      assignments: override.assignments,
+    }),
+    manualExtras: [],
+  };
+}
+
 export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
   return {
     ...schedule,
-    days: schedule.days.map((day) => ({
-      ...day,
-      assignments: normalizeDayAssignments(day),
-    })),
+    days: schedule.days.map((day) => applyRequiredDayOverride(day)),
   };
 }
 
@@ -63,11 +109,37 @@ function normalizeEditableNameList(value: unknown) {
   return Array.from(new Set(value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)));
 }
 
+const REQUIRED_EXTRA_HOLIDAYS = ["2026-05-01"];
+
+function normalizeExtraHolidaysText(value: unknown) {
+  const merged = new Set(
+    String(typeof value === "string" ? value : "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+
+  REQUIRED_EXTRA_HOLIDAYS.forEach((dateKey) => merged.add(dateKey));
+  return [...merged].join(", ");
+}
+
 function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]) {
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   let previousNight: string[] = [];
 
   orderedDays.forEach((day) => {
+    if (hasRequiredDayOverride(day.dateKey)) {
+      const overriddenDay = applyRequiredDayOverride(day);
+      day.isHoliday = overriddenDay.isHoliday;
+      day.isCustomHoliday = overriddenDay.isCustomHoliday;
+      day.isWeekdayHoliday = overriddenDay.isWeekdayHoliday;
+      day.assignments = overriddenDay.assignments;
+      day.manualExtras = overriddenDay.manualExtras;
+      day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+      previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+      return;
+    }
+
     if (day.isWeekend) {
       delete day.assignments["일반"];
       day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
@@ -177,6 +249,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     year: clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year),
     month: clampNumber(input.month ?? base.month, SCHEDULE_MONTHS[0], SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1], base.month),
     jcheckCount: DEFAULT_JCHECK_COUNT,
+    extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays),
     generalTeamPeople,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),

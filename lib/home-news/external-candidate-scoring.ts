@@ -242,6 +242,11 @@ function isMajorMediaCandidate(candidate: ExternalNewsCandidate) {
   return MAJOR_MEDIA_PATTERNS.test(text);
 }
 
+function isMajorLocalElectionCandidate(candidate: ExternalNewsCandidate) {
+  const text = `${candidate.title} ${candidate.excerpt}`.trim();
+  return LOCAL_ELECTION_MAJOR_RACE_PATTERNS.test(text) && isMajorMediaCandidate(candidate);
+}
+
 function hasTrueHeadlineStrength(candidate: ExternalNewsCandidate) {
   const breakdown = candidate.scoreBreakdown;
   if (!breakdown) return false;
@@ -265,8 +270,15 @@ function hasTrueHeadlineStrength(candidate: ExternalNewsCandidate) {
     breakdown.newsroomRelevance >= 80 &&
     breakdown.promotionalPenalty <= 20 &&
     breakdown.localOnlyPenalty <= 16;
+  const isMajorLocalElectionHeadline =
+    isMajorLocalElectionCandidate(candidate) &&
+    breakdown.portalHeadlineLikelihood >= 58 &&
+    breakdown.frontPageLikelihood >= 54 &&
+    breakdown.newsroomRelevance >= 78 &&
+    breakdown.promotionalPenalty <= 24 &&
+    breakdown.localOnlyPenalty <= 24;
 
-  return isMajorMedia && (isNationalHeadline || isStrongProceduralHeadline || isMajorDisasterHeadline);
+  return isMajorMedia && (isNationalHeadline || isStrongProceduralHeadline || isMajorDisasterHeadline || isMajorLocalElectionHeadline);
 }
 
 function getLocalElectionMajorRaceBoost(candidate: ExternalNewsCandidate) {
@@ -603,8 +615,15 @@ function getHeadlineThreshold(candidate: ExternalNewsCandidate) {
     breakdown.newsroomRelevance >= 80 &&
     breakdown.promotionalPenalty <= 22 &&
     breakdown.localOnlyPenalty <= 18;
+  const isMajorLocalElection =
+    isMajorLocalElectionCandidate(candidate) &&
+    breakdown.portalHeadlineLikelihood >= 58 &&
+    breakdown.frontPageLikelihood >= 54 &&
+    breakdown.newsroomRelevance >= 78 &&
+    breakdown.promotionalPenalty <= 24 &&
+    breakdown.localOnlyPenalty <= 24;
 
-  return isStrongProcedural || isStrongHeadline || isMajorDisaster || isMajorEconomicOrWorld;
+  return isStrongProcedural || isStrongHeadline || isMajorDisaster || isMajorEconomicOrWorld || isMajorLocalElection;
 }
 
 function hasCategoryFallbackContext(candidate: ExternalNewsCandidate) {
@@ -631,6 +650,11 @@ export function shouldKeepForHomeLivePreview(candidate: ExternalNewsCandidate) {
   if (!getHeadlineThreshold(candidate)) return false;
   if (!isMajorMediaCandidate(candidate)) return false;
   if (breakdown.promotionalPenalty >= 24) return false;
+  if (isMajorLocalElectionCandidate(candidate)) {
+    if (breakdown.localOnlyPenalty >= 24) return false;
+    if (breakdown.newsroomRelevance < 78) return false;
+    return hasTrueHeadlineStrength(candidate);
+  }
   if (breakdown.localOnlyPenalty >= 20) return false;
   if (breakdown.newsroomRelevance < 80) return false;
   return hasTrueHeadlineStrength(candidate);
@@ -685,6 +709,13 @@ export function shouldPrioritizeForHomeLivePreview(candidate: ExternalNewsCandid
   if (!breakdown) return false;
   if (!isWithinRecentPublishedWindow(candidate, Date.now())) return false;
   if (!shouldKeepForHomeLivePreview(candidate)) return false;
+  if (isMajorLocalElectionCandidate(candidate)) {
+    return (
+      breakdown.portalHeadlineLikelihood >= 66 ||
+      breakdown.frontPageLikelihood >= 62 ||
+      breakdown.newsroomRelevance >= 84
+    );
+  }
   return (
     breakdown.portalHeadlineLikelihood >= 74 ||
     breakdown.frontPageLikelihood >= 70 ||

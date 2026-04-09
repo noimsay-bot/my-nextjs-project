@@ -1,6 +1,6 @@
 "use server";
 
-import { HomeNewsDataset } from "@/components/home/home-news.types";
+import { HomeNewsCategory, HomeNewsDataset, HOME_NEWS_CATEGORIES } from "@/components/home/home-news.types";
 import {
   createDefaultNewsAIDraftRequest,
   NewsAIDraftRequestInput,
@@ -184,6 +184,39 @@ function uniqueCandidates(candidates: ExternalNewsCandidate[]) {
     }
     return true;
   });
+}
+
+function selectCandidatesForCategory(
+  category: HomeNewsCategory,
+  slotCandidates: ExternalNewsCandidate[],
+  allCandidates: ExternalNewsCandidate[],
+  perCategoryLimit = 3,
+) {
+  const merged = uniqueCandidates([
+    ...slotCandidates.filter((candidate) => candidate.category === category && shouldPrioritizeForHomeLivePreview(candidate)),
+    ...slotCandidates.filter((candidate) => candidate.category === category && shouldKeepForHomeLivePreview(candidate)),
+    ...slotCandidates.filter((candidate) => candidate.category === category),
+    ...allCandidates.filter((candidate) => candidate.category === category && shouldKeepForHomeLivePreview(candidate)),
+    ...allCandidates.filter((candidate) => candidate.category === category),
+  ]);
+
+  return merged.slice(0, perCategoryLimit);
+}
+
+function interleaveCategoryCandidates(categoryBuckets: Map<HomeNewsCategory, ExternalNewsCandidate[]>) {
+  const ordered: ExternalNewsCandidate[] = [];
+  const maxLength = Math.max(...HOME_NEWS_CATEGORIES.map((category) => categoryBuckets.get(category)?.length ?? 0), 0);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    HOME_NEWS_CATEGORIES.forEach((category) => {
+      const candidate = categoryBuckets.get(category)?.[index];
+      if (candidate) {
+        ordered.push(candidate);
+      }
+    });
+  }
+
+  return ordered;
 }
 
 function cleanFallbackLine(value: string) {
@@ -417,20 +450,29 @@ export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult
     const relaxedCandidates = scored.candidates.filter(shouldKeepForHomeLivePreview);
     const candidateSource = strictCandidates.length > 0 ? strictCandidates : relaxedCandidates;
 
-    if (candidateSource.length === 0) {
+    if (scored.candidates.length === 0) {
       return {
         ok: false,
         message: "현재 기준으로 포털 메인급·신문 1면급·속보급 후보가 없어 브리핑을 비워 둡니다.",
       };
     }
 
-    const workspace = buildExternalNewsWorkspace(now, candidateSource, scored.trendHints);
+    const workspace = buildExternalNewsWorkspace(now, scored.candidates, scored.trendHints);
     const selectedSlot =
       slotPriority.find((candidateSlot) => workspace.batches[candidateSlot].items.length > 0) ?? slot;
-    const slotCandidates = workspace.batches[selectedSlot].items;
-    const selectedPool = slotCandidates.length > 0 ? slotCandidates : candidateSource;
-    const strictPool = selectedPool.filter(shouldPrioritizeForHomeLivePreview);
-    const selectedCandidates = uniqueCandidates(strictPool.length > 0 ? strictPool : selectedPool).slice(0, 3);
+    const slotCandidates = uniqueCandidates(workspace.batches[selectedSlot].items);
+    const fallbackCandidates = uniqueCandidates(candidateSource.length > 0 ? candidateSource : scored.candidates);
+    const categoryBuckets = new Map<HomeNewsCategory, ExternalNewsCandidate[]>(
+      HOME_NEWS_CATEGORIES.map((category) => [
+        category,
+        selectCandidatesForCategory(
+          category,
+          slotCandidates.length > 0 ? slotCandidates : fallbackCandidates,
+          fallbackCandidates,
+        ),
+      ]),
+    );
+    const selectedCandidates = interleaveCategoryCandidates(categoryBuckets);
 
     if (selectedCandidates.length === 0) {
       return {
@@ -484,7 +526,10 @@ export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult
           strictCount: strictCandidates.length,
           relaxedCount: relaxedCandidates.length,
           slotCount: slotCandidates.length,
-          selectedPoolCount: selectedPool.length,
+          selectedPoolCount: fallbackCandidates.length,
+          selectedCategoryCounts: Object.fromEntries(
+            HOME_NEWS_CATEGORIES.map((category) => [category, categoryBuckets.get(category)?.length ?? 0]),
+          ),
           selected: selectedCandidates.map((candidate) => ({
             title: candidate.title,
             category: candidate.category,

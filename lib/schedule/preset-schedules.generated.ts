@@ -1223,9 +1223,9 @@ export const presetScheduleMonths: GeneratedSchedule[] = [
         "year": 2026,
         "dow": 5,
         "isWeekend": false,
-        "isHoliday": false,
-        "isCustomHoliday": false,
-        "isWeekdayHoliday": false,
+        "isHoliday": true,
+        "isCustomHoliday": true,
+        "isWeekdayHoliday": true,
         "isOverflowMonth": true,
         "vacations": [],
         "assignments": {

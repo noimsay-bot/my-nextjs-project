@@ -162,6 +162,13 @@ function getCategoryDisplayLabel(category: string) {
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
+function getDayAssignmentSortRank(dateKey: string, category: string, isWeekendLike: boolean) {
+  if (dateKey === "2026-05-01" && category === "야근") {
+    return 999;
+  }
+  return getVisibleAssignmentDisplayRank(category, isWeekendLike);
+}
+
 function parseScheduleDragPayload(value: string): ScheduleDragPayload | null {
   try {
     return JSON.parse(value) as ScheduleDragPayload;
@@ -1437,8 +1444,8 @@ export function ScheduleApp() {
                   const editMode =
                     isEditingVisibleMonth &&
                     (isAllDaysEditMode || state.editDateKey === day.dateKey);
-                  const canDragAssignments = isAllDaysEditMode && isEditingVisibleMonth && !isCoarsePointer;
-                  const canDropAssignments = isAllDaysEditMode && isEditingVisibleMonth;
+                  const canDragAssignments = editMode && !isCoarsePointer;
+                  const canDropAssignments = editMode;
                   const currentUser = state.currentUser.trim();
                   const editLocked = Boolean(state.editDateKey && !isAllDaysEditMode && state.editDateKey !== day.dateKey);
                   const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
@@ -1452,8 +1459,8 @@ export function ScheduleApp() {
                     })
                     .sort(
                       ([leftCategory], [rightCategory]) =>
-                        getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
-                        getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                        getDayAssignmentSortRank(day.dateKey, leftCategory, isWeekendLike) -
+                        getDayAssignmentSortRank(day.dateKey, rightCategory, isWeekendLike),
                     );
 
                   return (
@@ -2364,8 +2371,8 @@ export function ScheduleApp() {
                       )
                       .sort(
                         ([leftCategory], [rightCategory]) =>
-                          getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
-                          getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                          getDayAssignmentSortRank(day.dateKey, leftCategory, isWeekendLike) -
+                          getDayAssignmentSortRank(day.dateKey, rightCategory, isWeekendLike),
                       );
 
                     return (

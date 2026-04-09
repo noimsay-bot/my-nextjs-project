@@ -26,6 +26,16 @@ export function getDefaultExternalNewsSources(): ExternalNewsSourceConfig[] {
       tags: ["검찰", "경찰", "수사"],
     },
     {
+      id: "google-local-election-major-races",
+      label: "Google News 지방선거 광역단체장",
+      url: createGoogleNewsSearchUrl(
+        "(민주당 OR 국민의힘 OR 개혁신당 OR 조국혁신당 OR 진보당) (서울시장 OR 부산시장 OR 대구시장 OR 인천시장 OR 광주시장 OR 대전시장 OR 울산시장 OR 세종시장 OR 경기도지사 OR 강원도지사 OR 충북지사 OR 충남지사 OR 전북지사 OR 전남지사 OR 경북지사 OR 경남지사 OR 제주지사) (후보 확정 OR 공천 확정 OR 경선 결과 OR 후보 선출 OR 단일화 OR 여론조사) -인터뷰 -기획 -칼럼 -사설 -행사 -캠페인",
+      ),
+      slotHints: ["morning_6", "afternoon_3"],
+      categoryHint: "politics",
+      tags: ["지방선거", "후보확정"],
+    },
+    {
       id: "google-warrant",
       label: "Google News 영장·심사",
       url: createGoogleNewsSearchUrl(
