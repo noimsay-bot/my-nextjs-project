@@ -9,6 +9,7 @@ export type NewsAIDraftRequestInput = {
   relatedKeywords: string;
   eventStage: Exclude<HomeNewsEventStage, null> | "";
   eventTime: string;
+  publishedTime: string;
   sourceLabel: string;
   priorityHint: NewsBriefingPriority | "";
   recommendationReason: string;
@@ -41,6 +42,7 @@ export function createDefaultNewsAIDraftRequest(values?: Partial<NewsBriefingFor
     relatedKeywords: "",
     eventStage: values?.eventStage ?? "",
     eventTime: values?.occurredAt ?? "",
+    publishedTime: values?.publishedAt ?? "",
     sourceLabel: values?.sourceLabel ?? "",
     priorityHint: values?.priority ?? "",
     recommendationReason: "",

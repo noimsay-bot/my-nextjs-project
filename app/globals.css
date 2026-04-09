@@ -1778,6 +1778,36 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   }
 }
 
+@media (max-width: 720px) and (orientation: portrait) {
+  .portal-header-utility {
+    grid-template-columns: minmax(0, 1fr) 76px;
+    gap: 8px;
+  }
+
+  .theme-toggle {
+    padding: 3px;
+    border-radius: 16px;
+  }
+
+  .theme-toggle__button {
+    padding: 6px 8px;
+    font-size: 12px;
+    min-height: 34px;
+  }
+
+  .portal-header-utility > .muted {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .portal-header-logout {
+    min-width: 76px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.15;
+  }
+}
+
 @media (max-width: 540px) {
   .schedule-toolbar-actions--controls {
     grid-template-columns: 1fr;

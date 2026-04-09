@@ -582,7 +582,7 @@ export function PublishedSchedulesPanel() {
   }, []);
 
   useEffect(() => {
-    const shouldAutoFitSchedule = scheduleLayoutMode === "tablet";
+    const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
     if (!shouldAutoFitSchedule) {
       setScheduleZoomFactor(1);
     }
@@ -672,17 +672,17 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const shouldAutoFitSchedule = scheduleLayoutMode === "tablet";
+  const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
   const schedulePanelLayoutClassName =
     scheduleLayoutMode === "mobile"
-      ? "schedule-published-panel--mobile schedule-published-panel--mobile-layout"
+      ? "schedule-published-panel--fit schedule-published-panel--mobile-layout"
       : scheduleLayoutMode === "tablet"
-        ? "schedule-published-panel--tablet schedule-published-panel--mobile-layout"
+        ? "schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
-  const canControlScheduleZoom = shouldAutoFitSchedule;
+  const canControlScheduleZoom = false;
   const scheduleZoomPercent = Math.round(appliedScheduleScale * 100);
 
   useEffect(() => {
@@ -794,10 +794,6 @@ export function PublishedSchedulesPanel() {
     setScheduleZoomFactor((current) =>
       Math.min(TOUCH_SCHEDULE_ZOOM_MAX, Number((current + TOUCH_SCHEDULE_ZOOM_STEP).toFixed(2))),
     );
-  };
-
-  const resetScheduleZoom = () => {
-    setScheduleZoomFactor(1);
   };
 
   const removeRouteEntry = (index: number) => {
@@ -1100,12 +1096,9 @@ export function PublishedSchedulesPanel() {
                 </div>
               </div>
               {canControlScheduleZoom ? (
-                <div className="schedule-published-zoom-controls schedule-published-zoom-controls--hidden" aria-hidden="true">
+                <div className="schedule-published-zoom-controls">
                   <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
                     축소
-                  </button>
-                  <button className="btn" onClick={resetScheduleZoom}>
-                    맞춤 {scheduleZoomPercent}%
                   </button>
                   <button className="btn" disabled={scheduleZoomFactor >= TOUCH_SCHEDULE_ZOOM_MAX} onClick={zoomInSchedule}>
                     확대

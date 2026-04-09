@@ -82,6 +82,7 @@ async function generateDraftForCandidate(candidate: ExternalNewsCandidate, slot:
     relatedKeywords: candidate.tags.join(", "),
     eventStage: candidate.eventStage ?? "",
     eventTime: candidate.occurredAt ? candidate.occurredAt.slice(0, 16) : "",
+    publishedTime: candidate.publishedAt ? candidate.publishedAt.slice(0, 16) : "",
     sourceLabel: candidate.source,
     priorityHint: candidate.priority,
     recommendationReason: candidate.recommendationReason,
@@ -114,6 +115,7 @@ async function generateDraftForCandidate(candidate: ExternalNewsCandidate, slot:
   const validationContext: DraftValidationContext = {
     referenceText: request.referenceText,
     eventTime: request.eventTime,
+    publishedTime: request.publishedTime,
     relatedKeywords: request.relatedKeywords,
   };
   const validationError = validateDraftFiveWsAndOneH(draft, validationContext);
@@ -191,6 +193,45 @@ function cleanFallbackLine(value: string) {
     .trim();
 }
 
+function formatTimestampAsKoreanLabel(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date);
+
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  const rawDayPeriod = parts.find((part) => part.type === "dayPeriod")?.value ?? "";
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+  const dayPeriod = rawDayPeriod === "AM" ? "오전" : rawDayPeriod === "PM" ? "오후" : rawDayPeriod;
+
+  if (!month || !day || !hour || !minute) return "";
+  return `${month}월 ${day}일 ${dayPeriod} ${hour}:${minute}`;
+}
+
+function buildTimeLead(candidate: ExternalNewsCandidate) {
+  const occurredLabel = formatTimestampAsKoreanLabel(candidate.occurredAt);
+  if (occurredLabel) {
+    return `${occurredLabel} 기준`;
+  }
+
+  const publishedLabel = formatTimestampAsKoreanLabel(candidate.publishedAt);
+  if (publishedLabel) {
+    return `${publishedLabel} 게시 기사 기준`;
+  }
+
+  return "";
+}
+
 function stripHeadlineSource(title: string) {
   return cleanFallbackLine(title).replace(/\s*[-|]\s*[^-|]+$/, "").trim();
 }
@@ -247,6 +288,8 @@ function splitExcerptToSentences(excerpt: string) {
 
 function buildFallbackSummaryLines(candidate: ExternalNewsCandidate) {
   const strippedTitle = stripHeadlineSource(candidate.title);
+  const timeLead = buildTimeLead(candidate);
+  const firstLine = timeLead ? `${timeLead}, ${strippedTitle}` : strippedTitle;
   const titleComparable = toComparableHeadline(strippedTitle);
   const sentences = splitExcerptToSentences(candidate.excerpt);
   const secondLine =
@@ -262,7 +305,7 @@ function buildFallbackSummaryLines(candidate: ExternalNewsCandidate) {
     getFallbackContextLine(candidate);
 
   return [
-    strippedTitle,
+    firstLine,
     secondLine || getFallbackContextLine(candidate),
     getFallbackStatusLine(candidate),
   ].map((line) => cleanFallbackLine(line));

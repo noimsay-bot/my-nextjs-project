@@ -49,6 +49,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function isWithinRecentPublishedWindow(
+  candidate: ExternalNewsCandidate,
+  nowTs: number,
+  windowHours = 24,
+) {
+  const publishedAtTs = toNewsTimestamp(candidate.publishedAt);
+  if (!publishedAtTs) return false;
+
+  const diffHours = (nowTs - publishedAtTs) / (1000 * 60 * 60);
+  return diffHours >= 0 && diffHours <= windowHours;
+}
+
 export function getExternalCandidateLocationScope(candidate: ExternalNewsCandidate) {
   const text = `${candidate.title} ${candidate.excerpt}`.trim();
   if (SEOUL_NATIONAL_PATTERNS.test(text)) {
@@ -615,6 +627,7 @@ function hasCategoryFallbackContext(candidate: ExternalNewsCandidate) {
 export function shouldKeepForHomeLivePreview(candidate: ExternalNewsCandidate) {
   const breakdown = candidate.scoreBreakdown;
   if (!breakdown) return false;
+  if (!isWithinRecentPublishedWindow(candidate, Date.now())) return false;
   if (!getHeadlineThreshold(candidate)) return false;
   if (!isMajorMediaCandidate(candidate)) return false;
   if (breakdown.promotionalPenalty >= 24) return false;
@@ -626,6 +639,7 @@ export function shouldKeepForHomeLivePreview(candidate: ExternalNewsCandidate) {
 export function shouldKeepForHomeCategoryFallback(candidate: ExternalNewsCandidate) {
   const breakdown = candidate.scoreBreakdown;
   if (!breakdown) return false;
+  if (!isWithinRecentPublishedWindow(candidate, Date.now())) return false;
   if (!isMajorMediaCandidate(candidate)) return false;
   if (breakdown.promotionalPenalty >= 28) return false;
   if (breakdown.localOnlyPenalty >= 24) return false;
@@ -669,6 +683,7 @@ export function shouldKeepForHomeCategoryFallback(candidate: ExternalNewsCandida
 export function shouldPrioritizeForHomeLivePreview(candidate: ExternalNewsCandidate) {
   const breakdown = candidate.scoreBreakdown;
   if (!breakdown) return false;
+  if (!isWithinRecentPublishedWindow(candidate, Date.now())) return false;
   if (!shouldKeepForHomeLivePreview(candidate)) return false;
   return (
     breakdown.portalHeadlineLikelihood >= 74 ||
@@ -700,6 +715,7 @@ export function scoreExternalNewsCandidates(
         personalizationHints: scored.personalizationHints,
       };
     })
+    .filter((candidate) => isWithinRecentPublishedWindow(candidate, nowTs))
     .sort((left, right) => right.score - left.score);
 
   return {

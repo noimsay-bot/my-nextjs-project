@@ -148,6 +148,7 @@ export async function generateNewsAIDraft(input: NewsAIDraftRequestInput): Promi
     const validationContext: DraftValidationContext = {
       referenceText: input.referenceText,
       eventTime: input.eventTime,
+      publishedTime: input.publishedTime,
       relatedKeywords: input.relatedKeywords,
     };
     const validationError = validateDraftFiveWsAndOneH(draft, validationContext);

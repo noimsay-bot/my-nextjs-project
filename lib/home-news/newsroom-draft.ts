@@ -44,6 +44,7 @@ export const NEWS_DRAFT_SCHEMA = {
 export type DraftValidationContext = {
   referenceText: string;
   eventTime: string;
+  publishedTime: string;
   relatedKeywords: string;
 };
 
@@ -173,6 +174,38 @@ function extractNumberTokens(text: string) {
   );
 }
 
+function formatTimeReference(value: string, suffix: string) {
+  const normalized = value.trim();
+  if (!normalized) return "";
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return `${normalized}${suffix}`;
+  }
+
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(parsed);
+
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  const rawDayPeriod = parts.find((part) => part.type === "dayPeriod")?.value ?? "";
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+  const dayPeriod = rawDayPeriod === "AM" ? "오전" : rawDayPeriod === "PM" ? "오후" : rawDayPeriod;
+
+  if (!month || !day || !hour || !minute) {
+    return `${normalized}${suffix}`;
+  }
+
+  return `${month}월 ${day}일 ${dayPeriod} ${hour}:${minute}${suffix}`;
+}
+
 export function extractResponseText(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const record = payload as Record<string, unknown>;
@@ -235,9 +268,14 @@ export function normalizeDraftPayload(raw: unknown): NewsAIDraftResult | null {
 }
 
 export function buildNewsDraftPrompt(input: NewsAIDraftRequestInput) {
-  const timeGuide = input.eventTime
-    ? `실제 사건/절차 시각: ${input.eventTime}`
+  const eventTimeReference = input.eventTime ? formatTimeReference(input.eventTime, " 기준") : "";
+  const publishedTimeReference = input.publishedTime ? formatTimeReference(input.publishedTime, " 게시 기사 기준") : "";
+  const timeGuide = eventTimeReference
+    ? `실제 사건/절차 시각: ${eventTimeReference}`
     : "실제 사건/절차 시각: 제공되지 않음";
+  const publishedTimeGuide = publishedTimeReference
+    ? `기사 게시 시각: ${publishedTimeReference}`
+    : "기사 게시 시각: 제공되지 않음";
   const importanceHints = input.importanceHints.length > 0
     ? `중요도 힌트:\n- ${input.importanceHints.join("\n- ")}`
     : "중요도 힌트: 제공되지 않음";
@@ -264,7 +302,14 @@ export function buildNewsDraftPrompt(input: NewsAIDraftRequestInput) {
     "정치권, 관련 업계, 상황입니다, 파장이 예상됩니다, 관심이 쏠립니다 같은 빈 표현을 쓰지 않습니다.",
     "메인급 뉴스로 판단, 1면급 뉴스, 속보급 판단 같은 평가 문장을 요약 본문에 쓰지 않습니다.",
     "입력에 없는 시간, 장소, 숫자, 인명, 평가를 추정해서 쓰지 않습니다.",
-    "실제 사건/절차 시각이 제공되면 1줄 또는 briefing_text에 자연스럽게 반영하고, 제공되지 않으면 시간을 만들지 않습니다.",
+    "실제 사건/절차 시각이 제공되면 1줄 또는 briefing_text에 자연스럽게 반영합니다.",
+    "실제 사건/절차 시각이 없고 기사 게시 시각만 있으면, 사건 발생 시각처럼 쓰지 말고 '4월 9일 오전 9:15 게시 기사 기준'처럼 출고 기준 시각으로만 자연스럽게 반영합니다.",
+    "둘 중 하나라도 시각 정보가 있으면 summary 첫 줄이나 briefing_text에 날짜 또는 시간이 드러나야 합니다.",
+    eventTimeReference
+      ? `이번 입력의 시간 표기 힌트는 '${eventTimeReference}' 입니다. 가능한 한 첫 줄 앞부분에 붙여 씁니다.`
+      : publishedTimeReference
+        ? `이번 입력의 시간 표기 힌트는 '${publishedTimeReference}' 입니다. 가능한 한 첫 줄 앞부분에 붙여 씁니다.`
+        : "이번 입력에는 반영할 시각 힌트가 없습니다.",
     "why_it_matters는 추상적인 의미 부여가 아니라 뉴스룸, 시청자, 사회적 파급 기준에서 왜 중요한지 한두 문장으로 구체적으로 씁니다.",
     "check_points는 후속 취재 관점에서 실제로 확인해야 할 항목만 2~4개 작성합니다. 예: 추가 인명피해 여부, 영장 청구 여부, 법원 판단, 정부 공식 입장, 증시·환율 실제 반응.",
     "briefing_text는 한 줄 속보 자막처럼 짧고 명확하게, 핵심 사실만 씁니다.",
@@ -272,6 +317,7 @@ export function buildNewsDraftPrompt(input: NewsAIDraftRequestInput) {
     `브리핑 슬롯: ${input.briefingSlot}`,
     `사건 단계: ${input.eventStage || "미지정"}`,
     timeGuide,
+    publishedTimeGuide,
     `우선순위 힌트: ${input.priorityHint || "미지정"}`,
     `추천 이유: ${input.recommendationReason || "미지정"}`,
     importanceHints,
@@ -288,6 +334,7 @@ export function buildNewsDraftRetryPrompt(basePrompt: string, validationError: s
     "",
     `직전 초안 문제: ${validationError}`,
     "다시 작성할 때는 3줄 요약을 유지하고, 첫 줄에 누가, 어디서, 무엇을 했는지를 기사에 있는 표현으로 더 구체적으로 씁니다.",
+    "시각 정보가 제공된 입력이면 첫 줄 또는 briefing_text 앞부분에 그 시각을 그대로 반영합니다.",
     "둘째 줄은 절차, 배경, 쟁점을 실제 기관명과 단계 중심으로 쓰고, 셋째 줄은 현재 진행 단계나 다음 확인 포인트를 추상어 없이 씁니다.",
     "정치권, 해당 사안, 후속 인선, 내부 토론, 긴장감, 상황입니다, 파장이 예상된다, 메인급 뉴스로 판단 같은 표현은 쓰지 않습니다.",
     "입력에 없는 수치, 시간, 장소, 평가 문장을 절대 추가하지 않습니다.",
@@ -344,8 +391,12 @@ export function validateDraftFiveWsAndOneH(draft: NewsAIDraftResult, context: Dr
     return "입력에 있는 장소 정보가 제목이나 요약에 반영되지 않았습니다.";
   }
 
-  if (context.eventTime && !containsTimeSignal(firstLine) && !containsTimeSignal(draft.briefingText)) {
-    return "입력에 있는 실제 시각 정보가 첫 줄이나 전광판 문구에 반영되지 않았습니다.";
+  if (
+    (context.eventTime || context.publishedTime) &&
+    !containsTimeSignal(firstLine) &&
+    !containsTimeSignal(draft.briefingText)
+  ) {
+    return "입력에 있는 시각 정보가 첫 줄이나 전광판 문구에 반영되지 않았습니다.";
   }
 
   if (firstLine.length < 16) {
@@ -363,6 +414,7 @@ export function validateDraftFiveWsAndOneH(draft: NewsAIDraftResult, context: Dr
   const referenceNumbers = new Set([
     ...extractNumberTokens(context.referenceText),
     ...extractNumberTokens(context.eventTime),
+    ...extractNumberTokens(context.publishedTime),
   ]);
   const newNumbers = extractNumberTokens(combined).filter((token) => !referenceNumbers.has(token));
   if (newNumbers.length > 0) {
