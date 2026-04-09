@@ -686,7 +686,7 @@ export async function refreshUsers() {
       .select(PROFILE_COLUMNS)
       .order("created_at", { ascending: false });
 
-    if (session.role !== "admin") {
+    if (!hasAdminAccess(session.role)) {
       query = query.eq("approved", true);
     }
 
@@ -922,7 +922,7 @@ export function updateUserStatus(userId: string, status: UserStatus) {
 
   setCachedUsers(nextUsers);
 
-  if (cachedSession?.role === "admin") {
+  if (hasAdminAccess(cachedSession?.role)) {
     const supabase = getSupabaseClient();
     void supabase.from("profiles").update({ approved }).eq("id", userId);
   }
@@ -943,7 +943,7 @@ export function updateUserRole(userId: string, role: UserRole) {
 
   setCachedUsers(nextUsers);
 
-  if (cachedSession?.role === "admin") {
+  if (hasAdminAccess(cachedSession?.role)) {
     const supabase = getSupabaseClient();
     void supabase.from("profiles").update({ role }).eq("id", userId);
   }
@@ -960,4 +960,8 @@ export function deleteUser(_userId: string) {
 
 export function hasDeskAccess(role: UserRole | null | undefined) {
   return role === "desk" || role === "admin" || role === "team_lead";
+}
+
+export function hasAdminAccess(role: UserRole | null | undefined) {
+  return role === "admin" || role === "team_lead";
 }

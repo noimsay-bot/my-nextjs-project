@@ -8,6 +8,10 @@ import { ExternalNewsWorkspaceResponse } from "@/lib/home-news/external-source-t
 import { toExternalNewsCandidate } from "@/lib/home-news/external-source-transform";
 import { NewsBriefingAdminRecord } from "@/lib/home-news/admin-types";
 
+function hasAdminLikeRole(role: string | null | undefined) {
+  return role === "admin" || role === "team_lead";
+}
+
 async function requireServerAdminSession() {
   const supabase = await createServerSupabaseClient();
   const {
@@ -25,7 +29,7 @@ async function requireServerAdminSession() {
     .eq("id", user.id)
     .single<{ id: string; role: string; approved: boolean }>();
 
-  if (profileError || !profile || profile.role !== "admin" || !profile.approved) {
+  if (profileError || !profile || !hasAdminLikeRole(profile.role) || !profile.approved) {
     throw new Error("외부 뉴스 후보 조회 권한이 없습니다.");
   }
 }

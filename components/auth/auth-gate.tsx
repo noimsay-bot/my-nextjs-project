@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   getSession,
+  hasAdminAccess,
   initializeAuth,
   subscribeToAuth,
   type SessionUser,
@@ -12,8 +13,12 @@ import {
 const publicPaths = new Set(["/login"]);
 
 function hasAccess(pathname: string, session: SessionUser) {
+  if (pathname.startsWith("/admin")) {
+    return hasAdminAccess(session.role);
+  }
+
   if (pathname.startsWith("/team-lead")) {
-    return session.role === "team_lead" || session.role === "admin";
+    return hasAdminAccess(session.role);
   }
 
   if (pathname.startsWith("/schedule/vacations")) {
@@ -49,7 +54,8 @@ function hasAccess(pathname: string, session: SessionUser) {
         pathname === "/vacation" ||
         pathname.startsWith("/submissions") ||
         pathname.startsWith("/review") ||
-        pathname.startsWith("/schedule")
+        pathname.startsWith("/schedule") ||
+        pathname.startsWith("/admin")
       );
     case "admin":
       return true;

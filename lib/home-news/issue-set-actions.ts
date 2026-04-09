@@ -1,5 +1,6 @@
 "use client";
 
+import { hasAdminAccess } from "@/lib/auth/storage";
 import { getKstDateKey } from "@/lib/home-news/admin-types";
 import { getNewsIssueSetWorkspace } from "@/lib/home-news/issue-set-queries";
 import {
@@ -62,7 +63,7 @@ type UpdateIssueSetItemsInput = {
 
 async function requireAdminSession() {
   const session = await getPortalSession();
-  if (!session?.approved || session.role !== "admin") {
+  if (!session?.approved || !hasAdminAccess(session.role)) {
     throw new Error("발행 세트 관리자 권한이 없습니다.");
   }
   return session;

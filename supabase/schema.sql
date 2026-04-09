@@ -78,7 +78,7 @@ as $$
     select 1
     from public.profiles
     where id = auth.uid()
-      and role = 'admin'
+      and role in ('admin', 'team_lead')
       and approved = true
   );
 $$;
@@ -196,6 +196,13 @@ for update
 to authenticated
 using (public.is_admin())
 with check (public.is_admin());
+
+drop policy if exists "profiles_admin_delete_all" on public.profiles;
+create policy "profiles_admin_delete_all"
+on public.profiles
+for delete
+to authenticated
+using (public.is_admin());
 
 create table if not exists public.submissions (
   id uuid primary key default gen_random_uuid(),

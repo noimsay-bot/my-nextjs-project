@@ -1,5 +1,6 @@
 "use client";
 
+import { hasAdminAccess } from "@/lib/auth/storage";
 import { NewsBriefingAdminRecord } from "@/lib/home-news/admin-types";
 import { getPortalSession, getPortalSupabaseClient, getSupabaseStorageErrorMessage } from "@/lib/supabase/portal";
 
@@ -32,7 +33,7 @@ export type NewsBriefingAdminWorkspace = {
 
 export async function getNewsBriefingAdminWorkspace(): Promise<NewsBriefingAdminWorkspace> {
   const session = await getPortalSession();
-  if (!session?.approved || session.role !== "admin") {
+  if (!session?.approved || !hasAdminAccess(session.role)) {
     throw new Error("뉴스 브리핑 관리자 권한이 없습니다.");
   }
 

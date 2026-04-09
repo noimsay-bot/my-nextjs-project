@@ -17,8 +17,30 @@ export const emptyHomeNewsDataset: HomeNewsDataset = {
 export type HomeNewsFallbackReason = "missing_env" | "query_error" | "schema_missing";
 
 export function getHomeNewsFallbackDataset(_reason: HomeNewsFallbackReason): HomeNewsDataset {
+  const cardsByCategory = Object.fromEntries(
+    Object.entries(homeNewsMockData.cardsByCategory).map(([category, items]) => [
+      category,
+      (items ?? []).map((item) => ({
+        ...item,
+        summary: [...item.summary],
+        checkPoints: [...item.checkPoints],
+        tags: item.tags ? [...item.tags] : undefined,
+      })),
+    ]),
+  ) as HomeNewsDataset["cardsByCategory"];
+
   return {
-    ...emptyHomeNewsDataset,
-    sourceKind: homeNewsMockData.sourceKind,
+    ...homeNewsMockData,
+    tickerItems: homeNewsMockData.tickerItems.map((item) => ({ ...item })),
+    cardsByCategory,
+    temporarySections: (homeNewsMockData.temporarySections ?? []).map((section) => ({
+      ...section,
+      items: section.items.map((item) => ({
+        ...item,
+        summary: [...item.summary],
+        checkPoints: [...item.checkPoints],
+        tags: item.tags ? [...item.tags] : undefined,
+      })),
+    })),
   };
 }

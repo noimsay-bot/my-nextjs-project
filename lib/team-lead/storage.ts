@@ -1368,6 +1368,10 @@ async function getPrivilegedSupabaseClient() {
   return supabaseModule.createClient();
 }
 
+function hasAdminLikeAccess(role: ReviewManagementProfileRow["role"] | null | undefined) {
+  return role === "admin" || role === "team_lead";
+}
+
 function formatReviewCandidate(row: ReviewManagementProfileRow): ReviewerCandidate {
   return {
     id: row.id,
@@ -2207,8 +2211,8 @@ export async function resetSubmissionAssignment(submissionId: string) {
 
 export async function getAdminWorkspace(): Promise<AdminWorkspace> {
   const session = await getPrivilegedPortalSession();
-  if (!session || session.role !== "admin") {
-    throw new Error("admin 권한이 없습니다.");
+  if (!session || !hasAdminLikeAccess(session.role)) {
+    throw new Error("관리자 권한이 없습니다.");
   }
 
   const supabase = await getPrivilegedSupabaseClient();
@@ -2236,8 +2240,8 @@ export async function updateAdminProfileAccess(
   },
 ) {
   const session = await getPrivilegedPortalSession();
-  if (!session || session.role !== "admin") {
-    return { ok: false as const, message: "admin 권한이 없습니다." };
+  if (!session || !hasAdminLikeAccess(session.role)) {
+    return { ok: false as const, message: "관리자 권한이 없습니다." };
   }
 
   const supabase = await getPrivilegedSupabaseClient();
@@ -2264,8 +2268,8 @@ export async function updateAdminProfileAccess(
 
 export async function deleteAdminProfile(profileId: string) {
   const session = await getPrivilegedPortalSession();
-  if (!session || session.role !== "admin") {
-    return { ok: false as const, message: "admin 권한이 없습니다." };
+  if (!session || !hasAdminLikeAccess(session.role)) {
+    return { ok: false as const, message: "관리자 권한이 없습니다." };
   }
 
   if (session.id === profileId) {

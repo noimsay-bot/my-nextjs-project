@@ -53,6 +53,10 @@ type ServerAdminSession = {
   approved: boolean;
 };
 
+function hasAdminLikeRole(role: string | null | undefined) {
+  return role === "admin" || role === "team_lead";
+}
+
 type DraftValidationContext = {
   referenceText: string;
   eventTime: string;
@@ -245,7 +249,7 @@ async function requireServerAdminSession(): Promise<ServerAdminSession> {
     .eq("id", user.id)
     .single<{ id: string; role: string; approved: boolean }>();
 
-  if (profileError || !profile || profile.role !== "admin" || !profile.approved) {
+  if (profileError || !profile || !hasAdminLikeRole(profile.role) || !profile.approved) {
     throw new Error("AI 초안 생성 권한이 없습니다.");
   }
 

@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import {
-  setRoleExperience,
   getSession,
+  hasAdminAccess,
   logoutUser,
+  setRoleExperience,
   subscribeToAuth,
   type UserRole,
 } from "@/lib/auth/storage";
@@ -108,7 +109,8 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             link.href === "/submissions" ||
             link.href === "/review" ||
             link.href === "/schedule" ||
-            link.href === "/team-lead",
+            link.href === "/team-lead" ||
+            link.href === "/admin",
         );
       case "admin":
         return links;
@@ -126,6 +128,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [session]);
 
   const adminSession = session?.actualRole === "admin" ? session : null;
+  const canOpenAdminArea = hasAdminAccess(session?.role);
 
   const cycleExperienceRole = () => {
     setExperienceDraftRole((current) => {
@@ -177,7 +180,8 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                     className={
                       pathname === link.href ||
                       (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
-                      (link.href === "/team-lead" && pathname.startsWith("/team-lead"))
+                      (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
+                      (link.href === "/admin" && pathname.startsWith("/admin"))
                         ? "active"
                         : ""
                     }
@@ -226,6 +230,9 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                       확인
                     </button>
                   </>
+                ) : null}
+                {!adminSession && canOpenAdminArea ? (
+                  <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
                 ) : null}
                 <span className="muted">
                   {sessionLabel}
