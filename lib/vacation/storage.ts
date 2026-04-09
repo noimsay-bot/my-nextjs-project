@@ -25,6 +25,7 @@ export const VACATION_STORAGE_KEY = "j-special-force-vacations-v1";
 export const VACATION_EVENT = "j-special-force-vacations-changed";
 export const VACATION_STATUS_EVENT = "j-special-force-vacations-status";
 export const DEFAULT_VACATION_CAPACITY = 5;
+const VACATION_SETTINGS_ROW_ID = "vacation_request_access";
 
 export interface VacationRequest {
   id: string;
@@ -62,6 +63,7 @@ export interface VacationLotteryResult {
 export interface VacationStore {
   requests: VacationRequest[];
   months: Record<string, VacationMonthState>;
+  requestOpen: boolean;
 }
 
 interface VacationRequestRow {
@@ -89,6 +91,12 @@ interface VacationMonthRow {
   updated_at: string;
 }
 
+interface VacationSettingsRow {
+  id: string;
+  is_request_open: boolean;
+  updated_at: string;
+}
+
 let vacationStoreCache = createEmptyStore();
 let vacationRefreshPromise: Promise<VacationStore> | null = null;
 let vacationPersistPromise: Promise<{ ok: boolean; message?: string }> | null = null;
@@ -101,6 +109,7 @@ function createEmptyStore(): VacationStore {
   return {
     requests: [],
     months: {},
+    requestOpen: false,
   };
 }
 
@@ -195,7 +204,11 @@ function sanitizeVacationStore(input?: Partial<VacationStore> | null): VacationS
     }),
   );
 
-  return { requests, months };
+  return {
+    requests,
+    months,
+    requestOpen: Boolean(input?.requestOpen),
+  };
 }
 
 function readStore() {
@@ -281,13 +294,25 @@ async function persistVacationStore(store: VacationStore) {
     compensatory_winners: month.compensatoryWinners,
     applied_at: month.appliedAt,
   }));
+  const settingsRow = {
+    id: VACATION_SETTINGS_ROW_ID,
+    is_request_open: sanitized.requestOpen,
+  };
 
-  const [{ data: existingRequests, error: requestSelectError }, { error: requestUpsertError }, { error: monthUpsertError }] =
+  const [
+    { data: existingRequests, error: requestSelectError },
+    { error: requestUpsertError },
+    { error: monthUpsertError },
+    { error: settingsUpsertError },
+  ] =
     await Promise.all([
       supabase.from("vacation_requests").select("id"),
       requestRows.length > 0 ? supabase.from("vacation_requests").upsert(requestRows) : Promise.resolve({ error: null }),
       canManageVacationMonths && monthRows.length > 0
         ? supabase.from("vacation_months").upsert(monthRows)
+        : Promise.resolve({ error: null }),
+      canManageVacationMonths
+        ? supabase.from("vacation_settings").upsert(settingsRow)
         : Promise.resolve({ error: null }),
     ]);
 
@@ -299,6 +324,9 @@ async function persistVacationStore(store: VacationStore) {
   }
   if (monthUpsertError) {
     throw new Error(getSupabaseStorageErrorMessage(monthUpsertError, "vacation_months"));
+  }
+  if (settingsUpsertError) {
+    throw new Error(getSupabaseStorageErrorMessage(settingsUpsertError, "vacation_settings"));
   }
 
   const staleRequestIds = (existingRequests ?? [])
@@ -326,8 +354,11 @@ function writeStore(store: VacationStore) {
       emitVacationEvent();
       return { ok: true as const };
     })
-    .catch(async () => {
-      const message = "휴가 데이터 저장에 실패했습니다. DB 기준 상태로 복구합니다.";
+    .catch(async (error) => {
+      const message =
+        error instanceof Error && error.message
+          ? `${error.message} DB 기준 상태로 복구합니다.`
+          : "휴가 데이터 저장에 실패했습니다. DB 기준 상태로 복구합니다.";
       emitVacationStatus({
         ok: false,
         message,
@@ -360,7 +391,11 @@ export async function refreshVacationStore() {
     }
 
     const supabase = await getPortalSupabaseClient();
-    const [{ data: requestRows, error: requestError }, { data: monthRows, error: monthError }] = await Promise.all([
+    const [
+      { data: requestRows, error: requestError },
+      { data: monthRows, error: monthError },
+      { data: settingsRows, error: settingsError },
+    ] = await Promise.all([
       supabase
         .from("vacation_requests")
         .select("id, requester_id, requester_name, type, year, month, month_key, requested_dates, raw_dates, status, created_at, updated_at")
@@ -370,12 +405,28 @@ export async function refreshVacationStore() {
         .from("vacation_months")
         .select("month_key, managed_date_keys, limits, annual_winners, compensatory_winners, applied_at, updated_at")
         .returns<VacationMonthRow[]>(),
+      supabase
+        .from("vacation_settings")
+        .select("id, is_request_open, updated_at")
+        .eq("id", VACATION_SETTINGS_ROW_ID)
+        .returns<VacationSettingsRow[]>(),
     ]);
 
-    if (requestError || monthError) {
-      const schemaError = requestError ?? monthError;
-      if (isSupabaseSchemaMissingError(schemaError)) {
-        console.warn(getSupabaseStorageErrorMessage(schemaError, "vacation_requests / vacation_months"));
+    if (requestError || monthError || settingsError) {
+      const requestOrMonthSchemaError = requestError ?? monthError;
+      const settingsSchemaMissing = Boolean(settingsError && isSupabaseSchemaMissingError(settingsError));
+      const schemaError = requestOrMonthSchemaError ?? (settingsSchemaMissing ? null : settingsError);
+      if (settingsSchemaMissing && !requestOrMonthSchemaError) {
+        vacationStoreCache = sanitizeVacationStore({
+          requests: (requestRows ?? []).map((row) => rowToVacationRequest(row)),
+          months: Object.fromEntries((monthRows ?? []).map((row) => [row.month_key, rowToVacationMonthState(row)])),
+          requestOpen: false,
+        });
+        emitVacationEvent();
+        return cloneVacationStore(vacationStoreCache);
+      }
+      if (schemaError && isSupabaseSchemaMissingError(schemaError)) {
+        console.warn(getSupabaseStorageErrorMessage(schemaError, "vacation_requests / vacation_months / vacation_settings"));
         vacationStoreCache = createEmptyStore();
         emitVacationEvent();
         return cloneVacationStore(vacationStoreCache);
@@ -384,12 +435,16 @@ export async function refreshVacationStore() {
       if (requestError) {
         throw new Error(requestError.message);
       }
-      throw new Error(monthError?.message ?? "휴가 데이터를 불러오지 못했습니다.");
+      if (monthError) {
+        throw new Error(monthError.message);
+      }
+      throw new Error(settingsError?.message ?? "휴가 데이터를 불러오지 못했습니다.");
     }
 
     vacationStoreCache = sanitizeVacationStore({
       requests: (requestRows ?? []).map((row) => rowToVacationRequest(row)),
       months: Object.fromEntries((monthRows ?? []).map((row) => [row.month_key, rowToVacationMonthState(row)])),
+      requestOpen: Boolean(settingsRows?.[0]?.is_request_open),
     });
     emitVacationEvent();
     return cloneVacationStore(vacationStoreCache);
@@ -975,6 +1030,10 @@ export function getVacationStore() {
   return readStore();
 }
 
+export function isVacationRequestOpen() {
+  return readStore().requestOpen;
+}
+
 export interface VacationCalendarDateItem {
   dateKey: string;
   blocked: boolean;
@@ -1133,6 +1192,10 @@ export function submitVacationRequests(input: {
     return { ok: false as const, message: "로그인한 사용자 이름을 확인할 수 없습니다." };
   }
 
+  if (!isVacationRequestOpen()) {
+    return { ok: false as const, message: "현재 휴가 신청이 닫혀 있습니다." };
+  }
+
   const annualValidation = input.annualRawDates
     ? validateVacationRequestDates({ year: input.year, month: input.month, rawDates: input.annualRawDates })
     : null;
@@ -1230,6 +1293,26 @@ export function getVacationApplicantsOverview(year: number, month: number) {
     annualApplicants: synced.monthState ? getApplicantsByType(store, monthKey, "연차") : ({} as Record<string, string[]>),
     compensatoryApplicants: synced.monthState ? getApplicantsByType(store, monthKey, "대휴") : ({} as Record<string, string[]>),
     requests: getRequestsForMonth(store, monthKey),
+    requestOpen: store.requestOpen,
+  };
+}
+
+export function setVacationRequestOpen(nextOpen: boolean) {
+  const store = readStore();
+  if (store.requestOpen === nextOpen) {
+    return {
+      ok: true as const,
+      requestOpen: nextOpen,
+      message: nextOpen ? "휴가 신청이 이미 오픈 중입니다." : "휴가 신청이 이미 닫혀 있습니다.",
+    };
+  }
+
+  store.requestOpen = nextOpen;
+  writeStore(store);
+  return {
+    ok: true as const,
+    requestOpen: nextOpen,
+    message: nextOpen ? "휴가 신청을 오픈했습니다." : "휴가 신청을 닫았습니다.",
   };
 }
 

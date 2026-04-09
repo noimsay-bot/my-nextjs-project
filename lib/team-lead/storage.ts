@@ -156,10 +156,12 @@ export const TEAM_LEAD_STORAGE_STATUS_EVENT = "j-team-lead-storage-status";
 const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
 const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
 const TEAM_LEAD_REVIEW_ACCESS_STATE_KEY = "review_access_v1";
+const TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY = "submission_access_v1";
 const TEAM_LEAD_REFERENCE_NOTES_STATE_KEY = "reference_notes_v1";
 const TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY = "best_report_quarters_v1";
 const TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY = "best_report_current_v1";
 export const TEAM_LEAD_BEST_REPORT_EVENT = "j-team-lead-best-report-updated";
+export const TEAM_LEAD_SUBMISSION_ACCESS_EVENT = "j-team-lead-submission-access-updated";
 
 interface TeamLeadScheduleAssignmentRow {
   month_key: string;
@@ -175,6 +177,7 @@ interface TeamLeadStateRow {
 let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} };
 let contributionManualCache = {} as Record<string, ContributionManualItem[]>;
 let finalCutCache = {} as Record<string, FinalCutDecision>;
+let submissionAccessCache = false;
 let teamLeadRefreshPromise: Promise<void> | null = null;
 let assignmentPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let assignmentPersistResolvers: Array<() => void> = [];
@@ -1465,6 +1468,40 @@ async function getGrantedReviewerProfileIds() {
   return normalizeReviewAccessState(data?.state);
 }
 
+export function isTeamLeadSubmissionAccessOpen() {
+  return submissionAccessCache;
+}
+
+export async function refreshTeamLeadSubmissionAccessState() {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    submissionAccessCache = false;
+    emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+    return submissionAccessCache;
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+      submissionAccessCache = false;
+      emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+      return submissionAccessCache;
+    }
+    throw new Error(error.message);
+  }
+
+  submissionAccessCache = normalizeSubmissionAccessState(data?.state).isOpen;
+  emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+  return submissionAccessCache;
+}
+
 async function getGrantedReviewerProfiles() {
   const supabase = await getPrivilegedSupabaseClient();
   const grantedProfileIds = await getGrantedReviewerProfileIds();
@@ -1552,6 +1589,17 @@ function normalizeBestReportCurrentState(raw: unknown) {
   const record = raw as { resetAt?: unknown };
   return {
     resetAt: typeof record.resetAt === "string" ? record.resetAt : "",
+  };
+}
+
+function normalizeSubmissionAccessState(raw: unknown) {
+  if (!raw || typeof raw !== "object") {
+    return { isOpen: false };
+  }
+
+  const record = raw as { isOpen?: unknown };
+  return {
+    isOpen: Boolean(record.isOpen),
   };
 }
 
@@ -2142,6 +2190,32 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
   return {
     ok: true as const,
     message: "평가 페이지 권한을 저장했습니다.",
+  };
+}
+
+export async function setTeamLeadSubmissionAccessOpen(nextOpen: boolean) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "영상평가 제출 오픈 권한이 없습니다." };
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY, {
+      isOpen: nextOpen,
+    });
+    submissionAccessCache = nextOpen;
+    emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "영상평가 제출 오픈 상태 저장에 실패했습니다.",
+    };
+  }
+
+  return {
+    ok: true as const,
+    isOpen: nextOpen,
+    message: nextOpen ? "영상평가 제출을 오픈했습니다." : "영상평가 제출을 닫았습니다.",
   };
 }
 

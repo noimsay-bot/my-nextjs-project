@@ -13,6 +13,16 @@ import {
   subscribeToAuth,
   type UserRole,
 } from "@/lib/auth/storage";
+import {
+  isVacationRequestOpen,
+  refreshVacationStore,
+  VACATION_EVENT,
+} from "@/lib/vacation/storage";
+import {
+  isTeamLeadSubmissionAccessOpen,
+  refreshTeamLeadSubmissionAccessState,
+  TEAM_LEAD_SUBMISSION_ACCESS_EVENT,
+} from "@/lib/team-lead/storage";
 
 const links = [
   { href: "/", label: "홈" },
@@ -49,6 +59,8 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState(() => getSession());
   const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
   const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>(() => getSession()?.experienceRole ?? getSession()?.actualRole ?? "admin");
+  const [vacationRequestOpen, setVacationRequestOpen] = useState(() => isVacationRequestOpen());
+  const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => isTeamLeadSubmissionAccessOpen());
 
   useEffect(() => {
     let mounted = true;
@@ -71,6 +83,42 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
+    const syncVacationOpen = () => {
+      setVacationRequestOpen(isVacationRequestOpen());
+    };
+
+    const refreshVacationOpen = () => {
+      void refreshVacationStore().then(syncVacationOpen);
+    };
+
+    refreshVacationOpen();
+    window.addEventListener("focus", refreshVacationOpen);
+    window.addEventListener(VACATION_EVENT, syncVacationOpen);
+    return () => {
+      window.removeEventListener("focus", refreshVacationOpen);
+      window.removeEventListener(VACATION_EVENT, syncVacationOpen);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncSubmissionOpen = () => {
+      setSubmissionAccessOpen(isTeamLeadSubmissionAccessOpen());
+    };
+
+    const refreshSubmissionOpen = () => {
+      void refreshTeamLeadSubmissionAccessState().then(syncSubmissionOpen);
+    };
+
+    refreshSubmissionOpen();
+    window.addEventListener("focus", refreshSubmissionOpen);
+    window.addEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
+    return () => {
+      window.removeEventListener("focus", refreshSubmissionOpen);
+      window.removeEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!session?.actualRole) return;
     setExperienceDraftRole(session.experienceRole ?? session.actualRole);
   }, [session?.actualRole, session?.experienceRole]);
@@ -81,15 +129,15 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
-            link.href === "/vacation" ||
-            link.href === "/submissions" ||
+            (link.href === "/vacation" && vacationRequestOpen) ||
+            (link.href === "/submissions" && submissionAccessOpen) ||
             (link.href === "/review" && session.canReview),
         );
       case "reviewer":
         return links.filter(
           (link) =>
             link.href === "/" ||
-            link.href === "/vacation" ||
+            (link.href === "/vacation" && vacationRequestOpen) ||
             link.href === "/submissions" ||
             link.href === "/review",
         );
@@ -118,7 +166,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       default:
         return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
     }
-  }, [session?.canReview, session?.role]);
+  }, [session?.canReview, session?.role, submissionAccessOpen, vacationRequestOpen]);
 
   const sessionLabel = useMemo(() => {
     if (!session) return "";

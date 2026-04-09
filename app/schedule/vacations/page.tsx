@@ -8,8 +8,10 @@ import {
   applyVacationMonthToSchedule,
   DEFAULT_VACATION_CAPACITY,
   getVacationApplicantsOverview,
+  isVacationRequestOpen,
   refreshVacationStore,
   runVacationLottery,
+  setVacationRequestOpen,
   setVacationCapacity,
   VACATION_EVENT,
   VACATION_STATUS_EVENT,
@@ -157,6 +159,7 @@ export default function ScheduleVacationsPage() {
   const [monthRequests, setMonthRequests] = useState<Array<{ requesterId: string | null; requesterName: string }>>([]);
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+  const [vacationRequestOpen, setVacationRequestOpenState] = useState(() => isVacationRequestOpen());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -199,6 +202,7 @@ export default function ScheduleVacationsPage() {
       })),
     );
     setUsers(Array.isArray(loadedUsers) ? loadedUsers : getUsers());
+    setVacationRequestOpenState(isVacationRequestOpen());
   };
 
   useEffect(() => {
@@ -253,12 +257,15 @@ export default function ScheduleVacationsPage() {
       }
     });
 
-    return users
-      .filter((user) => user.status === "ACTIVE" && (user.role === "member" || user.role === "reviewer"))
-      .filter((user) => !submittedIds.has(user.id) && !submittedNames.has(user.username.trim()))
-      .map((user) => user.username.trim())
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right, "ko"));
+    return Array.from(
+      new Set(
+        users
+          .filter((user) => user.status === "ACTIVE" && (user.role === "member" || user.role === "reviewer"))
+          .filter((user) => !submittedIds.has(user.id) && !submittedNames.has(user.username.trim()))
+          .map((user) => user.username.trim())
+          .filter(Boolean),
+      ),
+    ).sort((left, right) => left.localeCompare(right, "ko"));
   }, [monthRequests, users]);
 
   return (
@@ -274,9 +281,22 @@ export default function ScheduleVacationsPage() {
               </span>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Link href="/vacation" className="btn">
-                휴가 신청 페이지
-              </Link>
+              <button
+                type="button"
+                className={`btn ${vacationRequestOpen ? "white" : ""}`}
+                onClick={async () => {
+                  const result = setVacationRequestOpen(!vacationRequestOpen);
+                  const persistResult = await waitForVacationStoreWrite();
+                  await loadMonth();
+                  if (!persistResult.ok) {
+                    setMessage({ tone: "warn", text: persistResult.message ?? "휴가 신청 오픈 상태 저장에 실패했습니다." });
+                    return;
+                  }
+                  setMessage({ tone: "ok", text: result.message });
+                }}
+              >
+                {vacationRequestOpen ? "오픈중" : "휴가 신청 오픈"}
+              </button>
               <Link href="/schedule" className="btn">
                 DESK 메인
               </Link>

@@ -9,10 +9,25 @@ import {
   subscribeToAuth,
   type SessionUser,
 } from "@/lib/auth/storage";
+import {
+  isVacationRequestOpen,
+  refreshVacationStore,
+  VACATION_EVENT,
+} from "@/lib/vacation/storage";
+import {
+  isTeamLeadSubmissionAccessOpen,
+  refreshTeamLeadSubmissionAccessState,
+  TEAM_LEAD_SUBMISSION_ACCESS_EVENT,
+} from "@/lib/team-lead/storage";
 
 const publicPaths = new Set(["/login"]);
 
-function hasAccess(pathname: string, session: SessionUser) {
+function hasAccess(
+  pathname: string,
+  session: SessionUser,
+  vacationRequestOpen: boolean | null,
+  submissionAccessOpen: boolean | null,
+) {
   if (pathname.startsWith("/admin")) {
     return hasAdminAccess(session.role);
   }
@@ -29,14 +44,14 @@ function hasAccess(pathname: string, session: SessionUser) {
     case "member":
       return (
         pathname === "/" ||
-        pathname === "/vacation" ||
-        pathname.startsWith("/submissions") ||
+        (pathname === "/vacation" && Boolean(vacationRequestOpen)) ||
+        (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen)) ||
         (session.canReview && pathname.startsWith("/review"))
       );
     case "reviewer":
       return (
         pathname === "/" ||
-        pathname === "/vacation" ||
+        (pathname === "/vacation" && Boolean(vacationRequestOpen)) ||
         pathname.startsWith("/submissions") ||
         pathname.startsWith("/review")
       );
@@ -68,8 +83,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPublicPath = publicPaths.has(pathname);
+  const needsVacationAccessCheck = pathname === "/vacation";
+  const needsSubmissionAccessCheck = pathname.startsWith("/submissions");
   const [session, setSession] = useState<SessionUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(!isPublicPath);
+  const [vacationRequestOpen, setVacationRequestOpen] = useState<boolean | null>(() =>
+    needsVacationAccessCheck ? null : isVacationRequestOpen(),
+  );
+  const [submissionAccessOpen, setSubmissionAccessOpen] = useState<boolean | null>(() =>
+    needsSubmissionAccessCheck ? null : isTeamLeadSubmissionAccessOpen(),
+  );
 
   useEffect(() => {
     if (isPublicPath) {
@@ -91,6 +114,38 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (isPublicPath) return undefined;
+
+    const syncVacationOpen = () => {
+      setVacationRequestOpen(isVacationRequestOpen());
+    };
+
+    void refreshVacationStore().then(syncVacationOpen);
+    window.addEventListener("focus", syncVacationOpen);
+    window.addEventListener(VACATION_EVENT, syncVacationOpen);
+    return () => {
+      window.removeEventListener("focus", syncVacationOpen);
+      window.removeEventListener(VACATION_EVENT, syncVacationOpen);
+    };
+  }, [isPublicPath]);
+
+  useEffect(() => {
+    if (isPublicPath) return undefined;
+
+    const syncSubmissionOpen = () => {
+      setSubmissionAccessOpen(isTeamLeadSubmissionAccessOpen());
+    };
+
+    void refreshTeamLeadSubmissionAccessState().then(syncSubmissionOpen);
+    window.addEventListener("focus", syncSubmissionOpen);
+    window.addEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
+    return () => {
+      window.removeEventListener("focus", syncSubmissionOpen);
+      window.removeEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
+    };
+  }, [isPublicPath]);
 
   useEffect(() => {
     if (isPublicPath) return undefined;
@@ -124,14 +179,38 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (!hasAccess(pathname, session)) {
+    if ((session.role === "member" || session.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) {
+      return;
+    }
+
+    if (session.role === "member" && needsSubmissionAccessCheck && submissionAccessOpen === null) {
+      return;
+    }
+
+    if (!hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)) {
       router.replace("/");
       return;
     }
-  }, [checkingSession, isPublicPath, pathname, router, session]);
+  }, [
+    checkingSession,
+    isPublicPath,
+    needsSubmissionAccessCheck,
+    needsVacationAccessCheck,
+    pathname,
+    router,
+    session,
+    submissionAccessOpen,
+    vacationRequestOpen,
+  ]);
 
   if (isPublicPath) return <>{children}</>;
-  if (checkingSession) return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
-  if (!session || !session.approved || !hasAccess(pathname, session)) return null;
+  if (
+    checkingSession ||
+    ((session?.role === "member" || session?.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) ||
+    (session?.role === "member" && needsSubmissionAccessCheck && submissionAccessOpen === null)
+  ) {
+    return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
+  }
+  if (!session || !session.approved || !hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)) return null;
   return <>{children}</>;
 }
