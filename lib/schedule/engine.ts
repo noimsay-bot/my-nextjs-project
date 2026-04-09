@@ -4,6 +4,7 @@
   DEFAULT_JCHECK_COUNT,
   defaultPointers,
   defaultScheduleState,
+  GENERAL_TEAM_DEFAULT_NAMES,
   getStoredAssignmentDisplayRank,
   getScheduleCategoryLabel,
   SCHEDULE_MONTHS,
@@ -57,6 +58,57 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
 
+function normalizeEditableNameList(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return Array.from(new Set(value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)));
+}
+
+function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]) {
+  const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  let previousNight: string[] = [];
+
+  orderedDays.forEach((day) => {
+    if (day.isWeekend) {
+      delete day.assignments["일반"];
+      day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+      previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+      return;
+    }
+
+    const assignedNames = new Set<string>();
+    Object.entries(day.assignments).forEach(([category, names]) => {
+      if (category === "일반") return;
+      names.forEach((name) => {
+        if (category === "휴가") {
+          const vacationName = parseVacationEntry(name).name.trim();
+          if (vacationName) assignedNames.add(vacationName);
+          return;
+        }
+
+        const trimmed = name.trim();
+        if (trimmed) assignedNames.add(trimmed);
+      });
+    });
+    day.vacations.forEach((entry) => {
+      const vacationName = parseVacationEntry(entry).name.trim();
+      if (vacationName) assignedNames.add(vacationName);
+    });
+
+    const nextGeneralNames = generalTeamPeople.filter(
+      (name) => !assignedNames.has(name) && !previousNight.includes(name),
+    );
+
+    if (nextGeneralNames.length > 0) {
+      day.assignments["일반"] = nextGeneralNames;
+    } else {
+      delete day.assignments["일반"];
+    }
+
+    day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+    previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+  });
+}
+
 export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): ScheduleState {
   const base = cloneScheduleState(defaultScheduleState);
   if (!input) return base;
@@ -106,12 +158,27 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   const generatedHistory = (input.generatedHistory ?? (generated ? [generated] : [])).map((item) =>
     normalizeGeneratedSchedule(item),
   );
+  const normalizedGeneralTeamPeople = normalizeEditableNameList(
+    input.generalTeamPeople ?? base.generalTeamPeople ?? GENERAL_TEAM_DEFAULT_NAMES,
+  );
+  const generalTeamPeople =
+    normalizedGeneralTeamPeople.length > 0
+      ? normalizedGeneralTeamPeople
+      : [...GENERAL_TEAM_DEFAULT_NAMES];
+  if (generated) {
+    syncGeneralAssignments(generated.days, generalTeamPeople);
+  }
+  generatedHistory.forEach((item) => {
+    syncGeneralAssignments(item.days, generalTeamPeople);
+  });
   return {
     ...base,
     ...input,
     year: clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year),
     month: clampNumber(input.month ?? base.month, SCHEDULE_MONTHS[0], SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1], base.month),
     jcheckCount: DEFAULT_JCHECK_COUNT,
+    generalTeamPeople,
+    globalOffPool: normalizeEditableNameList(input.globalOffPool),
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
     offExcludeByCategory: nextOffExcludeByCategory,

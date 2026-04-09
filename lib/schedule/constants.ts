@@ -17,13 +17,13 @@ export function getScheduleCategoryLabel(category: string) {
 }
 
 export const weekendScheduleAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "야근"] as const;
-export const weekdayStoredAssignmentOrder = ["조근", "연장", "일반", "야근", "제크", "휴가", "청와대", "국회", "청사"] as const;
+export const weekdayStoredAssignmentOrder = ["조근", "일반", "연장", "석근", "야근", "제크", "휴가", "청와대", "국회", "청사"] as const;
 export const weekendStoredAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "야근", "휴가", "청사"] as const;
 
 const assignmentDisplayOrder = [
   "조근",
-  "연장",
   "일반",
+  "연장",
   "석근",
   "야근",
   "제크",
@@ -89,6 +89,30 @@ export function createEmptyOffByCategory(): Record<CategoryKey, string[]> {
 }
 
 export const emptyOffByCategory = createEmptyOffByCategory();
+
+export const GENERAL_TEAM_DEFAULT_NAMES = [
+  "구본준",
+  "김재식",
+  "박재현",
+  "반일훈",
+  "방극철",
+  "변경태",
+  "유규열",
+  "김준택",
+  "김진광",
+  "박대권",
+  "유연경",
+  "이완근",
+  "이주원",
+  "이지수",
+  "이학진",
+  "정상원",
+  "정재우",
+  "최무룡",
+  "황현우",
+  "정철원",
+  "조용희",
+] as const;
 
 function createSeedList(...names: string[]) {
   return Array.from({ length: 30 }, (_, index) => names[index] ?? "");
@@ -310,6 +334,8 @@ export const defaultScheduleState: ScheduleState = {
   jcheckCount: DEFAULT_JCHECK_COUNT,
   extraHolidays: "",
   vacations: "",
+  generalTeamPeople: [...GENERAL_TEAM_DEFAULT_NAMES],
+  globalOffPool: [],
   offPeople: [],
   offByCategory: createEmptyOffByCategory(),
   offExcludeByCategory: createEmptyOffByCategory(),

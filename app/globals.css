@@ -955,6 +955,200 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
   gap: 10px;
 }
 
+.schedule-order-sheet {
+  display: grid;
+  gap: 12px;
+}
+
+.schedule-order-sheet__scroller {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.schedule-order-sheet__table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+
+.schedule-order-sheet__table th,
+.schedule-order-sheet__table td {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 2px;
+  vertical-align: top;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.schedule-order-sheet__table tr:last-child td,
+.schedule-order-sheet__table tr:last-child th {
+  border-bottom: none;
+}
+
+.schedule-order-sheet__table tr td:last-child,
+.schedule-order-sheet__table tr th:last-child {
+  border-right: none;
+}
+
+.schedule-order-sheet__sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--panel) 92%, transparent) !important;
+  backdrop-filter: blur(10px);
+}
+
+.schedule-order-sheet__row-label {
+  min-width: 68px;
+  width: 68px;
+  text-align: center;
+  padding: 6px 4px !important;
+}
+
+.schedule-order-sheet__row-label-inner {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  text-align: center;
+}
+
+.schedule-order-sheet__row-label strong {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.18;
+  color: var(--text);
+}
+
+.schedule-order-sheet__row-actions {
+  display: grid;
+  gap: 4px;
+}
+
+.schedule-order-sheet__row-actions .btn,
+.schedule-order-sheet__row-label .btn {
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+.schedule-order-sheet__cell {
+  min-width: 0;
+  width: auto;
+  padding: 1px !important;
+}
+
+.schedule-order-sheet__cell--off {
+  background: rgba(239, 68, 68, 0.12) !important;
+}
+
+.schedule-order-sheet__cell--start {
+  background: rgba(34, 197, 94, 0.12) !important;
+}
+
+.schedule-order-sheet__cell--start .schedule-order-sheet__input {
+  border: 1px solid rgba(255, 255, 255, 0.88);
+}
+
+.schedule-order-sheet__input-wrap {
+  display: block;
+  height: 100%;
+}
+
+.schedule-order-sheet__input {
+  min-width: 0;
+  width: 100%;
+  text-align: center;
+  padding: 5px 2px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.1;
+  min-height: 34px;
+  border-radius: 0;
+  box-shadow: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+}
+
+.schedule-order-sheet__start-button {
+  margin-top: 2px;
+  width: 100%;
+  padding: 3px 4px;
+  font-size: 10px;
+  border-radius: 0;
+  border-color: rgba(74, 222, 128, 0.45);
+  background: rgba(34, 197, 94, 0.12);
+  color: #dcfce7;
+}
+
+.schedule-order-bottom-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+  align-items: start;
+}
+
+.schedule-order-name-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 6px;
+}
+
+.schedule-order-name-grid--wide {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.schedule-order-name-cell-wrap {
+  position: relative;
+}
+
+.schedule-order-name-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.schedule-order-name-cell--selected {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.2);
+  color: #ffd7d7;
+}
+
+.schedule-order-name-cell:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.schedule-order-name-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+}
+
 .schedule-name-chip {
   font-size: clamp(14px, 2.4vw, 18px);
   line-height: 1.08;

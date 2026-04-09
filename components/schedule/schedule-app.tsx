@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, getVisibleAssignmentDisplayRank, orderCategories } from "@/lib/schedule/constants";
+import { GENERAL_TEAM_DEFAULT_NAMES, SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, getVisibleAssignmentDisplayRank, orderCategories } from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -279,8 +279,12 @@ export function ScheduleApp() {
   const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴" | "경조">("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
+  const [isOrderEditMode, setIsOrderEditMode] = useState(false);
+  const [isGeneralTeamAdding, setIsGeneralTeamAdding] = useState(false);
+  const [generalTeamDraftName, setGeneralTeamDraftName] = useState("");
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
+  const generalTeamInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const isEditingDateRef = useRef(false);
@@ -404,6 +408,12 @@ export function ScheduleApp() {
   }, [addPersonDialog]);
 
   useEffect(() => {
+    if (!isGeneralTeamAdding) return;
+    generalTeamInputRef.current?.focus();
+    generalTeamInputRef.current?.select();
+  }, [isGeneralTeamAdding]);
+
+  useEffect(() => {
     if (!addPersonDialog) return;
     if (activeEditMonthKey === visibleMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
     setAddPersonDialog(null);
@@ -424,6 +434,17 @@ export function ScheduleApp() {
   }, []);
 
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
+  const generalTeamPeople = useMemo(
+    () => (state.generalTeamPeople.length > 0 ? state.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES.map((name) => name.trim()).filter(Boolean)),
+    [state.generalTeamPeople],
+  );
+  const globalOffPool = useMemo(
+    () =>
+      state.globalOffPool.length > 0
+        ? state.globalOffPool
+        : Array.from(new Set([...uniquePeople, ...state.offPeople.map((name) => name.trim()).filter(Boolean)])),
+    [state.globalOffPool, state.offPeople, uniquePeople],
+  );
   const totalCount = uniquePeople.length;
   const targetMonthKey = useMemo(() => getMonthKey(state.year, state.month), [state.month, state.year]);
   const visibleSchedule = useMemo(() => {
@@ -587,6 +608,82 @@ export function ScheduleApp() {
     setGlobalOffEditor(null);
   };
 
+  const toggleOrderEditMode = () => {
+    setIsOrderEditMode((current) => {
+      const next = !current;
+      if (next) {
+        setGlobalOffEditor({
+          selectedNames: [...state.offPeople],
+        });
+      }
+      if (!next) {
+        setOrderOffEditor(null);
+        setGlobalOffEditor(null);
+        setIsGeneralTeamAdding(false);
+        setGeneralTeamDraftName("");
+      }
+      return next;
+    });
+  };
+
+  const appendGeneralTeamPerson = (rawName: string) => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return;
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generalTeamPeople: Array.from(
+          new Set([...(current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES), trimmed]),
+        ),
+      }),
+    );
+    setGeneralTeamDraftName("");
+    setIsGeneralTeamAdding(false);
+  };
+
+  const removeGeneralTeamPerson = (name: string) => {
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generalTeamPeople: (current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES).filter((item) => item !== name),
+        offPeople: current.offPeople.filter((item) => item !== name),
+      }),
+    );
+    setGlobalOffEditor((current) => (current ? { ...current, selectedNames: current.selectedNames.filter((item) => item !== name) } : current));
+  };
+
+  const appendGlobalOffPoolPerson = () => {
+    const name = window.prompt("기본 오프 인원 목록에 추가할 이름을 입력하세요.");
+    const trimmed = name?.trim() ?? "";
+    if (!trimmed) return;
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        globalOffPool: Array.from(
+          new Set([
+            ...(current.globalOffPool.length > 0
+              ? current.globalOffPool
+              : Array.from(new Set([...getUniquePeople(current), ...current.offPeople.map((item) => item.trim()).filter(Boolean)]))),
+            trimmed,
+          ]),
+        ),
+      }),
+    );
+  };
+
+  const removeGlobalOffPoolPerson = (name: string) => {
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        globalOffPool: (current.globalOffPool.length > 0
+          ? current.globalOffPool
+          : Array.from(new Set([...getUniquePeople(current), ...current.offPeople.map((item) => item.trim()).filter(Boolean)]))).filter((item) => item !== name),
+        offPeople: current.offPeople.filter((item) => item !== name),
+      }),
+    );
+    setGlobalOffEditor((current) => (current ? { ...current, selectedNames: current.selectedNames.filter((item) => item !== name) } : current));
+  };
+
   const saveOrderOffEdit = () => {
     if (!orderOffEditor) return;
     const startName = state.monthStartNames[targetMonthKey]?.[orderOffEditor.categoryKey]?.trim();
@@ -739,22 +836,24 @@ export function ScheduleApp() {
       return;
     }
     const result = generateSchedule(state);
-    if (result.state.generated) {
-      syncVacationMonthSheetFromGeneratedSchedule(result.state.generated);
+    const nextState = sanitizeScheduleState(result.state);
+    if (nextState.generated) {
+      syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
     }
-    setState(result.state);
-    setVisibleMonthKey(result.state.generated?.monthKey ?? null);
+    setState(nextState);
+    setVisibleMonthKey(nextState.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
   };
 
   const confirmGenerate = () => {
     setOverwriteConfirmOpen(false);
     const result = generateSchedule(state);
-    if (result.state.generated) {
-      syncVacationMonthSheetFromGeneratedSchedule(result.state.generated);
+    const nextState = sanitizeScheduleState(result.state);
+    if (nextState.generated) {
+      syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
     }
-    setState(result.state);
-    setVisibleMonthKey(result.state.generated?.monthKey ?? null);
+    setState(nextState);
+    setVisibleMonthKey(nextState.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
   };
 
@@ -1214,7 +1313,7 @@ export function ScheduleApp() {
                     수정 완료
                   </button>
                   <button className="btn" onClick={cancelDayEdit}>
-                    수정 취소
+                    수정모드 취소
                   </button>
                 </>
               ) : (
@@ -1350,7 +1449,12 @@ export function ScheduleApp() {
                     .filter(([category]) => {
                       if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
                       return !["국회", "청사", "청와대"].includes(category);
-                    });
+                    })
+                    .sort(
+                      ([leftCategory], [rightCategory]) =>
+                        getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
+                        getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                    );
 
                   return (
                     <article
@@ -1864,7 +1968,7 @@ export function ScheduleApp() {
         </div>
       </section>
 
-      <div className="subgrid-2">
+      <div style={{ display: "grid", gap: 16 }}>
       <section style={{ display: "grid", gap: 16 }}>
         <section className="subgrid-3">
           <article className="kpi">
@@ -1883,153 +1987,236 @@ export function ScheduleApp() {
 
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-            <div className="chip">순번 입력</div>
-            {orderCategories.map((category) => {
-              const categoryPeople = getCategoryPeople(state, category.key);
-              const isOffEditing = orderOffEditor?.categoryKey === category.key;
-              const effectiveOffNames = getEffectiveOffByCategory(state, category.key);
-              const selectedOffNames = isOffEditing ? orderOffEditor.selectedNames : effectiveOffNames;
-              const startRawIndex = getStartPointerRawIndex(state, targetMonthKey, category.key);
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="chip">순번 입력</div>
+              <button className={`btn ${isOrderEditMode ? "white" : ""}`} disabled={isEditingDate} onClick={toggleOrderEditMode}>
+                {isOrderEditMode ? "수정모드 종료" : "수정모드"}
+              </button>
+            </div>
+            <div className="schedule-order-sheet">
+              <div className="schedule-order-sheet__scroller">
+                <table className="schedule-order-sheet__table">
+                  <tbody>
+                    {orderCategories.map((category) => {
+                      const isOffEditing = orderOffEditor?.categoryKey === category.key;
+                      const effectiveOffNames = getEffectiveOffByCategory(state, category.key);
+                      const selectedOffNames = isOffEditing ? orderOffEditor.selectedNames : effectiveOffNames;
+                      const startRawIndex = getStartPointerRawIndex(state, targetMonthKey, category.key);
 
-              return (
-              <article key={category.key} style={{ border: "1px solid var(--line)", borderRadius: 20, padding: 16, display: "grid", gap: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 0, gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <div style={{ display: "grid", gap: 4 }}>
-                    <strong>{category.label}</strong>
-                    <span className="muted">1~30 순번</span>
-                  </div>
-                  {isOffEditing ? (
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button className="btn primary" disabled={isEditingDate} onClick={saveOrderOffEdit}>저장</button>
-                      <button className="btn" disabled={isEditingDate} onClick={cancelOrderOffEdit}>취소</button>
-                    </div>
+                      return (
+                        <tr key={category.key}>
+                          <th className="schedule-order-sheet__sticky-col schedule-order-sheet__row-label">
+                            <div className="schedule-order-sheet__row-label-inner">
+                              <strong>{category.label}</strong>
+                              {isOrderEditMode ? (
+                                isOffEditing ? (
+                                  <div className="schedule-order-sheet__row-actions">
+                                    <button className="btn primary" disabled={isEditingDate} onClick={saveOrderOffEdit}>저장</button>
+                                    <button className="btn" disabled={isEditingDate} onClick={cancelOrderOffEdit}>취소</button>
+                                  </div>
+                                ) : (
+                                  <button className="btn" disabled={isEditingDate} onClick={() => startOrderOffEdit(category.key)}>오프</button>
+                                )
+                              ) : null}
+                            </div>
+                          </th>
+                          {Array.from({ length: 30 }, (_, index) => {
+                            const value = state.orders[category.key][index] ?? "";
+                            const trimmedValue = value.trim();
+                            const isSelectedOff = selectedOffNames.includes(trimmedValue);
+                            const isStart = index === startRawIndex;
+
+                            return (
+                              <td
+                                key={`${category.key}-${index}`}
+                                className={`schedule-order-sheet__cell${isSelectedOff ? " schedule-order-sheet__cell--off" : ""}${isStart ? " schedule-order-sheet__cell--start" : ""}`}
+                              >
+                                <label className="schedule-order-sheet__input-wrap">
+                                  <input
+                                    className="field-input schedule-order-sheet__input"
+                                    disabled={isEditingDate || !isOrderEditMode}
+                                    value={value}
+                                    onChange={(e) => {
+                                      const orders = { ...state.orders, [category.key]: [...state.orders[category.key]] };
+                                      orders[category.key][index] = e.target.value;
+                                      setState({ ...state, orders });
+                                    }}
+                                  />
+                                </label>
+                                {isOrderEditMode && isOffEditing && trimmedValue ? (
+                                  <button
+                                    type="button"
+                                    className="btn schedule-order-sheet__start-button"
+                                    onClick={() =>
+                                      setState((current) =>
+                                        sanitizeScheduleState(setMonthStartPointer(current, targetMonthKey, category.key, index)),
+                                      )
+                                    }
+                                  >
+                                    시작점
+                                  </button>
+                                ) : null}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {isOrderEditMode && orderOffEditor ? (
+              <article style={{ border: "1px solid var(--line)", borderRadius: 20, padding: 16, display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong>{orderCategories.find((category) => category.key === orderOffEditor.categoryKey)?.label ?? "근무유형"} 오프 편집</strong>
+                  <span className="muted">이름을 누르면 해당 근무유형의 오프로 저장됩니다.</span>
+                </div>
+                <div className="status note">아래 기본 오프 인원을 기준으로 더하거나 빼서 조절할 수 있습니다.</div>
+                <div className="schedule-order-name-grid">
+                  {getCategoryPeople(state, orderOffEditor.categoryKey).length > 0 ? (
+                    getCategoryPeople(state, orderOffEditor.categoryKey).map((name) => {
+                      const selected = orderOffEditor.selectedNames.includes(name);
+                      return (
+                        <button
+                          key={`${orderOffEditor.categoryKey}-${name}`}
+                          type="button"
+                          className={`schedule-order-name-cell${selected ? " schedule-order-name-cell--selected" : ""}`}
+                          onClick={() =>
+                            setOrderOffEditor((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    selectedNames: selected
+                                      ? current.selectedNames.filter((item) => item !== name)
+                                      : [...current.selectedNames, name],
+                                  }
+                                : current,
+                            )
+                          }
+                        >
+                          {name}
+                        </button>
+                      );
+                    })
                   ) : (
-                    <button className="btn" disabled={isEditingDate} onClick={() => startOrderOffEdit(category.key)}>수정</button>
+                    <span className="muted">등록된 이름이 없습니다.</span>
                   )}
                 </div>
-                {isOffEditing ? (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <div className="status note">이름을 누르면 해당 근무유형의 오프로 저장됩니다. 아래 기본 오프 인원을 기준으로 더하거나 빼서 조절할 수 있습니다.</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {categoryPeople.length > 0 ? (
-                        categoryPeople.map((name) => {
-                          const selected = selectedOffNames.includes(name);
-                          return (
-                            <button
-                              key={`${category.key}-${name}`}
-                              type="button"
-                              className="btn"
-                              onClick={() =>
-                                setOrderOffEditor((current) =>
-                                  current && current.categoryKey === category.key
-                                    ? {
-                                        ...current,
-                                        selectedNames: selected
-                                          ? current.selectedNames.filter((item) => item !== name)
-                                          : [...current.selectedNames, name],
-                                      }
-                                    : current,
-                                )
-                              }
-                              style={{
-                                padding: "8px 12px",
-                                borderColor: selected ? "rgba(239,68,68,.55)" : undefined,
-                                background: selected ? "rgba(239,68,68,.24)" : undefined,
-                                color: selected ? "#ffd7d7" : undefined,
-                              }}
-                            >
-                              {name}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <span className="muted">등록된 이름이 없습니다.</span>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-                <div className="schedule-order-grid">
-                  {Array.from({ length: 30 }, (_, index) => (
-                    <label
-                      key={`${category.key}-${index}`}
-                      style={{
-                        display: "grid",
-                        gap: 6,
-                        padding: 8,
-                        borderRadius: 12,
-                        border: index === startRawIndex ? "1px solid rgba(74,222,128,.55)" : "1px solid rgba(255,255,255,.08)",
-                        background: selectedOffNames.includes((state.orders[category.key][index] ?? "").trim())
-                          ? "rgba(239,68,68,.16)"
-                          : index === startRawIndex
-                            ? "rgba(34,197,94,.16)"
-                            : "rgba(255,255,255,.02)",
-                      }}
-                    >
-                      <span className="muted" style={{ fontSize: 12 }}>{index + 1}번</span>
-                      <input
-                        className="field-input"
-                        disabled={isEditingDate}
-                        style={
-                          selectedOffNames.includes((state.orders[category.key][index] ?? "").trim())
-                            ? {
-                                borderColor: "rgba(248,113,113,.55)",
-                                background: "rgba(61,14,18,.6)",
-                                color: "#ffe4e6",
-                              }
-                            : index === startRawIndex
-                              ? { borderColor: "rgba(74,222,128,.55)", background: "rgba(15,23,42,.86)" }
-                              : undefined
-                        }
-                        value={state.orders[category.key][index] ?? ""}
-                        onChange={(e) => {
-                          const orders = { ...state.orders, [category.key]: [...state.orders[category.key]] };
-                          orders[category.key][index] = e.target.value;
-                          setState({ ...state, orders });
-                        }}
-                      />
-                      {selectedOffNames.includes((state.orders[category.key][index] ?? "").trim()) ? (
-                        <span style={{ fontSize: 12, fontWeight: 800, color: "#fda4af" }}>오프</span>
-                      ) : null}
-                      {index === startRawIndex ? (
-                        <span style={{ fontSize: 12, fontWeight: 800, color: "#86efac" }}>이번 달 시작점</span>
-                      ) : null}
-                      {isOffEditing && state.orders[category.key][index]?.trim() ? (
-                        <button
-                          type="button"
-                          className="btn"
-                          style={{
-                            padding: "4px 8px",
-                            fontSize: 12,
-                            borderColor: "rgba(74,222,128,.45)",
-                            background: index === startRawIndex ? "rgba(34,197,94,.22)" : "rgba(34,197,94,.12)",
-                            color: "#dcfce7",
-                          }}
-                          onClick={() => setState((current) => sanitizeScheduleState(setMonthStartPointer(current, targetMonthKey, category.key, index)))}
-                        >
-                          시작점
-                        </button>
-                      ) : null}
-                    </label>
-                  ))}
-                </div>
               </article>
-            )})}
+            ) : null}
           </div>
         </section>
       </section>
 
-      <section style={{ display: "grid", gap: 10, width: "756px", maxWidth: "100%", justifySelf: "start" }}>
+      <section className="panel" style={{ width: "100%" }}>
+        <div className="panel-pad" style={{ display: "grid", gap: 8, padding: "8px 12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div className="chip">일반조</div>
+            {isOrderEditMode ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="muted" style={{ fontSize: 12 }}>이름을 눌러 오프 설정</span>
+                {isGeneralTeamAdding ? (
+                  <form
+                    style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      appendGeneralTeamPerson(generalTeamDraftName);
+                    }}
+                  >
+                    <input
+                      ref={generalTeamInputRef}
+                      className="field-input"
+                      style={{ width: 180, minWidth: 140, padding: "8px 10px", fontSize: 13 }}
+                      value={generalTeamDraftName}
+                      onChange={(event) => setGeneralTeamDraftName(event.target.value)}
+                      placeholder="이름 입력 후 Enter"
+                    />
+                    <button type="submit" className="btn" style={{ padding: "8px 12px", fontSize: 13 }}>추가</button>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ padding: "8px 12px", fontSize: 13 }}
+                      onClick={() => {
+                        setIsGeneralTeamAdding(false);
+                        setGeneralTeamDraftName("");
+                      }}
+                    >
+                      취소
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    className="btn"
+                    style={{ padding: "8px 12px", fontSize: 13 }}
+                    onClick={() => {
+                      setIsGeneralTeamAdding(true);
+                      setGeneralTeamDraftName("");
+                    }}
+                  >
+                    추가
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="muted" style={{ fontSize: 12 }}>수정모드에서 편집</span>
+            )}
+          </div>
+
+          <div className="schedule-order-name-grid schedule-order-name-grid--wide">
+            {generalTeamPeople.map((name) => {
+              const selected = ((isOrderEditMode ? globalOffEditor?.selectedNames : null) ?? state.offPeople).includes(name);
+              return (
+                <div key={`general-team-off-${name}`} className="schedule-order-name-cell-wrap">
+                  <button
+                    type="button"
+                    className={`schedule-order-name-cell${selected ? " schedule-order-name-cell--selected" : ""}`}
+                    disabled={!isOrderEditMode || !globalOffEditor}
+                    onClick={() =>
+                      setGlobalOffEditor((current) =>
+                        current
+                          ? {
+                              ...current,
+                              selectedNames: selected
+                                ? current.selectedNames.filter((item) => item !== name)
+                                : [...current.selectedNames, name],
+                            }
+                          : current,
+                      )
+                    }
+                  >
+                    {name}
+                  </button>
+                  {isOrderEditMode ? (
+                    <button
+                      type="button"
+                      className="schedule-order-name-delete"
+                      onClick={() => removeGeneralTeamPerson(name)}
+                      aria-label={`${name} 삭제`}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="schedule-order-bottom-grid">
         <section className="panel" style={{ width: "100%" }}>
           <div className="panel-pad" style={{ display: "grid", gap: 4, padding: "8px 12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <div className="chip">기본 오프 인원</div>
-              {globalOffEditor ? (
+              {isOrderEditMode && globalOffEditor ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={appendGlobalOffPoolPerson}>추가</button>
                   <button className="btn primary" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={saveGlobalOffEdit}>저장</button>
                   <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={cancelGlobalOffEdit}>취소</button>
                 </div>
               ) : (
-                <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={startGlobalOffEdit}>수정</button>
+                <span className="muted" style={{ fontSize: 12 }}>수정모드에서 편집</span>
               )}
             </div>
 
@@ -2048,47 +2235,42 @@ export function ScheduleApp() {
               여기서 고른 인원은 전체 순번에서 기본 오프로 표시됩니다. 각 근무유형의 `수정`에서 근무별 오프를 따로 조절할 수 있습니다.
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 6,
-                alignContent: "flex-start",
-              }}
-            >
-              {uniquePeople.length > 0 ? (
-                uniquePeople.map((name) => {
-                  const selected = (globalOffEditor?.selectedNames ?? state.offPeople).includes(name);
+            <div className="schedule-order-name-grid">
+              {globalOffPool.length > 0 ? (
+                globalOffPool.map((name) => {
+                  const selected = ((isOrderEditMode ? globalOffEditor?.selectedNames : null) ?? state.offPeople).includes(name);
                   return (
-                    <button
-                      key={`global-off-${name}`}
-                      type="button"
-                      className="btn"
-                      disabled={!globalOffEditor}
-                      onClick={() =>
-                        setGlobalOffEditor((current) =>
-                          current
-                            ? {
-                                ...current,
-                                selectedNames: selected
-                                  ? current.selectedNames.filter((item) => item !== name)
-                                  : [...current.selectedNames, name],
-                              }
-                            : current,
-                        )
-                      }
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: 13,
-                        lineHeight: 1.2,
-                        borderColor: selected ? "rgba(239,68,68,.55)" : undefined,
-                        background: selected ? "rgba(239,68,68,.24)" : undefined,
-                        color: selected ? "#ffd7d7" : undefined,
-                        cursor: globalOffEditor ? "pointer" : "default",
-                      }}
-                    >
-                      {name}
-                    </button>
+                    <div key={`global-off-${name}`} className="schedule-order-name-cell-wrap">
+                      <button
+                        type="button"
+                        className={`schedule-order-name-cell${selected ? " schedule-order-name-cell--selected" : ""}`}
+                        disabled={!isOrderEditMode || !globalOffEditor}
+                        onClick={() =>
+                          setGlobalOffEditor((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  selectedNames: selected
+                                    ? current.selectedNames.filter((item) => item !== name)
+                                    : [...current.selectedNames, name],
+                                }
+                              : current,
+                          )
+                        }
+                      >
+                        {name}
+                      </button>
+                      {isOrderEditMode ? (
+                        <button
+                          type="button"
+                          className="schedule-order-name-delete"
+                          onClick={() => removeGlobalOffPoolPerson(name)}
+                          aria-label={`${name} 삭제`}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
                   );
                 })
               ) : (

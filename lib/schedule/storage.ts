@@ -71,6 +71,8 @@ function buildSettingsState(state: ScheduleState): Partial<ScheduleState> {
     jcheckCount: state.jcheckCount,
     extraHolidays: state.extraHolidays,
     vacations: state.vacations,
+    generalTeamPeople: state.generalTeamPeople,
+    globalOffPool: state.globalOffPool,
     offPeople: state.offPeople,
     offByCategory: state.offByCategory,
     offExcludeByCategory: state.offExcludeByCategory,

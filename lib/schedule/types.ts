@@ -116,6 +116,8 @@ export interface ScheduleState {
   jcheckCount: number;
   extraHolidays: string;
   vacations: string;
+  generalTeamPeople: string[];
+  globalOffPool: string[];
   offPeople: string[];
   offByCategory: Record<CategoryKey, string[]>;
   offExcludeByCategory: Record<CategoryKey, string[]>;
