@@ -40,13 +40,6 @@ const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
-function getTouchDistance(touches: TouchList) {
-  if (touches.length < 2) return 0;
-  const first = touches[0];
-  const second = touches[1];
-  return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
-}
-
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
@@ -473,23 +466,13 @@ export function PublishedSchedulesPanel() {
   const [scheduleScale, setScheduleScale] = useState(1);
   const [scheduleZoomFactor, setScheduleZoomFactor] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
-  const [scheduleViewportWidth, setScheduleViewportWidth] = useState(0);
   const [session, setSession] = useState(() => getSession());
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
-  const pinchZoomStateRef = useRef<{ startDistance: number; startZoomFactor: number } | null>(null);
-  const scheduleZoomFactorRef = useRef(1);
-  const pendingPinchZoomFactorRef = useRef(1);
-  const pinchZoomFrameRef = useRef(0);
   const canDelete = hasDeskAccess(session?.role);
   const username = session?.username ?? "";
-
-  useEffect(() => {
-    scheduleZoomFactorRef.current = scheduleZoomFactor;
-    pendingPinchZoomFactorRef.current = scheduleZoomFactor;
-  }, [scheduleZoomFactor]);
 
   useEffect(() => {
     return subscribeToAuth((nextSession) => {
@@ -697,8 +680,6 @@ export function PublishedSchedulesPanel() {
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
-  const isScheduleOverflowingX =
-    shouldAutoFitSchedule && scheduleViewportWidth > 0 && scaledScheduleWidth > scheduleViewportWidth + 1;
   const canControlScheduleZoom = false;
   const scheduleZoomPercent = Math.round(appliedScheduleScale * 100);
 
@@ -719,7 +700,6 @@ export function PublishedSchedulesPanel() {
       );
 
       const containerWidth = scrollNode.clientWidth;
-      setScheduleViewportWidth((current) => (current === containerWidth ? current : containerWidth));
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
       const autoFitCap = 1;
       const nextFitScale = shouldAutoFitSchedule
@@ -788,70 +768,6 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener("orientationchange", scheduleMeasure);
     };
   }, [displayDays, editMode, isCompactMonthlyView, requests, selectedRoute, showMine]);
-
-  useEffect(() => {
-    const scrollNode = scheduleScrollRef.current;
-    if (!scrollNode || !shouldAutoFitSchedule) return;
-
-    const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length < 2) return;
-      const startDistance = getTouchDistance(event.touches);
-      if (startDistance <= 0) return;
-      pinchZoomStateRef.current = {
-        startDistance,
-        startZoomFactor: scheduleZoomFactorRef.current,
-      };
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const pinchState = pinchZoomStateRef.current;
-      if (!pinchState || event.touches.length < 2) return;
-
-      const nextDistance = getTouchDistance(event.touches);
-      if (nextDistance <= 0) return;
-
-      event.preventDefault();
-      const rawZoomFactor = pinchState.startZoomFactor * (nextDistance / pinchState.startDistance);
-      const nextZoomFactor = Math.min(
-        TOUCH_SCHEDULE_ZOOM_MAX,
-        Math.max(TOUCH_SCHEDULE_ZOOM_MIN, Number(rawZoomFactor.toFixed(2))),
-      );
-      pendingPinchZoomFactorRef.current = nextZoomFactor;
-      if (pinchZoomFrameRef.current) return;
-      pinchZoomFrameRef.current = window.requestAnimationFrame(() => {
-        pinchZoomFrameRef.current = 0;
-        const pendingZoomFactor = pendingPinchZoomFactorRef.current;
-        setScheduleZoomFactor((current) =>
-          Math.abs(current - pendingZoomFactor) < 0.01 ? current : pendingZoomFactor,
-        );
-      });
-    };
-
-    const endPinchZoom = () => {
-      pinchZoomStateRef.current = null;
-      if (pinchZoomFrameRef.current) {
-        window.cancelAnimationFrame(pinchZoomFrameRef.current);
-        pinchZoomFrameRef.current = 0;
-      }
-    };
-
-    scrollNode.addEventListener("touchstart", handleTouchStart, { passive: true });
-    scrollNode.addEventListener("touchmove", handleTouchMove, { passive: false });
-    scrollNode.addEventListener("touchend", endPinchZoom);
-    scrollNode.addEventListener("touchcancel", endPinchZoom);
-
-    return () => {
-      scrollNode.removeEventListener("touchstart", handleTouchStart);
-      scrollNode.removeEventListener("touchmove", handleTouchMove);
-      scrollNode.removeEventListener("touchend", endPinchZoom);
-      scrollNode.removeEventListener("touchcancel", endPinchZoom);
-      pinchZoomStateRef.current = null;
-      if (pinchZoomFrameRef.current) {
-        window.cancelAnimationFrame(pinchZoomFrameRef.current);
-        pinchZoomFrameRef.current = 0;
-      }
-    };
-  }, [selectedItem, shouldAutoFitSchedule]);
 
   const printSelectedSchedule = () => {
     if (!selectedItem) return;
@@ -1329,22 +1245,16 @@ export function PublishedSchedulesPanel() {
                 style={{
                   overflowX: shouldAutoFitSchedule ? "auto" : undefined,
                   overflowY: shouldAutoFitSchedule ? "auto" : undefined,
-                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y" : undefined,
+                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y pinch-zoom" : undefined,
                   WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
                 }}
               >
               <div
                 style={{
-                  minWidth:
-                    shouldAutoFitSchedule && !isScheduleOverflowingX
-                      ? "100%"
-                      : shouldAutoFitSchedule && scaledScheduleWidth > 0
-                        ? scaledScheduleWidth
-                        : undefined,
+                  minWidth: shouldAutoFitSchedule ? "100%" : undefined,
                   width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
                   height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
-                  margin:
-                    shouldAutoFitSchedule && scaledScheduleWidth > 0 && !isScheduleOverflowingX ? "0 auto" : undefined,
+                  margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,
                   position: shouldAutoFitSchedule ? "relative" : undefined,
                 }}
               >
@@ -1357,7 +1267,6 @@ export function PublishedSchedulesPanel() {
                   position: shouldAutoFitSchedule ? "absolute" : undefined,
                   top: shouldAutoFitSchedule ? 0 : undefined,
                   left: shouldAutoFitSchedule ? 0 : undefined,
-                  willChange: shouldAutoFitSchedule ? "transform" : undefined,
                 }}
               >
               <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
