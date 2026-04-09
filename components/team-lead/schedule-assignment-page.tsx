@@ -12,8 +12,10 @@ import {
   AssignmentTravelType,
   createDefaultScheduleAssignmentDayRows,
   createDefaultScheduleAssignmentEntry,
+  getScheduleAssignmentBaseTimes,
   getScheduleAssignmentVisibleTripTagMap,
   getScheduleAssignmentRows,
+  getScheduleAssignmentTimeColor,
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
   refreshTeamLeadState,
@@ -31,7 +33,7 @@ const dutyOptions = [
   "일반",
   "연장",
   "석근",
-  "철야",
+  "야근",
   "야퇴",
   "청와대",
   "국회",
@@ -61,9 +63,6 @@ function timeColorStyle(color: AssignmentTimeColor) {
   if (color === "yellow") return { borderColor: "rgba(250,204,21,.55)", background: "rgba(254,249,195,.95)", color: "#854d0e" };
   return undefined;
 }
-
-const cycleClockInColor = (color: AssignmentTimeColor): AssignmentTimeColor => (color === "" ? "blue" : color === "blue" ? "red" : "");
-const cycleClockOutColor = (color: AssignmentTimeColor): AssignmentTimeColor => (color === "" ? "yellow" : "");
 const getSafeSchedules = (schedules: string[]) => (schedules.length > 0 ? schedules : [""]);
 const removeScheduleAt = (schedules: string[], index: number) => getSafeSchedules(schedules.filter((_, i) => i !== index));
 const getSafeExclusiveVideo = (values: boolean[], count: number) => Array.from({ length: Math.max(count, 1) }, (_, i) => values[i] ?? false);
@@ -979,6 +978,11 @@ export function ScheduleAssignmentPage() {
                       const showClockInActions = activeTimeField === clockInFieldKey || entry.clockInConfirmed;
                       const showClockOutActions = activeTimeField === clockOutFieldKey || entry.clockOutConfirmed;
                       const rowDutyOptions = row.duty && !dutyOptions.includes(row.duty) ? [row.duty, ...dutyOptions] : dutyOptions;
+                      const baseTimes = getScheduleAssignmentBaseTimes(row.duty, day.dateKey, day);
+                      const displayClockIn = entry.clockIn || baseTimes?.clockInText || "";
+                      const displayClockOut = entry.clockOut || baseTimes?.clockOutText || "";
+                      const clockInColor = getScheduleAssignmentTimeColor("clockIn", displayClockIn, row.duty, day.dateKey, day);
+                      const clockOutColor = getScheduleAssignmentTimeColor("clockOut", displayClockOut, row.duty, day.dateKey, day);
                       const isDraftCustomRow =
                         isEditingPeople &&
                         row.isCustom &&
@@ -1103,26 +1107,78 @@ export function ScheduleAssignmentPage() {
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div style={{ display: "grid", gap: 2 }}>
-                              {entry.clockInConfirmed ? (
-                                <button type="button" disabled={isEditingPeople} className="field-input" style={{ width: 84, minWidth: 84, textAlign: "center", cursor: isEditingPeople ? "default" : "pointer", ...(timeColorStyle(entry.clockInColor) ?? {}) }} onClick={() => updateMonthEntry(row.key, (current) => ({ ...current, clockInColor: cycleClockInColor(current.clockInColor) }))}>{entry.clockIn}</button>
-                              ) : (
-                                <input disabled={isEditingPeople} className="field-input" type="text" inputMode="numeric" maxLength={5} placeholder="00:00" value={entry.clockIn} style={{ width: 84, minWidth: 84, textAlign: "center" }} onFocus={() => setActiveTimeField(clockInFieldKey)} onClick={() => setActiveTimeField(clockInFieldKey)} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, clockIn: event.target.value, clockInConfirmed: false, clockInColor: "" }))} />
-                              )}
+                              <input
+                                disabled={isEditingPeople}
+                                className="field-input"
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={5}
+                                placeholder="00:00"
+                                value={displayClockIn}
+                                style={{ width: 84, minWidth: 84, textAlign: "center", ...(timeColorStyle(clockInColor) ?? {}) }}
+                                onFocus={(event) => {
+                                  if (!entry.clockIn && baseTimes?.clockInText) {
+                                    updateMonthEntry(row.key, (current) => ({
+                                      ...current,
+                                      clockIn: baseTimes.clockInText,
+                                      clockInConfirmed: false,
+                                      clockInColor: "",
+                                    }));
+                                  }
+                                  setActiveTimeField(clockInFieldKey);
+                                  event.currentTarget.select();
+                                }}
+                                onClick={() => setActiveTimeField(clockInFieldKey)}
+                                onChange={(event) =>
+                                  updateMonthEntry(row.key, (current) => ({
+                                    ...current,
+                                    clockIn: event.target.value,
+                                    clockInConfirmed: false,
+                                    clockInColor: "",
+                                  }))
+                                }
+                              />
                               {showClockInActions ? <div style={{ display: "flex", gap: 2 }}>
-                                {!entry.clockInConfirmed ? <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockIn); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockIn: formatted, clockInConfirmed: Boolean(formatted), clockInColor: "" })); setActiveTimeField(null); }}>확인</button> : null}
+                                {!entry.clockInConfirmed ? <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockIn || displayClockIn); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockIn: formatted, clockInConfirmed: Boolean(formatted), clockInColor: "" })); setActiveTimeField(null); }}>확인</button> : null}
                                 <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { setActiveTimeField(null); updateMonthEntry(row.key, (current) => ({ ...current, clockIn: "", clockInColor: "", clockInConfirmed: false })); }}>초기화</button>
                               </div> : null}
                             </div>
                           </td>
                           <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div style={{ display: "grid", gap: 2 }}>
-                              {entry.clockOutConfirmed ? (
-                                <button type="button" disabled={isEditingPeople} className="field-input" style={{ width: 84, minWidth: 84, textAlign: "center", cursor: isEditingPeople ? "default" : "pointer", ...(timeColorStyle(entry.clockOutColor) ?? {}) }} onClick={() => updateMonthEntry(row.key, (current) => ({ ...current, clockOutColor: cycleClockOutColor(current.clockOutColor) }))}>{entry.clockOut}</button>
-                              ) : (
-                                <input disabled={isEditingPeople} className="field-input" type="text" inputMode="numeric" maxLength={5} placeholder="00:00" value={entry.clockOut} style={{ width: 84, minWidth: 84, textAlign: "center" }} onFocus={() => setActiveTimeField(clockOutFieldKey)} onClick={() => setActiveTimeField(clockOutFieldKey)} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, clockOut: event.target.value, clockOutConfirmed: false, clockOutColor: "" }))} />
-                              )}
+                              <input
+                                disabled={isEditingPeople}
+                                className="field-input"
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={5}
+                                placeholder="00:00"
+                                value={displayClockOut}
+                                style={{ width: 84, minWidth: 84, textAlign: "center", ...(timeColorStyle(clockOutColor) ?? {}) }}
+                                onFocus={(event) => {
+                                  if (!entry.clockOut && baseTimes?.clockOutText) {
+                                    updateMonthEntry(row.key, (current) => ({
+                                      ...current,
+                                      clockOut: baseTimes.clockOutText,
+                                      clockOutConfirmed: false,
+                                      clockOutColor: "",
+                                    }));
+                                  }
+                                  setActiveTimeField(clockOutFieldKey);
+                                  event.currentTarget.select();
+                                }}
+                                onClick={() => setActiveTimeField(clockOutFieldKey)}
+                                onChange={(event) =>
+                                  updateMonthEntry(row.key, (current) => ({
+                                    ...current,
+                                    clockOut: event.target.value,
+                                    clockOutConfirmed: false,
+                                    clockOutColor: "",
+                                  }))
+                                }
+                              />
                               {showClockOutActions ? <div style={{ display: "flex", gap: 2 }}>
-                                {!entry.clockOutConfirmed ? <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockOut); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockOut: formatted, clockOutConfirmed: Boolean(formatted), clockOutColor: formatted ? "yellow" : "" })); setActiveTimeField(null); }}>확인</button> : null}
+                                {!entry.clockOutConfirmed ? <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { const formatted = formatManualTime(entry.clockOut || displayClockOut); if (formatted === null) return; updateMonthEntry(row.key, (current) => ({ ...current, clockOut: formatted, clockOutConfirmed: Boolean(formatted), clockOutColor: "" })); setActiveTimeField(null); }}>확인</button> : null}
                                 <button type="button" disabled={isEditingPeople} className="btn" style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => { setActiveTimeField(null); updateMonthEntry(row.key, (current) => ({ ...current, clockOut: "", clockOutColor: "", clockOutConfirmed: false })); }}>초기화</button>
                               </div> : null}
                             </div>

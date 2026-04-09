@@ -135,21 +135,26 @@ export function ContributionPage() {
     const contributionCards = getContributionCards();
     const cardMap = new Map(contributionCards.map((card) => [card.name, card] as const));
 
-    const merged = users
-      .map((user) => user.username.trim())
-      .filter(Boolean)
-      .filter((name) => !hiddenNames.has(name))
+    const merged = Array.from(
+      new Set(
+        users
+          .map((user) => user.username.trim())
+          .filter(Boolean)
+          .filter((name) => !hiddenNames.has(name)),
+      ),
+    )
       .sort((left, right) => left.localeCompare(right, "ko"))
       .map((name) => cardMap.get(name) ?? createEmptyCard(name));
 
-    const extraCards = contributionCards.filter(
-      (card) =>
-        !hiddenNames.has(card.name.trim()) &&
-        !merged.some((mergedCard) => mergedCard.name === card.name),
-    );
+    const mergedNames = new Set(merged.map((card) => card.name));
+    const extraCards = contributionCards.filter((card) => !hiddenNames.has(card.name.trim()) && !mergedNames.has(card.name));
 
     setCards(
-      [...merged, ...extraCards].sort(
+      Array.from(
+        new Map(
+          [...merged, ...extraCards].map((card) => [card.name, card] as const),
+        ).values(),
+      ).sort(
         (left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"),
       ),
     );
@@ -274,13 +279,13 @@ export function ContributionPage() {
           gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
         }}
       >
-        {cards.map((card) => {
+        {cards.map((card, index) => {
           const isExpanded = expandedNames.includes(card.name);
           const isEditing = editingName === card.name;
           const draftItems = manualDrafts[card.name] ?? [];
 
           return (
-            <article key={card.name} className="panel">
+            <article key={`${card.name}-${index}`} className="panel">
               <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
                 <button
                   type="button"

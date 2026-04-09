@@ -554,6 +554,24 @@ function normalizeDutyLabel(value: string) {
   return value.replace(/\s+/g, "").trim();
 }
 
+function getScheduleAssignmentDutySortRank(duty: string) {
+  const normalized = normalizeDutyLabel(duty);
+  switch (normalized) {
+    case "조근":
+      return 0;
+    case "일반":
+      return 1;
+    case "연장":
+      return 2;
+    case "석근":
+      return 3;
+    case "야근":
+      return 4;
+    default:
+      return 100;
+  }
+}
+
 function isWeekendDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(year, month - 1, day);
@@ -586,6 +604,44 @@ function getDutyBaseTimes(duty: string, dateKey: string, day: DaySchedule | null
     default:
       return null;
   }
+}
+
+function formatTimeMinutes(minutes: number) {
+  const normalized = ((minutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hours = Math.floor(normalized / 60);
+  const mins = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+}
+
+export function getScheduleAssignmentBaseTimes(duty: string, dateKey: string, day: DaySchedule | null) {
+  const baseTimes = getDutyBaseTimes(duty, dateKey, day);
+  if (!baseTimes) return null;
+  return {
+    ...baseTimes,
+    clockInText: formatTimeMinutes(baseTimes.clockIn),
+    clockOutText: formatTimeMinutes(baseTimes.clockOut),
+  };
+}
+
+export function getScheduleAssignmentTimeColor(
+  field: "clockIn" | "clockOut",
+  value: string,
+  duty: string,
+  dateKey: string,
+  day: DaySchedule | null,
+): AssignmentTimeColor {
+  const baseTimes = getDutyBaseTimes(duty, dateKey, day);
+  const minutes = parseTimeMinutes(value);
+  if (!baseTimes || minutes === null) return "";
+
+  if (field === "clockIn") {
+    if (minutes < baseTimes.clockIn) return "blue";
+    if (minutes > baseTimes.clockIn) return "red";
+    return "";
+  }
+
+  if (minutes > baseTimes.clockOut) return "yellow";
+  return "";
 }
 
 function toScoreByHalfHour(minutes: number) {
@@ -821,7 +877,21 @@ export function getScheduleAssignmentRows(
     isCustom: true,
   }));
 
-  return [...addedRows, ...baseRows] satisfies ScheduleAssignmentRow[];
+  return [...addedRows, ...baseRows]
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const rankDiff =
+        getScheduleAssignmentDutySortRank(left.row.duty) - getScheduleAssignmentDutySortRank(right.row.duty);
+      if (rankDiff !== 0) return rankDiff;
+
+      const normalizedLeftDuty = normalizeDutyLabel(left.row.duty);
+      const normalizedRightDuty = normalizeDutyLabel(right.row.duty);
+      const dutyDiff = normalizedLeftDuty.localeCompare(normalizedRightDuty, "ko");
+      if (dutyDiff !== 0) return dutyDiff;
+
+      return left.index - right.index;
+    })
+    .map(({ row }) => row) satisfies ScheduleAssignmentRow[];
 }
 
 interface TripTimelineRow {
