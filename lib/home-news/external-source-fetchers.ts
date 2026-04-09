@@ -18,7 +18,9 @@ export function getDefaultExternalNewsSources(): ExternalNewsSourceConfig[] {
     {
       id: "google-investigation",
       label: "Google News 수사 동향",
-      url: createGoogleNewsSearchUrl("검찰 소환 OR 경찰 소환 OR 조사 OR 출석"),
+      url: createGoogleNewsSearchUrl(
+        "대통령실 OR 대통령 발언 OR 당대표 OR 원내대표 OR 비대위원장 OR 탄핵 OR 특검 OR 법안 처리 OR 압수수색 OR 소환 OR 출석 OR 체포 OR 구속영장 OR 기소 OR 선고 -인터뷰 -기획 -칼럼 -사설 -행사 -캠페인",
+      ),
       slotHints: ["morning_6", "afternoon_3"],
       categoryHint: "politics",
       tags: ["검찰", "경찰", "수사"],
@@ -26,7 +28,9 @@ export function getDefaultExternalNewsSources(): ExternalNewsSourceConfig[] {
     {
       id: "google-warrant",
       label: "Google News 영장·심사",
-      url: createGoogleNewsSearchUrl("구속영장실질심사 OR 영장 청구 OR 영장 발부 OR 영장 기각"),
+      url: createGoogleNewsSearchUrl(
+        "구속영장실질심사 OR 영장 청구 OR 영장 발부 OR 영장 기각 OR 압수수색 OR 소환 통보 OR 법원 선고 -인터뷰 -행사 -캠페인",
+      ),
       slotHints: ["morning_6", "afternoon_3"],
       categoryHint: "politics",
       tags: ["영장", "법원", "심사"],
@@ -34,7 +38,9 @@ export function getDefaultExternalNewsSources(): ExternalNewsSourceConfig[] {
     {
       id: "google-disaster",
       label: "Google News 재난·사고",
-      url: createGoogleNewsSearchUrl("지진 OR 화재 OR 산불 OR 대형 사고 OR 재난"),
+      url: createGoogleNewsSearchUrl(
+        "살인 OR 강력범죄 OR 화재 OR 사망 OR 붕괴 OR 폭발 OR 산불 OR 대형 사고 OR 재난 OR 압수수색 OR 체포 OR 구속영장 OR 기소 OR 선고 -캠페인 -행사 -추모 -복구지원",
+      ),
       slotHints: ["morning_6", "afternoon_3"],
       categoryHint: "society",
       tags: ["재난", "사건사고"],
@@ -42,7 +48,9 @@ export function getDefaultExternalNewsSources(): ExternalNewsSourceConfig[] {
     {
       id: "google-economy",
       label: "Google News 경제",
-      url: createGoogleNewsSearchUrl("환율 OR 증시 OR 금리 OR 물가 OR 수출"),
+      url: createGoogleNewsSearchUrl(
+        "기준금리 OR FOMC OR 코스피 OR 코스닥 OR 환율 OR 물가 OR 유가 OR 관세 OR 반도체 OR 삼성전자 OR SK하이닉스 OR 부동산 -인터뷰 -생활정보 -행사",
+      ),
       slotHints: ["morning_6", "afternoon_3"],
       categoryHint: "economy",
       tags: ["경제"],
@@ -50,7 +58,9 @@ export function getDefaultExternalNewsSources(): ExternalNewsSourceConfig[] {
     {
       id: "google-world",
       label: "Google News 국제",
-      url: createGoogleNewsSearchUrl("미국 OR 중국 OR 일본 OR 유럽 외교 OR 전쟁 OR 정상회담"),
+      url: createGoogleNewsSearchUrl(
+        "미국 OR 중국 OR 러시아 OR 일본 OR 이란 OR 이스라엘 OR 가자 OR 우크라이나 OR 전쟁 OR 휴전 OR 공습 OR 미사일 OR 정상회담 OR 관세 -인터뷰 -분석 -칼럼",
+      ),
       slotHints: ["morning_6", "afternoon_3"],
       categoryHint: "world",
       tags: ["국제"],

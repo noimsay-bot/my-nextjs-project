@@ -582,7 +582,7 @@ export function PublishedSchedulesPanel() {
   }, []);
 
   useEffect(() => {
-    const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
+    const shouldAutoFitSchedule = scheduleLayoutMode === "tablet";
     if (!shouldAutoFitSchedule) {
       setScheduleZoomFactor(1);
     }
@@ -672,7 +672,7 @@ export function PublishedSchedulesPanel() {
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
+  const shouldAutoFitSchedule = scheduleLayoutMode === "tablet";
   const schedulePanelLayoutClassName =
     scheduleLayoutMode === "mobile"
       ? "schedule-published-panel--mobile schedule-published-panel--mobile-layout"

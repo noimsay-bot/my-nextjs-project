@@ -47,6 +47,7 @@ export type ExternalNewsCandidate = {
     promotionalPenalty: number;
     localOnlyPenalty: number;
     nationalImpact: number;
+    newsroomRelevance: number;
     urgency: number;
     freshness: number;
   };

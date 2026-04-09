@@ -1,5 +1,6 @@
 "use client";
 
+import Head from "next/head";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -155,11 +156,23 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="shell">
+      <Head>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css" />
+      </Head>
       <section className="panel portal-header-shell">
         <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
           <div style={{ display: "flex", justifyContent: "stretch" }}>
             <Link href="/" className="brand-logo" aria-label="홈으로 이동">
-              <span className="brand-logo-text">JTBC News Camera Hub</span>
+              <span
+                className="brand-logo-text"
+                style={{
+                  fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+                  fontWeight: 600,
+                  letterSpacing: "0.1em",
+                }}
+              >
+                JTBC NEWS CAMERA HUB
+              </span>
             </Link>
           </div>
           {!isLogin ? (
