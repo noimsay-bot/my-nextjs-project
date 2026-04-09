@@ -85,6 +85,10 @@ function toIssueSetMeta(row: HomeNewsIssueSetRow): HomeNewsIssueSetMeta {
   };
 }
 
+function isTemporaryRepairIssueSet(records: HomeNewsBriefingRecord[]) {
+  return records.length > 0 && records.every((record) => record.source_label === "임시복구");
+}
+
 export async function fetchCurrentHomeIssueSet(now = new Date()): Promise<CurrentHomeIssueSetResult | null> {
   if (!hasSupabaseEnv()) {
     return null;
@@ -115,6 +119,10 @@ export async function fetchCurrentHomeIssueSet(now = new Date()): Promise<Curren
 
   const records = sortIssueSetItems(resolved.items ?? []).map((item) => item.briefing);
   if (records.length === 0) {
+    return null;
+  }
+
+  if (isTemporaryRepairIssueSet(records)) {
     return null;
   }
 

@@ -44,7 +44,6 @@ function ensurePortalHost() {
 }
 
 export function HomeNewsPortal() {
-  const isDev = process.env.NODE_ENV === "development";
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [baseData, setBaseData] = useState<HomeNewsDataset>(emptyHomeNewsDataset);
   const [livePreviewData, setLivePreviewData] = useState<HomeNewsDataset | null>(null);
@@ -216,7 +215,8 @@ export function HomeNewsPortal() {
           setLikeWorkspace(null);
         }
       }
-      if (isDev) {
+      const shouldAttemptLivePreview = result.source !== "issue_set";
+      if (shouldAttemptLivePreview) {
         try {
           const previewResult = await generateTimedLivePreview();
           if (!cancelled && previewResult.ok && previewResult.data) {
@@ -260,7 +260,7 @@ export function HomeNewsPortal() {
         currentHost.remove();
       }
     };
-  }, [isDev]);
+  }, []);
 
   if (!host) return null;
   return createPortal(section, host);

@@ -541,6 +541,77 @@ function toRecord(
   };
 }
 
+function splitExcerptToSummaryLines(excerpt: string, title: string) {
+  const normalizedExcerpt = excerpt.replace(/\s+/g, " ").trim();
+  if (!normalizedExcerpt) return [title];
+
+  const parts = normalizedExcerpt
+    .split(/(?<=[.!?。])\s+|(?<=다\.)\s+| · /)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return [normalizedExcerpt];
+  return parts.slice(0, 2);
+}
+
+function buildFallbackWhyItMatters(candidate: ExternalNewsCandidate) {
+  return (
+    candidate.recommendationReason ||
+    candidate.importanceHints[0] ||
+    candidate.selectionReason ||
+    (candidate.category === "politics"
+      ? "정치권 일정과 의사결정 흐름에 영향을 줄 수 있는 사안입니다."
+      : candidate.category === "society"
+        ? "현장 안전과 시민 체감도에 바로 연결될 수 있는 사안입니다."
+        : candidate.category === "economy"
+          ? "시장 흐름과 생활물가, 기업 비용에 영향을 줄 수 있는 사안입니다."
+          : "국제 정세와 국내 경제·외교 흐름에 영향을 줄 수 있는 사안입니다.")
+  );
+}
+
+function buildFallbackCheckPoints(candidate: ExternalNewsCandidate) {
+  const hinted = [...candidate.importanceHints, ...candidate.personalizationHints]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (hinted.length > 0) {
+    return hinted;
+  }
+
+  if (candidate.eventStage) {
+    return ["관련 기관의 추가 발표와 후속 절차 진행 여부 확인"];
+  }
+
+  if (candidate.category === "economy") {
+    return ["시장 지표와 정부 대응 메시지 추가 확인"];
+  }
+
+  if (candidate.category === "world") {
+    return ["관련국 발표와 추가 외교 일정 확인"];
+  }
+
+  return ["후속 브리핑과 추가 사실관계 확인"];
+}
+
+function buildFallbackDraft(candidate: ExternalNewsCandidate): NewsAIDraftResult {
+  const summaryLines = splitExcerptToSummaryLines(candidate.excerpt, candidate.title);
+  const briefingText = summaryLines[0] || candidate.title;
+
+  return {
+    title: candidate.title.trim(),
+    summaryLines:
+      summaryLines.length >= 2
+        ? summaryLines
+        : [summaryLines[0] || candidate.title, buildFallbackWhyItMatters(candidate)],
+    whyItMatters: buildFallbackWhyItMatters(candidate),
+    checkPoints: buildFallbackCheckPoints(candidate),
+    tags: candidate.tags.slice(0, 8),
+    priority: candidate.priority,
+    briefingText,
+  };
+}
+
 function pickCategoryCandidates(
   scoredCandidates: ExternalNewsCandidate[],
   slotCandidates: ExternalNewsCandidate[],
@@ -559,23 +630,10 @@ function pickCategoryCandidates(
 }
 
 export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult> {
-  if (process.env.NODE_ENV !== "development") {
-    return {
-      ok: false,
-      message: "개발 환경에서만 사용할 수 있습니다.",
-    };
-  }
-
-  if (!process.env.OPENAI_API_KEY) {
-    return {
-      ok: false,
-      message: "OPENAI_API_KEY 환경변수가 없어 현재 시각 기준 뉴스 요약을 생성할 수 없습니다.",
-    };
-  }
-
   const now = new Date();
   const slot = getCurrentHomeIssueSetSlot(now);
   const slotPriority = getCurrentHomeIssueSetSlotPriority(now);
+  const canUseOpenAI = Boolean(process.env.OPENAI_API_KEY);
 
   try {
     const rawItems = await fetchExternalNewsRawItems();
@@ -645,6 +703,14 @@ export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult
 
     const draftedResults = await Promise.all(
       selectedCandidates.map(async (candidate) => {
+        if (!canUseOpenAI) {
+          return {
+            candidate,
+            draft: buildFallbackDraft(candidate),
+            error: null,
+          };
+        }
+
         try {
           return {
             candidate,
@@ -654,8 +720,8 @@ export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult
         } catch (error) {
           return {
             candidate,
-            draft: null,
-            error: error instanceof Error ? error.message : "AI 초안 생성에 실패했습니다.",
+            draft: buildFallbackDraft(candidate),
+            error: error instanceof Error ? error.message : "AI 초안 생성에 실패했습니다. 외부 기사 요약으로 대체합니다.",
           };
         }
       }),
@@ -664,13 +730,6 @@ export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult
     const draftedRecords = draftedResults.filter(
       (result): result is { candidate: ExternalNewsCandidate; draft: NewsAIDraftResult; error: null } => Boolean(result.draft),
     );
-    if (draftedRecords.length === 0) {
-      return {
-        ok: false,
-        message: "현재 후보들은 육하원칙 기준 요약을 통과하지 못해 브리핑을 만들지 않았습니다.",
-      };
-    }
-
     const orderMap = new Map(selectedCandidates.map((candidate, index) => [candidate.id, index]));
     const orderedRecords = draftedRecords
       .sort((left, right) => (orderMap.get(left.candidate.id) ?? 0) - (orderMap.get(right.candidate.id) ?? 0))
@@ -712,7 +771,9 @@ export async function generateTimedLivePreview(): Promise<TimedLivePreviewResult
 
     return {
       ok: true,
-      message: "현재 시각 기준 뉴스 요약을 생성했습니다.",
+      message: canUseOpenAI
+        ? "현재 시각 기준 뉴스 요약을 생성했습니다."
+        : "OPENAI_API_KEY 없이 외부 기사 기반 최신 뉴스 브리핑을 생성했습니다.",
       data: buildHomeNewsDataset(orderedRecords, now, {
         respectInputOrder: true,
         filterInactive: false,
