@@ -410,6 +410,14 @@
   line-height: 1.58;
 }
 
+.sourceNote {
+  margin: -2px 0 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+
 .meta {
   display: grid;
   gap: 10px;
@@ -580,6 +588,10 @@
   .summary p,
   .metaRow dd {
     font-size: 13px;
+  }
+
+  .sourceNote {
+    font-size: 11px;
   }
 
   .metaRow {

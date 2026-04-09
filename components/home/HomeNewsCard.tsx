@@ -48,6 +48,9 @@ export function HomeNewsCard({
               <p key={`${item.id}-${index}`}>{line}</p>
             ))}
           </div>
+          {item.sourceLabel ? (
+            <p className={styles.sourceNote}>참고 출처: {item.sourceLabel}</p>
+          ) : null}
           {onSetPreference ? (
             <div className={styles.cardActions}>
               <button

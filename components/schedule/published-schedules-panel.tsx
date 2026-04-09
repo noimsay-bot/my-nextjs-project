@@ -1257,7 +1257,12 @@ export function PublishedSchedulesPanel() {
               >
               <div
                 style={{
-                  minWidth: shouldAutoFitSchedule ? "100%" : undefined,
+                  minWidth:
+                    shouldAutoFitSchedule && !isScheduleOverflowingX
+                      ? "100%"
+                      : shouldAutoFitSchedule && scaledScheduleWidth > 0
+                        ? scaledScheduleWidth
+                        : undefined,
                   width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
                   height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
                   margin:

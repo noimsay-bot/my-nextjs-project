@@ -38,6 +38,7 @@ export type HomeNewsCardItem = {
   category: HomeNewsCategory;
   title: string;
   summary: string[];
+  sourceLabel?: string;
   whyItMatters: string;
   checkPoints: string[];
   priority?: "high" | "medium" | "low";

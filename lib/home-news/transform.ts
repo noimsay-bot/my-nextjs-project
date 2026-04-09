@@ -126,6 +126,7 @@ function toCardItem(item: HomeNewsBriefingRecord): HomeNewsCardItem {
             index === 0 ? prependOccurredAt(line, item.occurred_at) : line,
           )
         : [prependOccurredAt(item.briefing_text?.trim() || item.title, item.occurred_at)],
+    sourceLabel: item.source_label?.trim() || undefined,
     whyItMatters: item.why_it_matters?.trim() || "추가 브리핑이 들어오면 이 영역에서 중요도를 함께 설명합니다.",
     checkPoints:
       item.check_points && item.check_points.length > 0
