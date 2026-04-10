@@ -140,7 +140,7 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
       return;
     }
 
-    if (day.isWeekend) {
+    if (day.isWeekend || day.isWeekdayHoliday || day.isCustomHoliday) {
       delete day.assignments["일반"];
       day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
       previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
