@@ -592,6 +592,8 @@ function getDutyBaseTimes(duty: string, dateKey: string, day: DaySchedule | null
         ? { clockIn: 9 * 60, clockOut: 18 * 60 }
         : { clockIn: 7 * 60, clockOut: 16 * 60 };
     case "일반":
+    case "국회지원":
+    case "법조지원":
       return { clockIn: 9 * 60, clockOut: 18 * 60 };
     case "연장":
       return { clockIn: 10 * 60, clockOut: 19 * 60 };

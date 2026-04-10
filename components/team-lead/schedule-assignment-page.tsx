@@ -778,6 +778,24 @@ export function ScheduleAssignmentPage() {
         },
       };
     });
+
+    const normalizedDuty = duty.replace(/\s+/g, "").trim();
+    if (normalizedDuty !== "국회지원" && normalizedDuty !== "법조지원") {
+      return;
+    }
+
+    const baseTimes = getScheduleAssignmentBaseTimes(duty, dateKey, selectedMonthDayIndex.get(dateKey) ?? null);
+    if (!baseTimes) return;
+
+    updateMonthEntry(row.key, (current) => ({
+      ...current,
+      clockIn: baseTimes.clockInText,
+      clockInConfirmed: false,
+      clockInColor: "",
+      clockOut: baseTimes.clockOutText,
+      clockOutConfirmed: false,
+      clockOutColor: "",
+    }));
   };
 
   if (schedules.length === 0) {
