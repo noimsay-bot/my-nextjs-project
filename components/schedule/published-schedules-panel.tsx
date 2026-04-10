@@ -44,6 +44,7 @@ const MAX_ROUTE_SIZE = 3;
 const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
 function getWeekdayLabel(dow: number) {
@@ -551,6 +552,7 @@ export function PublishedSchedulesPanel() {
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const lastFocusRefreshAtRef = useRef(0);
   const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
 
@@ -591,15 +593,21 @@ export function PublishedSchedulesPanel() {
   };
 
   useEffect(() => {
-    void loadItems();
-    void loadRequests();
-    void loadScheduleHistory();
+    void Promise.all([loadItems(), loadRequests(), loadScheduleHistory()]).finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
   }, []);
 
   useEffect(() => {
-    const onRefresh = () => {
+    const refreshVisibleData = () => {
       void loadItems();
       void loadRequests();
+    };
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      refreshVisibleData();
     };
     const onScheduleStateRefresh = () => {
       syncScheduleHistory();
@@ -610,18 +618,18 @@ export function PublishedSchedulesPanel() {
       setRequestMessage(detail.message);
       setRequestMessageTone("warn");
     };
-    window.addEventListener("storage", onRefresh);
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
-    window.addEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+    window.addEventListener("storage", refreshVisibleData);
+    window.addEventListener("focus", onFocusRefresh);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
+    window.addEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
     window.addEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
     window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("storage", onRefresh);
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
-      window.removeEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+      window.removeEventListener("storage", refreshVisibleData);
+      window.removeEventListener("focus", onFocusRefresh);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
+      window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
       window.removeEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);

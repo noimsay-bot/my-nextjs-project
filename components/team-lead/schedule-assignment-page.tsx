@@ -69,6 +69,7 @@ const getSafeExclusiveVideo = (values: boolean[], count: number) => Array.from({
 const removeExclusiveVideoAt = (values: boolean[], index: number, nextCount: number) => getSafeExclusiveVideo(values.filter((_, i) => i !== index), nextCount);
 const createCustomRowId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const coverageScoreSteps = [0, 0.5, 1, 1.5, 2] as const;
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
   "": "",
   departure: "출장출발",
@@ -370,6 +371,7 @@ export function ScheduleAssignmentPage() {
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const jumpToTodayPendingRef = useRef(false);
+  const lastFocusRefreshAtRef = useRef(0);
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
@@ -420,19 +422,27 @@ export function ScheduleAssignmentPage() {
       await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
       syncFromCache();
     };
+    const refreshSchedulesOnFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refreshSchedules();
+    };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setImportMessage({ tone: "warn", text: detail.message });
     };
     syncFromCache();
-    void refreshSchedules();
-    window.addEventListener("focus", refreshSchedules);
+    void refreshSchedules().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", refreshSchedulesOnFocus);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("focus", refreshSchedules);
+      window.removeEventListener("focus", refreshSchedulesOnFocus);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);

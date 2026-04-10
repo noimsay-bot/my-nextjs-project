@@ -14,6 +14,7 @@ import { applyHomeNewsPersonalization } from "@/lib/home-news/personalization";
 import { generateTimedLivePreview } from "@/lib/home-news/timed-live-preview-actions";
 
 const HOST_SELECTOR = '[data-home-news-slot="true"]';
+const DEFERRED_NEWS_TASK_DELAY_MS = 120;
 
 function ensurePortalHost() {
   const panel = document.querySelector<HTMLElement>(".schedule-published-panel > .panel-pad");
@@ -58,6 +59,20 @@ function toNoticeCardItem(notice: HomeNotice): HomeNewsCardItem {
     noticeTone: notice.tone,
     disablePreferenceActions: true,
   };
+}
+
+function scheduleDeferredTask(callback: () => void) {
+  if (typeof globalThis === "undefined" || typeof window === "undefined") {
+    return () => {};
+  }
+
+  if (typeof globalThis.requestIdleCallback === "function") {
+    const handle = globalThis.requestIdleCallback(callback, { timeout: 1000 });
+    return () => globalThis.cancelIdleCallback(handle);
+  }
+
+  const handle = globalThis.setTimeout(callback, DEFERRED_NEWS_TASK_DELAY_MS);
+  return () => globalThis.clearTimeout(handle);
 }
 
 export function HomeNewsPortal() {
@@ -213,9 +228,105 @@ export function HomeNewsPortal() {
   useEffect(() => {
     if (typeof document === "undefined") return;
 
+    let cancelled = false;
+    let cancelDeferredTasks = () => {};
+
+    const syncNotices = () => {
+      setNoticeItems(getHomeNotices().map(toNoticeCardItem));
+    };
+
+    void (async () => {
+      setLoading(true);
+      syncNotices();
+
+      const [noticeResult, datasetResult] = await Promise.allSettled([
+        refreshHomePopupNoticeWorkspace(),
+        fetchHomeNewsDataset(),
+      ]);
+      if (cancelled) return;
+
+      if (noticeResult.status === "fulfilled") {
+        syncNotices();
+      } else {
+        console.warn(
+          noticeResult.reason instanceof Error
+            ? noticeResult.reason.message
+            : "공지 정보를 불러오지 못했습니다.",
+        );
+      }
+
+      const resolvedDataset = datasetResult.status === "fulfilled" ? datasetResult.value : null;
+      if (resolvedDataset) {
+        setBaseData(resolvedDataset.data);
+        if (resolvedDataset.errorMessage) {
+          console.warn(resolvedDataset.errorMessage);
+        }
+      } else {
+        const datasetError = datasetResult.status === "rejected" ? datasetResult.reason : null;
+        setBaseData(emptyHomeNewsDataset);
+        console.warn(
+          datasetError instanceof Error
+            ? datasetError.message
+            : "뉴스 데이터를 불러오지 못했습니다.",
+        );
+      }
+
+      setLoading(false);
+
+      cancelDeferredTasks = scheduleDeferredTask(() => {
+        void (async () => {
+          try {
+            const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
+            if (!cancelled) {
+              setLikeWorkspace(nextLikeWorkspace);
+            }
+          } catch (error) {
+            if (!cancelled) {
+              console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
+              setLikeWorkspace(null);
+            }
+          }
+
+          if (!resolvedDataset || resolvedDataset.source === "issue_set") {
+            if (!cancelled) {
+              setLivePreviewData(null);
+            }
+            return;
+          }
+
+          try {
+            const previewResult = await generateTimedLivePreview();
+            if (cancelled) return;
+            if (previewResult.ok && previewResult.data) {
+              setLivePreviewData(previewResult.data);
+              return;
+            }
+
+            console.warn(previewResult.message);
+            setLivePreviewData(null);
+          } catch (error) {
+            if (!cancelled) {
+              console.warn(error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.");
+              setLivePreviewData(null);
+            }
+          }
+        })();
+      });
+    })();
+
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
+    return () => {
+      cancelled = true;
+      cancelDeferredTasks();
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
     let frameId = 0;
     let observer: MutationObserver | null = null;
-    let cancelled = false;
 
     const syncHost = () => {
       const nextHost = ensurePortalHost();
@@ -228,81 +339,19 @@ export function HomeNewsPortal() {
       frameId = window.requestAnimationFrame(syncHost);
     };
 
-    const syncNotices = () => {
-      setNoticeItems(getHomeNotices().map(toNoticeCardItem));
-    };
-
-    void (async () => {
-      syncNotices();
-      setLoading(true);
-      void refreshHomePopupNoticeWorkspace()
-        .then(() => {
-          if (!cancelled) {
-            syncNotices();
-          }
-        })
-        .catch((error) => {
-          if (!cancelled) {
-            console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
-          }
-        });
-      const result = await fetchHomeNewsDataset();
-      if (cancelled) return;
-      setBaseData(result.data);
-      try {
-        const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
-        if (!cancelled) {
-          setLikeWorkspace(nextLikeWorkspace);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
-          setLikeWorkspace(null);
-        }
-      }
-      const shouldAttemptLivePreview = result.source !== "issue_set";
-      if (shouldAttemptLivePreview) {
-        try {
-          const previewResult = await generateTimedLivePreview();
-          if (!cancelled && previewResult.ok && previewResult.data) {
-            setLivePreviewData(previewResult.data);
-          }
-          if (!cancelled && !previewResult.ok) {
-            console.warn(previewResult.message);
-            setLivePreviewData(null);
-          }
-        } catch (error) {
-          if (!cancelled) {
-            console.warn(error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.");
-            setLivePreviewData(null);
-          }
-        }
-      } else if (!cancelled) {
-        setLivePreviewData(null);
-      }
-      if (!cancelled) syncNotices();
-      setLoading(false);
-      if (result.errorMessage) {
-        console.warn(result.errorMessage);
-      }
-    })();
-
     syncHost();
     observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", scheduleSync);
     window.addEventListener("orientationchange", scheduleSync);
     window.visualViewport?.addEventListener("resize", scheduleSync);
-    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
 
     return () => {
-      cancelled = true;
       cancelAnimationFrame(frameId);
       observer?.disconnect();
       window.removeEventListener("resize", scheduleSync);
       window.removeEventListener("orientationchange", scheduleSync);
       window.visualViewport?.removeEventListener("resize", scheduleSync);
-      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
       const currentHost = hostRef.current;
       if (currentHost?.dataset.homeNewsOwner === "HomeNewsPortal") {
         currentHost.remove();

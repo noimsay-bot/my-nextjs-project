@@ -146,11 +146,8 @@ export interface ScheduleAssignmentDataStore {
   rows: ScheduleAssignmentRowStore;
 }
 
-const TEAM_LEAD_SCHEDULE_ASSIGNMENT_KEY = "j-team-lead-schedule-assignment-v1";
 export const TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT = "j-team-lead-schedule-assignment-updated";
-const TEAM_LEAD_CONTRIBUTION_KEY = "j-team-lead-contribution-v1";
 export const TEAM_LEAD_CONTRIBUTION_EVENT = "j-team-lead-contribution-updated";
-const TEAM_LEAD_FINAL_CUT_KEY = "j-team-lead-final-cut-v1";
 export const TEAM_LEAD_FINAL_CUT_EVENT = "j-team-lead-final-cut-updated";
 export const TEAM_LEAD_STORAGE_STATUS_EVENT = "j-team-lead-storage-status";
 const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";

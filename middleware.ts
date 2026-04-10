@@ -7,6 +7,61 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    {
+      source: "/",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/admin/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/review/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/schedule/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/submissions/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/team-lead/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/vacation/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
   ],
 };

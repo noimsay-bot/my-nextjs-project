@@ -1,7 +1,5 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
-import { AuthGate } from "@/components/auth/auth-gate";
-import { PortalShell } from "@/components/portal-shell";
 import { ThemeScript } from "@/components/theme/theme-script";
 
 export const metadata: Metadata = {
@@ -21,13 +19,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css" />
         <ThemeScript />
       </head>
-      <body>
-        <AuthGate>
-          <PortalShell>{children}</PortalShell>
-        </AuthGate>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

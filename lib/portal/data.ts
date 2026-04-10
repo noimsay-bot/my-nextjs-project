@@ -1,3 +1,8 @@
+import {
+  getPortalSession,
+  getPortalSupabaseClient,
+} from "@/lib/supabase/portal";
+
 export type ReportType = "일반리포트" | "기획리포트" | "인터뷰리포트" | "LIVE";
 
 export interface SubmissionCard {
@@ -46,6 +51,29 @@ export interface ReviewWorkspaceResult {
   canEdit: boolean;
   readOnlyReason: string | null;
   reviewerId: string | null;
+}
+
+const REVIEW_SUBMISSION_LOCK_STORAGE_PREFIX = "j-review-submission-lock-v1";
+export const REVIEW_SUBMISSION_LOCK_EVENT = "j-review-submission-lock-updated";
+
+function getReviewSubmissionLockStorageKey(userId: string) {
+  return `${REVIEW_SUBMISSION_LOCK_STORAGE_PREFIX}:${userId}`;
+}
+
+export function hasSubmittedReviewLock(userId: string | null | undefined) {
+  if (typeof window === "undefined" || !userId) return false;
+  return window.localStorage.getItem(getReviewSubmissionLockStorageKey(userId)) === "1";
+}
+
+export function setSubmittedReviewLock(userId: string, locked: boolean) {
+  if (typeof window === "undefined" || !userId) return;
+  const key = getReviewSubmissionLockStorageKey(userId);
+  if (locked) {
+    window.localStorage.setItem(key, "1");
+  } else {
+    window.localStorage.removeItem(key);
+  }
+  window.dispatchEvent(new Event(REVIEW_SUBMISSION_LOCK_EVENT));
 }
 
 export async function subscribeToReviewWorkspaceChanges(onChange: () => void | Promise<void>) {
@@ -710,16 +738,6 @@ function formatSubmissionUpdatedAt(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("ko-KR");
-}
-
-async function getPortalSession() {
-  const authModule = await import("@/lib/auth/storage");
-  return authModule.getSession() ?? authModule.getSessionAsync();
-}
-
-async function getPortalSupabaseClient() {
-  const supabaseModule = await import("@/lib/supabase/client");
-  return supabaseModule.createClient();
 }
 
 export async function getMySubmissionEntry() {

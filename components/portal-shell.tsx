@@ -1,6 +1,5 @@
 "use client";
 
-import Head from "next/head";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -14,15 +13,10 @@ import {
   type UserRole,
 } from "@/lib/auth/storage";
 import {
-  isVacationRequestOpen,
-  refreshVacationStore,
-  VACATION_EVENT,
-} from "@/lib/vacation/storage";
-import {
-  isTeamLeadSubmissionAccessOpen,
-  refreshTeamLeadSubmissionAccessState,
-  TEAM_LEAD_SUBMISSION_ACCESS_EVENT,
-} from "@/lib/team-lead/storage";
+  getPortalAccessState,
+  subscribeToPortalAccessState,
+} from "@/lib/portal/access-state";
+import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
 
 const links = [
   { href: "/vacation", label: "휴가 신청" },
@@ -55,12 +49,15 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const headerRef = useRef<HTMLElement | null>(null);
-  const isLogin = pathname === "/login";
-  const [session, setSession] = useState(() => getSession());
+  const initialSession = getSession();
+  const [session, setSession] = useState(initialSession);
   const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
-  const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>(() => getSession()?.experienceRole ?? getSession()?.actualRole ?? "admin");
-  const [vacationRequestOpen, setVacationRequestOpen] = useState(() => isVacationRequestOpen());
-  const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => isTeamLeadSubmissionAccessOpen());
+  const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>(
+    () => initialSession?.experienceRole ?? initialSession?.actualRole ?? "admin",
+  );
+  const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
+  const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
+  const [reviewLocked, setReviewLocked] = useState(() => hasSubmittedReviewLock(initialSession?.id));
 
   useEffect(() => {
     let mounted = true;
@@ -83,45 +80,30 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
-    const syncVacationOpen = () => {
-      setVacationRequestOpen(isVacationRequestOpen());
-    };
-
-    const refreshVacationOpen = () => {
-      void refreshVacationStore().then(syncVacationOpen);
-    };
-
-    refreshVacationOpen();
-    window.addEventListener("focus", refreshVacationOpen);
-    window.addEventListener(VACATION_EVENT, syncVacationOpen);
-    return () => {
-      window.removeEventListener("focus", refreshVacationOpen);
-      window.removeEventListener(VACATION_EVENT, syncVacationOpen);
-    };
-  }, []);
-
-  useEffect(() => {
-    const syncSubmissionOpen = () => {
-      setSubmissionAccessOpen(isTeamLeadSubmissionAccessOpen());
-    };
-
-    const refreshSubmissionOpen = () => {
-      void refreshTeamLeadSubmissionAccessState().then(syncSubmissionOpen);
-    };
-
-    refreshSubmissionOpen();
-    window.addEventListener("focus", refreshSubmissionOpen);
-    window.addEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
-    return () => {
-      window.removeEventListener("focus", refreshSubmissionOpen);
-      window.removeEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
-    };
+    return subscribeToPortalAccessState((accessState) => {
+      setVacationRequestOpen(accessState.vacationRequestOpen);
+      setSubmissionAccessOpen(accessState.submissionAccessOpen);
+    });
   }, []);
 
   useEffect(() => {
     if (!session?.actualRole) return;
     setExperienceDraftRole(session.experienceRole ?? session.actualRole);
   }, [session?.actualRole, session?.experienceRole]);
+
+  useEffect(() => {
+    const syncReviewLocked = () => {
+      setReviewLocked(hasSubmittedReviewLock(getSession()?.id));
+    };
+
+    syncReviewLocked();
+    window.addEventListener("focus", syncReviewLocked);
+    window.addEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
+    return () => {
+      window.removeEventListener("focus", syncReviewLocked);
+      window.removeEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -162,22 +144,22 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
             link.href === "/" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
-            (link.href === "/review" && session.canReview),
+            (link.href === "/review" && session.canReview && !reviewLocked),
         );
       case "reviewer":
         return links.filter(
           (link) =>
             link.href === "/" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
-            link.href === "/submissions" ||
-            link.href === "/review",
+            (link.href === "/submissions" && submissionAccessOpen) ||
+            (link.href === "/review" && session.canReview && !reviewLocked),
         );
       case "desk":
         return links.filter(
           (link) =>
             link.href === "/" ||
-            link.href === "/vacation" ||
-            link.href === "/submissions" ||
+            (link.href === "/vacation" && vacationRequestOpen) ||
+            (link.href === "/submissions" && submissionAccessOpen) ||
             link.href === "/schedule" ||
             (link.href === "/review" && session.canReview),
         );
@@ -185,19 +167,33 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
-            link.href === "/vacation" ||
-            link.href === "/submissions" ||
-            link.href === "/review" ||
+            (link.href === "/vacation" && vacationRequestOpen) ||
+            (link.href === "/submissions" && submissionAccessOpen) ||
+            (link.href === "/review" && session.canReview && !reviewLocked) ||
             link.href === "/schedule" ||
             link.href === "/team-lead" ||
             link.href === "/admin",
         );
       case "admin":
-        return links;
+        return links.filter(
+          (link) =>
+            link.href === "/" ||
+            (link.href === "/vacation" && vacationRequestOpen) ||
+            (link.href === "/submissions" && submissionAccessOpen) ||
+            link.href === "/schedule" ||
+            (link.href === "/review" && session.canReview && !reviewLocked) ||
+            link.href === "/team-lead" ||
+            link.href === "/admin",
+        );
       default:
-        return links.filter((link) => link.href === "/" || link.href === "/vacation" || link.href === "/submissions");
+        return links.filter(
+          (link) =>
+            link.href === "/" ||
+            (link.href === "/vacation" && vacationRequestOpen) ||
+            (link.href === "/submissions" && submissionAccessOpen),
+        );
     }
-  }, [session?.canReview, session?.role, submissionAccessOpen, vacationRequestOpen]);
+  }, [reviewLocked, session?.canReview, session?.role, submissionAccessOpen, vacationRequestOpen]);
 
   const sessionLabel = useMemo(() => {
     if (!session) return "";
@@ -235,9 +231,6 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="shell">
-      <Head>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css" />
-      </Head>
       <section ref={headerRef} className="panel portal-header-shell">
         <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
           <div style={{ display: "flex", justifyContent: "stretch" }}>
@@ -254,93 +247,91 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
               </span>
             </Link>
           </div>
-          {!isLogin ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-                alignItems: "center",
-              }}
-            >
-              <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
-                {visibleLinks.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={
-                      pathname === link.href ||
-                      (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
-                      (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
-                      (link.href === "/admin" && pathname.startsWith("/admin"))
-                        ? "active"
-                        : ""
-                    }
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-              </nav>
-              <div className="portal-header-utility" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
-                  <button
-                    type="button"
-                    className={`theme-toggle__button ${theme === "light" ? "theme-toggle__button--active" : ""}`}
-                    onClick={() => setTheme("light")}
-                  >
-                    라이트
-                  </button>
-                  <button
-                    type="button"
-                    className={`theme-toggle__button ${theme === "dark" ? "theme-toggle__button--active" : ""}`}
-                    onClick={() => setTheme("dark")}
-                  >
-                    다크
-                  </button>
-                  <button
-                    type="button"
-                    className={`theme-toggle__button ${theme === "pink" ? "theme-toggle__button--active" : ""}`}
-                    onClick={() => setTheme("pink")}
-                  >
-                    핑크
-                  </button>
-                  <button
-                    type="button"
-                    className={`theme-toggle__button ${theme === "green" ? "theme-toggle__button--active" : ""}`}
-                    onClick={() => setTheme("green")}
-                  >
-                    그린
-                  </button>
-                </div>
-                {adminSession ? (
-                  <>
-                    <button type="button" className="btn" onClick={cycleExperienceRole}>
-                      권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
-                    </button>
-                    <button type="button" className="btn primary" onClick={confirmRoleExperience}>
-                      확인
-                    </button>
-                  </>
-                ) : null}
-                {!adminSession && canOpenAdminArea ? (
-                  <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
-                ) : null}
-                <span className="muted">
-                  {sessionLabel}
-                </span>
-                <button
-                  className="btn portal-header-logout"
-                  onClick={async () => {
-                    await logoutUser();
-                    window.location.href = "/login";
-                  }}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
+              {visibleLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={
+                    pathname === link.href ||
+                    (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
+                    (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
+                    (link.href === "/admin" && pathname.startsWith("/admin"))
+                      ? "active"
+                      : ""
+                  }
                 >
-                  로그아웃
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+            <div className="portal-header-utility" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
+                <button
+                  type="button"
+                  className={`theme-toggle__button ${theme === "light" ? "theme-toggle__button--active" : ""}`}
+                  onClick={() => setTheme("light")}
+                >
+                  라이트
+                </button>
+                <button
+                  type="button"
+                  className={`theme-toggle__button ${theme === "dark" ? "theme-toggle__button--active" : ""}`}
+                  onClick={() => setTheme("dark")}
+                >
+                  다크
+                </button>
+                <button
+                  type="button"
+                  className={`theme-toggle__button ${theme === "pink" ? "theme-toggle__button--active" : ""}`}
+                  onClick={() => setTheme("pink")}
+                >
+                  핑크
+                </button>
+                <button
+                  type="button"
+                  className={`theme-toggle__button ${theme === "green" ? "theme-toggle__button--active" : ""}`}
+                  onClick={() => setTheme("green")}
+                >
+                  그린
                 </button>
               </div>
+              {adminSession ? (
+                <>
+                  <button type="button" className="btn" onClick={cycleExperienceRole}>
+                    권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
+                  </button>
+                  <button type="button" className="btn primary" onClick={confirmRoleExperience}>
+                    확인
+                  </button>
+                </>
+              ) : null}
+              {!adminSession && canOpenAdminArea ? (
+                <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
+              ) : null}
+              <span className="muted">
+                {sessionLabel}
+              </span>
+              <button
+                className="btn portal-header-logout"
+                onClick={async () => {
+                  await logoutUser();
+                  window.location.href = "/login";
+                }}
+              >
+                로그아웃
+              </button>
             </div>
-          ) : null}
+          </div>
         </div>
       </section>
       <main style={{ marginTop: 20 }}>

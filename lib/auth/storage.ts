@@ -63,6 +63,7 @@ const USERS_CACHE_KEY = "j-special-force-users-cache-v2";
 const ROLE_EXPERIENCE_CACHE_KEY = "j-special-force-role-experience-v1";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
 const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
+const SESSION_REFRESH_STALE_MS = 60_000;
 
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
 let cachedExperienceRole = readStoredExperienceRole();
@@ -76,6 +77,8 @@ let profileChannel: BrowserRealtimeChannel | null = null;
 let profileSubscriptionUserId: string | null = null;
 let reviewAccessChannel: BrowserRealtimeChannel | null = null;
 let sessionRefreshListenersInitialized = false;
+let lastSessionRefreshAt = cachedSession ? Date.now() : 0;
+let cachedReviewAccessProfileIds: string[] | null = null;
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -138,6 +141,10 @@ function clearReviewAccessSubscription() {
   reviewAccessChannel = null;
 }
 
+function invalidateReviewAccessCache() {
+  cachedReviewAccessProfileIds = null;
+}
+
 function syncProfileSubscription(userId: string) {
   if (typeof window === "undefined") return;
   if (profileSubscriptionUserId === userId && profileChannel) return;
@@ -156,7 +163,7 @@ function syncProfileSubscription(userId: string) {
         filter: `id=eq.${userId}`,
       },
       () => {
-        void refreshSession();
+        void refreshSession({ force: true });
       },
     )
     .subscribe();
@@ -180,8 +187,9 @@ function syncReviewAccessSubscription() {
         filter: `key=eq.${REVIEW_ACCESS_STATE_KEY}`,
       },
       () => {
+        invalidateReviewAccessCache();
         if (!cachedSession) return;
-        void refreshSession();
+        void refreshSession({ force: true });
       },
     )
     .subscribe();
@@ -192,7 +200,7 @@ function initSessionRefreshListeners() {
 
   const refreshIfSignedIn = () => {
     if (!cachedSession) return;
-    void refreshSession();
+    void refreshSession({ force: false });
   };
 
   window.addEventListener("focus", refreshIfSignedIn);
@@ -329,7 +337,11 @@ function normalizeReviewAccessState(raw: unknown) {
   );
 }
 
-async function fetchGrantedReviewAccessProfileIds() {
+async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean }) {
+  if (!options?.force && cachedReviewAccessProfileIds) {
+    return cachedReviewAccessProfileIds;
+  }
+
   try {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
@@ -342,7 +354,8 @@ async function fetchGrantedReviewAccessProfileIds() {
       return [] as string[];
     }
 
-    return normalizeReviewAccessState(data.state);
+    cachedReviewAccessProfileIds = normalizeReviewAccessState(data.state);
+    return cachedReviewAccessProfileIds;
   } catch {
     return [] as string[];
   }
@@ -406,6 +419,7 @@ function notifySessionChange(session: SessionUser | null) {
 
 function setCachedSession(session: SessionUser | null) {
   cachedSession = normalizeStoredSession(session);
+  lastSessionRefreshAt = cachedSession ? Date.now() : 0;
 
   if (!cachedSession) {
     clearJson(AUTH_CACHE_KEY);
@@ -424,6 +438,7 @@ function setCachedUsers(users: UserAccount[]) {
 async function forceLogoutForUnapprovedUser() {
   clearProfileSubscription();
   clearReviewAccessSubscription();
+  invalidateReviewAccessCache();
   persistExperienceRole(null);
   setCachedUsers([]);
   setCachedSession(null);
@@ -491,14 +506,25 @@ async function ensureProfile(user: User) {
   return data;
 }
 
-async function syncSessionFromUser(user: User) {
+function canReuseCachedSession(user: User, force: boolean) {
+  return !force && cachedSession && cachedSession.id === user.id && Date.now() - lastSessionRefreshAt < SESSION_REFRESH_STALE_MS;
+}
+
+async function syncSessionFromUser(user: User, options?: { force?: boolean }) {
+  const force = options?.force ?? true;
+  if (canReuseCachedSession(user, force)) {
+    syncReviewAccessSubscription();
+    syncProfileSubscription(user.id);
+    return cachedSession;
+  }
+
   const profile = await ensureProfile(user);
   if (profile && !profile.approved) {
     await forceLogoutForUnapprovedUser();
     return null;
   }
 
-  const grantedProfileIds = await fetchGrantedReviewAccessProfileIds();
+  const grantedProfileIds = await fetchGrantedReviewAccessProfileIds({ force });
   const nextSession = profile
     ? profileToSession(
         profile,
@@ -525,12 +551,13 @@ function initAuthListener() {
 
       clearProfileSubscription();
       clearReviewAccessSubscription();
+      invalidateReviewAccessCache();
       setCachedSession(null);
       setCachedUsers([]);
       return;
     }
 
-    void syncSessionFromUser(session.user);
+    void syncSessionFromUser(session.user, { force: true });
   });
 
   authInitialized = true;
@@ -569,7 +596,7 @@ export async function initializeAuth() {
     initAuthListener();
     if (cachedSession) {
       if (!refreshPromise && !initializePromise) {
-        initializePromise = refreshSession().finally(() => {
+        initializePromise = refreshSession({ force: false }).finally(() => {
           initializePromise = null;
         });
       }
@@ -580,7 +607,7 @@ export async function initializeAuth() {
       return initializePromise;
     }
 
-    initializePromise = refreshSession().finally(() => {
+    initializePromise = refreshSession({ force: true }).finally(() => {
       initializePromise = null;
     });
 
@@ -595,7 +622,7 @@ export async function initializeAuth() {
   }
 }
 
-export async function refreshSession() {
+export async function refreshSession(options?: { force?: boolean }) {
   if (typeof window === "undefined") return null;
   if (refreshPromise) return refreshPromise;
 
@@ -613,7 +640,7 @@ export async function refreshSession() {
         return null;
       }
 
-      return syncSessionFromUser(user);
+      return syncSessionFromUser(user, { force: options?.force ?? true });
     } catch (error) {
       if (isSupabaseEnvError(error)) {
         setCachedSession(null);

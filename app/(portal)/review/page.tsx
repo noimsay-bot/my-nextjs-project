@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   additionalBonusOptions,
   cardNeedsBonusComment,
   createEmptyReviewCardState,
+  createEmptyReviewStateEntry,
   getCardSections,
   getReviewCardScore,
   getReviewWorkspace,
@@ -13,6 +15,7 @@ import {
   ReviewCardState,
   ReviewStateStore,
   saveReviewEntry,
+  setSubmittedReviewLock,
   subscribeToReviewWorkspaceChanges,
   SubmissionCard,
   SubmissionEntry,
@@ -115,6 +118,7 @@ function mergeWorkspaceReviewState(entries: SubmissionEntry[], serverState: Revi
 }
 
 export default function ReviewPage() {
+  const router = useRouter();
   const [submissions, setSubmissions] = useState<SubmissionEntry[]>([]);
   const [selectedEntryKey, setSelectedEntryKey] = useState("");
   const [selectedCardId, setSelectedCardId] = useState("");
@@ -130,6 +134,8 @@ export default function ReviewPage() {
   const reviewStateRef = useRef<ReviewStateStore>({});
   const inFlightSaveRef = useRef<Record<string, boolean>>({});
   const reviewDraftStorageKeyRef = useRef<string | null>(null);
+  const didResetWorkspaceRef = useRef(false);
+  const reviewerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     reviewStateRef.current = reviewState;
@@ -147,24 +153,47 @@ export default function ReviewPage() {
 
         const draftStorageKey = workspace.reviewerId ? getReviewDraftStorageKey(workspace.reviewerId) : null;
         reviewDraftStorageKeyRef.current = draftStorageKey;
+        reviewerIdRef.current = workspace.reviewerId;
         const localReviewState = draftStorageKey ? readPersistedReviewState(draftStorageKey) : {};
         const mergedReviewState = mergeWorkspaceReviewState(workspace.entries, workspace.reviewState, localReviewState);
+        const emptyReviewState = Object.fromEntries(
+          workspace.entries.map((entry) => [getSubmissionEntryKey(entry), createEmptyReviewStateEntry(entry)]),
+        ) satisfies ReviewStateStore;
+        const nextReviewState = didResetWorkspaceRef.current ? mergedReviewState : emptyReviewState;
+        const visibleEntries = workspace.canEdit
+          ? workspace.entries.filter((entry) => !nextReviewState[getSubmissionEntryKey(entry)]?.done)
+          : workspace.entries;
+        const visibleEntryKeys = new Set(visibleEntries.map((entry) => getSubmissionEntryKey(entry)));
+        const visibleReviewState = Object.fromEntries(
+          Object.entries(nextReviewState).filter(([entryKey]) => visibleEntryKeys.has(entryKey)),
+        ) satisfies ReviewStateStore;
 
-        setSubmissions(workspace.entries);
-        reviewStateRef.current = mergedReviewState;
-        setReviewState(mergedReviewState);
+        setSubmissions(visibleEntries);
+        reviewStateRef.current = visibleReviewState;
+        setReviewState(visibleReviewState);
         setSelectedEntryKey((currentKey) => {
-          if (workspace.entries.some((entry) => getSubmissionEntryKey(entry) === currentKey)) {
+          if (visibleEntries.some((entry) => getSubmissionEntryKey(entry) === currentKey)) {
             return currentKey;
           }
 
-          return workspace.entries[0] ? getSubmissionEntryKey(workspace.entries[0]) : "";
+          return visibleEntries[0] ? getSubmissionEntryKey(visibleEntries[0]) : "";
         });
         setCanEdit(workspace.canEdit);
         setReadOnlyReason(workspace.readOnlyReason);
 
         if (draftStorageKey) {
-          writePersistedReviewState(draftStorageKey, mergedReviewState);
+          writePersistedReviewState(draftStorageKey, visibleReviewState);
+        }
+
+        if (!didResetWorkspaceRef.current) {
+          didResetWorkspaceRef.current = true;
+          if (workspace.canEdit && workspace.entries.length > 0) {
+            await Promise.all(
+              workspace.entries.map((entry) =>
+                saveReviewEntry(entry, createEmptyReviewStateEntry(entry)),
+              ),
+            );
+          }
         }
       } catch (error) {
         if (!active) return;
@@ -389,34 +418,54 @@ export default function ReviewPage() {
     );
   };
 
-  const submitCurrentReview = async () => {
-    if (!current || !canEdit || submitting) return;
-    const entryKey = getSubmissionEntryKey(current);
-    const latestState = normalizeReviewStateEntry(reviewStateRef.current[entryKey] ?? null, current);
-    const nextEntryState = {
-      ...latestState,
-      done: true,
-    };
-    const nextState = {
-      ...reviewStateRef.current,
-      [entryKey]: nextEntryState,
-    };
+  const submitAllReviews = async () => {
+    if (!canEdit || submitting || submissions.length === 0) return;
+    const confirmed = window.confirm("평가를 제출하면 다시 평가를 할 수 없습니다.\n평가를 제출하시겠습니까?");
+    if (!confirmed) return;
+
+    const nextState = { ...reviewStateRef.current };
+    const entryKeys = submissions.map((entry) => getSubmissionEntryKey(entry));
+
+    submissions.forEach((entry) => {
+      const entryKey = getSubmissionEntryKey(entry);
+      nextState[entryKey] = {
+        ...normalizeReviewStateEntry(reviewStateRef.current[entryKey] ?? null, entry),
+        done: true,
+      };
+      pendingSaveRef.current[entryKey] = { entry, state: nextState[entryKey] };
+      const existingTimer = saveTimerRef.current[entryKey];
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        delete saveTimerRef.current[entryKey];
+      }
+    });
 
     reviewStateRef.current = nextState;
     setReviewState(nextState);
     if (reviewDraftStorageKeyRef.current) {
       writePersistedReviewState(reviewDraftStorageKeyRef.current, nextState);
     }
-    pendingSaveRef.current[entryKey] = { entry: current, state: nextEntryState };
-    const existingTimer = saveTimerRef.current[entryKey];
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      delete saveTimerRef.current[entryKey];
-    }
 
     setSubmitting(true);
     try {
-      await flushPersistAndWait(entryKey);
+      for (const entryKey of entryKeys) {
+        await flushPersistAndWait(entryKey);
+      }
+
+      if (reviewDraftStorageKeyRef.current && typeof window !== "undefined") {
+        window.localStorage.removeItem(reviewDraftStorageKeyRef.current);
+      }
+      if (reviewerIdRef.current) {
+        setSubmittedReviewLock(reviewerIdRef.current, true);
+      }
+
+      reviewStateRef.current = {};
+      setReviewState({});
+      setSubmissions([]);
+      setSelectedEntryKey("");
+      setSelectedCardId("");
+      router.replace("/");
+      router.refresh();
     } finally {
       setSubmitting(false);
     }
@@ -495,12 +544,9 @@ export default function ReviewPage() {
                     {canEdit ? (
                       <button
                         className="btn primary"
-                        disabled={missingBonusCommentCards.length > 0 || submitting}
+                        disabled={submitting || submissions.length === 0}
                         onClick={() => {
-                          if (missingBonusCommentCards.length > 0) return;
-                          const confirmed = window.confirm("평가를 종료하시겠습니까?");
-                          if (!confirmed) return;
-                          void submitCurrentReview();
+                          void submitAllReviews();
                         }}
                       >
                         {submitting ? "제출 중..." : "모든 평가 제출"}

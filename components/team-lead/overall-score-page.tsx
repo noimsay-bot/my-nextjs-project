@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
@@ -23,6 +23,8 @@ import {
   TEAM_LEAD_STORAGE_STATUS_EVENT,
   refreshTeamLeadState,
 } from "@/lib/team-lead/storage";
+
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
 function formatScore(score: number) {
   return score.toFixed(1);
@@ -389,6 +391,7 @@ export function OverallScorePage() {
   const [finalCutRows, setFinalCutRows] = useState<TeamLeadFinalCutSummaryRow[]>([]);
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+  const lastFocusRefreshAtRef = useRef(0);
 
   const syncFromCache = useCallback(() => {
     setCards(getOverallScoreCards());
@@ -408,14 +411,22 @@ export function OverallScorePage() {
       ]);
       syncFromCache();
     };
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refresh();
+    };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setMessage({ tone: "warn", text: detail.message });
     };
 
-    void refresh();
-    window.addEventListener("focus", refresh);
+    void refresh().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
@@ -425,7 +436,7 @@ export function OverallScorePage() {
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);

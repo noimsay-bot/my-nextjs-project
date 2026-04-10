@@ -67,6 +67,7 @@ import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, Schedule
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -346,6 +347,7 @@ export function ScheduleApp() {
   const editBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const isEditingDateRef = useRef(false);
+  const lastFocusRefreshAtRef = useRef(0);
   const session = getSession();
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
@@ -381,6 +383,7 @@ export function ScheduleApp() {
   useEffect(() => {
     let active = true;
     void Promise.all([loadState(), loadRequests(), loadPublishedItems()]).finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
       if (active) {
         setLoaded(true);
       }
@@ -428,18 +431,26 @@ export function ScheduleApp() {
   }, [isEditingDate]);
 
   useEffect(() => {
-    const onRefresh = () => {
+    const refreshForRouteState = () => {
       if (isEditingDateRef.current) {
         void Promise.all([loadRequests(), loadPublishedItems()]);
         return;
       }
       void Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
     };
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      refreshForRouteState();
+    };
+
+    window.addEventListener("focus", onFocusRefresh);
+    window.addEventListener(CHANGE_REQUESTS_EVENT, refreshForRouteState);
     return () => {
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(CHANGE_REQUESTS_EVENT, onRefresh);
+      window.removeEventListener("focus", onFocusRefresh);
+      window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshForRouteState);
     };
   }, []);
 
