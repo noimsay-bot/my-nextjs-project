@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { HomeNewsSection } from "@/components/home/HomeNewsSection";
 import { HomeNewsCardItem, HomeNewsCardsByCategory, HomeNewsDataset } from "@/components/home/home-news.types";
 import { emptyHomeNewsDataset } from "@/lib/home-news/fallback";
+import { getHomeNotices, HOME_POPUP_NOTICE_EVENT, refreshHomePopupNoticeWorkspace, type HomeNotice } from "@/lib/home-popup/storage";
 import { fetchHomeNewsDataset } from "@/lib/home-news/queries";
 import { setHomeNewsBriefingPreference } from "@/lib/home-news/like-actions";
 import { fetchHomeNewsLikeWorkspace } from "@/lib/home-news/like-queries";
@@ -43,11 +44,28 @@ function ensurePortalHost() {
   return host;
 }
 
+function toNoticeCardItem(notice: HomeNotice): HomeNewsCardItem {
+  return {
+    id: `notice-${notice.id}`,
+    category: "politics",
+    title: notice.title,
+    summary: notice.body.split(/\r?\n/).filter((line) => line.trim().length > 0),
+    whyItMatters: "",
+    checkPoints: [],
+    publishedAt: notice.updatedAt,
+    badgeLabel: "공지",
+    tagLabel: notice.kind === "popup" ? "팝업" : "일반",
+    noticeTone: notice.tone,
+    disablePreferenceActions: true,
+  };
+}
+
 export function HomeNewsPortal() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [baseData, setBaseData] = useState<HomeNewsDataset>(emptyHomeNewsDataset);
   const [livePreviewData, setLivePreviewData] = useState<HomeNewsDataset | null>(null);
   const [likeWorkspace, setLikeWorkspace] = useState<Awaited<ReturnType<typeof fetchHomeNewsLikeWorkspace>> | null>(null);
+  const [noticeItems, setNoticeItems] = useState<HomeNewsCardItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingPreferenceId, setTogglingPreferenceId] = useState<string | null>(null);
   const [requestedOpen, setRequestedOpen] = useState<{ id: string; token: number } | null>(null);
@@ -58,6 +76,17 @@ export function HomeNewsPortal() {
     [likeWorkspace, livePreviewData],
   );
   const activeData = personalizedPreviewData ?? personalizedBaseData;
+  const activeDataWithNotices = useMemo<HomeNewsDataset>(() => ({
+    ...activeData,
+    temporarySections: [
+      {
+        id: "notice",
+        label: "공지",
+        items: noticeItems,
+      },
+      ...(activeData.temporarySections ?? []).filter((section) => section.id !== "notice"),
+    ],
+  }), [activeData, noticeItems]);
 
   function updateDatasetPreferenceState(
     dataset: HomeNewsDataset | null,
@@ -120,7 +149,7 @@ export function HomeNewsPortal() {
   const section = useMemo(
     () => (
       <HomeNewsSection
-        data={activeData}
+        data={activeDataWithNotices}
         loading={loading}
         requestedOpenItemId={requestedOpen?.id ?? null}
         requestedOpenToken={requestedOpen?.token ?? 0}
@@ -128,8 +157,8 @@ export function HomeNewsPortal() {
         onSelectTickerItem={(itemId) => setRequestedOpen({ id: itemId, token: Date.now() })}
         onSetPreference={(itemId, nextPreference) => {
           const allItems = [
-            ...Object.values(activeData.cardsByCategory).flatMap((items) => items ?? []),
-            ...(activeData.temporarySections ?? []).flatMap((section) => section.items ?? []),
+            ...Object.values(activeDataWithNotices.cardsByCategory).flatMap((items) => items ?? []),
+            ...(activeDataWithNotices.temporarySections ?? []).flatMap((section) => section.items ?? []),
           ];
           const targetItem = allItems.find((item) => item.id === itemId) ?? null;
           if (!targetItem) return;
@@ -178,7 +207,7 @@ export function HomeNewsPortal() {
         }}
       />
     ),
-    [activeData, loading, togglingPreferenceId],
+    [activeDataWithNotices, loading, togglingPreferenceId],
   );
 
   useEffect(() => {
@@ -199,8 +228,24 @@ export function HomeNewsPortal() {
       frameId = window.requestAnimationFrame(syncHost);
     };
 
+    const syncNotices = () => {
+      setNoticeItems(getHomeNotices().map(toNoticeCardItem));
+    };
+
     void (async () => {
+      syncNotices();
       setLoading(true);
+      void refreshHomePopupNoticeWorkspace()
+        .then(() => {
+          if (!cancelled) {
+            syncNotices();
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
+          }
+        });
       const result = await fetchHomeNewsDataset();
       if (cancelled) return;
       setBaseData(result.data);
@@ -235,6 +280,7 @@ export function HomeNewsPortal() {
       } else if (!cancelled) {
         setLivePreviewData(null);
       }
+      if (!cancelled) syncNotices();
       setLoading(false);
       if (result.errorMessage) {
         console.warn(result.errorMessage);
@@ -247,6 +293,7 @@ export function HomeNewsPortal() {
     window.addEventListener("resize", scheduleSync);
     window.addEventListener("orientationchange", scheduleSync);
     window.visualViewport?.addEventListener("resize", scheduleSync);
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
 
     return () => {
       cancelled = true;
@@ -255,6 +302,7 @@ export function HomeNewsPortal() {
       window.removeEventListener("resize", scheduleSync);
       window.removeEventListener("orientationchange", scheduleSync);
       window.visualViewport?.removeEventListener("resize", scheduleSync);
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
       const currentHost = hostRef.current;
       if (currentHost?.dataset.homeNewsOwner === "HomeNewsPortal") {
         currentHost.remove();

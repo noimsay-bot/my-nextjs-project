@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
   --portal-header-offset: 12px;
+  --desk-header-offset: 0px;
   --bg: #2e4774;
   --bg-top-glow: rgba(143, 214, 224, 0.14);
   --bg-start: #35517d;
@@ -2336,11 +2337,10 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   grid-row: 1;
   justify-self: end;
   position: sticky;
-  top: 168px;
+  top: calc(var(--portal-header-offset, 12px) + var(--desk-header-offset, 0px));
   transform: none;
   margin-left: 0;
   width: 24px;
-  max-height: calc(100vh - 198px);
   display: grid;
   gap: 6px;
   align-content: start;
@@ -2350,9 +2350,7 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   background: var(--panel);
   box-shadow: var(--panel-shadow);
   backdrop-filter: blur(6px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
+  overflow: visible;
   z-index: 2;
 }
 

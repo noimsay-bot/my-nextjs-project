@@ -1,4 +1,4 @@
-import { CategoryDefinition, CategoryKey, PointerState, ScheduleState } from "@/lib/schedule/types";
+import { CategoryDefinition, CategoryKey, PointerState, ScheduleAssignmentNameTag, ScheduleState } from "@/lib/schedule/types";
 
 export const STORAGE_KEY = "j-schedule-integrated-react-v1";
 export const SCHEDULE_YEAR_START = 2026;
@@ -14,6 +14,41 @@ export function getScheduleCategoryLabel(category: string) {
   if (category === "주말조근") return "조근";
   if (category === "주말일반근무") return "일반";
   return category;
+}
+
+export function isGeneralAssignmentCategory(category: string) {
+  return getScheduleCategoryLabel(category) === "일반";
+}
+
+export const scheduleAssignmentNameTagLabels: Record<ScheduleAssignmentNameTag, string> = {
+  gov: "(국)",
+  law: "(법)",
+};
+
+export const scheduleAssignmentNameTagColors: Record<
+  ScheduleAssignmentNameTag,
+  { background: string; border: string; color: string }
+> = {
+  gov: {
+    background: "rgba(125,211,252,.2)",
+    border: "1px solid rgba(125,211,252,.54)",
+    color: "#e0f2fe",
+  },
+  law: {
+    background: "rgba(250,204,21,.18)",
+    border: "1px solid rgba(250,204,21,.5)",
+    color: "#fef3c7",
+  },
+};
+
+export function buildScheduleAssignmentNameTagKey(category: string, name: string) {
+  return `${category}::${name.trim()}`;
+}
+
+export function getNextScheduleAssignmentNameTag(tag?: ScheduleAssignmentNameTag | null): ScheduleAssignmentNameTag | null {
+  if (tag === "gov") return "law";
+  if (tag === "law") return null;
+  return "gov";
 }
 
 export const weekendScheduleAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "야근"] as const;

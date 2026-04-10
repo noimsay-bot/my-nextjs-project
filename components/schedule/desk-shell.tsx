@@ -1,9 +1,9 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DeskPopupNoticeManager } from "@/components/schedule/desk-popup-notice-manager";
-import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
 
 const items = [
   { href: "/schedule/schedule-assignment", label: "일정배정" },
@@ -15,16 +15,43 @@ const items = [
 
 export function DeskShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const showManagementLinks =
-    pathname.startsWith("/schedule/write") ||
-    pathname === "/schedule/vacations" ||
-    pathname === "/schedule/long-service-leave" ||
-    pathname === "/schedule/health-checks" ||
-    pathname === "/schedule/press-support";
+  const headerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const updateDeskOffset = () => {
+      const height = headerRef.current?.getBoundingClientRect().height ?? 0;
+      root.style.setProperty("--desk-header-offset", `${Math.ceil(height) + 8}px`);
+    };
+
+    updateDeskOffset();
+
+    if (typeof ResizeObserver === "undefined" || !headerRef.current) {
+      window.addEventListener("resize", updateDeskOffset);
+      return () => {
+        window.removeEventListener("resize", updateDeskOffset);
+        root.style.removeProperty("--desk-header-offset");
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateDeskOffset();
+    });
+    observer.observe(headerRef.current);
+    window.addEventListener("resize", updateDeskOffset);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateDeskOffset);
+      root.style.removeProperty("--desk-header-offset");
+    };
+  }, []);
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article
+        ref={headerRef}
         className="panel desk-shell-sticky"
         style={{
           backdropFilter: "blur(16px)",
@@ -58,7 +85,6 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            {showManagementLinks ? <ScheduleManagementLinks inline /> : null}
             <DeskPopupNoticeManager inline showMeta={false} />
           </div>
         </div>

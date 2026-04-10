@@ -5,8 +5,11 @@
   defaultPointers,
   defaultScheduleState,
   GENERAL_TEAM_DEFAULT_NAMES,
+  buildScheduleAssignmentNameTagKey,
+  getNextScheduleAssignmentNameTag,
   getStoredAssignmentDisplayRank,
   getScheduleCategoryLabel,
+  isGeneralAssignmentCategory,
   SCHEDULE_MONTHS,
   SCHEDULE_YEAR_END,
   SCHEDULE_YEAR_START,
@@ -18,6 +21,7 @@ import {
   GeneratedSchedule,
   GenerationResult,
   PointerState,
+  ScheduleAssignmentNameTag,
   ScheduleState,
   SnapshotItem,
   VacationType,
@@ -41,6 +45,17 @@ function normalizeDayAssignments(day: DaySchedule) {
       })
       .map(({ category, names }) => [category, names]),
   ) as Record<string, string[]>;
+}
+
+function normalizeDayAssignmentNameTags(day: DaySchedule) {
+  return Object.fromEntries(
+    Object.entries(day.assignmentNameTags ?? {}).filter(([key, value]) => {
+      if (value !== "gov" && value !== "law") return false;
+      const [category, name] = key.split("::");
+      if (!category || !name || !isGeneralAssignmentCategory(category)) return false;
+      return (day.assignments[category] ?? []).includes(name);
+    }),
+  ) as Record<string, ScheduleAssignmentNameTag>;
 }
 
 const REQUIRED_DAY_ASSIGNMENT_OVERRIDES: Record<
@@ -75,6 +90,7 @@ function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
     return {
       ...day,
       assignments: normalizeDayAssignments(day),
+      assignmentNameTags: normalizeDayAssignmentNameTags(day),
     };
   }
 
@@ -88,6 +104,11 @@ function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
       isHoliday: override.isHoliday,
       assignments: override.assignments,
     }),
+    assignmentNameTags: normalizeDayAssignmentNameTags({
+      ...day,
+      isHoliday: override.isHoliday,
+      assignments: override.assignments,
+    }),
     manualExtras: [],
   };
 }
@@ -95,7 +116,13 @@ function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
 export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
   return {
     ...schedule,
-    days: schedule.days.map((day) => applyRequiredDayOverride(day)),
+    days: schedule.days.map((day) => {
+      const normalizedDay = applyRequiredDayOverride(day);
+      return {
+        ...normalizedDay,
+        assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
+      };
+    }),
   };
 }
 
@@ -136,6 +163,7 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
       day.assignments = overriddenDay.assignments;
       day.manualExtras = overriddenDay.manualExtras;
       day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+      day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
       previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
       return;
     }
@@ -143,6 +171,7 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
     if (day.isWeekend || day.isWeekdayHoliday || day.isCustomHoliday) {
       delete day.assignments["일반"];
       day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+      day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
       previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
       return;
     }
@@ -177,6 +206,7 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
     }
 
     day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+    day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
     previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
   });
 }
@@ -1513,6 +1543,29 @@ export function updateDayHeaderName(state: ScheduleState, dateKey: string, value
   const day = generated.days.find((item) => item.dateKey === dateKey);
   if (!day) return state;
   day.headerName = value;
+  return syncGeneratedSchedule(next, generated);
+}
+
+export function cycleDayAssignmentNameTag(state: ScheduleState, dateKey: string, category: string, name: string) {
+  if (!state.generated || !isGeneralAssignmentCategory(category)) return state;
+
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day) return state;
+
+  const key = buildScheduleAssignmentNameTagKey(category, name);
+  const currentTag = day.assignmentNameTags?.[key] ?? null;
+  const nextTag = getNextScheduleAssignmentNameTag(currentTag);
+  const nextMap = { ...(day.assignmentNameTags ?? {}) };
+
+  if (!nextTag) {
+    delete nextMap[key];
+  } else {
+    nextMap[key] = nextTag;
+  }
+
+  day.assignmentNameTags = nextMap;
   return syncGeneratedSchedule(next, generated);
 }
 

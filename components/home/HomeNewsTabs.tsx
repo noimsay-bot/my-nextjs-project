@@ -22,6 +22,10 @@ function getInitialTab(
   cardsByCategory: Partial<HomeNewsCardsByCategory>,
   temporarySections: HomeNewsTemporarySection[],
 ) {
+  if (temporarySections.some((section) => section.id === "notice")) {
+    return "notice" as HomeNewsTabKey;
+  }
+
   const baseCategory = getInitialCategory(cardsByCategory);
   if ((cardsByCategory[baseCategory] ?? []).length > 0) {
     return baseCategory;
@@ -52,32 +56,28 @@ export function HomeNewsTabs({
   onSetPreference,
 }: HomeNewsTabsProps) {
   const groupId = useId();
-  const leadingTabs = HOME_NEWS_CATEGORIES.slice(0, 1).map((category) => ({
-    key: category as HomeNewsTabKey,
-    label: HOME_NEWS_CATEGORY_LABELS[category],
-    items: cardsByCategory[category] ?? [],
-  }));
-  const trailingTabs = HOME_NEWS_CATEGORIES.slice(1).map((category) => ({
+  const categoryTabs = HOME_NEWS_CATEGORIES.map((category) => ({
     key: category as HomeNewsTabKey,
     label: HOME_NEWS_CATEGORY_LABELS[category],
     items: cardsByCategory[category] ?? [],
   }));
   const tabs = [
-    ...leadingTabs,
     ...temporarySections.map((section) => ({
       key: section.id as HomeNewsTabKey,
       label: section.label,
       items: section.items,
     })),
-    ...trailingTabs,
+    ...categoryTabs,
   ];
-  const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => recommendedCategory ?? getInitialTab(cardsByCategory, temporarySections));
+  const hasNoticeTab = tabs.some((tab) => tab.key === "notice");
+  const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
   const items = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
+  const isNoticeActive = activeCategory === "notice";
 
   useEffect(() => {
-    const nextCategory = recommendedCategory ?? getInitialTab(cardsByCategory, temporarySections);
+    const nextCategory = getInitialTab(cardsByCategory, temporarySections);
     const currentItems = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
     const nextItems = tabs.find((tab) => tab.key === nextCategory)?.items ?? [];
     if (currentItems.length === 0 && nextItems.length > 0) {
@@ -97,10 +97,10 @@ export function HomeNewsTabs({
   }, [requestedOpenItemId, requestedOpenToken, tabs]);
 
   useEffect(() => {
-    if (!recommendedCategory || hasUserSelectedCategory) return;
+    if (!recommendedCategory || hasUserSelectedCategory || hasNoticeTab) return;
     if ((cardsByCategory[recommendedCategory] ?? []).length === 0) return;
     setActiveCategory(recommendedCategory);
-  }, [cardsByCategory, hasUserSelectedCategory, recommendedCategory]);
+  }, [cardsByCategory, hasNoticeTab, hasUserSelectedCategory, recommendedCategory]);
 
   return (
     <div className={styles.tabs}>
@@ -116,7 +116,7 @@ export function HomeNewsTabs({
               aria-selected={isActive}
               aria-controls={`${groupId}-${tab.key}-panel`}
               tabIndex={isActive ? 0 : -1}
-              className={`${styles.tabButton} ${isActive ? styles.tabButtonActive : ""}`}
+              className={`${styles.tabButton} ${tab.key === "notice" ? styles.tabButtonNotice : ""} ${isActive ? styles.tabButtonActive : ""} ${tab.key === "notice" && isActive ? styles.tabButtonNoticeActive : ""}`}
               onClick={() => {
                 setHasUserSelectedCategory(true);
                 setActiveCategory(tab.key);
@@ -135,7 +135,7 @@ export function HomeNewsTabs({
         aria-labelledby={`${groupId}-${activeCategory}-tab`}
         className={styles.panel}
       >
-        {loading ? (
+        {loading && !(isNoticeActive && items.length > 0) ? (
           <div className={styles.grid}>
             {[0, 1].map((item) => (
               <div key={item} className={styles.cardSkeleton} aria-hidden="true" />

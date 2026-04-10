@@ -23,7 +23,7 @@ export function HomeNewsCard({
   const likesCount = item.likesCount ?? 0;
 
   return (
-    <article className={styles.card}>
+    <article className={`${styles.card} ${item.noticeTone === "urgent" ? styles.cardNoticeUrgent : item.noticeTone === "normal" ? styles.cardNoticeNormal : ""}`}>
       <button
         type="button"
         className={`${styles.cardToggle} ${!expanded ? styles.cardToggleCollapsed : ""}`}
@@ -33,8 +33,8 @@ export function HomeNewsCard({
       >
         {expanded ? (
           <div className={styles.cardHeader}>
-            <span className={styles.badge}>{HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
-            <span className={styles.tag}>접기</span>
+            <span className={styles.badge}>{item.badgeLabel ?? HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
+            <span className={styles.tag}>{item.tagLabel ?? "접기"}</span>
           </div>
         ) : null}
         <div className={`${styles.cardBody} ${!expanded ? styles.cardBodyCollapsed : ""}`}>
@@ -51,7 +51,7 @@ export function HomeNewsCard({
           {item.sourceLabel ? (
             <p className={styles.sourceNote}>참고 출처: {item.sourceLabel}</p>
           ) : null}
-          {onSetPreference ? (
+          {onSetPreference && !item.disablePreferenceActions ? (
             <div className={styles.cardActions}>
               <button
                 type="button"

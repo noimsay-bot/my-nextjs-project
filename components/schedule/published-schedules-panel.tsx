@@ -7,7 +7,15 @@ import {
   subscribeToAuth,
 } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { getAssignmentDisplayRank, getScheduleCategoryLabel, getVisibleAssignmentDisplayRank } from "@/lib/schedule/constants";
+import {
+  buildScheduleAssignmentNameTagKey,
+  getAssignmentDisplayRank,
+  getScheduleCategoryLabel,
+  getVisibleAssignmentDisplayRank,
+  isGeneralAssignmentCategory,
+  scheduleAssignmentNameTagColors,
+  scheduleAssignmentNameTagLabels,
+} from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -40,6 +48,16 @@ type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
+function getAssignmentChipTag(category: string, name: string, day: DaySchedule) {
+  if (!isGeneralAssignmentCategory(category)) return null;
+  const key = buildScheduleAssignmentNameTagKey(category, name);
+  return day.assignmentNameTags?.[key] ?? null;
+}
+
+function getAssignmentChipText(name: string, tag: "gov" | "law" | null) {
+  return tag ? `${name}${scheduleAssignmentNameTagLabels[tag]}` : name;
 }
 
 function getPublishedScheduleLayoutMode(
@@ -1444,6 +1462,8 @@ export function PublishedSchedulesPanel() {
                                     !routeSelected &&
                                     !personObject.pending &&
                                     recommendedCandidateKeys.has(getRefKey(ref));
+                                  const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                  const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
                                   return (
                                     <button
@@ -1474,6 +1494,8 @@ export function PublishedSchedulesPanel() {
                                               ? "rgba(124,58,237,.32)"
                                             : dimOtherNames
                                                 ? "rgba(255,255,255,.06)"
+                                                : nameTagColors
+                                                  ? nameTagColors.background
                                                 : assignmentDisplay.chipStyle?.background
                                                   ? assignmentDisplay.chipStyle.background
                                                   : mineHighlighted
@@ -1491,8 +1513,18 @@ export function PublishedSchedulesPanel() {
                                               ? "2px solid rgba(226,232,240,.82)"
                                             : dimOtherNames
                                                 ? "1px solid rgba(255,255,255,.08)"
+                                                : nameTagColors
+                                                  ? nameTagColors.border
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: routeSelected && firstSelected ? "#f5eaff" : recommendedHighlighted || mineHighlighted ? "#ffffff" : dimOtherNames ? "rgba(248,251,255,.48)" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        color: routeSelected && firstSelected
+                                          ? "#f5eaff"
+                                          : recommendedHighlighted || mineHighlighted
+                                            ? "#ffffff"
+                                            : dimOtherNames
+                                              ? "rgba(248,251,255,.48)"
+                                              : nameTagColors
+                                                ? nameTagColors.color
+                                                : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
                                         lineHeight: 1.3,
                                         boxShadow: "none",
@@ -1500,9 +1532,9 @@ export function PublishedSchedulesPanel() {
                                         opacity: dimOtherNames ? 0.42 : 1,
                                         cursor: editMode && (!personObject.pending || ownPendingRequest) ? "pointer" : "default",
                                       }}
-                                    >
+                                      >
                                         <FittedNameText
-                                        text={assignmentDisplay.name}
+                                        text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
                                         className="schedule-name-chip__text"
                                         minFontSize={shouldAutoFitSchedule ? 5 : 9}
                                         maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}

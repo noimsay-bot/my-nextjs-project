@@ -11,6 +11,20 @@ import {
   refreshHomePopupNoticeWorkspace,
 } from "@/lib/home-popup/storage";
 
+function getNoticeToneStyle(tone: "normal" | "urgent") {
+  if (tone === "urgent") {
+    return {
+      background: "rgba(127,29,29,.92)",
+      border: "1px solid rgba(248,113,113,.44)",
+    };
+  }
+
+  return {
+    background: "rgba(20,83,45,.92)",
+    border: "1px solid rgba(74,222,128,.32)",
+  };
+}
+
 export function HomePopupNoticeModal() {
   const [notice, setNotice] = useState(() => getHomePopupNotice());
   const [hasApplied, setHasApplied] = useState(() => hasAppliedToCurrentHomePopupNotice());
@@ -25,12 +39,12 @@ export function HomePopupNoticeModal() {
     const nextHasApplied = hasAppliedToCurrentHomePopupNotice();
     setNotice(nextNotice);
     setHasApplied(nextHasApplied);
-    if (nextNotice?.isActive && !nextHasApplied && nextNotice.noticeId !== lastNoticeIdRef.current) {
-      lastNoticeIdRef.current = nextNotice.noticeId;
+    if (nextNotice?.isActive && (!nextHasApplied || !nextNotice.applicationEnabled) && nextNotice.id !== lastNoticeIdRef.current) {
+      lastNoticeIdRef.current = nextNotice.id;
       setOpen(true);
       setMessage(null);
     }
-    if (!nextNotice?.isActive || nextHasApplied) {
+    if (!nextNotice?.isActive || (nextNotice.applicationEnabled && nextHasApplied)) {
       setOpen(false);
     }
   };
@@ -42,7 +56,7 @@ export function HomePopupNoticeModal() {
     } catch (error) {
       setMessage({
         tone: "warn",
-        text: error instanceof Error ? error.message : "홈 팝업 공지를 불러오지 못했습니다.",
+        text: error instanceof Error ? error.message : "홈 공지를 불러오지 못했습니다.",
       });
     }
   };
@@ -92,7 +106,9 @@ export function HomePopupNoticeModal() {
     }
   };
 
-  if (!notice?.isActive || !open || hasApplied || !portalReady) return null;
+  if (!notice?.isActive || !open || (notice.applicationEnabled && hasApplied) || !portalReady) return null;
+
+  const toneStyle = getNoticeToneStyle(notice.tone);
 
   return createPortal(
     <div
@@ -114,28 +130,29 @@ export function HomePopupNoticeModal() {
         className="panel"
         style={{
           width: "min(560px, 100%)",
-          background: "rgb(15,23,42)",
-          border: "1px solid rgba(148,163,184,.26)",
+          ...toneStyle,
           boxShadow: "0 30px 80px rgba(2,6,23,.42)",
         }}
       >
         <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-            <div className="chip">팝업 공지</div>
+            <div className="chip">공지</div>
             <button className="btn" type="button" onClick={() => setOpen(false)}>
               닫기
             </button>
           </div>
           <div style={{ display: "grid", gap: 10 }}>
             <strong style={{ fontSize: 24, lineHeight: 1.25 }}>{notice.title}</strong>
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, color: "#dbeafe" }}>{notice.body}</div>
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, color: "#f8fafc" }}>{notice.body}</div>
           </div>
           {message?.text ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn primary" type="button" disabled={submitting} onClick={() => void handleApply()}>
-              신청하기
-            </button>
-          </div>
+          {notice.applicationEnabled ? (
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn primary" type="button" disabled={submitting} onClick={() => void handleApply()}>
+                신청하기
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>,

@@ -1,5 +1,5 @@
 export const HOME_NEWS_CATEGORIES = ["politics", "society", "economy", "world"] as const;
-export const HOME_NEWS_TEMPORARY_SECTION_IDS = ["local_election"] as const;
+export const HOME_NEWS_TEMPORARY_SECTION_IDS = ["notice", "local_election"] as const;
 
 export type HomeNewsCategory = (typeof HOME_NEWS_CATEGORIES)[number];
 export type HomeNewsTemporarySectionId = (typeof HOME_NEWS_TEMPORARY_SECTION_IDS)[number];
@@ -49,6 +49,10 @@ export type HomeNewsCardItem = {
   likesCount?: number;
   viewerHasLiked?: boolean;
   viewerHasDisliked?: boolean;
+  badgeLabel?: string;
+  tagLabel?: string;
+  noticeTone?: "normal" | "urgent";
+  disablePreferenceActions?: boolean;
 };
 
 export type HomeNewsCardsByCategory = Record<HomeNewsCategory, HomeNewsCardItem[]>;

@@ -3,9 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
+import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
-import { GENERAL_TEAM_DEFAULT_NAMES, SCHEDULE_MONTHS, SCHEDULE_YEARS, categories, defaultScheduleState, getAssignmentDisplayRank, getScheduleCategoryLabel, getVisibleAssignmentDisplayRank, orderCategories } from "@/lib/schedule/constants";
+import {
+  buildScheduleAssignmentNameTagKey,
+  GENERAL_TEAM_DEFAULT_NAMES,
+  SCHEDULE_MONTHS,
+  SCHEDULE_YEARS,
+  categories,
+  defaultScheduleState,
+  getAssignmentDisplayRank,
+  getScheduleCategoryLabel,
+  getVisibleAssignmentDisplayRank,
+  isGeneralAssignmentCategory,
+  orderCategories,
+  scheduleAssignmentNameTagColors,
+  scheduleAssignmentNameTagLabels,
+} from "@/lib/schedule/constants";
 import { renderSchedulePrintHtml } from "@/lib/schedule/print-layout";
 import {
   CHANGE_REQUESTS_EVENT,
@@ -21,6 +36,7 @@ import {
   addManualField,
   addPersonToCategory,
   autoRebalance,
+  cycleDayAssignmentNameTag,
   cycleVacationEntryType,
   cloneScheduleState,
   compactGeneratedAssignments,
@@ -54,6 +70,16 @@ const ALL_DAYS_EDIT_KEY = "__all_days__";
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
+function getAssignmentChipTag(category: string, name: string, day: DaySchedule) {
+  if (!isGeneralAssignmentCategory(category)) return null;
+  const key = buildScheduleAssignmentNameTagKey(category, name);
+  return day.assignmentNameTags?.[key] ?? null;
+}
+
+function getAssignmentChipText(name: string, tag: "gov" | "law" | null) {
+  return tag ? `${name}${scheduleAssignmentNameTagLabels[tag]}` : name;
 }
 
 function getAdjacentMonth(year: number, month: number, offset: number) {
@@ -959,6 +985,7 @@ export function ScheduleApp() {
             }} disabled={isEditingDate}>
               근무표 게시
             </button>
+            <ScheduleManagementLinks inline />
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
           </div>
           {isEditingDate ? <div className="status note">{isAllDaysEditMode ? "근무표 전체 수정 중입니다. 수정 완료 또는 취소 후 다른 작업을 진행해 주세요." : "날짜 수정 중입니다. 확인 또는 취소 후 다른 작업을 진행해 주세요."}</div> : null}
@@ -1673,6 +1700,8 @@ export function ScheduleApp() {
                                     Boolean(currentUser) &&
                                     currentUser === assignmentDisplay.name &&
                                     (state.showMyWork || (editMode && !isAllDaysEditMode));
+                                  const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                  const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending;
                                   const weekendConflict = conflicted && isWeekendLike;
                                   return (
@@ -1713,6 +1742,12 @@ export function ScheduleApp() {
                                             );
                                             return;
                                           }
+                                          if (isGeneralAssignmentCategory(category)) {
+                                            updateEditingState((current) =>
+                                              cycleDayAssignmentNameTag(current, day.dateKey, category, assignmentDisplay.name),
+                                            );
+                                            return;
+                                          }
                                           handlePersonSlotActivate({ dateKey: day.dateKey, category, index });
                                         }}
                                         onDragStart={(event) => {
@@ -1749,6 +1784,8 @@ export function ScheduleApp() {
                                                 ? weekendConflict
                                                   ? "rgba(34,211,238,.28)"
                                                   : "rgba(239,68,68,.22)"
+                                                : nameTagColors
+                                                  ? nameTagColors.background
                                                 : assignmentDisplay.chipStyle?.background
                                                   ? assignmentDisplay.chipStyle.background
                                                   : highlighted
@@ -1760,11 +1797,15 @@ export function ScheduleApp() {
                                               ? weekendConflict
                                                 ? "1px solid rgba(103,232,249,.65)"
                                                 : "1px solid rgba(239,68,68,.28)"
+                                              : nameTagColors
+                                                ? nameTagColors.border
                                               : highlighted
                                                 ? "1px solid rgba(34,211,238,.35)"
                                                 : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict
                                           ? "#d8fbff"
+                                          : nameTagColors
+                                            ? nameTagColors.color
                                           : editMode
                                               ? "#fffbea"
                                               : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
@@ -1774,7 +1815,7 @@ export function ScheduleApp() {
                                       }}
                                     >
                                         <FittedNameText
-                                          text={assignmentDisplay.name}
+                                          text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
                                           className="schedule-name-chip__text"
                                           minFontSize={9}
                                           maxFontSize={editMode ? 16 : 18}
@@ -2335,6 +2376,8 @@ export function ScheduleApp() {
                               <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 0, minHeight: 42, width: "100%" }}>
                                 {names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
+                                  const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                  const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const conflicted = conflictSet.has(`${category}-${name}`);
                                   const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
                                   return (
@@ -2354,20 +2397,28 @@ export function ScheduleApp() {
                                           ? weekendConflict
                                             ? "rgba(34,211,238,.28)"
                                             : "rgba(239,68,68,.22)"
+                                          : nameTagColors
+                                            ? nameTagColors.background
                                           : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.16)",
                                         border: conflicted
                                           ? weekendConflict
                                             ? "1px solid rgba(103,232,249,.65)"
                                             : "1px solid rgba(239,68,68,.28)"
+                                          : nameTagColors
+                                            ? nameTagColors.border
                                           : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: weekendConflict ? "#d8fbff" : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                        color: weekendConflict
+                                          ? "#d8fbff"
+                                          : nameTagColors
+                                            ? nameTagColors.color
+                                            : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
                                         lineHeight: 1.3,
                                         boxShadow: "none",
                                       }}
                                     >
                                       <FittedNameText
-                                        text={assignmentDisplay.name}
+                                        text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
                                         className="schedule-name-chip__text"
                                         minFontSize={9}
                                         maxFontSize={18}

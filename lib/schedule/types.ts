@@ -20,6 +20,7 @@ export interface Conflict {
 }
 
 export type VacationType = "연차" | "대휴" | "공가" | "근속휴가" | "건강검진" | "경조";
+export type ScheduleAssignmentNameTag = "gov" | "law";
 
 export interface DaySchedule {
   dateKey: string;
@@ -34,6 +35,7 @@ export interface DaySchedule {
   isOverflowMonth: boolean;
   vacations: string[];
   assignments: Record<string, string[]>;
+  assignmentNameTags?: Record<string, ScheduleAssignmentNameTag>;
   manualExtras: string[];
   headerName: string;
   conflicts: Conflict[];
