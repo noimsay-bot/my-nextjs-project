@@ -1,15 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  defaultPointers,
+} from "@/lib/schedule/constants";
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
-import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import {
+  readStoredScheduleState,
+  refreshScheduleState,
+  saveScheduleState,
+  SCHEDULE_STATE_EVENT,
+} from "@/lib/schedule/storage";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import {
   AssignmentTripTagPhase,
   AssignmentTimeColor,
   AssignmentTravelType,
+  createAssignmentRowKey,
   createDefaultScheduleAssignmentDayRows,
   createDefaultScheduleAssignmentEntry,
   getScheduleAssignmentBaseTimes,
@@ -154,6 +163,27 @@ interface ImportMessage {
   tone: ImportMessageTone;
   text: string;
 }
+
+interface ImportedWorkbookRow {
+  day: number;
+  headerName: string;
+  name: string;
+  duty: string;
+  clockIn: string;
+  clockOut: string;
+  schedule: string;
+  exclusiveVideo: boolean;
+  travelType: AssignmentTravelType;
+}
+
+const historicalImportMonthMap = {
+  "2025-12": { year: 2025, month: 12, label: "2025년 12월" },
+  "2026-01": { year: 2026, month: 1, label: "2026년 1월" },
+  "2026-02": { year: 2026, month: 2, label: "2026년 2월" },
+  "2026-03": { year: 2026, month: 3, label: "2026년 3월" },
+} as const;
+
+type HistoricalImportMonthKey = keyof typeof historicalImportMonthMap;
 
 const vacationBadgeStyles = vacationStyleTones;
 const jcheckBadgeStyle = {
@@ -338,6 +368,235 @@ function buildMonthDays(schedule: GeneratedSchedule | null) {
   });
 }
 
+function normalizeWorkbookCellText(value: unknown) {
+  return String(value ?? "").replace(/\r/g, "").trim();
+}
+
+function isTruthyWorkbookFlag(value: string) {
+  const normalized = value.replace(/\s+/g, "").trim().toLowerCase();
+  return normalized === "1" || normalized === "y" || normalized === "yes" || normalized === "true" || normalized === "o";
+}
+
+function normalizeImportedDutyLabel(value: string) {
+  const normalized = value.replace(/\s+/g, "").trim();
+  if (normalized === "대기") return "뉴스대기";
+  return normalized || "미정";
+}
+
+function getImportedTravelType(duty: string): AssignmentTravelType {
+  const normalized = duty.replace(/\s+/g, "").trim();
+  if (normalized === "국내출장") return "국내출장";
+  if (normalized === "해외출장") return "해외출장";
+  return "";
+}
+
+function parseWorkbookDayMarker(row: string[]) {
+  for (const cell of row) {
+    const normalized = normalizeWorkbookCellText(cell);
+    if (!normalized) continue;
+    const matched = normalized.match(/(^|[\s\n])(\d{1,2})일(?:[\s\n(]|$)/);
+    if (!matched) continue;
+
+    const day = Number(matched[2]);
+    if (!Number.isInteger(day) || day < 1 || day > 31) continue;
+
+    const headerName = normalized
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => line && !/^\d{1,2}일$/.test(line) && !/^\([^)]+\)$/.test(line))
+      .filter((line) => !line.includes("일"))
+      .join(" ")
+      .trim();
+
+    return {
+      day,
+      headerName,
+    };
+  }
+
+  return null;
+}
+
+function findWorkbookHeaderIndex(rows: string[][]) {
+  return rows.findIndex((row) => row.includes("이름") && row.includes("근무") && row.includes("일정"));
+}
+
+function detectHistoricalImportMonthKey(sourceText: string): HistoricalImportMonthKey | null {
+  const normalized = sourceText.replace(/\s+/g, "").toLowerCase();
+  if (
+    normalized.includes("2025-12") ||
+    normalized.includes("2025.12") ||
+    normalized.includes("2025/12") ||
+    normalized.includes("2025년12월") ||
+    normalized.includes("12월")
+  ) {
+    return "2025-12";
+  }
+  if (
+    normalized.includes("2026-01") ||
+    normalized.includes("2026.01") ||
+    normalized.includes("2026/01") ||
+    normalized.includes("2026-1") ||
+    normalized.includes("2026.1") ||
+    normalized.includes("2026/1") ||
+    normalized.includes("2026년1월") ||
+    normalized.includes("1월")
+  ) {
+    return "2026-01";
+  }
+  if (
+    normalized.includes("2026-02") ||
+    normalized.includes("2026.02") ||
+    normalized.includes("2026/02") ||
+    normalized.includes("2026-2") ||
+    normalized.includes("2026.2") ||
+    normalized.includes("2026/2") ||
+    normalized.includes("2026년2월") ||
+    normalized.includes("2월")
+  ) {
+    return "2026-02";
+  }
+  if (
+    normalized.includes("2026-03") ||
+    normalized.includes("2026.03") ||
+    normalized.includes("2026/03") ||
+    normalized.includes("2026-3") ||
+    normalized.includes("2026.3") ||
+    normalized.includes("2026/3") ||
+    normalized.includes("2026년3월") ||
+    normalized.includes("3월")
+  ) {
+    return "2026-03";
+  }
+  return null;
+}
+
+function buildImportedMonthData(
+  rows: string[][],
+  year: number,
+  month: number,
+): { schedule: GeneratedSchedule; monthEntries: Record<string, ScheduleAssignmentEntry> } {
+  const headerIndex = findWorkbookHeaderIndex(rows);
+  if (headerIndex < 0) {
+    throw new Error("엑셀에서 `이름 / 근무 / 일정` 헤더를 찾지 못했습니다.");
+  }
+
+  const headerRow = rows[headerIndex] ?? [];
+  const nameIndex = headerRow.indexOf("이름");
+  const dutyIndex = headerRow.indexOf("근무");
+  const clockInIndex = headerRow.indexOf("출근");
+  const clockOutIndex = headerRow.indexOf("퇴근");
+  const scheduleIndex = headerRow.indexOf("일정");
+  const exclusiveVideoIndex = headerRow.indexOf("영상 단독");
+
+  if (nameIndex < 0 || dutyIndex < 0 || scheduleIndex < 0) {
+    throw new Error("엑셀 필수 열(`이름 / 근무 / 일정`)이 없습니다.");
+  }
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const importedRows: ImportedWorkbookRow[] = [];
+  let currentDay = 0;
+  let currentHeaderName = "";
+
+  rows.slice(headerIndex + 1).forEach((row) => {
+    const normalizedRow = row.map(normalizeWorkbookCellText);
+    const marker = parseWorkbookDayMarker(normalizedRow);
+    if (marker) {
+      currentDay = marker.day;
+      if (marker.headerName) {
+        currentHeaderName = marker.headerName;
+      }
+    }
+
+    if (!currentDay || currentDay > lastDay) return;
+
+    const name = normalizeWorkbookCellText(normalizedRow[nameIndex]);
+    const rawDuty = normalizeWorkbookCellText(normalizedRow[dutyIndex]);
+    const schedule = normalizeWorkbookCellText(normalizedRow[scheduleIndex]);
+    const clockIn = clockInIndex >= 0 ? normalizeWorkbookCellText(normalizedRow[clockInIndex]) : "";
+    const clockOut = clockOutIndex >= 0 ? normalizeWorkbookCellText(normalizedRow[clockOutIndex]) : "";
+    const exclusiveVideo = exclusiveVideoIndex >= 0 ? isTruthyWorkbookFlag(normalizedRow[exclusiveVideoIndex]) : false;
+
+    if (!name && !rawDuty && !schedule && !clockIn && !clockOut) return;
+    if (!name) return;
+
+    const duty = normalizeImportedDutyLabel(rawDuty);
+    importedRows.push({
+      day: currentDay,
+      headerName: currentHeaderName,
+      name,
+      duty,
+      clockIn,
+      clockOut,
+      schedule,
+      exclusiveVideo,
+      travelType: getImportedTravelType(duty),
+    });
+  });
+
+  if (importedRows.length === 0) {
+    throw new Error("엑셀에서 가져올 일정배정 행을 찾지 못했습니다.");
+  }
+
+  const standardCategories = new Set(["조근", "일반", "연장", "석근", "야근", "제크", "휴가", "주말조근", "주말일반근무", "뉴스대기"]);
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+  const monthEntries: Record<string, ScheduleAssignmentEntry> = {};
+  const days = Array.from({ length: lastDay }, (_, index) => createEmptyDaySchedule(new Date(year, month - 1, index + 1)));
+
+  importedRows.forEach((item) => {
+    const day = days[item.day - 1];
+    if (!day) return;
+
+    if (item.headerName && !day.headerName) {
+      day.headerName = item.headerName;
+    }
+
+    const category = item.duty;
+    const nextNames = day.assignments[category] ?? [];
+    const rowIndex = nextNames.length;
+    day.assignments[category] = [...nextNames, item.name];
+
+    const rowKey = createAssignmentRowKey(day.dateKey, category, rowIndex, item.name);
+    const baseTimes = getScheduleAssignmentBaseTimes(category, day.dateKey, day);
+    const normalizedClockIn = formatManualTime(item.clockIn);
+    const normalizedClockOut = formatManualTime(item.clockOut);
+    const clockInText = normalizedClockIn || baseTimes?.clockInText || "";
+    const clockOutText = normalizedClockOut || baseTimes?.clockOutText || "";
+
+    monthEntries[rowKey] = {
+      ...createDefaultScheduleAssignmentEntry(),
+      clockIn: clockInText,
+      clockInConfirmed: false,
+      clockOut: clockOutText,
+      clockOutConfirmed: false,
+      schedules: item.schedule ? [item.schedule] : [""],
+      travelType: item.travelType,
+      exclusiveVideo: [item.exclusiveVideo],
+    };
+  });
+
+  days.forEach((day) => {
+    day.manualExtras = Object.keys(day.assignments).filter((category) => !standardCategories.has(category));
+    if (day.assignments["휴가"]?.length) {
+      day.vacations = [...day.assignments["휴가"]];
+    }
+  });
+
+  const nextStartDate = new Date(year, month, 1);
+
+  return {
+    schedule: {
+      year,
+      month,
+      monthKey,
+      days,
+      nextPointers: { ...defaultPointers },
+      nextStartDate: `${nextStartDate.getFullYear()}-${String(nextStartDate.getMonth() + 1).padStart(2, "0")}-${String(nextStartDate.getDate()).padStart(2, "0")}`,
+    },
+    monthEntries,
+  };
+}
+
 function ScheduleDeleteConfirmButton({
   onConfirm,
 }: {
@@ -363,12 +622,14 @@ export function ScheduleAssignmentPage() {
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
+  const [isWorkbookImporting, setIsWorkbookImporting] = useState(false);
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
   const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
   const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const workbookInputRef = useRef<HTMLInputElement | null>(null);
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const jumpToTodayPendingRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
@@ -497,6 +758,94 @@ export function ScheduleAssignmentPage() {
 
   const jumpToDate = (dateKey: string) => {
     scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
+  };
+
+  const handleWorkbookImport = async (file: File | null) => {
+    if (!file) return;
+
+    setIsWorkbookImporting(true);
+    setImportMessage({ tone: "note", text: "엑셀 파일을 읽는 중입니다." });
+
+    try {
+      const workbookBuffer = await file.arrayBuffer();
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(workbookBuffer, { type: "array" });
+      if (workbook.SheetNames.length === 0) {
+        throw new Error("엑셀 시트를 찾지 못했습니다.");
+      }
+      const currentState = readStoredScheduleState();
+      const currentStore = getScheduleAssignmentStore();
+      const nextSchedules = [...currentState.generatedHistory];
+      const nextEntries = { ...currentStore.entries };
+      const nextRows = { ...currentStore.rows };
+      const importedLabels: string[] = [];
+      const skippedLabels: string[] = [];
+
+      workbook.SheetNames.forEach((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as string[][];
+        const previewText = rows
+          .slice(0, 12)
+          .flat()
+          .map((cell) => normalizeWorkbookCellText(cell))
+          .filter(Boolean)
+          .join(" ");
+        const monthKey = detectHistoricalImportMonthKey(`${file.name} ${sheetName} ${previewText}`);
+        if (!monthKey) return;
+
+        const monthMeta = historicalImportMonthMap[monthKey];
+        const alreadyExists =
+          schedules.some((schedule) => schedule.monthKey === monthKey) ||
+          nextSchedules.some((item) => item.monthKey === monthKey) ||
+          Boolean(nextEntries[monthKey]) ||
+          Boolean(nextRows[monthKey]);
+
+        if (alreadyExists) {
+          skippedLabels.push(`${monthMeta.label} 이미 있음`);
+          return;
+        }
+
+        const { schedule, monthEntries } = buildImportedMonthData(rows, monthMeta.year, monthMeta.month);
+        nextSchedules.push(schedule);
+        nextEntries[monthKey] = monthEntries;
+        nextRows[monthKey] = {};
+        importedLabels.push(monthMeta.label);
+      });
+
+      if (importedLabels.length === 0) {
+        throw new Error(
+          skippedLabels.length > 0
+            ? `가져온 데이터가 없습니다. ${skippedLabels.join(", ")}`
+            : "파일명 또는 시트명에서 2025년 12월~2026년 3월 과거데이터를 찾지 못했습니다.",
+        );
+      }
+
+      const nextState = {
+        ...currentState,
+        generatedHistory: nextSchedules.sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
+      };
+      await saveScheduleState(nextState);
+
+      const nextStore: ScheduleAssignmentDataStore = {
+        entries: nextEntries,
+        rows: nextRows,
+      };
+      await saveScheduleAssignmentStore(nextStore);
+
+      setSchedules(getTeamLeadSchedules());
+      setStore(getScheduleAssignmentStore());
+      setImportMessage({
+        tone: "ok",
+        text: `${importedLabels.join(", ")} 데이터를 추가했습니다.${skippedLabels.length > 0 ? ` ${skippedLabels.join(", ")}` : ""} 기존 데이터는 건드리지 않았습니다.`,
+      });
+    } catch (error) {
+      setImportMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "엑셀 가져오기에 실패했습니다.",
+      });
+    } finally {
+      setIsWorkbookImporting(false);
+    }
   };
 
   const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
@@ -850,6 +1199,28 @@ export function ScheduleAssignmentPage() {
             </div>
           </div>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={isWorkbookImporting}
+              onClick={() => workbookInputRef.current?.click()}
+            >
+              {isWorkbookImporting ? "불러오는 중..." : "12월~3월 과거데이터 올리기"}
+            </button>
+            <input
+              ref={workbookInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0] ?? null;
+                void handleWorkbookImport(file).finally(() => {
+                  event.currentTarget.value = "";
+                });
+              }}
+            />
+          </div>
           {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>

@@ -177,29 +177,10 @@ async function persistScheduleStateNow(state: ScheduleState) {
     throw new Error(getSupabaseStorageErrorMessage(settingsError, "schedule_settings"));
   }
 
-  const { data: existingRows, error: existingError } = await supabase.from("schedule_months").select("month_key").not("draft_state", "is", null);
-
-  if (existingError) {
-    throw new Error(getSupabaseStorageErrorMessage(existingError, "schedule_months"));
-  }
-
   if (monthRows.length > 0) {
     const { error: upsertError } = await supabase.from("schedule_months").upsert(monthRows);
     if (upsertError) {
       throw new Error(getSupabaseStorageErrorMessage(upsertError, "schedule_months"));
-    }
-  }
-
-  const staleMonthKeys = (existingRows ?? [])
-    .map((row) => row.month_key as string)
-    .filter((monthKey) => !monthKeys.includes(monthKey));
-
-  if (staleMonthKeys.length > 0) {
-    const { error: clearError } = await supabase.from("schedule_months").upsert(
-      staleMonthKeys.map((monthKey) => ({ month_key: monthKey, draft_state: null, updated_by: session.id })),
-    );
-    if (clearError) {
-      throw new Error(getSupabaseStorageErrorMessage(clearError, "schedule_months"));
     }
   }
 
