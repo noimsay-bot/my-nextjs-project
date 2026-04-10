@@ -68,7 +68,7 @@ const removeScheduleAt = (schedules: string[], index: number) => getSafeSchedule
 const getSafeExclusiveVideo = (values: boolean[], count: number) => Array.from({ length: Math.max(count, 1) }, (_, i) => values[i] ?? false);
 const removeExclusiveVideoAt = (values: boolean[], index: number, nextCount: number) => getSafeExclusiveVideo(values.filter((_, i) => i !== index), nextCount);
 const createCustomRowId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-const coverageScoreSteps = [0, 0.5, 1, 2] as const;
+const coverageScoreSteps = [0, 0.5, 1, 1.5, 2] as const;
 const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
   "": "",
   departure: "출장출발",
@@ -188,6 +188,13 @@ function getCoverageScoreStyle(score: number) {
       borderColor: "rgba(96,165,250,.72)",
       background: "rgba(219,234,254,.95)",
       color: "#1d4ed8",
+    };
+  }
+  if (score === 1.5) {
+    return {
+      borderColor: "rgba(192,132,252,.72)",
+      background: "rgba(243,232,255,.95)",
+      color: "#7c3aed",
     };
   }
   if (score === 2) {
@@ -366,9 +373,28 @@ export function ScheduleAssignmentPage() {
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
+  const getStickyHeaderOffset = () => {
+    if (typeof window === "undefined") return 24;
+    if (window.innerWidth <= 960) return 24;
+
+    const selectors = [".portal-header-shell", ".desk-shell-sticky"];
+    return selectors.reduce((offset, selector) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) return offset;
+
+      const computed = window.getComputedStyle(element);
+      if (computed.display === "none" || computed.visibility === "hidden" || computed.position !== "sticky") {
+        return offset;
+      }
+
+      return offset + element.getBoundingClientRect().height;
+    }, 20);
+  };
+
   const scrollCardToTop = (target: HTMLElement | null, behavior: ScrollBehavior) => {
     if (!target) return;
-    const targetTop = Math.max(0, window.scrollY + target.getBoundingClientRect().top - 132);
+    const stickyOffset = getStickyHeaderOffset();
+    const targetTop = Math.max(0, window.scrollY + target.getBoundingClientRect().top - stickyOffset);
     window.scrollTo({ top: targetTop, behavior });
   };
 

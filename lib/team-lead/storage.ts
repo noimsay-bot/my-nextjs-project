@@ -255,7 +255,7 @@ function normalizeScheduleAssignmentEntry(
         ? entry.tripTagPhase
         : "",
     exclusiveVideo,
-    coverageScore: [0, 0.5, 1, 2].includes(Number(entry?.coverageScore)) ? Number(entry?.coverageScore) : 0,
+    coverageScore: [0, 0.5, 1, 1.5, 2].includes(Number(entry?.coverageScore)) ? Number(entry?.coverageScore) : 0,
     coverageNote: typeof entry?.coverageNote === "string" ? entry.coverageNote : "",
   };
 }

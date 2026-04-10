@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DeskPopupNoticeManager } from "@/components/schedule/desk-popup-notice-manager";
 import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
 
 const items = [
@@ -24,18 +25,24 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article
-        className="panel"
+        className="panel desk-shell-sticky"
         style={{
-          position: "sticky",
-          top: 10,
-          zIndex: 30,
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
         }}
       >
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">DESK</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "nowrap",
+              overflowX: "auto",
+              alignItems: "center",
+              paddingBottom: 2,
+            }}
+          >
             {items.map((item) => {
               const active =
                 pathname === item.href ||
@@ -51,8 +58,9 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
+            {showManagementLinks ? <ScheduleManagementLinks inline /> : null}
+            <DeskPopupNoticeManager inline showMeta={false} />
           </div>
-          {showManagementLinks ? <ScheduleManagementLinks /> : null}
         </div>
       </article>
       {children}

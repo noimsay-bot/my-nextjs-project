@@ -2,7 +2,7 @@
 
 import Head from "next/head";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import {
@@ -54,6 +54,7 @@ function readStoredTheme(): PortalTheme {
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const headerRef = useRef<HTMLElement | null>(null);
   const isLogin = pathname === "/login";
   const [session, setSession] = useState(() => getSession());
   const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
@@ -121,6 +122,37 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     if (!session?.actualRole) return;
     setExperienceDraftRole(session.experienceRole ?? session.actualRole);
   }, [session?.actualRole, session?.experienceRole]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const updateHeaderOffset = () => {
+      const height = headerRef.current?.getBoundingClientRect().height ?? 0;
+      root.style.setProperty("--portal-header-offset", `${Math.ceil(height) + 10}px`);
+    };
+
+    updateHeaderOffset();
+
+    if (typeof ResizeObserver === "undefined" || !headerRef.current) {
+      window.addEventListener("resize", updateHeaderOffset);
+      return () => {
+        window.removeEventListener("resize", updateHeaderOffset);
+        root.style.removeProperty("--portal-header-offset");
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateHeaderOffset();
+    });
+    observer.observe(headerRef.current);
+    window.addEventListener("resize", updateHeaderOffset);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateHeaderOffset);
+      root.style.removeProperty("--portal-header-offset");
+    };
+  }, []);
 
   const visibleLinks = useMemo(() => {
     switch (session?.role) {
@@ -206,7 +238,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       <Head>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css" />
       </Head>
-      <section className="panel portal-header-shell">
+      <section ref={headerRef} className="panel portal-header-shell">
         <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
           <div style={{ display: "flex", justifyContent: "stretch" }}>
             <Link href="/" className="brand-logo" aria-label="홈으로 이동">

@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  --portal-header-offset: 12px;
   --bg: #2e4774;
   --bg-top-glow: rgba(143, 214, 224, 0.14);
   --bg-start: #35517d;
@@ -469,6 +470,18 @@ button {
   font-size: clamp(24px, 3.6vw, 38px);
   font-weight: 900;
   letter-spacing: 0.06em;
+}
+
+.portal-header-shell {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.desk-shell-sticky {
+  position: sticky;
+  top: var(--portal-header-offset, 12px);
+  z-index: 30;
 }
 
 html[data-theme="light"] .portal-header-shell {
@@ -1715,6 +1728,12 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 }
 
 @media (max-width: 960px) {
+  .portal-header-shell,
+  .desk-shell-sticky {
+    position: static;
+    top: auto;
+  }
+
   .subgrid-4,
   .subgrid-3,
   .subgrid-2,
@@ -2317,11 +2336,11 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   grid-row: 1;
   justify-self: end;
   position: sticky;
-  top: calc(50vh + 34px);
-  transform: translateY(-50%);
+  top: 168px;
+  transform: none;
   margin-left: 0;
   width: 24px;
-  max-height: calc(100vh - 156px);
+  max-height: calc(100vh - 198px);
   display: grid;
   gap: 6px;
   align-content: start;

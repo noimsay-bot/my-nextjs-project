@@ -36,29 +36,39 @@ export function TripBoardPage({
   emptyMessage: string;
   showAllUsers?: boolean;
 }) {
-  const [cards, setCards] = useState<TeamLeadTripPersonCard[]>([]);
-  const [expandedNames, setExpandedNames] = useState<string[]>([]);
+  const [cards, setCards] = useState<Array<TeamLeadTripPersonCard & { cardKey: string }>>([]);
+  const [expandedCardKeys, setExpandedCardKeys] = useState<string[]>([]);
 
   useEffect(() => {
     const syncCards = () => {
       const tripCards = getTeamLeadTripCards(travelTypes);
       if (!showAllUsers) {
-        setCards(tripCards);
+        setCards(tripCards.map((card) => ({ ...card, cardKey: card.name })));
         return;
       }
 
       const users = getUsers();
       if (users.length === 0) {
-        setCards(tripCards);
+        setCards(tripCards.map((card) => ({ ...card, cardKey: card.name })));
         return;
       }
 
       const cardMap = new Map(tripCards.map((card) => [card.name, card] as const));
-      const merged = users
-        .map((user) => user.username)
-        .filter(Boolean)
+      const merged = Array.from(
+        new Set(
+          users
+            .map((user) => user.username.trim())
+            .filter(Boolean),
+        ),
+      )
         .sort((left, right) => left.localeCompare(right, "ko"))
-        .map((name) => cardMap.get(name) ?? { name, items: [] });
+        .map((name) => {
+          const card = cardMap.get(name) ?? { name, items: [] };
+          return {
+            ...card,
+            cardKey: name,
+          };
+        });
 
       setCards(merged);
     };
@@ -82,12 +92,12 @@ export function TripBoardPage({
   }, [showAllUsers, travelTypes]);
 
   useEffect(() => {
-    setExpandedNames((current) => current.filter((name) => cards.some((card) => card.name === name)));
+    setExpandedCardKeys((current) => current.filter((cardKey) => cards.some((card) => card.cardKey === cardKey)));
   }, [cards]);
 
-  const toggleCard = (name: string) => {
-    setExpandedNames((current) =>
-      current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+  const toggleCard = (cardKey: string) => {
+    setExpandedCardKeys((current) =>
+      current.includes(cardKey) ? current.filter((item) => item !== cardKey) : [...current, cardKey],
     );
   };
 
@@ -112,13 +122,13 @@ export function TripBoardPage({
           }}
         >
           {cards.map((card) => (
-            <article key={card.name} className="panel">
+            <article key={card.cardKey} className="panel">
               <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => toggleCard(card.name)}
-                  aria-expanded={expandedNames.includes(card.name)}
+                  onClick={() => toggleCard(card.cardKey)}
+                  aria-expanded={expandedCardKeys.includes(card.cardKey)}
                   style={{
                     display: "grid",
                     gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -148,7 +158,7 @@ export function TripBoardPage({
                       border: "1px solid rgba(148,163,184,.22)",
                       background: "rgba(255,255,255,.05)",
                       fontSize: 16,
-                      transform: expandedNames.includes(card.name) ? "rotate(180deg)" : "rotate(0deg)",
+                      transform: expandedCardKeys.includes(card.cardKey) ? "rotate(180deg)" : "rotate(0deg)",
                       transition: "transform 160ms ease",
                     }}
                   >
@@ -156,7 +166,7 @@ export function TripBoardPage({
                   </span>
                 </button>
 
-                {expandedNames.includes(card.name) ? card.items.length > 0 ? (
+                {expandedCardKeys.includes(card.cardKey) ? card.items.length > 0 ? (
                   <div style={{ display: "grid", gap: 10 }}>
                     {card.items.map((item) => (
                       <div

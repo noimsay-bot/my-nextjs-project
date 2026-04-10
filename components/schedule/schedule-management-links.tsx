@@ -11,11 +11,18 @@ const items = [
   { href: "/schedule/press-support", label: "출입처 지원" },
 ];
 
-export function ScheduleManagementLinks() {
+export function ScheduleManagementLinks({ inline = false }: { inline?: boolean }) {
   const pathname = usePathname();
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+    <div
+      style={{
+        display: "flex",
+        flexWrap: inline ? "nowrap" : "wrap",
+        gap: 10,
+        alignItems: "center",
+      }}
+    >
       {items.map((item) => {
         const active = pathname === item.href;
         return (
