@@ -16,10 +16,17 @@ import { generateTimedLivePreview } from "@/lib/home-news/timed-live-preview-act
 const HOST_SELECTOR = '[data-home-news-slot="true"]';
 const DEFERRED_NEWS_TASK_DELAY_MS = 120;
 
-function ensurePortalHost() {
+function findPortalTargets() {
   const panel = document.querySelector<HTMLElement>(".schedule-published-panel > .panel-pad");
   const hero = panel?.querySelector<HTMLElement>(".schedule-published-hero");
   if (!panel || !hero) return null;
+  return { panel, hero };
+}
+
+function ensurePortalHost(targets: ReturnType<typeof findPortalTargets>) {
+  if (!targets) return null;
+
+  const { panel, hero } = targets;
 
   const duplicatedHosts = panel.querySelectorAll<HTMLElement>(HOST_SELECTOR);
   if (duplicatedHosts.length > 1) {
@@ -327,11 +334,34 @@ export function HomeNewsPortal() {
 
     let frameId = 0;
     let observer: MutationObserver | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let observedRoot: HTMLElement | null = null;
 
     const syncHost = () => {
-      const nextHost = ensurePortalHost();
+      const targets = findPortalTargets();
+      const nextHost = ensurePortalHost(targets);
       hostRef.current = nextHost;
       setHost((current) => (current === nextHost ? current : nextHost));
+
+      const nextObservedRoot = targets?.panel ?? document.body;
+      if (observer && observedRoot === nextObservedRoot) {
+        return;
+      }
+
+      observer?.disconnect();
+      resizeObserver?.disconnect();
+
+      observer = new MutationObserver(scheduleSync);
+      observer.observe(nextObservedRoot, { childList: true, subtree: true });
+      observedRoot = nextObservedRoot;
+
+      if (typeof ResizeObserver !== "undefined" && targets) {
+        resizeObserver = new ResizeObserver(scheduleSync);
+        resizeObserver.observe(targets.panel);
+        resizeObserver.observe(targets.hero);
+      } else {
+        resizeObserver = null;
+      }
     };
 
     const scheduleSync = () => {
@@ -340,18 +370,15 @@ export function HomeNewsPortal() {
     };
 
     syncHost();
-    observer = new MutationObserver(scheduleSync);
-    observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", scheduleSync);
     window.addEventListener("orientationchange", scheduleSync);
-    window.visualViewport?.addEventListener("resize", scheduleSync);
 
     return () => {
       cancelAnimationFrame(frameId);
       observer?.disconnect();
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleSync);
       window.removeEventListener("orientationchange", scheduleSync);
-      window.visualViewport?.removeEventListener("resize", scheduleSync);
       const currentHost = hostRef.current;
       if (currentHost?.dataset.homeNewsOwner === "HomeNewsPortal") {
         currentHost.remove();

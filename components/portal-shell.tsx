@@ -45,8 +45,7 @@ function readStoredTheme(): PortalTheme {
   return PORTAL_THEMES.includes(storedTheme as PortalTheme) ? (storedTheme as PortalTheme) : "dark";
 }
 
-export function PortalShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+function PortalHeader({ pathname }: { pathname: string }) {
   const router = useRouter();
   const headerRef = useRef<HTMLElement | null>(null);
   const initialSession = getSession();
@@ -58,6 +57,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
   const [reviewLocked, setReviewLocked] = useState(() => hasSubmittedReviewLock(initialSession?.id));
+  const shouldTrackReviewLock = Boolean(session?.canReview);
 
   useEffect(() => {
     let mounted = true;
@@ -96,6 +96,11 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       setReviewLocked(hasSubmittedReviewLock(getSession()?.id));
     };
 
+    if (!shouldTrackReviewLock) {
+      setReviewLocked(false);
+      return;
+    }
+
     syncReviewLocked();
     window.addEventListener("focus", syncReviewLocked);
     window.addEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
@@ -103,7 +108,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", syncReviewLocked);
       window.removeEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
     };
-  }, []);
+  }, [shouldTrackReviewLock, session?.id]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -230,110 +235,116 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="shell">
-      <section ref={headerRef} className="panel portal-header-shell">
-        <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
-          <div style={{ display: "flex", justifyContent: "stretch" }}>
-            <Link href="/" className="brand-logo" aria-label="홈으로 이동">
-              <span
-                className="brand-logo-text"
-                style={{
-                  fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-                  fontWeight: 600,
-                  letterSpacing: "0.1em",
-                }}
+    <section ref={headerRef} className="panel portal-header-shell">
+      <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
+        <div style={{ display: "flex", justifyContent: "stretch" }}>
+          <Link href="/" className="brand-logo" aria-label="홈으로 이동">
+            <span
+              className="brand-logo-text"
+              style={{
+                fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+                fontWeight: 600,
+                letterSpacing: "0.1em",
+              }}
+            >
+              JTBC NEWS CAMERA HUB
+            </span>
+          </Link>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
+            {visibleLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={
+                  pathname === link.href ||
+                  (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
+                  (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
+                  (link.href === "/admin" && pathname.startsWith("/admin"))
+                    ? "active"
+                    : ""
+                }
               >
-                JTBC NEWS CAMERA HUB
-              </span>
-            </Link>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
-              {visibleLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={
-                    pathname === link.href ||
-                    (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
-                    (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
-                    (link.href === "/admin" && pathname.startsWith("/admin"))
-                      ? "active"
-                      : ""
-                  }
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </nav>
-            <div className="portal-header-utility" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
-                <button
-                  type="button"
-                  className={`theme-toggle__button ${theme === "light" ? "theme-toggle__button--active" : ""}`}
-                  onClick={() => setTheme("light")}
-                >
-                  라이트
-                </button>
-                <button
-                  type="button"
-                  className={`theme-toggle__button ${theme === "dark" ? "theme-toggle__button--active" : ""}`}
-                  onClick={() => setTheme("dark")}
-                >
-                  다크
-                </button>
-                <button
-                  type="button"
-                  className={`theme-toggle__button ${theme === "pink" ? "theme-toggle__button--active" : ""}`}
-                  onClick={() => setTheme("pink")}
-                >
-                  핑크
-                </button>
-                <button
-                  type="button"
-                  className={`theme-toggle__button ${theme === "green" ? "theme-toggle__button--active" : ""}`}
-                  onClick={() => setTheme("green")}
-                >
-                  그린
-                </button>
-              </div>
-              {adminSession ? (
-                <>
-                  <button type="button" className="btn" onClick={cycleExperienceRole}>
-                    권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
-                  </button>
-                  <button type="button" className="btn primary" onClick={confirmRoleExperience}>
-                    확인
-                  </button>
-                </>
-              ) : null}
-              {!adminSession && canOpenAdminArea ? (
-                <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
-              ) : null}
-              <span className="muted">
-                {sessionLabel}
-              </span>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="portal-header-utility" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
               <button
-                className="btn portal-header-logout"
-                onClick={async () => {
-                  await logoutUser();
-                  window.location.href = "/login";
-                }}
+                type="button"
+                className={`theme-toggle__button ${theme === "light" ? "theme-toggle__button--active" : ""}`}
+                onClick={() => setTheme("light")}
               >
-                로그아웃
+                라이트
+              </button>
+              <button
+                type="button"
+                className={`theme-toggle__button ${theme === "dark" ? "theme-toggle__button--active" : ""}`}
+                onClick={() => setTheme("dark")}
+              >
+                다크
+              </button>
+              <button
+                type="button"
+                className={`theme-toggle__button ${theme === "pink" ? "theme-toggle__button--active" : ""}`}
+                onClick={() => setTheme("pink")}
+              >
+                핑크
+              </button>
+              <button
+                type="button"
+                className={`theme-toggle__button ${theme === "green" ? "theme-toggle__button--active" : ""}`}
+                onClick={() => setTheme("green")}
+              >
+                그린
               </button>
             </div>
+            {adminSession ? (
+              <>
+                <button type="button" className="btn" onClick={cycleExperienceRole}>
+                  권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
+                </button>
+                <button type="button" className="btn primary" onClick={confirmRoleExperience}>
+                  확인
+                </button>
+              </>
+            ) : null}
+            {!adminSession && canOpenAdminArea ? (
+              <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
+            ) : null}
+            <span className="muted">{sessionLabel}</span>
+            <button
+              className="btn portal-header-logout"
+              onClick={async () => {
+                await logoutUser();
+                window.location.href = "/login";
+              }}
+            >
+              로그아웃
+            </button>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
+  );
+}
+
+export function PortalShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  return (
+    <div className="shell">
+      <PortalHeader pathname={pathname} />
       <main style={{ marginTop: 20 }}>
         <AppRouteBoundary resetKey={pathname}>
           {children}

@@ -1,10 +1,13 @@
 "use client";
 
 import { getUsers } from "@/lib/auth/storage";
-import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import {
+  buildScheduleAssignmentNameTagKey,
+  getScheduleCategoryLabel,
+} from "@/lib/schedule/constants";
 import { getPublishedSchedules } from "@/lib/schedule/published";
 import { readStoredScheduleState } from "@/lib/schedule/storage";
-import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
+import { DaySchedule, GeneratedSchedule, ScheduleAssignmentNameTag } from "@/lib/schedule/types";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -830,6 +833,92 @@ function getGeneratedHistorySchedules() {
   return readStoredScheduleState().generatedHistory;
 }
 
+function parseScheduleAssignmentRowKey(rowKey: string) {
+  const [dateKey, category, indexText, ...nameParts] = rowKey.split("::");
+  if (!dateKey || !category || category === "custom" || nameParts.length === 0) {
+    return null;
+  }
+
+  return {
+    dateKey,
+    category,
+    index: Number(indexText),
+    name: nameParts.join("::").trim(),
+  };
+}
+
+function getScheduleAssignmentNameTagForDuty(duty: string): ScheduleAssignmentNameTag | null {
+  switch (normalizeDutyLabel(duty)) {
+    case "국회지원":
+      return "gov";
+    case "법조지원":
+      return "law";
+    default:
+      return null;
+  }
+}
+
+export function applyScheduleAssignmentNameTagsToSchedule(
+  schedule: GeneratedSchedule,
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+) {
+  const monthRows = store.rows[schedule.monthKey] ?? {};
+  let changed = false;
+
+  const days = schedule.days.map((day) => {
+    const dayRows = monthRows[day.dateKey];
+    if (!dayRows) return day;
+
+    const rows = getScheduleAssignmentRows(day, dayRows);
+    if (rows.length === 0) return day;
+
+    const nextTags = { ...(day.assignmentNameTags ?? {}) };
+    let dayChanged = false;
+
+    rows.forEach((row) => {
+      if (row.isCustom) return;
+      const parsed = parseScheduleAssignmentRowKey(row.key);
+      if (!parsed?.name) return;
+
+      const tagKey = buildScheduleAssignmentNameTagKey(parsed.category, parsed.name);
+      const nextTag = getScheduleAssignmentNameTagForDuty(row.duty);
+
+      if (nextTag) {
+        if (nextTags[tagKey] !== nextTag) {
+          nextTags[tagKey] = nextTag;
+          dayChanged = true;
+        }
+        return;
+      }
+
+      if (tagKey in nextTags) {
+        delete nextTags[tagKey];
+        dayChanged = true;
+      }
+    });
+
+    if (!dayChanged) return day;
+    changed = true;
+    return {
+      ...day,
+      assignmentNameTags: nextTags,
+    };
+  });
+
+  if (!changed) return schedule;
+  return {
+    ...schedule,
+    days,
+  };
+}
+
+export function applyScheduleAssignmentNameTagsToSchedules(
+  schedules: GeneratedSchedule[],
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+) {
+  return schedules.map((schedule) => applyScheduleAssignmentNameTagsToSchedule(schedule, store));
+}
+
 export function getTeamLeadSchedules() {
   const published = getPublishedSchedules().map((item) => item.schedule);
   const generated = getGeneratedHistorySchedules();
@@ -844,7 +933,9 @@ export function getTeamLeadSchedules() {
     }
   });
 
-  return Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  return applyScheduleAssignmentNameTagsToSchedules(
+    Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
+  );
 }
 
 export function getScheduleAssignmentRows(

@@ -104,11 +104,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    return subscribeToPortalAccessState((accessState) => {
-      setVacationRequestOpen(accessState.vacationRequestOpen);
-      setSubmissionAccessOpen(accessState.submissionAccessOpen);
+    if (!needsVacationAccessCheck && !needsSubmissionAccessCheck) {
+      return;
+    }
+
+    const accessState = getPortalAccessState();
+    setVacationRequestOpen(accessState.vacationRequestOpen);
+    setSubmissionAccessOpen(accessState.submissionAccessOpen);
+
+    return subscribeToPortalAccessState((nextAccessState) => {
+      setVacationRequestOpen(nextAccessState.vacationRequestOpen);
+      setSubmissionAccessOpen(nextAccessState.submissionAccessOpen);
     });
-  }, []);
+  }, [needsSubmissionAccessCheck, needsVacationAccessCheck]);
 
   useEffect(() => {
     let cancelled = false;

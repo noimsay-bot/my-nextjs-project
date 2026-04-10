@@ -74,7 +74,6 @@ function getWeekdayLabel(dow: number) {
 }
 
 function getAssignmentChipTag(category: string, name: string, day: DaySchedule) {
-  if (!isGeneralAssignmentCategory(category)) return null;
   const key = buildScheduleAssignmentNameTagKey(category, name);
   return day.assignmentNameTags?.[key] ?? null;
 }

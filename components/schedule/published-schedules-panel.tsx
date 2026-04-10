@@ -38,6 +38,7 @@ import {
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
+import { applyScheduleAssignmentNameTagsToSchedule } from "@/lib/team-lead/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
@@ -52,7 +53,6 @@ function getWeekdayLabel(dow: number) {
 }
 
 function getAssignmentChipTag(category: string, name: string, day: DaySchedule) {
-  if (!isGeneralAssignmentCategory(category)) return null;
   const key = buildScheduleAssignmentNameTagKey(category, name);
   return day.assignmentNameTags?.[key] ?? null;
 }
@@ -570,7 +570,10 @@ export function PublishedSchedulesPanel() {
 
   const loadItems = async () => {
     await refreshPublishedSchedules();
-    const nextItems = getPublishedSchedules();
+    const nextItems = getPublishedSchedules().map((item) => ({
+      ...item,
+      schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+    }));
     setItems(nextItems);
   };
 
@@ -582,7 +585,7 @@ export function PublishedSchedulesPanel() {
   const syncScheduleHistory = () => {
     const nextHistory = readStoredScheduleState().generatedHistory.map((schedule) => ({
       monthKey: schedule.monthKey,
-      schedule,
+      schedule: applyScheduleAssignmentNameTagsToSchedule(schedule),
     }));
     setScheduleHistory(nextHistory);
   };
