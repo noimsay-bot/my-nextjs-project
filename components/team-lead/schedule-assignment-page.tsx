@@ -217,6 +217,12 @@ function getPreviousDateKey(dateKey: string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"] as const;
+
+function getWeekdayLabel(dow: number) {
+  return weekdayLabels[dow] ?? "";
+}
+
 function formatManualTime(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -833,7 +839,7 @@ export function ScheduleAssignmentPage() {
                   <div className="chip">{day.dateKey}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <strong style={{ fontSize: 22, color: day.dateKey === todayDateKey ? "#8fe7ff" : undefined }}>
-                      {day.month}월 {day.day}일 일정배정
+                      {day.month}월 {day.day}일 {getWeekdayLabel(day.dow)}요일 일정배정
                     </strong>
                     {!isEditingPeople ? (
                       <button

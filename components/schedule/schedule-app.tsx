@@ -45,9 +45,9 @@ import { getPublishedSchedules, publishSchedule, PublishedScheduleItem, refreshP
 import { PUBLISHED_SCHEDULES_STATUS_EVENT } from "@/lib/schedule/published";
 import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
-import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
+import { deskEditableVacationTypes, vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
-import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem } from "@/lib/schedule/types";
+import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
@@ -88,6 +88,31 @@ const dutyLegendStyles = {
     color: "#ffffff",
   },
 } as const;
+
+function VacationLegendChips() {
+  return (
+    <>
+      {vacationLegendOrder.map((type) => (
+        <span
+          key={type}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "5px 12px",
+            borderRadius: 999,
+            fontSize: 14,
+            fontWeight: 800,
+            lineHeight: 1.2,
+            ...vacationLegendStyles[type],
+          }}
+        >
+          {vacationTypeLabels[type]}
+        </span>
+      ))}
+    </>
+  );
+}
 
 function getAssignmentDisplay(category: string, value: string) {
   if (category !== "휴가") {
@@ -283,7 +308,7 @@ export function ScheduleApp() {
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [addPersonDialog, setAddPersonDialog] = useState<AddPersonDialogState | null>(null);
   const [addPersonName, setAddPersonName] = useState("");
-  const [addPersonVacationType, setAddPersonVacationType] = useState<"연차" | "대휴" | "경조">("연차");
+  const [addPersonVacationType, setAddPersonVacationType] = useState<VacationType>("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
   const [isOrderEditMode, setIsOrderEditMode] = useState(false);
@@ -1228,81 +1253,7 @@ export function ScheduleApp() {
             <div className="chip">DESK</div>
             {visibleSchedule ? (
               <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.연차,
-                  }}
-                >
-                  연차
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.대휴,
-                  }}
-                >
-                  대휴
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.근속휴가,
-                  }}
-                >
-                  근속
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.건강검진,
-                  }}
-                >
-                  검진
-                </span>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    ...vacationLegendStyles.경조,
-                  }}
-                >
-                  경조
-                </span>
+                <VacationLegendChips />
               <button
                 className="btn"
                 disabled={isEditingDate || !hasPreviousVisibleMonth}
@@ -1352,81 +1303,7 @@ export function ScheduleApp() {
                 <div style={{ display: "grid", gap: 8 }}>
                   <strong style={{ fontSize: 22 }}>{visibleSchedule.year}년 {visibleSchedule.month}월 DESK 근무표</strong>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.연차,
-                      }}
-                    >
-                      연차
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.대휴,
-                      }}
-                    >
-                      대휴
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.근속휴가,
-                      }}
-                    >
-                      근속
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.건강검진,
-                      }}
-                    >
-                      검진
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.경조,
-                      }}
-                    >
-                      경조
-                    </span>
+                    <VacationLegendChips />
                   </div>
                 </div>
               </div>
@@ -2562,8 +2439,8 @@ export function ScheduleApp() {
               {addPersonDialog.category === "휴가" ? (
                 <div style={{ display: "grid", gap: 8 }}>
                   <span className="muted">휴가 유형</span>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-                    {(["연차", "대휴", "경조"] as const).map((type) => {
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+                    {deskEditableVacationTypes.map((type) => {
                       const selected = addPersonVacationType === type;
                       return (
                         <button
@@ -2587,7 +2464,7 @@ export function ScheduleApp() {
                             filter: selected ? "saturate(1.15) brightness(1.08)" : "saturate(.92)",
                           }}
                         >
-                          {type}
+                          {vacationTypeLabels[type]}
                         </button>
                       );
                     })}

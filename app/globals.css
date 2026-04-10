@@ -2072,6 +2072,42 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   justify-items: start;
 }
 
+.schedule-published-panel--mobile-layout .schedule-published-hero__months,
+.schedule-published-panel--mobile-layout .schedule-published-hero__right .schedule-calendar-top-actions {
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  row-gap: 10px;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-hero__user {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-hero__user > .muted {
+  flex: 1 0 100%;
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+.schedule-published-hero__user-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-hero__months > .btn,
+.schedule-published-panel--mobile-layout .schedule-published-hero__user > .btn,
+.schedule-published-panel--mobile-layout .schedule-published-hero__right .schedule-calendar-top-actions > .btn {
+  flex: 0 0 auto;
+}
+
 .schedule-published-panel--mobile-layout .schedule-calendar-scroll--daily {
   overflow-x: auto !important;
   overflow-y: auto !important;

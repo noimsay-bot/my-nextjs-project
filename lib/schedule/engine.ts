@@ -300,7 +300,7 @@ export function splitNames(value: string) {
 
 export function parseVacationEntry(value: string): { type: VacationType; name: string } {
   const trimmed = value.trim();
-  const matched = /^(연차|대휴|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
+  const matched = /^(연차|대휴|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
   if (matched) {
     return {
       type: matched[1] as VacationType,
@@ -317,7 +317,7 @@ export function formatVacationEntry(type: VacationType, name: string) {
   return `${type}:${name.trim()}`;
 }
 
-const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "근속휴가", "건강검진", "경조"];
+const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "공가", "근속휴가", "건강검진", "경조"];
 
 function getNextVacationType(type: VacationType): VacationType {
   const currentIndex = VACATION_TYPE_SEQUENCE.indexOf(type);

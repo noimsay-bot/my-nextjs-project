@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
-  hasDeskAccess,
   subscribeToAuth,
 } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
@@ -27,10 +26,9 @@ import {
   PUBLISHED_SCHEDULES_STATUS_EVENT,
   PublishedScheduleItem,
   refreshPublishedSchedules,
-  removePublishedSchedule,
 } from "@/lib/schedule/published";
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
-import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
+import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -64,6 +62,31 @@ const dutyLegendStyles = {
     color: "#ffffff",
   },
 } as const;
+
+function VacationLegendChips() {
+  return (
+    <>
+      {vacationLegendOrder.map((type) => (
+        <span
+          key={type}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "5px 12px",
+            borderRadius: 999,
+            fontSize: 14,
+            fontWeight: 800,
+            lineHeight: 1.2,
+            ...vacationLegendStyles[type],
+          }}
+        >
+          {vacationTypeLabels[type]}
+        </span>
+      ))}
+    </>
+  );
+}
 
 type DisplayDay = DaySchedule & {
   ownerMonthKey: string;
@@ -146,6 +169,42 @@ function dayContainsUser(day: DaySchedule, username: string) {
 function getCurrentMonthKey() {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getHiddenPublishedScheduleStorageKey(sessionId?: string | null, username?: string | null) {
+  const actorKey = sessionId?.trim() || username?.trim() || "anonymous";
+  return `j-special-force-hidden-published-schedules:${actorKey}`;
+}
+
+function readHiddenPublishedMonthKeys(sessionId?: string | null, username?: string | null) {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(getHiddenPublishedScheduleStorageKey(sessionId, username));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(
+      new Set(
+        parsed
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter((item) => /^\d{4}-\d{2}$/.test(item)),
+      ),
+    ).sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+function writeHiddenPublishedMonthKeys(monthKeys: string[], sessionId?: string | null, username?: string | null) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    getHiddenPublishedScheduleStorageKey(sessionId, username),
+    JSON.stringify(
+      Array.from(new Set(monthKeys.filter((item) => /^\d{4}-\d{2}$/.test(item)))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    ),
+  );
 }
 
 function getCoveredDateRange(
@@ -456,6 +515,9 @@ export function PublishedSchedulesPanel() {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [hideMode, setHideMode] = useState(false);
+  const [hiddenPublishedMonthKeys, setHiddenPublishedMonthKeys] = useState<string[]>([]);
+  const [draftHiddenPublishedMonthKeys, setDraftHiddenPublishedMonthKeys] = useState<string[]>([]);
   const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
@@ -471,7 +533,7 @@ export function PublishedSchedulesPanel() {
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
-  const canDelete = hasDeskAccess(session?.role);
+  const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
 
   useEffect(() => {
@@ -480,14 +542,16 @@ export function PublishedSchedulesPanel() {
     });
   }, []);
 
+  useEffect(() => {
+    const nextHidden = readHiddenPublishedMonthKeys(session?.id, session?.username);
+    setHiddenPublishedMonthKeys(nextHidden);
+    setDraftHiddenPublishedMonthKeys(nextHidden);
+  }, [session?.id, session?.username]);
+
   const loadItems = async () => {
     await refreshPublishedSchedules();
     const nextItems = getPublishedSchedules();
     setItems(nextItems);
-    setSelectedMonthKey((current) => {
-      if (current && nextItems.some((item) => item.monthKey === current)) return current;
-      return getPreferredPublishedMonthKey(nextItems);
-    });
   };
 
   const loadRequests = async () => {
@@ -554,6 +618,11 @@ export function PublishedSchedulesPanel() {
   }, [editMode]);
 
   useEffect(() => {
+    if (!hideMode) return;
+    setDraftHiddenPublishedMonthKeys(hiddenPublishedMonthKeys);
+  }, [hiddenPublishedMonthKeys, hideMode]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const coarsePointerMediaQuery = window.matchMedia("(any-pointer: coarse)");
     const syncViewport = () => {
@@ -586,17 +655,31 @@ export function PublishedSchedulesPanel() {
     }
   }, [scheduleLayoutMode]);
 
+  const activeHiddenMonthKeys = hideMode ? draftHiddenPublishedMonthKeys : hiddenPublishedMonthKeys;
+  const activeItems = useMemo(() => {
+    if (hideMode) return items;
+    const hiddenMonthKeySet = new Set(hiddenPublishedMonthKeys);
+    return items.filter((item) => !hiddenMonthKeySet.has(item.monthKey));
+  }, [hiddenPublishedMonthKeys, hideMode, items]);
+
+  useEffect(() => {
+    setSelectedMonthKey((current) => {
+      if (current && activeItems.some((item) => item.monthKey === current)) return current;
+      return getPreferredPublishedMonthKey(activeItems);
+    });
+  }, [activeItems]);
+
   const selectedItem = useMemo(() => {
-    if (items.length === 0) return null;
-    return items.find((item) => item.monthKey === selectedMonthKey) ?? items[items.length - 1];
-  }, [items, selectedMonthKey]);
+    if (activeItems.length === 0) return null;
+    return activeItems.find((item) => item.monthKey === selectedMonthKey) ?? activeItems[activeItems.length - 1];
+  }, [activeItems, selectedMonthKey]);
 
   const previousSelectedItem = useMemo(() => {
     if (!selectedItem) return null;
-    const index = items.findIndex((item) => item.monthKey === selectedItem.monthKey);
+    const index = activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey);
     if (index <= 0) return null;
-    return items[index - 1] ?? null;
-  }, [items, selectedItem]);
+    return activeItems[index - 1] ?? null;
+  }, [activeItems, selectedItem]);
 
   const previousDisplaySource = useMemo(() => {
     if (!selectedItem) return null;
@@ -606,23 +689,23 @@ export function PublishedSchedulesPanel() {
     return scheduleHistory[selectedHistoryIndex - 1] ?? null;
   }, [previousSelectedItem, scheduleHistory, selectedItem]);
 
-  const selectedIndex = selectedItem ? items.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
+  const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
-  const publishedDayIndex = useMemo(() => buildDayIndex(items), [items]);
+  const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
     () => (selectedItem ? buildDisplayDays(selectedItem, previousDisplaySource) : []),
     [previousDisplaySource, selectedItem],
   );
   const firstSelectedRef = selectedRoute[0] ?? null;
   const hasConflictWarning = useMemo(
-    () => routeWouldCreateConflict(items, selectedRoute),
-    [items, selectedRoute],
+    () => routeWouldCreateConflict(activeItems, selectedRoute),
+    [activeItems, selectedRoute],
   );
 
   const recommendedCandidates = useMemo(() => {
     if (!editMode || !firstSelectedRef) return [];
-    return items
+    return activeItems
       .flatMap((day) =>
         day.schedule.days.flatMap((scheduleDay) =>
           Object.entries(scheduleDay.assignments).flatMap(([category, names]) =>
@@ -638,32 +721,61 @@ export function PublishedSchedulesPanel() {
       )
       .filter((ref) => ref.dateKey > todayKey)
       .filter((ref) =>
-        items.some((item) => item.monthKey === ref.monthKey && item.schedule.days.some((day) => day.dateKey === ref.dateKey)),
+        activeItems.some((item) => item.monthKey === ref.monthKey && item.schedule.days.some((day) => day.dateKey === ref.dateKey)),
       )
       .filter((ref) => !sameRef(firstSelectedRef, ref))
       .filter((ref) => !isPendingRef(allPendingRequests, ref))
       .filter((ref) => isSwapCandidateValid(firstSelectedRef, ref, publishedDayIndex, todayKey))
       .sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.name.localeCompare(right.name));
-  }, [allPendingRequests, editMode, firstSelectedRef, items, publishedDayIndex, todayKey]);
+  }, [activeItems, allPendingRequests, editMode, firstSelectedRef, publishedDayIndex, todayKey]);
   const recommendedCandidateKeys = useMemo(
     () => new Set(recommendedCandidates.map((candidate) => getRefKey(candidate))),
     [recommendedCandidates],
   );
 
   const routeScopeLabel = useMemo(() => {
-    if (items.length === 0) return "게시된 근무표";
-    const first = items[0];
-    const last = items[items.length - 1];
+    if (activeItems.length === 0) return "게시된 근무표";
+    const first = activeItems[0];
+    const last = activeItems[activeItems.length - 1];
     if (first.monthKey === last.monthKey) {
       return `${first.schedule.year}년 ${first.schedule.month}월 게시 근무표`;
     }
     return `${first.schedule.year}년 ${first.schedule.month}월 ~ ${last.schedule.year}년 ${last.schedule.month}월 게시 근무표`;
-  }, [items]);
+  }, [activeItems]);
 
   const toggleEditMode = () => {
     setEditMode((current) => !current);
+    setHideMode(false);
     setConfirmConflictRequest(false);
     setRequestMessage("");
+    setRequestMessageTone("ok");
+  };
+
+  const toggleHideTarget = (monthKey: string) => {
+    setDraftHiddenPublishedMonthKeys((current) =>
+      current.includes(monthKey)
+        ? current.filter((item) => item !== monthKey)
+        : [...current, monthKey].sort((left, right) => left.localeCompare(right)),
+    );
+    setSelectedMonthKey(monthKey);
+  };
+
+  const toggleHideMode = async () => {
+    if (!canHidePublishedSchedules) return;
+
+    if (!hideMode) {
+      setEditMode(false);
+      setHideMode(true);
+      setDraftHiddenPublishedMonthKeys(hiddenPublishedMonthKeys);
+      setRequestMessage("숨길 근무표 월 버튼을 선택한 뒤 숨김 완료를 누르세요.");
+      setRequestMessageTone("note");
+      return;
+    }
+
+    writeHiddenPublishedMonthKeys(draftHiddenPublishedMonthKeys, session?.id, session?.username);
+    setHiddenPublishedMonthKeys(draftHiddenPublishedMonthKeys);
+    setHideMode(false);
+    setRequestMessage("내 홈 근무표 숨김 상태를 저장했습니다.");
     setRequestMessageTone("ok");
   };
 
@@ -862,7 +974,7 @@ export function PublishedSchedulesPanel() {
 
     const lastSelectedRef = selectedRoute[selectedRoute.length - 1];
     if (lastSelectedRef && !hasCompatibleVacationType(lastSelectedRef, person.ref)) {
-      setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차와 대휴는 서로 바꿀 수 없습니다.");
+      setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차, 대휴, 공가, 경조는 서로 다른 유형끼리 바꿀 수 없습니다.");
       setRequestMessageTone("warn");
       return;
     }
@@ -921,6 +1033,33 @@ export function PublishedSchedulesPanel() {
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="chip">게시된 근무표</div>
           <div className="status note">게시된 근무표가 없습니다.</div>
+        </div>
+      </section>
+    );
+  }
+
+  if (activeItems.length === 0 && !hideMode) {
+    return (
+      <section className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}>
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div className="schedule-published-hero">
+            <div className="schedule-published-hero__left">
+              <div className="chip">게시된 근무표</div>
+              <div className="muted schedule-published-hero__published">숨김 처리된 게시 근무표만 있습니다.</div>
+            </div>
+            <div className="schedule-published-hero__right">
+              <div className="schedule-toolbar-actions schedule-published-hero__user">
+                <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
+                {canHidePublishedSchedules ? (
+                  <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
+                    {hideMode ? "숨김 완료" : "근무표 숨김"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
+          <div className="status note">현재 홈에 보이는 게시 근무표가 없습니다.</div>
         </div>
       </section>
     );
@@ -1014,81 +1153,7 @@ export function PublishedSchedulesPanel() {
                 <div style={{ display: "grid", gap: 8 }}>
                   <strong style={{ fontSize: 22 }}>{selectedItem.title}</strong>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.연차,
-                      }}
-                    >
-                      연차
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.대휴,
-                      }}
-                    >
-                      대휴
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.근속휴가,
-                      }}
-                    >
-                      근속
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.건강검진,
-                      }}
-                    >
-                      검진
-                    </span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "5px 12px",
-                        borderRadius: 999,
-                        fontSize: 14,
-                        fontWeight: 800,
-                        lineHeight: 1.2,
-                        ...vacationLegendStyles.경조,
-                      }}
-                    >
-                      경조
-                    </span>
+                    <VacationLegendChips />
                   </div>
                   <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                 </div>
@@ -1108,15 +1173,34 @@ export function PublishedSchedulesPanel() {
                   <div className="chip">게시된 근무표</div>
                   <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                   <div className="schedule-toolbar-actions schedule-published-hero__months">
-                    {items.map((item) => (
-                      <button
-                        key={item.monthKey}
-                        className={`btn ${selectedItem?.monthKey === item.monthKey ? "white" : ""}`}
-                        onClick={() => setSelectedMonthKey(item.monthKey)}
-                      >
-                        {item.schedule.year}년 {item.schedule.month}월
-                      </button>
-                    ))}
+                    {activeItems.map((item) => {
+                      const isHiddenTarget = activeHiddenMonthKeys.includes(item.monthKey);
+                      const isSelected = selectedItem?.monthKey === item.monthKey;
+                      return (
+                        <button
+                          key={item.monthKey}
+                          className={`btn ${isSelected ? "white" : ""}`}
+                          onClick={() => {
+                            if (hideMode) {
+                              toggleHideTarget(item.monthKey);
+                              return;
+                            }
+                            setSelectedMonthKey(item.monthKey);
+                          }}
+                          style={
+                            hideMode && isHiddenTarget
+                              ? {
+                                  borderColor: "rgba(248, 113, 113, 0.8)",
+                                  background: isSelected ? "#fff" : "rgba(248, 113, 113, 0.18)",
+                                }
+                              : undefined
+                          }
+                        >
+                          {item.schedule.year}년 {item.schedule.month}월
+                          {hideMode && isHiddenTarget ? " 숨김" : ""}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <div className="schedule-published-hero__center">
@@ -1125,116 +1209,31 @@ export function PublishedSchedulesPanel() {
                 <div className="schedule-published-hero__right">
                   <div className="schedule-toolbar-actions schedule-published-hero__user">
                     <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
-                    <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
-                      {showMine ? "전체 보기" : "내 근무 보기"}
-                    </button>
-                    <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
-                      {editMode ? "근무 수정 완료" : "근무 수정"}
-                    </button>
-                  </div>
-                  <div className="schedule-published-hero__footer">
-                    <div className="schedule-calendar-top-legend">
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: "5px 12px",
-                          borderRadius: 999,
-                          fontSize: 14,
-                          fontWeight: 800,
-                          lineHeight: 1.2,
-                          ...vacationLegendStyles.연차,
-                        }}
-                      >
-                        연차
-                      </span>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: "5px 12px",
-                          borderRadius: 999,
-                          fontSize: 14,
-                          fontWeight: 800,
-                          lineHeight: 1.2,
-                          ...vacationLegendStyles.대휴,
-                        }}
-                      >
-                        대휴
-                      </span>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: "5px 12px",
-                          borderRadius: 999,
-                          fontSize: 14,
-                          fontWeight: 800,
-                          lineHeight: 1.2,
-                          ...vacationLegendStyles.근속휴가,
-                        }}
-                      >
-                        근속
-                      </span>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: "5px 12px",
-                          borderRadius: 999,
-                          fontSize: 14,
-                          fontWeight: 800,
-                          lineHeight: 1.2,
-                          ...vacationLegendStyles.건강검진,
-                        }}
-                      >
-                        검진
-                      </span>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: "5px 12px",
-                          borderRadius: 999,
-                          fontSize: 14,
-                          fontWeight: 800,
-                          lineHeight: 1.2,
-                          ...vacationLegendStyles.경조,
-                        }}
-                      >
-                        경조
-                      </span>
-                    </div>
-                    <div className="schedule-calendar-top-actions">
-                      <button className="btn" disabled={selectedIndex <= 0} onClick={() => setSelectedMonthKey(items[selectedIndex - 1]?.monthKey ?? null)}>
-                        이전 달
+                    <div className="schedule-published-hero__user-actions">
+                      <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
+                        {showMine ? "전체 보기" : "내 근무 보기"}
                       </button>
-                      <button className="btn" disabled={selectedIndex < 0 || selectedIndex >= items.length - 1} onClick={() => setSelectedMonthKey(items[selectedIndex + 1]?.monthKey ?? null)}>
-                        다음 달
+                      <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
+                        {editMode ? "근무 수정 완료" : "근무 수정"}
                       </button>
                       <button className="btn" onClick={printSelectedSchedule}>
                         출력
                       </button>
-                      {canDelete ? (
-                        <button
-                          className="btn"
-                          onClick={() => {
-                            const ok = window.confirm(`${selectedItem.title} 게시를 해제하시겠습니까?`);
-                            if (!ok) return;
-                            const next = removePublishedSchedule(selectedItem.monthKey);
-                            setItems(next);
-                            setSelectedMonthKey(getPreferredPublishedMonthKey(next));
-                          }}
-                        >
-                          게시 해제
+                      {canHidePublishedSchedules ? (
+                        <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
+                          {hideMode ? "숨김 완료" : "근무표 숨김"}
                         </button>
                       ) : null}
                     </div>
+                  </div>
+                  {hideMode ? (
+                    <div className="status note">숨길 월을 선택한 뒤 `숨김 완료`를 누르세요. 숨김 모드에서는 게시된 모든 근무표가 보입니다.</div>
+                  ) : null}
+                  <div className="schedule-published-hero__footer">
+                    <div className="schedule-calendar-top-legend">
+                      <VacationLegendChips />
+                    </div>
+                    <div className="schedule-calendar-top-actions" />
                   </div>
                 </div>
               </div>
