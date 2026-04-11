@@ -2095,9 +2095,20 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 .schedule-published-panel--mobile-layout .schedule-published-hero__months,
 .schedule-published-panel--mobile-layout .schedule-published-hero__right .schedule-calendar-top-actions {
   width: 100%;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
-  row-gap: 10px;
+  column-gap: 8px;
+  row-gap: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-hero__months::-webkit-scrollbar,
+.schedule-published-panel--mobile-layout .schedule-published-hero__right .schedule-calendar-top-actions::-webkit-scrollbar {
+  display: none;
 }
 
 .schedule-published-panel--mobile-layout .schedule-published-hero__user {

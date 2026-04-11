@@ -141,6 +141,11 @@ function clearReviewAccessSubscription() {
   reviewAccessChannel = null;
 }
 
+function readMustChangePassword(user: Pick<User, "user_metadata"> | null | undefined) {
+  const metadata = user?.user_metadata;
+  return metadata?.must_change_password === true || metadata?.mustChangePassword === true;
+}
+
 function invalidateReviewAccessCache() {
   cachedReviewAccessProfileIds = null;
 }
@@ -361,7 +366,7 @@ async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean })
   }
 }
 
-function profileToSession(profile: ProfileRow, canReview: boolean): SessionUser {
+function profileToSession(profile: ProfileRow, canReview: boolean, mustChangePassword: boolean): SessionUser {
   return buildSessionWithExperience({
     id: profile.id,
     email: profile.email,
@@ -370,7 +375,7 @@ function profileToSession(profile: ProfileRow, canReview: boolean): SessionUser 
     role: profile.role,
     actualRole: profile.role,
     approved: profile.approved,
-    mustChangePassword: false,
+    mustChangePassword,
     canReview,
     actualCanReview: canReview,
   });
@@ -407,7 +412,7 @@ function fallbackSessionFromUser(user: User): SessionUser {
     role,
     actualRole: role,
     approved: true,
-    mustChangePassword: false,
+    mustChangePassword: readMustChangePassword(user),
     canReview: hasIntrinsicReviewAccess(role),
     actualCanReview: hasIntrinsicReviewAccess(role),
   });
@@ -525,10 +530,12 @@ async function syncSessionFromUser(user: User, options?: { force?: boolean }) {
   }
 
   const grantedProfileIds = await fetchGrantedReviewAccessProfileIds({ force });
+  const mustChangePassword = readMustChangePassword(user);
   const nextSession = profile
     ? profileToSession(
         profile,
         hasIntrinsicReviewAccess(profile.role) || grantedProfileIds.includes(profile.id),
+        mustChangePassword,
       )
     : fallbackSessionFromUser(user);
   setCachedSession(nextSession);
@@ -886,14 +893,52 @@ export async function requestPasswordReset(email: string) {
 }
 
 export async function issueTemporaryPassword(email: string) {
-  return requestPasswordReset(email);
+  try {
+    const response = await fetch("/api/auth/temporary-password", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        loginId: email,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; message?: string }
+      | null;
+
+    if (!response.ok || !payload?.ok) {
+      return {
+        ok: false as const,
+        message: payload?.message ?? "임시 비밀번호 발급에 실패했습니다.",
+      };
+    }
+
+    return {
+      ok: true as const,
+      message: payload.message ?? "가입된 이메일로 임시 비밀번호를 보냈습니다.",
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: getFriendlyAuthError(error),
+    };
+  }
 }
 
 export async function updatePassword(password: string) {
   try {
     const supabase = getSupabaseClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     const { error } = await supabase.auth.updateUser({
       password,
+      data: {
+        ...(user?.user_metadata ?? {}),
+        must_change_password: false,
+      },
     });
 
     if (error) {

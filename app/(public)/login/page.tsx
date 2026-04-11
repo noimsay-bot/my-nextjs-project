@@ -8,9 +8,9 @@ import {
   getSupabaseSetupMessage,
   initializeAuth,
   isEnglishLoginId,
+  issueTemporaryPassword,
   loginUser,
   registerUser,
-  requestPasswordReset,
   subscribeToAuth,
   updatePassword,
 } from "@/lib/auth/storage";
@@ -49,7 +49,7 @@ export default function LoginPage() {
     password: "",
     confirmPassword: "",
   });
-  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoginId, setForgotLoginId] = useState("");
   const [passwordForm, setPasswordForm] = useState({ password: "", confirm: "" });
   const [submitting, setSubmitting] = useState(false);
 
@@ -58,6 +58,7 @@ export default function LoginPage() {
   }, [queryState.mode]);
   const nextPath = useMemo(() => normalizeNextPath(queryState.next), [queryState.next]);
   const approvalReason = queryState.reason;
+  const passwordResetLocked = forcedMode === "reset-password" || Boolean(session?.mustChangePassword);
 
   useEffect(() => {
     let mounted = true;
@@ -101,17 +102,23 @@ export default function LoginPage() {
       return;
     }
 
+    if (session?.mustChangePassword) {
+      setMode("reset-password");
+      setMessage("임시 비밀번호로 로그인했습니다. 새 비밀번호를 입력해 주세요.");
+      return;
+    }
+
     if (approvalReason === "approval") {
       setMessage("계정이 아직 승인되지 않았습니다. 관리자 승인 후 다시 이용해 주세요.");
     }
-  }, [approvalReason, forcedMode]);
+  }, [approvalReason, forcedMode, session?.mustChangePassword]);
 
   useEffect(() => {
-    if (forcedMode === "reset-password") return;
+    if (passwordResetLocked) return;
     if (!session?.approved) return;
     if (!session) return;
     router.replace(nextPath);
-  }, [forcedMode, nextPath, router, session]);
+  }, [nextPath, passwordResetLocked, router, session]);
 
   async function handleLoginSubmit(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -134,6 +141,12 @@ export default function LoginPage() {
     }
 
     setSession(result.session);
+    if (result.session.mustChangePassword) {
+      setMode("reset-password");
+      setMessage("임시 비밀번호로 로그인했습니다. 새 비밀번호를 입력해 주세요.");
+      return;
+    }
+
     setMessage("");
     router.replace(nextPath);
   }
@@ -176,13 +189,13 @@ export default function LoginPage() {
 
   async function handleForgotPassword() {
     setSubmitting(true);
-    const result = await requestPasswordReset(forgotEmail);
+    const result = await issueTemporaryPassword(forgotLoginId);
     setSubmitting(false);
     setMessage(result.message);
 
     if (result.ok) {
       setMode("login");
-      setForgotEmail("");
+      setForgotLoginId("");
     }
   }
 
@@ -203,7 +216,7 @@ export default function LoginPage() {
     setMessage(result.message);
 
     if (result.ok) {
-      router.replace("/");
+      router.replace(nextPath);
     }
   }
 
@@ -218,12 +231,12 @@ export default function LoginPage() {
               type="button"
               className={`btn ${mode === item ? "white" : ""}`}
               onClick={() => setMode(item)}
-              disabled={forcedMode === "reset-password" || submitting || !supabaseConfigured}
+              disabled={passwordResetLocked || submitting || !supabaseConfigured}
             >
               {item === "login" ? "로그인" : item === "signup" ? "회원가입" : "비밀번호 찾기"}
             </button>
           ))}
-          {forcedMode === "reset-password" ? (
+          {passwordResetLocked ? (
             <button type="button" className="btn white" disabled>
               비밀번호 재설정
             </button>
@@ -257,7 +270,7 @@ export default function LoginPage() {
               type="button"
               className="btn"
               onClick={() => setMode("forgot")}
-              disabled={submitting || !supabaseConfigured}
+              disabled={submitting || !supabaseConfigured || passwordResetLocked}
             >
               비밀번호 찾기
             </button>
@@ -323,24 +336,28 @@ export default function LoginPage() {
 
         {mode === "forgot" ? (
           <>
-            <div className="status note">비밀번호 찾기는 이메일 기준으로 진행됩니다.</div>
+            <div className="status note">아이디를 입력하면 가입된 이메일로 임시 비밀번호를 보내드립니다.</div>
             <input
               className="field-input"
-              type="email"
-              placeholder="가입한 이메일"
-              value={forgotEmail}
-              onChange={(event) => setForgotEmail(event.target.value)}
+              type="text"
+              placeholder="아이디"
+              value={forgotLoginId}
+              onChange={(event) => setForgotLoginId(event.target.value)}
               disabled={!supabaseConfigured}
             />
             <button className="btn primary" onClick={handleForgotPassword} disabled={submitting || !supabaseConfigured}>
-              재설정 메일 보내기
+              임시 비밀번호 보내기
             </button>
           </>
         ) : null}
 
         {mode === "reset-password" ? (
           <>
-            <div className="status note">메일 링크를 통해 들어왔다면 새 비밀번호를 입력해 주세요.</div>
+            <div className="status note">
+              {session?.mustChangePassword
+                ? "임시 비밀번호로 로그인한 상태입니다. 새 비밀번호를 입력해 변경해 주세요."
+                : "메일 링크를 통해 들어왔다면 새 비밀번호를 입력해 주세요."}
+            </div>
             <input
               className="field-input"
               type="password"

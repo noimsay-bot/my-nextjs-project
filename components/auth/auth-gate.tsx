@@ -148,6 +148,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    if (session.mustChangePassword) {
+      router.replace(`/login?mode=reset-password&next=${encodeURIComponent(pathname)}`);
+      return;
+    }
+
     if ((session.role === "member" || session.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) {
       return;
     }
@@ -178,6 +183,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   ) {
     return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   }
-  if (!session || !session.approved || !hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)) return null;
+  if (
+    !session ||
+    !session.approved ||
+    session.mustChangePassword ||
+    !hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)
+  ) {
+    return null;
+  }
   return <>{children}</>;
 }

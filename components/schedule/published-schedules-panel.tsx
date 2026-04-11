@@ -1245,9 +1245,11 @@ export function PublishedSchedulesPanel() {
                       <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
                         {editMode ? "근무 수정 완료" : "근무 수정"}
                       </button>
-                      <button className="btn" onClick={printSelectedSchedule}>
-                        출력
-                      </button>
+                      {scheduleLayoutMode !== "mobile" ? (
+                        <button className="btn" onClick={printSelectedSchedule}>
+                          출력
+                        </button>
+                      ) : null}
                       {canHidePublishedSchedules ? (
                         <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
                           {hideMode ? "숨김 완료" : "근무표 숨김"}
