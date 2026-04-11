@@ -71,6 +71,7 @@ export async function loadGoogleMapsPlacesApi() {
     };
     document.head.appendChild(script);
   }).catch((error) => {
+    console.error("Google Places load error:", error);
     googleMapsPromise = null;
     throw error;
   });

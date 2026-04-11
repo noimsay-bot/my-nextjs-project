@@ -45,6 +45,7 @@ export function RestaurantPlaceSearch({
         setApiStatus("ready");
       })
       .catch((error) => {
+        console.error("Google Places load error:", error);
         if (cancelled) return;
         setApiStatus("error");
         setApiMessage(error instanceof Error ? error.message : "구글 Places를 불러오지 못했습니다.");
