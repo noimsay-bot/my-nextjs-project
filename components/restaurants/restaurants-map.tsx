@@ -5,6 +5,8 @@ import { useEffect, useRef } from "react";
 import type { NearbyRestaurant, RestaurantLocation } from "@/lib/restaurants/types";
 
 const DEFAULT_CENTER: RestaurantLocation = { lat: 37.5665, lng: 126.978 };
+const NEARBY_VIEW_DISTANCE_METERS = 3_000;
+const NEARBY_VIEW_LIMIT = 8;
 
 type LeafletModule = typeof import("leaflet");
 
@@ -110,6 +112,24 @@ export function RestaurantsMap({
 
     if (points.length === 0) {
       map.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 13);
+      return;
+    }
+
+    if (currentLocation) {
+      const nearbyPoints = restaurants
+        .filter((restaurant) => restaurant.distanceMeters !== null && restaurant.distanceMeters <= NEARBY_VIEW_DISTANCE_METERS)
+        .slice(0, NEARBY_VIEW_LIMIT)
+        .map<[number, number]>((restaurant) => [restaurant.lat, restaurant.lng]);
+
+      if (nearbyPoints.length > 0) {
+        map.fitBounds([[currentLocation.lat, currentLocation.lng], ...nearbyPoints], {
+          padding: [30, 30],
+          maxZoom: 15,
+        });
+        return;
+      }
+
+      map.setView([currentLocation.lat, currentLocation.lng], 15);
       return;
     }
 
