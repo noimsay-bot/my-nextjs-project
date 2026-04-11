@@ -25,7 +25,8 @@ export function RestaurantPlaceSearch({
   const [searching, setSearching] = useState(false);
   const [predictions, setPredictions] = useState<RestaurantPlacePrediction[]>([]);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
-  const [resultState, setResultState] = useState<"idle" | "empty" | "ready">("idle");
+  const [resultState, setResultState] = useState<"idle" | "empty" | "ready" | "search-error" | "detail-error">("idle");
+  const [resultMessage, setResultMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +64,7 @@ export function RestaurantPlaceSearch({
     if (trimmedQuery.length < 2) {
       setPredictions([]);
       setResultState("idle");
+      setResultMessage("");
       return;
     }
 
@@ -74,13 +76,14 @@ export function RestaurantPlaceSearch({
           if (cancelled) return;
           setPredictions(nextPredictions);
           setResultState(nextPredictions.length > 0 ? "ready" : "empty");
+          setResultMessage("");
         })
         .catch((error) => {
+          console.error("Google Places prediction error:", error);
           if (cancelled) return;
           setPredictions([]);
-          setResultState("empty");
-          setApiStatus("error");
-          setApiMessage(error instanceof Error ? error.message : "검색 결과를 불러오지 못했습니다.");
+          setResultState("search-error");
+          setResultMessage(error instanceof Error ? error.message : "검색 결과를 불러오지 못했습니다.");
         })
         .finally(() => {
           if (cancelled) return;
@@ -104,6 +107,16 @@ export function RestaurantPlaceSearch({
     if (searching) {
       return { tone: "note" as const, text: "검색 결과를 찾는 중입니다." };
     }
+    if (resultState === "search-error" || resultState === "detail-error") {
+      return {
+        tone: "warn" as const,
+        text:
+          resultMessage ||
+          (resultState === "detail-error"
+            ? "선택한 장소 상세 정보를 불러오지 못했습니다."
+            : "검색 결과를 불러오지 못했습니다."),
+      };
+    }
     if (query.trim().length >= 2 && resultState === "empty") {
       return { tone: "note" as const, text: "검색 결과가 없습니다." };
     }
@@ -121,10 +134,12 @@ export function RestaurantPlaceSearch({
       setQuery(prediction.description);
       setPredictions([]);
       setResultState("idle");
+      setResultMessage("");
       onSelect(selectedPlace);
     } catch (error) {
-      setApiStatus("error");
-      setApiMessage(error instanceof Error ? error.message : "선택한 장소를 불러오지 못했습니다.");
+      console.error("Google Places detail error:", error);
+      setResultState("detail-error");
+      setResultMessage(error instanceof Error ? error.message : "선택한 장소를 불러오지 못했습니다.");
     } finally {
       setSearching(false);
     }
@@ -143,6 +158,8 @@ export function RestaurantPlaceSearch({
           onChange={(event) => {
             setQuery(event.target.value);
             setSelectedPlaceId(null);
+            setResultMessage("");
+            setResultState("idle");
           }}
           disabled={disabled || !searchEnabled}
         />
