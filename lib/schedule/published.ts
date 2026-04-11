@@ -174,7 +174,7 @@ export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
   return getPublishedSchedules();
 }
 
-export function publishSchedule(schedule: GeneratedSchedule) {
+export async function publishSchedule(schedule: GeneratedSchedule) {
   const nextItem: PublishedScheduleItem = {
     monthKey: schedule.monthKey,
     title: createPublishedTitle(schedule),
@@ -190,10 +190,12 @@ export function publishSchedule(schedule: GeneratedSchedule) {
   publishedSchedulesCache = cloneItems(next);
   emitPublishedSchedulesEvent();
 
-  void persistPublishedItem(schedule.monthKey, {
-    published_state: nextItem.schedule,
-    published_at: nextItem.publishedAt,
-  }).catch(async () => {
+  try {
+    await persistPublishedItem(schedule.monthKey, {
+      published_state: nextItem.schedule,
+      published_at: nextItem.publishedAt,
+    });
+  } catch (error) {
     emitPublishedSchedulesStatus({
       ok: false,
       message: "근무표 게시에 실패했습니다. DB 기준 상태로 복구합니다.",
@@ -201,7 +203,8 @@ export function publishSchedule(schedule: GeneratedSchedule) {
     publishedSchedulesCache = previous;
     emitPublishedSchedulesEvent();
     await refreshPublishedSchedules();
-  });
+    throw error;
+  }
 
   return nextItem;
 }

@@ -14,6 +14,7 @@ import {
   categories,
   defaultScheduleState,
   getAssignmentDisplayRank,
+  getDayDuplicateNameSet,
   getScheduleCategoryLabel,
   getVisibleAssignmentDisplayRank,
   isGeneralAssignmentCategory,
@@ -975,10 +976,17 @@ export function ScheduleApp() {
   const confirmPublish = async () => {
     const target = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
-    const published = await publishSchedule(target);
-    await loadPublishedItems();
-    setPublishOpen(false);
-    setMessage({ tone: "ok", text: `${published.title}를 홈화면에 게시했습니다.` });
+    try {
+      const published = await publishSchedule(target);
+      await loadPublishedItems();
+      setPublishOpen(false);
+      setMessage({ tone: "ok", text: `${published.title}를 홈화면에 게시했습니다.` });
+    } catch (error) {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "근무표 게시에 실패했습니다.",
+      });
+    }
   };
 
   return (
@@ -1366,6 +1374,8 @@ export function ScheduleApp() {
                   const dayCardStyle = getDayCardStyle(day);
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
+                  const duplicateNameSet = getDayDuplicateNameSet(day);
+                  const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category]) => {
                       if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
@@ -1436,7 +1446,7 @@ export function ScheduleApp() {
                               style={{
                                 minHeight: 24,
                                 textAlign: "center",
-                                color: "#f8fbff",
+                                color: headerNameDuplicated ? "#ffe4e6" : "#f8fbff",
                                 fontSize: 21,
                                 fontWeight: 900,
                                 lineHeight: 1.1,
@@ -1444,6 +1454,10 @@ export function ScheduleApp() {
                                 overflow: "visible",
                                 textOverflow: "clip",
                                 wordBreak: "keep-all",
+                                padding: headerNameDuplicated ? "4px 10px" : 0,
+                                borderRadius: headerNameDuplicated ? 999 : 0,
+                                background: headerNameDuplicated ? "rgba(239,68,68,.22)" : "transparent",
+                                border: headerNameDuplicated ? "1px solid rgba(248,113,113,.55)" : undefined,
                               }}
                             >
                               {day.headerName ?? ""}
@@ -1712,7 +1726,8 @@ export function ScheduleApp() {
                                     (state.showMyWork || (editMode && !isAllDaysEditMode));
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
-                                  const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending;
+                                  const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
+                                  const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending || duplicated;
                                   const weekendConflict = conflicted && isWeekendLike;
                                   return (
                                     <div
@@ -1802,8 +1817,8 @@ export function ScheduleApp() {
                                                     ? "rgba(34,211,238,.22)"
                                                     : "rgba(255,255,255,.16)",
                                           border: personObject.pending
-                                            ? "1px solid rgba(245,158,11,.35)"
-                                            : conflicted
+                                          ? "1px solid rgba(245,158,11,.35)"
+                                          : conflicted
                                               ? weekendConflict
                                                 ? "1px solid rgba(103,232,249,.65)"
                                                 : "1px solid rgba(239,68,68,.28)"
@@ -2292,6 +2307,8 @@ export function ScheduleApp() {
                     const centeredDayLabel = getCenteredDayLabel(day);
                     const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
                     const isWeekendLike = day.isWeekend || day.isHoliday;
+                    const duplicateNameSet = getDayDuplicateNameSet(day);
+                    const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
                     const previewAssignments = Object.entries(day.assignments)
                       .filter(([category, names]) =>
                         names.length > 0 &&
@@ -2339,7 +2356,7 @@ export function ScheduleApp() {
                               style={{
                                 minHeight: 24,
                                 textAlign: "center",
-                                color: "#f8fbff",
+                                color: headerNameDuplicated ? "#ffe4e6" : "#f8fbff",
                                 fontSize: 21,
                                 fontWeight: 900,
                                 lineHeight: 1.1,
@@ -2347,6 +2364,10 @@ export function ScheduleApp() {
                                 overflow: "visible",
                                 textOverflow: "clip",
                                 wordBreak: "keep-all",
+                                padding: headerNameDuplicated ? "4px 10px" : 0,
+                                borderRadius: headerNameDuplicated ? 999 : 0,
+                                background: headerNameDuplicated ? "rgba(239,68,68,.22)" : "transparent",
+                                border: headerNameDuplicated ? "1px solid rgba(248,113,113,.55)" : undefined,
                               }}
                             >
                               {day.headerName ?? ""}
@@ -2388,7 +2409,7 @@ export function ScheduleApp() {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
-                                  const conflicted = conflictSet.has(`${category}-${name}`);
+                                  const conflicted = conflictSet.has(`${category}-${name}`) || duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
                                   return (
                                     <div

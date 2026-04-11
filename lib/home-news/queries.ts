@@ -75,7 +75,7 @@ export async function fetchHomeNewsDataset(now = new Date()): Promise<HomeNewsLo
       .eq("is_active", true)
       .order("published_at", { ascending: false })
       .order("updated_at", { ascending: false })
-      .limit(48);
+      .limit(24);
 
     if (error) {
       throw error;

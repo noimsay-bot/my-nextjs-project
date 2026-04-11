@@ -215,7 +215,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
     return `${session.username} / ${session.role} 체험중 · 실권한 ${session.actualRole}`;
   }, [session]);
 
-  const adminSession = session?.actualRole === "admin" ? session : null;
+  const adminSession = hasAdminAccess(session?.actualRole) ? session : null;
   const canOpenAdminArea = hasAdminAccess(session?.role);
 
   const cycleExperienceRole = () => {

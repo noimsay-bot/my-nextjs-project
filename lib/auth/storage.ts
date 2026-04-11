@@ -284,7 +284,7 @@ function buildSessionWithExperience(
   const actualRole = base.actualRole ?? base.role;
   const actualCanReview = base.actualCanReview ?? base.canReview;
   const experienceRole =
-    actualRole === "admin"
+    hasAdminAccess(actualRole)
       ? normalizeExperienceRole(requestedExperienceRole)
       : null;
   const effectiveExperienceRole =
@@ -675,7 +675,7 @@ export function getSession() {
 }
 
 export function setRoleExperience(role: UserRole | null) {
-  if (!cachedSession || cachedSession.actualRole !== "admin") {
+  if (!cachedSession || !hasAdminAccess(cachedSession.actualRole)) {
     return cachedSession;
   }
 

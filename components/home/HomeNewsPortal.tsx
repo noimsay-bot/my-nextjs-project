@@ -276,84 +276,78 @@ export function HomeNewsPortal() {
     let cancelled = false;
     let cancelDeferredTasks = () => {};
 
+    setLoading(true);
+    syncNotices();
+
     void (async () => {
-      setLoading(true);
-      syncNotices();
+      try {
+        const resolvedDataset = await fetchHomeNewsDataset();
+        if (cancelled) return;
 
-      const [noticeResult, datasetResult] = await Promise.allSettled([
-        refreshHomePopupNoticeWorkspace(),
-        fetchHomeNewsDataset(),
-      ]);
-      if (cancelled) return;
-
-      if (noticeResult.status === "fulfilled") {
-        syncNotices();
-      } else {
-        console.warn(
-          noticeResult.reason instanceof Error
-            ? noticeResult.reason.message
-            : "공지 정보를 불러오지 못했습니다.",
-        );
-      }
-
-      const resolvedDataset = datasetResult.status === "fulfilled" ? datasetResult.value : null;
-      if (resolvedDataset) {
         setBaseData(resolvedDataset.data);
         if (resolvedDataset.errorMessage) {
           console.warn(resolvedDataset.errorMessage);
         }
-      } else {
-        const datasetError = datasetResult.status === "rejected" ? datasetResult.reason : null;
-        setBaseData(emptyHomeNewsDataset);
-        console.warn(
-          datasetError instanceof Error
-            ? datasetError.message
-            : "뉴스 데이터를 불러오지 못했습니다.",
-        );
-      }
+        setLoading(false);
 
-      setLoading(false);
-
-      cancelDeferredTasks = scheduleDeferredTask(() => {
-        void (async () => {
-          try {
-            const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
-            if (!cancelled) {
-              setLikeWorkspace(nextLikeWorkspace);
+        cancelDeferredTasks = scheduleDeferredTask(() => {
+          void (async () => {
+            try {
+              const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
+              if (!cancelled) {
+                setLikeWorkspace(nextLikeWorkspace);
+              }
+            } catch (error) {
+              if (!cancelled) {
+                console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
+                setLikeWorkspace(null);
+              }
             }
-          } catch (error) {
-            if (!cancelled) {
-              console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
-              setLikeWorkspace(null);
-            }
-          }
 
-          if (!resolvedDataset || resolvedDataset.source === "issue_set") {
-            if (!cancelled) {
-              setLivePreviewData(null);
-            }
-            return;
-          }
-
-          try {
-            const previewResult = await generateTimedLivePreview();
-            if (cancelled) return;
-            if (previewResult.ok && previewResult.data) {
-              setLivePreviewData(previewResult.data);
+            if (resolvedDataset.source === "issue_set") {
+              if (!cancelled) {
+                setLivePreviewData(null);
+              }
               return;
             }
 
-            console.warn(previewResult.message);
-            setLivePreviewData(null);
-          } catch (error) {
-            if (!cancelled) {
-              console.warn(error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.");
+            try {
+              const previewResult = await generateTimedLivePreview();
+              if (cancelled) return;
+              if (previewResult.ok && previewResult.data) {
+                setLivePreviewData(previewResult.data);
+                return;
+              }
+
+              console.warn(previewResult.message);
               setLivePreviewData(null);
+            } catch (error) {
+              if (!cancelled) {
+                console.warn(error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.");
+                setLivePreviewData(null);
+              }
             }
-          }
-        })();
-      });
+          })();
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setBaseData(emptyHomeNewsDataset);
+        setLoading(false);
+        console.warn(error instanceof Error ? error.message : "뉴스 데이터를 불러오지 못했습니다.");
+      }
     })();
+
+    void refreshHomePopupNoticeWorkspace()
+      .then(() => {
+        if (!cancelled) {
+          syncNotices();
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
+        }
+      });
 
     window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
     return () => {

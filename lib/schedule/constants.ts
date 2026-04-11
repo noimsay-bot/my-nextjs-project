@@ -1,4 +1,4 @@
-import { CategoryDefinition, CategoryKey, PointerState, ScheduleAssignmentNameTag, ScheduleState } from "@/lib/schedule/types";
+import { CategoryDefinition, CategoryKey, DaySchedule, PointerState, ScheduleAssignmentNameTag, ScheduleState } from "@/lib/schedule/types";
 
 export const STORAGE_KEY = "j-schedule-integrated-react-v1";
 export const SCHEDULE_YEAR_START = 2026;
@@ -14,6 +14,37 @@ export function getScheduleCategoryLabel(category: string) {
   if (category === "주말조근") return "조근";
   if (category === "주말일반근무") return "일반";
   return category;
+}
+
+function normalizeScheduleDuplicateName(value: string) {
+  return value.trim();
+}
+
+export function getDayDuplicateNameSet(day: DaySchedule) {
+  const counts = new Map<string, number>();
+
+  const pushName = (value: string) => {
+    const normalized = normalizeScheduleDuplicateName(value);
+    if (!normalized) return;
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  };
+
+  pushName(day.headerName ?? "");
+  Object.values(day.assignments ?? {}).forEach((names) => {
+    names.forEach((name) => pushName(name));
+  });
+
+  return new Set(
+    Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([name]) => name),
+  );
+}
+
+export function isDuplicateScheduleName(day: DaySchedule, value: string) {
+  const normalized = normalizeScheduleDuplicateName(value);
+  if (!normalized) return false;
+  return getDayDuplicateNameSet(day).has(normalized);
 }
 
 export function isGeneralAssignmentCategory(category: string) {

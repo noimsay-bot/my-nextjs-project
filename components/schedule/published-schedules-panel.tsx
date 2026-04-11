@@ -10,6 +10,7 @@ import { printHtmlDocument } from "@/lib/print";
 import {
   buildScheduleAssignmentNameTagKey,
   getAssignmentDisplayRank,
+  getDayDuplicateNameSet,
   getScheduleCategoryLabel,
   getVisibleAssignmentDisplayRank,
   isGeneralAssignmentCategory,
@@ -1314,6 +1315,8 @@ export function PublishedSchedulesPanel() {
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const highlightDayHead = showMine && dayContainsUser(day, username);
                   const highlightHeaderName = showMine && Boolean(username) && day.headerName?.trim() === username;
+                  const duplicateNameSet = getDayDuplicateNameSet(day);
+                  const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category, names]) => {
                       if (!Array.isArray(names) || names.length === 0) return false;
@@ -1389,7 +1392,7 @@ export function PublishedSchedulesPanel() {
                             style={{
                               minHeight: 24,
                               textAlign: "center",
-                              color: highlightHeaderName ? "#f8fbff" : "#f8fbff",
+                              color: headerNameDuplicated ? "#ffe4e6" : "#f8fbff",
                               fontSize: 21,
                               fontWeight: 900,
                               lineHeight: 1.1,
@@ -1398,10 +1401,22 @@ export function PublishedSchedulesPanel() {
                               textOverflow: "clip",
                               wordBreak: "keep-all",
                               justifySelf: "center",
-                              padding: highlightHeaderName ? (isCompactMonthlyView ? "4px 10px" : "5px 12px") : 0,
-                              borderRadius: highlightHeaderName ? 999 : 0,
-                              background: highlightHeaderName ? "rgba(125,211,252,.2)" : "transparent",
-                              border: highlightHeaderName ? "6px solid rgba(255,255,255,.95)" : undefined,
+                              padding: headerNameDuplicated
+                                ? (isCompactMonthlyView ? "4px 10px" : "5px 12px")
+                                : highlightHeaderName
+                                  ? (isCompactMonthlyView ? "4px 10px" : "5px 12px")
+                                  : 0,
+                              borderRadius: headerNameDuplicated || highlightHeaderName ? 999 : 0,
+                              background: headerNameDuplicated
+                                ? "rgba(239,68,68,.22)"
+                                : highlightHeaderName
+                                  ? "rgba(125,211,252,.2)"
+                                  : "transparent",
+                              border: headerNameDuplicated
+                                ? "1px solid rgba(248,113,113,.55)"
+                                : highlightHeaderName
+                                  ? "6px solid rgba(255,255,255,.95)"
+                                  : undefined,
                             }}
                           >
                             {day.headerName ?? ""}
@@ -1477,6 +1492,7 @@ export function PublishedSchedulesPanel() {
                                     recommendedCandidateKeys.has(getRefKey(ref));
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
+                                  const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
                                   return (
                                     <button
@@ -1499,6 +1515,8 @@ export function PublishedSchedulesPanel() {
                                         borderRadius: 0,
                                         background: personObject.pending
                                           ? "rgba(245,158,11,.18)"
+                                          : duplicated
+                                            ? "rgba(239,68,68,.22)"
                                           : routeSelected
                                             ? firstSelected
                                               ? "rgba(168,85,247,.28)"
@@ -1516,6 +1534,8 @@ export function PublishedSchedulesPanel() {
                                                     : "rgba(255,255,255,.16)",
                                         border: personObject.pending
                                           ? "1px solid rgba(245,158,11,.35)"
+                                          : duplicated
+                                            ? "1px solid rgba(239,68,68,.28)"
                                           : routeSelected
                                             ? firstSelected
                                               ? "1px solid rgba(192,132,252,.78)"
@@ -1531,6 +1551,8 @@ export function PublishedSchedulesPanel() {
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: routeSelected && firstSelected
                                           ? "#f5eaff"
+                                          : duplicated
+                                            ? "#ffe4e6"
                                           : recommendedHighlighted || mineHighlighted
                                             ? "#ffffff"
                                             : dimOtherNames

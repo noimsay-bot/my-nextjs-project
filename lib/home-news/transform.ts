@@ -106,6 +106,44 @@ function sanitizeRecord(record: HomeNewsBriefingRecord): HomeNewsBriefingRecord 
   };
 }
 
+function normalizeHeadlineKey(value: string) {
+  const normalized = value
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[-|]\s*[^-|]+$/g, " ")
+    .replace(/[“”"'`·,.:!?()\[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  const tokens = normalized
+    .split(" ")
+    .filter((token) => token.length >= 2)
+    .filter((token) => !["검찰", "경찰", "법원", "정부", "국회", "관련", "속보"].includes(token))
+    .slice(0, 6);
+
+  return tokens.join(" ");
+}
+
+function dedupeHomeNewsRecords(records: HomeNewsBriefingRecord[]) {
+  const seenIds = new Set<string>();
+  const seenHeadlineKeys = new Set<string>();
+
+  return records.filter((record) => {
+    if (seenIds.has(record.id)) return false;
+
+    const headlineKey = normalizeHeadlineKey(record.title);
+    if (headlineKey && seenHeadlineKeys.has(headlineKey)) {
+      return false;
+    }
+
+    seenIds.add(record.id);
+    if (headlineKey) {
+      seenHeadlineKeys.add(headlineKey);
+    }
+    return true;
+  });
+}
+
 function isLocalElectionSectionEnabled(now: Date) {
   return now.getTime() < new Date(LOCAL_ELECTION_SECTION_EXPIRES_AT).getTime();
 }
@@ -115,17 +153,19 @@ function isLocalElectionRecord(record: HomeNewsBriefingRecord) {
   return LOCAL_ELECTION_SECTION_PATTERNS.test(combinedText);
 }
 
+function buildCardSummary(item: HomeNewsBriefingRecord) {
+  const firstSummaryLine = item.summary_lines?.find((line) => line.trim().length > 0)?.trim() ?? "";
+  const fallback = item.briefing_text?.trim() || item.title;
+  const subtitle = firstSummaryLine || fallback;
+  return [prependOccurredAt(subtitle, item.occurred_at)];
+}
+
 function toCardItem(item: HomeNewsBriefingRecord): HomeNewsCardItem {
   return {
     id: item.id,
     category: item.category,
     title: item.title,
-    summary:
-      item.summary_lines && item.summary_lines.length > 0
-        ? item.summary_lines.map((line, index) =>
-            index === 0 ? prependOccurredAt(line, item.occurred_at) : line,
-          )
-        : [prependOccurredAt(item.briefing_text?.trim() || item.title, item.occurred_at)],
+    summary: buildCardSummary(item),
     sourceLabel: item.source_label?.trim() || undefined,
     whyItMatters: item.why_it_matters?.trim() || "추가 브리핑이 들어오면 이 영역에서 중요도를 함께 설명합니다.",
     checkPoints:
@@ -157,8 +197,8 @@ export function buildHomeNewsDataset(
     .filter((item) => (filterInactive ? item.is_active : true));
 
   const ordered = respectInputOrder
-    ? sanitized
-    : sanitized.slice().sort(sortHomeNewsBriefings);
+    ? dedupeHomeNewsRecords(sanitized)
+    : dedupeHomeNewsRecords(sanitized.slice().sort(sortHomeNewsBriefings));
 
   if (ordered.length === 0) {
     return {
