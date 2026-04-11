@@ -1,6 +1,7 @@
 "use client";
 
 const GOOGLE_MAPS_SCRIPT_ID = "jtbc-google-maps-js";
+const GOOGLE_MAPS_CALLBACK_NAME = "__jtbcGoogleMapsInit";
 
 let googleMapsPromise: Promise<typeof window.google> | null = null;
 let googleMapsPlacesLibraryPromise: Promise<google.maps.PlacesLibrary> | null = null;
@@ -13,13 +14,23 @@ export function hasGoogleMapsApiKey() {
   return getGoogleMapsApiKey().length > 0;
 }
 
-async function loadGoogleMapsApi() {
+function getGoogleLoaderState() {
+  return {
+    hasGoogle: typeof window !== "undefined" && !!window.google,
+    hasMaps: typeof window !== "undefined" && !!window.google?.maps,
+    importLibraryType:
+      typeof window === "undefined" ? "undefined" : typeof window.google?.maps?.importLibrary,
+  };
+}
+
+function logGoogleLoaderError(label: string, error: unknown) {
+  console.error(label, error);
+  console.error("Google loader state", getGoogleLoaderState());
+}
+
+function ensureGoogleMapsBootstrapLoader() {
   if (typeof window === "undefined") {
     throw new Error("Google Places는 브라우저에서만 사용할 수 있습니다.");
-  }
-
-  if (window.google?.maps) {
-    return window.google;
   }
 
   if (!hasGoogleMapsApiKey()) {
@@ -28,68 +39,117 @@ async function loadGoogleMapsApi() {
     );
   }
 
+  if (typeof window.google?.maps?.importLibrary === "function") {
+    return;
+  }
+
+  const googleNamespace = (window.google ??= {} as typeof window.google);
+  const mapsNamespace = (googleNamespace.maps ??= {} as typeof google.maps);
+  if (typeof mapsNamespace.importLibrary === "function") {
+    return;
+  }
+
+  let loaderPromise: Promise<void> | null = null;
+  const requestedLibraries = new Set<string>();
+
+  const loadScript = () => {
+    if (loaderPromise) {
+      return loaderPromise;
+    }
+
+    loaderPromise = new Promise<void>((resolve, reject) => {
+      const previousScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
+      if (previousScript) {
+        previousScript.remove();
+      }
+
+      const mapsNamespaceWithCallback = mapsNamespace as typeof mapsNamespace & Record<string, unknown>;
+      mapsNamespaceWithCallback[GOOGLE_MAPS_CALLBACK_NAME] = () => {
+        const script = document.getElementById(GOOGLE_MAPS_SCRIPT_ID) as HTMLScriptElement | null;
+        if (script) {
+          script.dataset.loaded = "true";
+        }
+        resolve();
+      };
+
+      const script = document.createElement("script");
+      const params = new URLSearchParams({
+        key: getGoogleMapsApiKey(),
+        v: "weekly",
+        language: "ko",
+        region: "KR",
+        loading: "async",
+        callback: `google.maps.${GOOGLE_MAPS_CALLBACK_NAME}`,
+      });
+
+      if (requestedLibraries.size > 0) {
+        params.set("libraries", Array.from(requestedLibraries).join(","));
+      }
+
+      script.id = GOOGLE_MAPS_SCRIPT_ID;
+      script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => {
+        loaderPromise = null;
+        delete mapsNamespaceWithCallback[GOOGLE_MAPS_CALLBACK_NAME];
+        reject(new Error("구글 Places 스크립트 로딩에 실패했습니다."));
+      };
+
+      document.head.appendChild(script);
+    }).then(() => undefined);
+
+    return loaderPromise;
+  };
+
+  mapsNamespace.importLibrary = ((libraryName: string, ...args: unknown[]) => {
+    requestedLibraries.add(libraryName);
+    return loadScript().then(() => {
+      if (typeof window.google?.maps?.importLibrary !== "function") {
+        throw new Error("구글 Maps 스크립트는 로드됐지만 importLibrary를 찾지 못했습니다.");
+      }
+
+      return window.google.maps.importLibrary(libraryName, ...(args as []));
+    });
+  }) as typeof google.maps.importLibrary;
+}
+
+async function loadGoogleMapsApi() {
+  if (typeof window === "undefined") {
+    throw new Error("Google Places는 브라우저에서만 사용할 수 있습니다.");
+  }
+
+  if (typeof window.google?.maps?.importLibrary === "function") {
+    return window.google;
+  }
+
   if (googleMapsPromise) {
     return googleMapsPromise;
   }
 
-  googleMapsPromise = new Promise<typeof window.google>((resolve, reject) => {
-    const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID) as HTMLScriptElement | null;
-    if (existingScript) {
-      if (window.google?.maps) {
-        resolve(window.google);
-        return;
+  googleMapsPromise = Promise.resolve()
+    .then(() => {
+      ensureGoogleMapsBootstrapLoader();
+      return window.google.maps.importLibrary("core");
+    })
+    .then(() => {
+      if (!window.google?.maps || typeof window.google.maps.importLibrary !== "function") {
+        throw new Error("구글 Maps 스크립트를 불러오지 못했습니다.");
       }
 
-      const handleLoad = () => {
-        if (window.google?.maps) {
-          resolve(window.google);
-          return;
-        }
-        reject(new Error("구글 Places 스크립트를 불러오지 못했습니다."));
-      };
-      const handleError = () => {
-        reject(new Error("구글 Places 스크립트 로딩에 실패했습니다."));
-      };
-      existingScript.addEventListener("load", handleLoad, { once: true });
-      existingScript.addEventListener("error", handleError, { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    const params = new URLSearchParams({
-      key: getGoogleMapsApiKey(),
-      language: "ko",
-      region: "KR",
-      loading: "async",
-      v: "weekly",
+      return window.google;
+    })
+    .catch((error) => {
+      logGoogleLoaderError("Google Places load error:", error);
+      googleMapsPromise = null;
+      throw error;
     });
-    script.id = GOOGLE_MAPS_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      script.dataset.loaded = "true";
-      if (window.google?.maps) {
-        resolve(window.google);
-        return;
-      }
-      reject(new Error("구글 Maps 스크립트는 로드됐지만 Places 초기화에 필요한 importLibrary를 찾지 못했습니다."));
-    };
-    script.onerror = () => {
-      reject(new Error("구글 Places 스크립트 로딩에 실패했습니다."));
-    };
-    document.head.appendChild(script);
-  }).catch((error) => {
-    console.error("Google Places load error:", error);
-    googleMapsPromise = null;
-    throw error;
-  });
 
   return googleMapsPromise;
 }
 
 export async function loadGoogleMapsPlacesLibrary() {
-  const google = await loadGoogleMapsApi();
+  await loadGoogleMapsApi();
 
   if (
     window.google?.maps?.places?.AutocompleteSuggestion &&
@@ -103,7 +163,7 @@ export async function loadGoogleMapsPlacesLibrary() {
     return googleMapsPlacesLibraryPromise;
   }
 
-  googleMapsPlacesLibraryPromise = google.maps
+  googleMapsPlacesLibraryPromise = window.google.maps
     .importLibrary("places")
     .then((library) => {
       const placesLibrary = library as google.maps.PlacesLibrary;
@@ -117,7 +177,7 @@ export async function loadGoogleMapsPlacesLibrary() {
       return placesLibrary;
     })
     .catch((error) => {
-      console.error("Google Places library error:", error);
+      logGoogleLoaderError("Google Places library error:", error);
       googleMapsPlacesLibraryPromise = null;
       throw error;
     });
