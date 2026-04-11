@@ -923,6 +923,7 @@ function buildSyntheticScheduleFromAssignmentMonth(
   const knownCategories = new Set([
     "조근",
     "일반",
+    "기타",
     "연장",
     "석근",
     "야근",

@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { hasGoogleMapsApiKey, loadGoogleMapsPlacesApi } from "@/lib/google/maps";
 import {
   fetchRestaurantPlaceDetails,
-  searchRestaurantPredictions,
+  searchRestaurantPredictionsWithMode,
   type RestaurantPlacePrediction,
   type RestaurantPlaceSelection,
+  type RestaurantPlaceSearchMode,
 } from "@/lib/restaurants/google-places";
 import type { RestaurantLocation } from "@/lib/restaurants/types";
 
@@ -27,6 +28,7 @@ export function RestaurantPlaceSearch({
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [resultState, setResultState] = useState<"idle" | "empty" | "ready" | "search-error" | "detail-error">("idle");
   const [resultMessage, setResultMessage] = useState("");
+  const [searchMode, setSearchMode] = useState<RestaurantPlaceSearchMode>("global");
 
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +73,7 @@ export function RestaurantPlaceSearch({
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setSearching(true);
-      void searchRestaurantPredictions(trimmedQuery, currentLocation)
+      void searchRestaurantPredictionsWithMode(trimmedQuery, currentLocation, searchMode)
         .then((nextPredictions) => {
           if (cancelled) return;
           setPredictions(nextPredictions);
@@ -95,7 +97,7 @@ export function RestaurantPlaceSearch({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [apiStatus, currentLocation, query]);
+  }, [apiStatus, currentLocation, query, searchMode]);
 
   const helperStatus = useMemo(() => {
     if (apiStatus === "loading") {
@@ -123,8 +125,17 @@ export function RestaurantPlaceSearch({
     if (selectedPlaceId) {
       return { tone: "ok" as const, text: "장소 선택이 완료되었습니다." };
     }
-    return { tone: "note" as const, text: "가게명을 검색하고 목록에서 하나를 선택해 주세요." };
-  }, [apiMessage, apiStatus, query, resultState, searching, selectedPlaceId]);
+    if (searchMode === "nearby" && !currentLocation) {
+      return { tone: "note" as const, text: "현재 위치가 없어서 전체 검색과 비슷하게 동작할 수 있습니다." };
+    }
+    return {
+      tone: "note" as const,
+      text:
+        searchMode === "nearby"
+          ? "현재 위치를 기준으로 가까운 음식점을 우선 찾아 보여줍니다."
+          : "전세계 검색 모드입니다. 해외 음식점도 검색할 수 있습니다.",
+    };
+  }, [apiMessage, apiStatus, currentLocation, query, resultState, searchMode, searching, selectedPlaceId]);
 
   const handleSelectPrediction = async (prediction: RestaurantPlacePrediction) => {
     setSearching(true);
@@ -151,9 +162,27 @@ export function RestaurantPlaceSearch({
     <div style={{ display: "grid", gap: 10 }}>
       <label style={{ display: "grid", gap: 8 }}>
         <span>장소 검색</span>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={searchMode === "global" ? "btn white" : "btn"}
+            onClick={() => setSearchMode("global")}
+            disabled={disabled || !searchEnabled}
+          >
+            전체 검색
+          </button>
+          <button
+            type="button"
+            className={searchMode === "nearby" ? "btn white" : "btn"}
+            onClick={() => setSearchMode("nearby")}
+            disabled={disabled || !searchEnabled}
+          >
+            현재 주변 우선
+          </button>
+        </div>
         <input
           className="field-input"
-          placeholder="가게명을 검색해 선택해 주세요."
+          placeholder={searchMode === "global" ? "해외 포함 전세계 음식점을 검색해 주세요." : "현재 위치 근처 음식점을 우선 검색해 주세요."}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);

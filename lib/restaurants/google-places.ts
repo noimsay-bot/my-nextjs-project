@@ -18,6 +18,8 @@ export interface RestaurantPlaceSelection {
   lng: number;
 }
 
+export type RestaurantPlaceSearchMode = "global" | "nearby";
+
 let autocompleteSessionToken: google.maps.places.AutocompleteSessionToken | null = null;
 
 async function loadPlacesContext() {
@@ -93,6 +95,14 @@ function ensurePlacesReady() {
 }
 
 export async function searchRestaurantPredictions(query: string, location?: RestaurantLocation | null) {
+  return searchRestaurantPredictionsWithMode(query, location, "global");
+}
+
+export async function searchRestaurantPredictionsWithMode(
+  query: string,
+  location?: RestaurantLocation | null,
+  mode: RestaurantPlaceSearchMode = "global",
+) {
   const trimmedQuery = query.trim();
   if (trimmedQuery.length < 2) {
     return [] as RestaurantPlacePrediction[];
@@ -103,14 +113,13 @@ export async function searchRestaurantPredictions(query: string, location?: Rest
   try {
     const { placesLibrary } = await loadPlacesContext();
     const sessionToken = getAutocompleteSessionToken(placesLibrary);
+    const useNearbyBias = mode === "nearby" && !!location;
     const { suggestions } = await placesLibrary.AutocompleteSuggestion.fetchAutocompleteSuggestions({
       input: trimmedQuery,
       includedPrimaryTypes: ["restaurant"],
-      includedRegionCodes: ["KR"],
       language: "ko",
-      region: "kr",
-      locationBias: ensureLocationBias(location),
-      origin: location ?? undefined,
+      locationBias: useNearbyBias ? ensureLocationBias(location) : undefined,
+      origin: useNearbyBias ? (location ?? undefined) : undefined,
       sessionToken,
     });
 
@@ -137,7 +146,6 @@ export async function fetchRestaurantPlaceDetails(placeId: string) {
     const place = new placesLibrary.Place({
       id: placeId,
       requestedLanguage: "ko",
-      requestedRegion: "kr",
     });
     const details = await place.fetchFields({
       fields: ["displayName", "formattedAddress", "location", "id"],
