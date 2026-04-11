@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -122,17 +123,18 @@ function getHiddenContributionCardNames() {
 }
 
 export function ContributionPage() {
+  const evaluationYear = useTeamLeadEvaluationYear();
   const [cards, setCards] = useState<ContributionPersonCard[]>([]);
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [manualDrafts, setManualDrafts] = useState<ManualEditorState>({});
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
-  const [period, setPeriod] = useState(() => getContributionPeriod());
+  const [period, setPeriod] = useState(() => getContributionPeriod(evaluationYear));
 
   const syncFromCache = useCallback(() => {
     const users = getUsers();
     const hiddenNames = getHiddenContributionCardNames();
-    const contributionCards = getContributionCards();
+    const contributionCards = getContributionCards(evaluationYear);
     const cardMap = new Map(contributionCards.map((card) => [card.name, card] as const));
 
     const merged = Array.from(
@@ -158,8 +160,8 @@ export function ContributionPage() {
         (left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko"),
       ),
     );
-    setPeriod(getContributionPeriod());
-  }, []);
+    setPeriod(getContributionPeriod(evaluationYear));
+  }, [evaluationYear]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -229,7 +231,7 @@ export function ContributionPage() {
       }))
       .filter((item) => item.label);
 
-    updateContributionManualItems(editingName, items);
+    updateContributionManualItems(editingName, items, evaluationYear);
     setMessage({ tone: "ok", text: "기여도 수동 점수를 저장했습니다." });
     setEditingName(null);
     setManualDrafts((current) => {
@@ -259,6 +261,7 @@ export function ContributionPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">팀 기여도</div>
           <strong style={{ fontSize: 24 }}>팀 기여도</strong>
+          <span className="muted" style={{ fontSize: 13 }}>{period.label}</span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="btn" onClick={handlePrint} disabled={cards.length === 0}>
               인쇄

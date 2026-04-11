@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import {
   getTeamLeadReferenceNotesWorkspace,
   saveTeamLeadReferenceNotes,
@@ -27,6 +28,7 @@ function getRoleLabel(role: TeamLeadReferenceNoteCard["role"]) {
 }
 
 export function ReferenceNotesPage() {
+  const evaluationYear = useTeamLeadEvaluationYear();
   const [cards, setCards] = useState<TeamLeadReferenceNoteCard[]>([]);
   const [draftItems, setDraftItems] = useState<Record<string, TeamLeadReferenceNoteItem[]>>({});
   const [loading, setLoading] = useState(true);
@@ -36,7 +38,7 @@ export function ReferenceNotesPage() {
   async function refresh() {
     setLoading(true);
     try {
-      const workspace = await getTeamLeadReferenceNotesWorkspace();
+      const workspace = await getTeamLeadReferenceNotesWorkspace(evaluationYear);
       setCards(workspace.cards);
       setDraftItems(
         Object.fromEntries(
@@ -59,7 +61,7 @@ export function ReferenceNotesPage() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [evaluationYear]);
 
   const cardsWithDrafts = useMemo(
     () =>
@@ -105,7 +107,7 @@ export function ReferenceNotesPage() {
 
   const saveCard = async (profileId: string) => {
     setSavingProfileId(profileId);
-    const result = await saveTeamLeadReferenceNotes(profileId, draftItems[profileId] ?? []);
+    const result = await saveTeamLeadReferenceNotes(profileId, draftItems[profileId] ?? [], evaluationYear);
     setMessage({
       tone: result.ok ? "ok" : "warn",
       text: result.message,
@@ -122,6 +124,9 @@ export function ReferenceNotesPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">참고사항</div>
           <strong style={{ fontSize: 24 }}>참고사항</strong>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
+          </span>
           <div className="status note">팀장을 제외한 가입자 기준 사람카드입니다. 카드마다 참고 항목을 추가하고 저장할 수 있습니다.</div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>

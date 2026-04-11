@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument, TeamLeadPrintPage } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
@@ -338,6 +339,7 @@ function FinalCutSummaryTable({ rows }: { rows: TeamLeadFinalCutSummaryRow[] }) 
 }
 
 export function OverallScoreSummaryPage() {
+  const evaluationYear = useTeamLeadEvaluationYear();
   const [cards, setCards] = useState<TeamLeadOverallScoreCard[]>([]);
   const [videoReviewRows, setVideoReviewRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
   const [contributionRows, setContributionRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
@@ -345,11 +347,11 @@ export function OverallScoreSummaryPage() {
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   const syncFromCache = useCallback(() => {
-    setCards(getOverallScoreCards());
-    setVideoReviewRows(getVideoReviewSummaryRows());
-    setContributionRows(getContributionSummaryRows());
-    setFinalCutRows(getFinalCutSummaryRows());
-  }, []);
+    setCards(getOverallScoreCards(evaluationYear));
+    setVideoReviewRows(getVideoReviewSummaryRows(evaluationYear));
+    setContributionRows(getContributionSummaryRows(evaluationYear));
+    setFinalCutRows(getFinalCutSummaryRows(evaluationYear));
+  }, [evaluationYear]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -428,6 +430,9 @@ export function OverallScoreSummaryPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">종합점수</div>
           <strong style={{ fontSize: 24 }}>종합점수</strong>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
+          </span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="btn" onClick={handlePrint} disabled={cards.length === 0}>
               인쇄

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
@@ -82,18 +83,9 @@ function buildOverallScorePagePrintBody(cards: TeamLeadOverallScoreCard[]) {
     </table>`;
 }
 
-function getPrintEvaluationMeta(baseDate = new Date()) {
-  const month = baseDate.getMonth() + 1;
-  const year = baseDate.getFullYear();
-
-  if (month >= 6 && month <= 10) {
-    return {
-      label: `${year}년 중간 평가`,
-    };
-  }
-
+function getPrintEvaluationMeta(evaluationYear: number) {
   return {
-    label: `${month <= 5 ? year - 1 : year}년 최종 평가`,
+    label: `${evaluationYear}년 평가`,
   };
 }
 
@@ -274,8 +266,9 @@ function buildPrintHtml(
   videoReviewRows: TeamLeadWeightedQuarterSummaryRow[],
   contributionRows: TeamLeadWeightedQuarterSummaryRow[],
   finalCutRows: TeamLeadFinalCutSummaryRow[],
+  evaluationYear: number,
 ) {
-  const evaluationMeta = getPrintEvaluationMeta();
+  const evaluationMeta = getPrintEvaluationMeta(evaluationYear);
   const printedAt = formatPrintDateLabel();
 
   return `<!doctype html>
@@ -385,6 +378,7 @@ function buildPrintHtml(
 }
 
 export function OverallScorePage() {
+  const evaluationYear = useTeamLeadEvaluationYear();
   const [cards, setCards] = useState<TeamLeadOverallScoreCard[]>([]);
   const [videoReviewRows, setVideoReviewRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
   const [contributionRows, setContributionRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
@@ -394,11 +388,11 @@ export function OverallScorePage() {
   const lastFocusRefreshAtRef = useRef(0);
 
   const syncFromCache = useCallback(() => {
-    setCards(getOverallScoreCards());
-    setVideoReviewRows(getVideoReviewSummaryRows());
-    setContributionRows(getContributionSummaryRows());
-    setFinalCutRows(getFinalCutSummaryRows());
-  }, []);
+    setCards(getOverallScoreCards(evaluationYear));
+    setVideoReviewRows(getVideoReviewSummaryRows(evaluationYear));
+    setContributionRows(getContributionSummaryRows(evaluationYear));
+    setFinalCutRows(getFinalCutSummaryRows(evaluationYear));
+  }, [evaluationYear]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -502,7 +496,7 @@ export function OverallScorePage() {
       return;
     }
 
-    const html = buildPrintHtml(selectedName, cards, videoReviewRows, contributionRows, finalCutRows);
+    const html = buildPrintHtml(selectedName, cards, videoReviewRows, contributionRows, finalCutRows, evaluationYear);
     printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
@@ -527,6 +521,9 @@ export function OverallScorePage() {
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">개인별 점수</div>
           <strong style={{ fontSize: 24 }}>개인별 점수</strong>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
+          </span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="btn" onClick={handlePagePrint} disabled={cards.length === 0}>
               인쇄

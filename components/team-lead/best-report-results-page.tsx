@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { subscribeToReviewWorkspaceChanges } from "@/lib/portal/data";
+import { getTeamLeadEvaluationYear } from "@/lib/team-lead/evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { refreshScoreboardState } from "@/lib/team-lead/scoreboard";
 import {
@@ -58,6 +60,9 @@ function buildBestReportPrintBody(reviewers: TeamLeadBestReportReviewer[], rows:
 }
 
 export function BestReportResultsPage() {
+  const evaluationYear = useTeamLeadEvaluationYear();
+  const currentEvaluationYear = getTeamLeadEvaluationYear();
+  const isCurrentEvaluationYear = evaluationYear === currentEvaluationYear;
   const [reviewers, setReviewers] = useState<TeamLeadBestReportReviewer[]>([]);
   const [rows, setRows] = useState<TeamLeadBestReportResultsRow[]>([]);
   const [reviewerDetails, setReviewerDetails] = useState<TeamLeadBestReportReviewerDetailRow[]>([]);
@@ -125,15 +130,39 @@ export function BestReportResultsPage() {
     };
   }, []);
 
-  const selectedQuarter = useMemo(
-    () => savedQuarters.find((quarter) => quarter.key === selectedResultKey) ?? null,
-    [savedQuarters, selectedResultKey],
+  const visibleSavedQuarters = useMemo(
+    () => savedQuarters.filter((quarter) => quarter.year === evaluationYear),
+    [evaluationYear, savedQuarters],
   );
 
-  const displayedReviewers = selectedQuarter?.reviewers ?? reviewers;
-  const displayedRows = selectedQuarter?.rows ?? rows;
-  const displayedReviewerDetails = selectedQuarter?.reviewerDetails ?? reviewerDetails;
-  const selectedResultLabel = selectedQuarter ? selectedQuarter.label : "현재 결과";
+  useEffect(() => {
+    setSelectedResultKey((current) => {
+      if (isCurrentEvaluationYear) {
+        return current === "current" || visibleSavedQuarters.some((quarter) => quarter.key === current) ? current : "current";
+      }
+      return visibleSavedQuarters.some((quarter) => quarter.key === current)
+        ? current
+        : (visibleSavedQuarters[0]?.key ?? "current");
+    });
+  }, [isCurrentEvaluationYear, visibleSavedQuarters]);
+
+  const selectedQuarter = useMemo(
+    () => visibleSavedQuarters.find((quarter) => quarter.key === selectedResultKey) ?? null,
+    [selectedResultKey, visibleSavedQuarters],
+  );
+
+  const displayedReviewers =
+    selectedQuarter?.reviewers ?? (isCurrentEvaluationYear && selectedResultKey === "current" ? reviewers : []);
+  const displayedRows =
+    selectedQuarter?.rows ?? (isCurrentEvaluationYear && selectedResultKey === "current" ? rows : []);
+  const displayedReviewerDetails =
+    selectedQuarter?.reviewerDetails ??
+    (isCurrentEvaluationYear && selectedResultKey === "current" ? reviewerDetails : []);
+  const selectedResultLabel = selectedQuarter
+    ? selectedQuarter.label
+    : isCurrentEvaluationYear && selectedResultKey === "current"
+      ? "현재 결과"
+      : `${evaluationYear}년 저장 결과`;
 
   useEffect(() => {
     setSelectedReviewerId((current) => {
@@ -171,7 +200,8 @@ export function BestReportResultsPage() {
     [displayedRows],
   );
 
-  const canSaveQuarter = selectedResultKey === "current" && completedRowCount > 0 && !loading && !savingQuarter;
+  const canSaveQuarter =
+    isCurrentEvaluationYear && selectedResultKey === "current" && completedRowCount > 0 && !loading && !savingQuarter;
   const handlePrint = () => {
     const ok = printTeamLeadDocument("영상평가 결과", [
       {
@@ -209,37 +239,42 @@ export function BestReportResultsPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">영상평가 결과</div>
           <strong style={{ fontSize: 24 }}>{selectedResultLabel} 영상평가 결과</strong>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
+          </span>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button type="button" className="btn" onClick={handlePrint} disabled={loading || displayedRows.length === 0}>
               인쇄
             </button>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={!canSaveQuarter}
-              onClick={async () => {
-                setSavingQuarter(true);
-                try {
-                  const result = await saveCurrentBestReportResultsAsNextQuarter();
-                  if (result.ok) {
-                    setSelectedResultKey(result.savedQuarter.key);
-                    await refreshScoreboardState();
-                    await refresh();
-                    setMessage({ tone: "ok", text: result.message });
-                  } else {
-                    setMessage({ tone: "warn", text: result.message });
+            {isCurrentEvaluationYear ? (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={!canSaveQuarter}
+                onClick={async () => {
+                  setSavingQuarter(true);
+                  try {
+                    const result = await saveCurrentBestReportResultsAsNextQuarter();
+                    if (result.ok) {
+                      setSelectedResultKey(result.savedQuarter.key);
+                      await refreshScoreboardState();
+                      await refresh();
+                      setMessage({ tone: "ok", text: result.message });
+                    } else {
+                      setMessage({ tone: "warn", text: result.message });
+                    }
+                  } finally {
+                    setSavingQuarter(false);
                   }
-                } finally {
-                  setSavingQuarter(false);
-                }
-              }}
-            >
-              {savingQuarter ? `${nextQuarterLabel} 저장 중...` : `${nextQuarterLabel} 결과 저장`}
-            </button>
+                }}
+              >
+                {savingQuarter ? `${nextQuarterLabel} 저장 중...` : `${nextQuarterLabel} 결과 저장`}
+              </button>
+            ) : null}
             <span className="muted">
-              {selectedResultKey === "current"
+              {isCurrentEvaluationYear && selectedResultKey === "current"
                 ? `저장하면 현재 결과를 ${nextQuarterLabel} 스냅샷으로 보관하고, 결과 페이지는 비워져 다음 분기 데이터를 새로 받습니다.`
-                : "저장된 분기 결과를 보고 있는 중입니다. 다시 누르면 현재 결과로 돌아갑니다."}
+                : `${evaluationYear}년 저장 결과를 보고 있는 중입니다.`}
             </span>
           </div>
           <div className="status note">
@@ -258,42 +293,46 @@ export function BestReportResultsPage() {
           <div className="chip">저장된 분기</div>
           <strong style={{ fontSize: 22 }}>저장된 영상평가 결과</strong>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() => setSelectedResultKey("current")}
-              style={{
-                display: "grid",
-                gap: 4,
-                minWidth: 160,
-                padding: "12px 14px",
-                borderRadius: 16,
-                border:
-                  selectedResultKey === "current"
-                    ? "1px solid rgba(56,189,248,.55)"
-                    : "1px solid rgba(255,255,255,.08)",
-                background:
-                  selectedResultKey === "current"
-                    ? "rgba(14,165,233,.16)"
-                    : "rgba(255,255,255,.04)",
-                color: "#f8fbff",
-                textAlign: "left",
-                cursor: "pointer",
-              }}
-            >
-              <strong>현재 결과</strong>
-              <span className="muted" style={{ fontSize: 12 }}>
-                피평가자 {rows.length}명
-              </span>
-            </button>
-            {savedQuarters.length > 0 ? (
-              [...savedQuarters]
+            {isCurrentEvaluationYear ? (
+              <button
+                type="button"
+                onClick={() => setSelectedResultKey("current")}
+                style={{
+                  display: "grid",
+                  gap: 4,
+                  minWidth: 160,
+                  padding: "12px 14px",
+                  borderRadius: 16,
+                  border:
+                    selectedResultKey === "current"
+                      ? "1px solid rgba(56,189,248,.55)"
+                      : "1px solid rgba(255,255,255,.08)",
+                  background:
+                    selectedResultKey === "current"
+                      ? "rgba(14,165,233,.16)"
+                      : "rgba(255,255,255,.04)",
+                  color: "#f8fbff",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <strong>현재 결과</strong>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  피평가자 {rows.length}명
+                </span>
+              </button>
+            ) : null}
+            {visibleSavedQuarters.length > 0 ? (
+              [...visibleSavedQuarters]
                 .sort((left, right) => right.year - left.year || right.quarter - left.quarter)
                 .map((quarter) => (
                   <button
                     key={quarter.key}
                     type="button"
                     onClick={() =>
-                      setSelectedResultKey((current) => (current === quarter.key ? "current" : quarter.key))
+                      setSelectedResultKey((current) =>
+                        current === quarter.key ? (isCurrentEvaluationYear ? "current" : quarter.key) : quarter.key,
+                      )
                     }
                     style={{
                       display: "grid",
@@ -324,7 +363,7 @@ export function BestReportResultsPage() {
                   </button>
                 ))
             ) : (
-              <div className="status note">아직 저장된 분기 결과가 없습니다.</div>
+              <div className="status note">{evaluationYear}년 저장된 분기 결과가 없습니다.</div>
             )}
           </div>
         </div>

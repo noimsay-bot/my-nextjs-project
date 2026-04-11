@@ -3,6 +3,7 @@
 import { getUsers } from "@/lib/auth/storage";
 import {
   buildScheduleAssignmentNameTagKey,
+  defaultPointers,
   getScheduleCategoryLabel,
 } from "@/lib/schedule/constants";
 import { getPublishedSchedules } from "@/lib/schedule/published";
@@ -14,6 +15,10 @@ import {
   getSupabaseStorageErrorMessage,
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
+import {
+  getTeamLeadEvaluationPeriod,
+  getTeamLeadEvaluationYear,
+} from "@/lib/team-lead/evaluation-year";
 
 export type AssignmentTimeColor = "" | "red" | "blue" | "yellow";
 export type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
@@ -80,10 +85,12 @@ export interface ScheduleAssignmentVisibleTripTag {
 }
 
 export interface ContributionPeriod {
+  evaluationYear: number;
   startMonthKey: string;
   endMonthKey: string;
   startLabel: string;
   endLabel: string;
+  label: string;
 }
 
 export interface ContributionScoreItem {
@@ -143,6 +150,10 @@ export interface ScheduleAssignmentDayRows {
 export type ScheduleAssignmentMonthStore = Record<string, ScheduleAssignmentEntry>;
 export type ScheduleAssignmentStore = Record<string, ScheduleAssignmentMonthStore>;
 export type ScheduleAssignmentRowStore = Record<string, Record<string, ScheduleAssignmentDayRows>>;
+type ContributionManualYearStore = Record<string, ContributionManualItem[]>;
+type ContributionManualStore = Record<string, ContributionManualYearStore>;
+type ReferenceNotesYearStore = Record<string, TeamLeadReferenceNoteItem[]>;
+type ReferenceNotesStore = Record<string, ReferenceNotesYearStore>;
 
 export interface ScheduleAssignmentDataStore {
   entries: ScheduleAssignmentStore;
@@ -175,7 +186,7 @@ interface TeamLeadStateRow {
 }
 
 let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} };
-let contributionManualCache = {} as Record<string, ContributionManualItem[]>;
+let contributionManualCache = {} as ContributionManualStore;
 let finalCutCache = {} as Record<string, FinalCutDecision>;
 let submissionAccessCache = false;
 let teamLeadRefreshPromise: Promise<void> | null = null;
@@ -667,8 +678,8 @@ function normalizeContributionManualItem(item: Partial<ContributionManualItem> |
   };
 }
 
-function normalizeContributionManualStore(store: unknown) {
-  if (!store || typeof store !== "object") return {} as Record<string, ContributionManualItem[]>;
+function normalizeContributionManualYearStore(store: unknown) {
+  if (!store || typeof store !== "object") return {} as ContributionManualYearStore;
   return Object.fromEntries(
     Object.entries(store as Record<string, unknown>).map(([name, items]) => [
       name,
@@ -678,19 +689,50 @@ function normalizeContributionManualStore(store: unknown) {
             .filter((item): item is ContributionManualItem => Boolean(item))
         : [],
     ]),
-  ) as Record<string, ContributionManualItem[]>;
+  ) as ContributionManualYearStore;
 }
 
-export function getContributionManualStore() {
+function normalizeContributionManualStore(store: unknown) {
+  if (!store || typeof store !== "object") return {} as ContributionManualStore;
+  const record = store as Record<string, unknown>;
+  const hasLegacyShape = Object.values(record).some((value) => Array.isArray(value));
+
+  if (hasLegacyShape) {
+    return {
+      [String(getTeamLeadEvaluationYear())]: normalizeContributionManualYearStore(record),
+    } satisfies ContributionManualStore;
+  }
+
+  return Object.fromEntries(
+    Object.entries(record).map(([yearKey, yearStore]) => [yearKey, normalizeContributionManualYearStore(yearStore)]),
+  ) as ContributionManualStore;
+}
+
+function getAllContributionManualStore() {
   return normalizeContributionManualStore(contributionManualCache);
 }
 
-export function saveContributionManualStore(store: Record<string, ContributionManualItem[]>) {
-  const normalized = normalizeContributionManualStore(store);
-  const previous = normalizeContributionManualStore(contributionManualCache);
-  contributionManualCache = normalized;
+export function getContributionManualStore(evaluationYear = getTeamLeadEvaluationYear()) {
+  return normalizeContributionManualYearStore(getAllContributionManualStore()[String(evaluationYear)] ?? {});
+}
+
+export function saveContributionManualStore(
+  store: ContributionManualYearStore,
+  evaluationYear = getTeamLeadEvaluationYear(),
+) {
+  const previous = getAllContributionManualStore();
+  const normalizedYearStore = normalizeContributionManualYearStore(store);
+  const next = { ...previous };
+
+  if (Object.keys(normalizedYearStore).length > 0) {
+    next[String(evaluationYear)] = normalizedYearStore;
+  } else {
+    delete next[String(evaluationYear)];
+  }
+
+  contributionManualCache = next;
   emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
-  return persistTeamLeadState(TEAM_LEAD_CONTRIBUTION_STATE_KEY, normalized).catch(async (error) => {
+  return persistTeamLeadState(TEAM_LEAD_CONTRIBUTION_STATE_KEY, next).catch(async (error) => {
     emitTeamLeadStorageStatus({
       ok: false,
       message: error instanceof Error ? error.message : "기여도 수동 점수 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
@@ -701,17 +743,21 @@ export function saveContributionManualStore(store: Record<string, ContributionMa
   });
 }
 
-export function updateContributionManualItems(name: string, items: ContributionManualItem[]) {
+export function updateContributionManualItems(
+  name: string,
+  items: ContributionManualItem[],
+  evaluationYear = getTeamLeadEvaluationYear(),
+) {
   const trimmedName = name.trim();
   if (!trimmedName) return;
-  const store = getContributionManualStore();
+  const store = getContributionManualStore(evaluationYear);
   const next = {
     ...store,
     [trimmedName]: items
       .map((item) => normalizeContributionManualItem(item))
       .filter((item): item is ContributionManualItem => Boolean(item)),
   };
-  saveContributionManualStore(next);
+  void saveContributionManualStore(next, evaluationYear);
 }
 
 function normalizeFinalCutDecision(value: unknown): FinalCutDecision {
@@ -779,16 +825,12 @@ function shouldIncludeFinalCutDuty(duty: string) {
   return Boolean(normalized) && normalized !== "석근";
 }
 
-export function getContributionPeriod(baseDate = new Date()): ContributionPeriod {
-  const year = baseDate.getFullYear();
-  const startMonthKey = `${year - 1}-12`;
-  const endMonthKey = `${year}-11`;
-  return {
-    startMonthKey,
-    endMonthKey,
-    startLabel: `${year - 1}년 12월`,
-    endLabel: `${year}년 11월`,
-  };
+function resolveTeamLeadEvaluationYear(baseDateOrYear: Date | number = new Date()) {
+  return typeof baseDateOrYear === "number" ? baseDateOrYear : getTeamLeadEvaluationYear(baseDateOrYear);
+}
+
+export function getContributionPeriod(baseDateOrYear: Date | number = new Date()): ContributionPeriod {
+  return getTeamLeadEvaluationPeriod(resolveTeamLeadEvaluationYear(baseDateOrYear));
 }
 
 function isMonthKeyInContributionPeriod(monthKey: string, period: ContributionPeriod) {
@@ -833,6 +875,137 @@ function buildContributionItem(
 
 function getGeneratedHistorySchedules() {
   return readStoredScheduleState().generatedHistory;
+}
+
+function createSyntheticScheduleDay(date: Date): DaySchedule {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const dow = date.getDay();
+
+  return {
+    dateKey: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    day,
+    month,
+    year,
+    dow,
+    isWeekend: dow === 0 || dow === 6,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: {},
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  };
+}
+
+function buildSyntheticScheduleFromAssignmentMonth(
+  monthKey: string,
+  store: ScheduleAssignmentDataStore,
+): GeneratedSchedule | null {
+  const [yearText, monthText] = monthKey.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const days = Array.from({ length: lastDay }, (_, index) =>
+    createSyntheticScheduleDay(new Date(year, month - 1, index + 1)),
+  );
+  const dayMap = new Map(days.map((day) => [day.dateKey, day] as const));
+  const groupedAssignments = new Map<string, Map<string, Array<{ index: number; name: string }>>>();
+  const monthEntries = store.entries[monthKey] ?? {};
+  const knownCategories = new Set([
+    "조근",
+    "일반",
+    "연장",
+    "석근",
+    "야근",
+    "제크",
+    "휴가",
+    "청와대",
+    "국회",
+    "청사",
+    "주말조근",
+    "주말일반근무",
+    "뉴스대기",
+    "국방부",
+    "서울청사",
+    "시청",
+    "법조",
+    "수원",
+    "국회지원",
+    "법조지원",
+    "국내출장",
+    "해외출장",
+    "오전반차",
+    "오후반차",
+    "대기",
+    "데스크",
+    "철야",
+  ]);
+
+  Object.keys(monthEntries).forEach((rowKey) => {
+    const parsed = parseScheduleAssignmentRowKey(rowKey);
+    if (!parsed || !parsed.name || !parsed.dateKey.startsWith(`${monthKey}-`)) {
+      return;
+    }
+
+    if (!dayMap.has(parsed.dateKey)) {
+      return;
+    }
+
+    const dayAssignments = groupedAssignments.get(parsed.dateKey) ?? new Map<string, Array<{ index: number; name: string }>>();
+    const categoryAssignments = dayAssignments.get(parsed.category) ?? [];
+    categoryAssignments.push({ index: Number.isFinite(parsed.index) ? parsed.index : categoryAssignments.length, name: parsed.name });
+    dayAssignments.set(parsed.category, categoryAssignments);
+    groupedAssignments.set(parsed.dateKey, dayAssignments);
+  });
+
+  groupedAssignments.forEach((categories, dateKey) => {
+    const day = dayMap.get(dateKey);
+    if (!day) return;
+
+    categories.forEach((items, category) => {
+      const names = items
+        .sort((left, right) => left.index - right.index)
+        .map((item) => item.name.trim())
+        .filter(Boolean);
+      if (names.length === 0) return;
+      day.assignments[category] = names;
+    });
+
+    if (day.assignments["휴가"]?.length) {
+      day.vacations = [...day.assignments["휴가"]];
+    }
+
+    day.manualExtras = Object.keys(day.assignments).filter((category) => !knownCategories.has(category));
+  });
+
+  const nextStartDate = new Date(year, month, 1);
+  return {
+    year,
+    month,
+    monthKey,
+    days,
+    nextPointers: { ...defaultPointers },
+    nextStartDate: `${nextStartDate.getFullYear()}-${String(nextStartDate.getMonth() + 1).padStart(2, "0")}-${String(nextStartDate.getDate()).padStart(2, "0")}`,
+  };
+}
+
+function getAssignmentOnlySchedules(store: ScheduleAssignmentDataStore, existingMonthKeys: Set<string>) {
+  const monthKeys = Array.from(new Set([...Object.keys(store.entries), ...Object.keys(store.rows)]))
+    .filter((monthKey) => !existingMonthKeys.has(monthKey))
+    .sort((left, right) => left.localeCompare(right));
+
+  return monthKeys
+    .map((monthKey) => buildSyntheticScheduleFromAssignmentMonth(monthKey, store))
+    .filter((schedule): schedule is GeneratedSchedule => Boolean(schedule));
 }
 
 function parseScheduleAssignmentRowKey(rowKey: string) {
@@ -922,6 +1095,7 @@ export function applyScheduleAssignmentNameTagsToSchedules(
 }
 
 export function getTeamLeadSchedules() {
+  const store = getScheduleAssignmentStore();
   const published = getPublishedSchedules().map((item) => item.schedule);
   const generated = getGeneratedHistorySchedules();
   const merged = new Map<string, GeneratedSchedule>();
@@ -934,9 +1108,15 @@ export function getTeamLeadSchedules() {
       merged.set(schedule.monthKey, schedule);
     }
   });
+  getAssignmentOnlySchedules(store, new Set(merged.keys())).forEach((schedule) => {
+    if (!merged.has(schedule.monthKey)) {
+      merged.set(schedule.monthKey, schedule);
+    }
+  });
 
   return applyScheduleAssignmentNameTagsToSchedules(
     Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
+    store,
   );
 }
 
@@ -1251,11 +1431,12 @@ export function getFinalCutCards(monthKey?: string) {
     .sort((left, right) => left.name.localeCompare(right.name, "ko"));
 }
 
-export function getContributionCards(baseDate = new Date()) {
-  const period = getContributionPeriod(baseDate);
+export function getContributionCards(baseDateOrYear: Date | number = new Date()) {
+  const evaluationYear = resolveTeamLeadEvaluationYear(baseDateOrYear);
+  const period = getContributionPeriod(evaluationYear);
   const schedules = getTeamLeadSchedules().filter((schedule) => isMonthKeyInContributionPeriod(schedule.monthKey, period));
   const store = getScheduleAssignmentStore();
-  const manualStore = getContributionManualStore();
+  const manualStore = getContributionManualStore(evaluationYear);
   const hiddenNames = new Set(
     getUsers()
       .filter((user) => user.role === "team_lead" || user.role === "desk")
@@ -1599,14 +1780,30 @@ function normalizeReferenceNoteItems(raw: unknown) {
     .filter((item): item is TeamLeadReferenceNoteItem => Boolean(item));
 }
 
-function normalizeReferenceNotesState(raw: unknown) {
-  if (!raw || typeof raw !== "object") return {} as Record<string, TeamLeadReferenceNoteItem[]>;
+function normalizeReferenceNotesProfileStore(raw: unknown) {
+  if (!raw || typeof raw !== "object") return {} as ReferenceNotesYearStore;
   return Object.fromEntries(
     Object.entries(raw as Record<string, unknown>).map(([profileId, items]) => [
       profileId,
       normalizeReferenceNoteItems(items),
     ]),
-  ) as Record<string, TeamLeadReferenceNoteItem[]>;
+  ) as ReferenceNotesYearStore;
+}
+
+function normalizeReferenceNotesState(raw: unknown) {
+  if (!raw || typeof raw !== "object") return {} as ReferenceNotesStore;
+  const record = raw as Record<string, unknown>;
+  const hasLegacyShape = Object.values(record).some((value) => Array.isArray(value));
+
+  if (hasLegacyShape) {
+    return {
+      [String(getTeamLeadEvaluationYear())]: normalizeReferenceNotesProfileStore(record),
+    } satisfies ReferenceNotesStore;
+  }
+
+  return Object.fromEntries(
+    Object.entries(record).map(([yearKey, yearStore]) => [yearKey, normalizeReferenceNotesProfileStore(yearStore)]),
+  ) as ReferenceNotesStore;
 }
 
 async function getGrantedReviewerProfileIds() {
@@ -1768,7 +1965,7 @@ function getNextBestReportQuarterTarget(
 ): TeamLeadBestReportQuarterTarget {
   const latest = snapshots[snapshots.length - 1];
   if (!latest) {
-    const year = new Date().getFullYear();
+    const year = getTeamLeadEvaluationYear();
     return {
       year,
       quarter: 1,
@@ -1986,7 +2183,9 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
   };
 }
 
-export async function getTeamLeadReferenceNotesWorkspace(): Promise<TeamLeadReferenceNotesWorkspace> {
+export async function getTeamLeadReferenceNotesWorkspace(
+  evaluationYear = getTeamLeadEvaluationYear(),
+): Promise<TeamLeadReferenceNotesWorkspace> {
   const session = await getPrivilegedPortalSession();
   if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
     throw new Error("참고사항 조회 권한이 없습니다.");
@@ -2019,7 +2218,7 @@ export async function getTeamLeadReferenceNotesWorkspace(): Promise<TeamLeadRefe
     }
   }
 
-  const noteMap = normalizeReferenceNotesState(stateRow?.state);
+  const noteMap = normalizeReferenceNotesState(stateRow?.state)[String(evaluationYear)] ?? {};
 
   return {
     cards: (profiles ?? []).map((profile) => ({
@@ -2037,6 +2236,7 @@ export async function getTeamLeadReferenceNotesWorkspace(): Promise<TeamLeadRefe
 export async function saveTeamLeadReferenceNotes(
   profileId: string,
   items: TeamLeadReferenceNoteItem[],
+  evaluationYear = getTeamLeadEvaluationYear(),
 ) {
   const session = await getPrivilegedPortalSession();
   if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
@@ -2056,10 +2256,20 @@ export async function saveTeamLeadReferenceNotes(
   }
 
   const nextState = normalizeReferenceNotesState(stateRow?.state);
+  const yearKey = String(evaluationYear);
+  const nextYearState = {
+    ...(nextState[yearKey] ?? {}),
+  };
   if (normalizedItems.length > 0) {
-    nextState[profileId] = normalizedItems;
+    nextYearState[profileId] = normalizedItems;
   } else {
-    delete nextState[profileId];
+    delete nextYearState[profileId];
+  }
+
+  if (Object.keys(nextYearState).length > 0) {
+    nextState[yearKey] = nextYearState;
+  } else {
+    delete nextState[yearKey];
   }
 
   try {

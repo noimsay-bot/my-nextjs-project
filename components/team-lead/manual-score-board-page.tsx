@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
@@ -66,8 +67,10 @@ function normalizeScore(value: string) {
   return Math.round(parsed * 10) / 10;
 }
 
-function getCards(category: TeamLeadManualScoreCategory) {
-  return category === "broadcastAccident" ? getBroadcastAccidentCards() : getLiveSafetyCards();
+function getCards(category: TeamLeadManualScoreCategory, evaluationYear: number) {
+  return category === "broadcastAccident"
+    ? getBroadcastAccidentCards(evaluationYear)
+    : getLiveSafetyCards(evaluationYear);
 }
 
 function buildManualScorePrintBody(cards: TeamLeadManualScoreCard[]) {
@@ -111,14 +114,15 @@ export function ManualScoreBoardPage({
   description: string;
   category: TeamLeadManualScoreCategory;
 }) {
+  const evaluationYear = useTeamLeadEvaluationYear();
   const [cards, setCards] = useState<TeamLeadManualScoreCard[]>([]);
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftState>({});
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
   const syncFromCache = useCallback(() => {
-    setCards(getCards(category));
-  }, [category]);
+    setCards(getCards(category, evaluationYear));
+  }, [category, evaluationYear]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -191,7 +195,7 @@ export function ManualScoreBoardPage({
       }))
       .filter((item) => item.label);
 
-    updateTeamLeadManualScoreItems(category, editingName, items);
+    updateTeamLeadManualScoreItems(category, editingName, items, evaluationYear);
     setMessage({ tone: "ok", text: "수동 점수를 저장했습니다." });
     setEditingName(null);
     setDrafts((current) => {
@@ -213,8 +217,8 @@ export function ManualScoreBoardPage({
       return;
     }
 
-    const nextItems = getTeamLeadManualScoreItems(category, cardName).filter((item) => item.id !== itemId);
-    updateTeamLeadManualScoreItems(category, cardName, nextItems);
+    const nextItems = getTeamLeadManualScoreItems(category, cardName, evaluationYear).filter((item) => item.id !== itemId);
+    updateTeamLeadManualScoreItems(category, cardName, nextItems, evaluationYear);
     setMessage({ tone: "ok", text: "항목을 삭제했습니다." });
   };
 
@@ -238,6 +242,9 @@ export function ManualScoreBoardPage({
         <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
           <div className="chip">{title}</div>
           <strong style={{ fontSize: 24 }}>{title}</strong>
+          <span className="muted" style={{ fontSize: 13 }}>
+            {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
+          </span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" className="btn" onClick={handlePrint} disabled={cards.length === 0}>
               인쇄

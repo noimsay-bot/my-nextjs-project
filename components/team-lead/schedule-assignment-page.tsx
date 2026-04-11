@@ -7,9 +7,7 @@ import {
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import {
-  readStoredScheduleState,
   refreshScheduleState,
-  saveScheduleState,
   SCHEDULE_STATE_EVENT,
 } from "@/lib/schedule/storage";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
@@ -380,13 +378,10 @@ function isTruthyWorkbookFlag(value: string) {
 function normalizeImportedDutyLabel(value: string) {
   const normalized = value.replace(/\s+/g, "").trim();
   if (normalized === "대기") return "뉴스대기";
-  return normalized || "미정";
+  return normalized;
 }
 
 function getImportedTravelType(duty: string): AssignmentTravelType {
-  const normalized = duty.replace(/\s+/g, "").trim();
-  if (normalized === "국내출장") return "국내출장";
-  if (normalized === "해외출장") return "해외출장";
   return "";
 }
 
@@ -622,14 +617,12 @@ export function ScheduleAssignmentPage() {
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
-  const [isWorkbookImporting, setIsWorkbookImporting] = useState(false);
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
   const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
   const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
-  const workbookInputRef = useRef<HTMLInputElement | null>(null);
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const jumpToTodayPendingRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
@@ -758,94 +751,6 @@ export function ScheduleAssignmentPage() {
 
   const jumpToDate = (dateKey: string) => {
     scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
-  };
-
-  const handleWorkbookImport = async (file: File | null) => {
-    if (!file) return;
-
-    setIsWorkbookImporting(true);
-    setImportMessage({ tone: "note", text: "엑셀 파일을 읽는 중입니다." });
-
-    try {
-      const workbookBuffer = await file.arrayBuffer();
-      const XLSX = await import("xlsx");
-      const workbook = XLSX.read(workbookBuffer, { type: "array" });
-      if (workbook.SheetNames.length === 0) {
-        throw new Error("엑셀 시트를 찾지 못했습니다.");
-      }
-      const currentState = readStoredScheduleState();
-      const currentStore = getScheduleAssignmentStore();
-      const nextSchedules = [...currentState.generatedHistory];
-      const nextEntries = { ...currentStore.entries };
-      const nextRows = { ...currentStore.rows };
-      const importedLabels: string[] = [];
-      const skippedLabels: string[] = [];
-
-      workbook.SheetNames.forEach((sheetName) => {
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as string[][];
-        const previewText = rows
-          .slice(0, 12)
-          .flat()
-          .map((cell) => normalizeWorkbookCellText(cell))
-          .filter(Boolean)
-          .join(" ");
-        const monthKey = detectHistoricalImportMonthKey(`${file.name} ${sheetName} ${previewText}`);
-        if (!monthKey) return;
-
-        const monthMeta = historicalImportMonthMap[monthKey];
-        const alreadyExists =
-          schedules.some((schedule) => schedule.monthKey === monthKey) ||
-          nextSchedules.some((item) => item.monthKey === monthKey) ||
-          Boolean(nextEntries[monthKey]) ||
-          Boolean(nextRows[monthKey]);
-
-        if (alreadyExists) {
-          skippedLabels.push(`${monthMeta.label} 이미 있음`);
-          return;
-        }
-
-        const { schedule, monthEntries } = buildImportedMonthData(rows, monthMeta.year, monthMeta.month);
-        nextSchedules.push(schedule);
-        nextEntries[monthKey] = monthEntries;
-        nextRows[monthKey] = {};
-        importedLabels.push(monthMeta.label);
-      });
-
-      if (importedLabels.length === 0) {
-        throw new Error(
-          skippedLabels.length > 0
-            ? `가져온 데이터가 없습니다. ${skippedLabels.join(", ")}`
-            : "파일명 또는 시트명에서 2025년 12월~2026년 3월 과거데이터를 찾지 못했습니다.",
-        );
-      }
-
-      const nextState = {
-        ...currentState,
-        generatedHistory: nextSchedules.sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
-      };
-      await saveScheduleState(nextState);
-
-      const nextStore: ScheduleAssignmentDataStore = {
-        entries: nextEntries,
-        rows: nextRows,
-      };
-      await saveScheduleAssignmentStore(nextStore);
-
-      setSchedules(getTeamLeadSchedules());
-      setStore(getScheduleAssignmentStore());
-      setImportMessage({
-        tone: "ok",
-        text: `${importedLabels.join(", ")} 데이터를 추가했습니다.${skippedLabels.length > 0 ? ` ${skippedLabels.join(", ")}` : ""} 기존 데이터는 건드리지 않았습니다.`,
-      });
-    } catch (error) {
-      setImportMessage({
-        tone: "warn",
-        text: error instanceof Error ? error.message : "엑셀 가져오기에 실패했습니다.",
-      });
-    } finally {
-      setIsWorkbookImporting(false);
-    }
   };
 
   const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
@@ -1199,28 +1104,6 @@ export function ScheduleAssignmentPage() {
             </div>
           </div>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn"
-              disabled={isWorkbookImporting}
-              onClick={() => workbookInputRef.current?.click()}
-            >
-              {isWorkbookImporting ? "불러오는 중..." : "12월~3월 과거데이터 올리기"}
-            </button>
-            <input
-              ref={workbookInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              style={{ display: "none" }}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0] ?? null;
-                void handleWorkbookImport(file).finally(() => {
-                  event.currentTarget.value = "";
-                });
-              }}
-            />
-          </div>
           {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>

@@ -16,6 +16,7 @@ import {
   getTeamLeadBestReportResultsWorkspace,
   getTeamLeadSchedules,
 } from "@/lib/team-lead/storage";
+import { getTeamLeadEvaluationYear } from "@/lib/team-lead/evaluation-year";
 
 export const TEAM_LEAD_SCOREBOARD_EVENT = "j-team-lead-scoreboard-updated";
 const TEAM_LEAD_SCOREBOARD_STATE_KEY = "scoreboard_v1";
@@ -97,9 +98,9 @@ export interface TeamLeadFinalCutSummaryRow {
 }
 
 interface TeamLeadScoreboardStore {
-  broadcastAccident: Record<string, TeamLeadScoreItem[]>;
-  liveSafety: Record<string, TeamLeadScoreItem[]>;
-  selectedFinalCutQuarterKeys: string[];
+  broadcastAccident: Record<string, Record<string, TeamLeadScoreItem[]>>;
+  liveSafety: Record<string, Record<string, TeamLeadScoreItem[]>>;
+  selectedFinalCutQuarterKeys: Record<string, string[]>;
 }
 
 interface TeamLeadStateRow {
@@ -115,7 +116,6 @@ const SUMMARY_QUARTERS = [
 ] as const satisfies ReadonlyArray<{ key: TeamLeadSummaryQuarterKey; label: string }>;
 
 let scoreboardCache = createEmptyScoreboardStore();
-let videoReviewScoreCache = new Map<string, number>();
 let videoReviewQuarterCache: TeamLeadBestReportQuarterSnapshot[] = [];
 let scoreboardRefreshPromise: Promise<void> | null = null;
 
@@ -127,7 +127,7 @@ function createEmptyScoreboardStore(): TeamLeadScoreboardStore {
   return {
     broadcastAccident: {},
     liveSafety: {},
-    selectedFinalCutQuarterKeys: [],
+    selectedFinalCutQuarterKeys: {},
   };
 }
 
@@ -143,7 +143,7 @@ function normalizeScoreItem(item: Partial<TeamLeadScoreItem> | undefined): TeamL
   };
 }
 
-function normalizeManualScoreStore(store: unknown) {
+function normalizeManualScoreYearStore(store: unknown) {
   if (!store || typeof store !== "object") return {} as Record<string, TeamLeadScoreItem[]>;
 
   return Object.fromEntries(
@@ -158,6 +158,22 @@ function normalizeManualScoreStore(store: unknown) {
   ) as Record<string, TeamLeadScoreItem[]>;
 }
 
+function normalizeManualScoreStore(store: unknown) {
+  if (!store || typeof store !== "object") return {} as Record<string, Record<string, TeamLeadScoreItem[]>>;
+  const record = store as Record<string, unknown>;
+  const hasLegacyShape = Object.values(record).some((value) => Array.isArray(value));
+
+  if (hasLegacyShape) {
+    return {
+      [String(getTeamLeadEvaluationYear())]: normalizeManualScoreYearStore(record),
+    };
+  }
+
+  return Object.fromEntries(
+    Object.entries(record).map(([yearKey, yearStore]) => [yearKey, normalizeManualScoreYearStore(yearStore)]),
+  ) as Record<string, Record<string, TeamLeadScoreItem[]>>;
+}
+
 function normalizeSelectedQuarterKeys(value: unknown) {
   if (!Array.isArray(value)) return [] as string[];
 
@@ -167,6 +183,22 @@ function normalizeSelectedQuarterKeys(value: unknown) {
     .filter(Boolean);
 }
 
+function normalizeSelectedQuarterKeyStore(value: unknown) {
+  if (!value || typeof value !== "object") return {} as Record<string, string[]>;
+  const record = value as Record<string, unknown>;
+  const hasLegacyShape = Array.isArray(value);
+
+  if (hasLegacyShape) {
+    return {
+      [String(getTeamLeadEvaluationYear())]: normalizeSelectedQuarterKeys(value),
+    };
+  }
+
+  return Object.fromEntries(
+    Object.entries(record).map(([yearKey, quarterKeys]) => [yearKey, normalizeSelectedQuarterKeys(quarterKeys)]),
+  ) as Record<string, string[]>;
+}
+
 function normalizeScoreboardStore(store: unknown): TeamLeadScoreboardStore {
   if (!store || typeof store !== "object") return createEmptyScoreboardStore();
 
@@ -174,7 +206,7 @@ function normalizeScoreboardStore(store: unknown): TeamLeadScoreboardStore {
   return {
     broadcastAccident: normalizeManualScoreStore(record.broadcastAccident),
     liveSafety: normalizeManualScoreStore(record.liveSafety),
-    selectedFinalCutQuarterKeys: normalizeSelectedQuarterKeys(record.selectedFinalCutQuarterKeys),
+    selectedFinalCutQuarterKeys: normalizeSelectedQuarterKeyStore(record.selectedFinalCutQuarterKeys),
   };
 }
 
@@ -233,7 +265,6 @@ export async function refreshScoreboardState() {
     const session = await getPortalSession();
     if (!session?.approved) {
       scoreboardCache = createEmptyScoreboardStore();
-      videoReviewScoreCache = new Map();
       videoReviewQuarterCache = [];
 
       if (typeof window !== "undefined") {
@@ -258,7 +289,6 @@ export async function refreshScoreboardState() {
       if (isSupabaseSchemaMissingError(schemaError)) {
         console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_state"));
         scoreboardCache = createEmptyScoreboardStore();
-        videoReviewScoreCache = new Map();
         videoReviewQuarterCache = [];
 
         if (typeof window !== "undefined") {
@@ -288,14 +318,9 @@ export async function refreshScoreboardState() {
           ]
         : []),
     ];
-    const latestVideoReviewYear = Math.max(...effectiveVideoReviewQuarters.map((quarter) => quarter.year), 0);
-    videoReviewQuarterCache =
-      latestVideoReviewYear > 0
-        ? effectiveVideoReviewQuarters
-            .filter((quarter) => quarter.year === latestVideoReviewYear)
-            .sort((left, right) => left.quarter - right.quarter)
-        : [];
-    videoReviewScoreCache = buildVideoReviewScoreMapFromQuarters(videoReviewQuarterCache);
+    videoReviewQuarterCache = [...effectiveVideoReviewQuarters].sort(
+      (left, right) => left.year - right.year || left.quarter - right.quarter,
+    );
 
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(TEAM_LEAD_SCOREBOARD_EVENT));
@@ -307,19 +332,37 @@ export async function refreshScoreboardState() {
   return scoreboardRefreshPromise;
 }
 
-function getManualStoreByCategory(store: TeamLeadScoreboardStore, category: TeamLeadManualScoreCategory) {
-  return category === "broadcastAccident" ? store.broadcastAccident : store.liveSafety;
+function getManualStoreByCategory(
+  store: TeamLeadScoreboardStore,
+  category: TeamLeadManualScoreCategory,
+  evaluationYear = getTeamLeadEvaluationYear(),
+) {
+  const yearStore = category === "broadcastAccident" ? store.broadcastAccident : store.liveSafety;
+  return { ...(yearStore[String(evaluationYear)] ?? {}) };
 }
 
 function setManualStoreByCategory(
   store: TeamLeadScoreboardStore,
   category: TeamLeadManualScoreCategory,
   nextManualStore: Record<string, TeamLeadScoreItem[]>,
+  evaluationYear = getTeamLeadEvaluationYear(),
 ) {
   if (category === "broadcastAccident") {
-    return { ...store, broadcastAccident: nextManualStore };
+    return {
+      ...store,
+      broadcastAccident: {
+        ...store.broadcastAccident,
+        [String(evaluationYear)]: nextManualStore,
+      },
+    };
   }
-  return { ...store, liveSafety: nextManualStore };
+  return {
+    ...store,
+    liveSafety: {
+      ...store.liveSafety,
+      [String(evaluationYear)]: nextManualStore,
+    },
+  };
 }
 
 function getEligibleUsers() {
@@ -334,9 +377,13 @@ function getEligibleUsers() {
   ).sort((left, right) => left.localeCompare(right, "ko"));
 }
 
-export function getTeamLeadManualScoreItems(category: TeamLeadManualScoreCategory, name: string) {
+export function getTeamLeadManualScoreItems(
+  category: TeamLeadManualScoreCategory,
+  name: string,
+  evaluationYear = getTeamLeadEvaluationYear(),
+) {
   const store = getScoreboardStore();
-  const manualStore = getManualStoreByCategory(store, category);
+  const manualStore = getManualStoreByCategory(store, category, evaluationYear);
   return [...(manualStore[name.trim()] ?? [])];
 }
 
@@ -344,12 +391,13 @@ export function updateTeamLeadManualScoreItems(
   category: TeamLeadManualScoreCategory,
   name: string,
   items: TeamLeadScoreItem[],
+  evaluationYear = getTeamLeadEvaluationYear(),
 ) {
   const trimmedName = name.trim();
   if (!trimmedName) return;
 
   const store = getScoreboardStore();
-  const manualStore = getManualStoreByCategory(store, category);
+  const manualStore = getManualStoreByCategory(store, category, evaluationYear);
   const nextManualStore = {
     ...manualStore,
     [trimmedName]: items
@@ -357,13 +405,13 @@ export function updateTeamLeadManualScoreItems(
       .filter((item): item is TeamLeadScoreItem => Boolean(item)),
   };
 
-  saveScoreboardStore(setManualStoreByCategory(store, category, nextManualStore));
+  saveScoreboardStore(setManualStoreByCategory(store, category, nextManualStore, evaluationYear));
 }
 
-function getManualScoreCards(category: TeamLeadManualScoreCategory) {
+function getManualScoreCards(category: TeamLeadManualScoreCategory, evaluationYear = getTeamLeadEvaluationYear()) {
   const names = getEligibleUsers();
   const store = getScoreboardStore();
-  const manualStore = getManualStoreByCategory(store, category);
+  const manualStore = getManualStoreByCategory(store, category, evaluationYear);
 
   return names.map((name) => {
     const items = [...(manualStore[name] ?? [])];
@@ -379,12 +427,12 @@ function getManualScoreCards(category: TeamLeadManualScoreCategory) {
   });
 }
 
-export function getBroadcastAccidentCards() {
-  return getManualScoreCards("broadcastAccident");
+export function getBroadcastAccidentCards(evaluationYear = getTeamLeadEvaluationYear()) {
+  return getManualScoreCards("broadcastAccident", evaluationYear);
 }
 
-export function getLiveSafetyCards() {
-  return getManualScoreCards("liveSafety");
+export function getLiveSafetyCards(evaluationYear = getTeamLeadEvaluationYear()) {
+  return getManualScoreCards("liveSafety", evaluationYear);
 }
 
 function parseMonthKey(monthKey: string) {
@@ -449,31 +497,40 @@ export function formatFinalCutQuarterLabel(group: FinalCutQuarterGroup) {
   return `${group.year}년 ${group.quarter}분기`;
 }
 
-export function getSelectedFinalCutQuarterKeys() {
-  return [...getScoreboardStore().selectedFinalCutQuarterKeys];
+export function getSelectedFinalCutQuarterKeys(evaluationYear = getTeamLeadEvaluationYear()) {
+  return [...(getScoreboardStore().selectedFinalCutQuarterKeys[String(evaluationYear)] ?? [])];
 }
 
-export function addSelectedFinalCutQuarter(quarterKey: string) {
+export function addSelectedFinalCutQuarter(quarterKey: string, evaluationYear = getTeamLeadEvaluationYear()) {
   const trimmedKey = quarterKey.trim();
   if (!trimmedKey) return;
 
   const store = getScoreboardStore();
-  if (store.selectedFinalCutQuarterKeys.includes(trimmedKey)) return;
+  const yearKey = String(evaluationYear);
+  const currentSelection = store.selectedFinalCutQuarterKeys[yearKey] ?? [];
+  if (currentSelection.includes(trimmedKey)) return;
 
   saveScoreboardStore({
     ...store,
-    selectedFinalCutQuarterKeys: [...store.selectedFinalCutQuarterKeys, trimmedKey],
+    selectedFinalCutQuarterKeys: {
+      ...store.selectedFinalCutQuarterKeys,
+      [yearKey]: [...currentSelection, trimmedKey],
+    },
   });
 }
 
-export function removeSelectedFinalCutQuarter(quarterKey: string) {
+export function removeSelectedFinalCutQuarter(quarterKey: string, evaluationYear = getTeamLeadEvaluationYear()) {
   const trimmedKey = quarterKey.trim();
   if (!trimmedKey) return;
 
   const store = getScoreboardStore();
+  const yearKey = String(evaluationYear);
   saveScoreboardStore({
     ...store,
-    selectedFinalCutQuarterKeys: store.selectedFinalCutQuarterKeys.filter((item) => item !== trimmedKey),
+    selectedFinalCutQuarterKeys: {
+      ...store.selectedFinalCutQuarterKeys,
+      [yearKey]: (store.selectedFinalCutQuarterKeys[yearKey] ?? []).filter((item) => item !== trimmedKey),
+    },
   });
 }
 
@@ -505,12 +562,14 @@ function getFinalCutQuarterScoreItems(card: FinalCutPersonCard | undefined, sele
   });
 }
 
-function getContributionScoreMap() {
-  return new Map(getContributionCards().map((card) => [card.name.trim(), card] as const));
+function getContributionScoreMap(evaluationYear = getTeamLeadEvaluationYear()) {
+  return new Map(getContributionCards(evaluationYear).map((card) => [card.name.trim(), card] as const));
 }
 
-function getVideoReviewScoreMap() {
-  return new Map(videoReviewScoreCache);
+function getVideoReviewScoreMap(evaluationYear = getTeamLeadEvaluationYear()) {
+  return buildVideoReviewScoreMapFromQuarters(
+    videoReviewQuarterCache.filter((quarter) => quarter.year === evaluationYear),
+  );
 }
 
 function getBestReportSummaryQuarterKey(quarter: TeamLeadBestReportQuarterNumber): TeamLeadSummaryQuarterKey {
@@ -551,19 +610,21 @@ function getSummaryQuarterKey(monthKey: string): TeamLeadSummaryQuarterKey {
   return "9-11";
 }
 
-function getSummaryQuarterKeyInCurrentPeriod(monthKey: string) {
-  const period = getContributionPeriod();
+function getSummaryQuarterKeyInCurrentPeriod(monthKey: string, evaluationYear = getTeamLeadEvaluationYear()) {
+  const period = getContributionPeriod(evaluationYear);
   if (!isMonthKeyInContributionPeriod(monthKey, period.startMonthKey, period.endMonthKey)) {
     return null;
   }
   return getSummaryQuarterKey(monthKey);
 }
 
-export function getVideoReviewSummaryRows() {
+export function getVideoReviewSummaryRows(evaluationYear = getTeamLeadEvaluationYear()) {
   const eligibleNames = getEligibleUsers();
   const authorQuarterScoreMap = new Map<string, Map<TeamLeadSummaryQuarterKey, number>>();
 
-  videoReviewQuarterCache.forEach((quarter) => {
+  videoReviewQuarterCache
+    .filter((quarter) => quarter.year === evaluationYear)
+    .forEach((quarter) => {
     const quarterKey = getBestReportSummaryQuarterKey(quarter.quarter);
     quarter.rows.forEach((row) => {
       const authorName = row.authorName.trim();
@@ -573,7 +634,7 @@ export function getVideoReviewSummaryRows() {
       quarterMap.set(quarterKey, roundScore(row.trimmedAverage ?? 0));
       authorQuarterScoreMap.set(authorName, quarterMap);
     });
-  });
+    });
 
   return eligibleNames
     .map((name) => {
@@ -602,15 +663,15 @@ export function getVideoReviewSummaryRows() {
     );
 }
 
-export function getContributionSummaryRows() {
-  const contributionCards = new Map(getContributionCards().map((card) => [card.name.trim(), card] as const));
+export function getContributionSummaryRows(evaluationYear = getTeamLeadEvaluationYear()) {
+  const contributionCards = new Map(getContributionCards(evaluationYear).map((card) => [card.name.trim(), card] as const));
   const rows = getEligibleUsers()
     .map((name) => {
       const card = contributionCards.get(name);
       const quarterScoreMap = new Map<TeamLeadSummaryQuarterKey, number>();
 
       (card?.items ?? []).forEach((item) => {
-        const quarterKey = getSummaryQuarterKeyInCurrentPeriod(item.monthKey);
+        const quarterKey = getSummaryQuarterKeyInCurrentPeriod(item.monthKey, evaluationYear);
         if (!quarterKey) return;
         quarterScoreMap.set(quarterKey, roundScore((quarterScoreMap.get(quarterKey) ?? 0) + item.totalScore));
       });
@@ -645,7 +706,7 @@ export function getContributionSummaryRows() {
     );
 }
 
-export function getFinalCutSummaryRows() {
+export function getFinalCutSummaryRows(evaluationYear = getTeamLeadEvaluationYear()) {
   const finalCutCards = new Map(getFinalCutCards().map((card) => [card.name.trim(), card] as const));
 
   return getEligibleUsers()
@@ -654,7 +715,7 @@ export function getFinalCutSummaryRows() {
       const quarterItemsMap = new Map<TeamLeadSummaryQuarterKey, FinalCutPersonCard["items"]>();
 
       (card?.items ?? []).forEach((item) => {
-        const quarterKey = getSummaryQuarterKeyInCurrentPeriod(item.dateKey.slice(0, 7));
+        const quarterKey = getSummaryQuarterKeyInCurrentPeriod(item.dateKey.slice(0, 7), evaluationYear);
         if (!quarterKey) return;
         const current = quarterItemsMap.get(quarterKey) ?? [];
         current.push(item);
@@ -697,13 +758,13 @@ export function getFinalCutSummaryRows() {
     );
 }
 
-export function getOverallScoreCards() {
+export function getOverallScoreCards(evaluationYear = getTeamLeadEvaluationYear()) {
   const names = getEligibleUsers();
-  const contributionSummaryRows = new Map(getContributionSummaryRows().map((row) => [row.name, row] as const));
-  const finalCutSummaryRows = new Map(getFinalCutSummaryRows().map((row) => [row.name, row] as const));
-  const videoReviewScoreMap = getVideoReviewScoreMap();
-  const broadcastScoreMap = new Map(getBroadcastAccidentCards().map((card) => [card.name, card] as const));
-  const liveScoreMap = new Map(getLiveSafetyCards().map((card) => [card.name, card] as const));
+  const contributionSummaryRows = new Map(getContributionSummaryRows(evaluationYear).map((row) => [row.name, row] as const));
+  const finalCutSummaryRows = new Map(getFinalCutSummaryRows(evaluationYear).map((row) => [row.name, row] as const));
+  const videoReviewScoreMap = getVideoReviewScoreMap(evaluationYear);
+  const broadcastScoreMap = new Map(getBroadcastAccidentCards(evaluationYear).map((card) => [card.name, card] as const));
+  const liveScoreMap = new Map(getLiveSafetyCards(evaluationYear).map((card) => [card.name, card] as const));
 
   return names
     .map((name) => {
