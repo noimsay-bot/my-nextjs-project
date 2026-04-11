@@ -501,6 +501,48 @@ export async function saveHomePopupNotice(input: { title: string; body: string; 
   });
 }
 
+export async function deleteHomeNotice(noticeId: string) {
+  const session = await getPortalSession();
+  if (!session?.approved || !isManagerRole(session.role)) {
+    throw new Error("DESK 권한이 필요합니다.");
+  }
+
+  const trimmedNoticeId = noticeId.trim();
+  if (!trimmedNoticeId) {
+    throw new Error("삭제할 공지를 찾지 못했습니다.");
+  }
+
+  const existingNotices = noticeListCache.length > 0 ? getHomeNotices() : (await refreshHomePopupNoticeWorkspace()).notices;
+  const targetNotice = existingNotices.find((notice) => notice.id === trimmedNoticeId) ?? null;
+  if (!targetNotice) {
+    throw new Error("삭제할 공지를 찾지 못했습니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  if (targetNotice.kind === "popup") {
+    const { error } = await supabase
+      .from("home_popup_notice_applications")
+      .delete()
+      .eq("notice_id", trimmedNoticeId);
+
+    if (error && !isSupabaseSchemaMissingError(error)) {
+      throw new Error(getSupabaseStorageErrorMessage(error, "home_popup_notice_applications"));
+    }
+  }
+
+  const nextNotices = existingNotices.filter((notice) => notice.id !== trimmedNoticeId);
+  const persistedNotices = await persistNotices(nextNotices, session.id, supabase);
+  const nextActivePopup = getActivePopupNotice(persistedNotices);
+  const currentApplications =
+    nextActivePopup?.id && noticeCache?.id === nextActivePopup.id ? getHomePopupNoticeApplications() : [];
+  const ownApplied = nextActivePopup?.id && noticeCache?.id === nextActivePopup.id ? currentUserAppliedCache : false;
+
+  syncCaches(persistedNotices, currentApplications, ownApplied);
+  emitHomePopupNoticeStatus({ ok: true, message: "공지를 삭제했습니다." });
+  emitHomePopupNoticeEvent();
+  return cloneNoticeList(persistedNotices);
+}
+
 export async function closeHomePopupNotice() {
   const session = await getPortalSession();
   if (!session?.approved || !isManagerRole(session.role)) {

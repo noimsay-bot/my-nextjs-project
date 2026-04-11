@@ -43,6 +43,9 @@ type HomeNewsTabsProps = {
   requestedOpenToken?: number;
   togglingPreferenceId?: string | null;
   onSetPreference?: (itemId: string, nextPreference: "like" | "dislike" | null) => void;
+  canDeleteNotice?: boolean;
+  deletingNoticeId?: string | null;
+  onDeleteNotice?: (itemId: string) => void;
 };
 
 export function HomeNewsTabs({
@@ -54,6 +57,9 @@ export function HomeNewsTabs({
   requestedOpenToken = 0,
   togglingPreferenceId = null,
   onSetPreference,
+  canDeleteNotice = false,
+  deletingNoticeId = null,
+  onDeleteNotice,
 }: HomeNewsTabsProps) {
   const groupId = useId();
   const categoryTabs = HOME_NEWS_CATEGORIES.map((category) => ({
@@ -150,6 +156,9 @@ export function HomeNewsTabs({
                 expanded={expandedCardId === item.id}
                 onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
                 togglingPreference={togglingPreferenceId === item.id}
+                canDeleteNotice={canDeleteNotice && activeCategory === "notice" && Boolean(item.noticeId)}
+                deletingNotice={deletingNoticeId === item.id}
+                onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
                 onSetPreference={
                   onSetPreference
                     ? (nextPreference) => onSetPreference(item.id, nextPreference)

@@ -8,6 +8,9 @@ type HomeNewsCardProps = {
   onToggle: () => void;
   togglingPreference?: boolean;
   onSetPreference?: (nextPreference: "like" | "dislike" | null) => void;
+  canDeleteNotice?: boolean;
+  deletingNotice?: boolean;
+  onDeleteNotice?: () => void;
 };
 
 export function HomeNewsCard({
@@ -16,6 +19,9 @@ export function HomeNewsCard({
   onToggle,
   togglingPreference = false,
   onSetPreference,
+  canDeleteNotice = false,
+  deletingNotice = false,
+  onDeleteNotice,
 }: HomeNewsCardProps) {
   const panelId = useId();
   const viewerHasLiked = item.viewerHasLiked ?? false;
@@ -43,6 +49,18 @@ export function HomeNewsCard({
       </button>
       {expanded ? (
         <div id={panelId} className={styles.cardExpanded}>
+          {canDeleteNotice && onDeleteNotice ? (
+            <div className={styles.noticeManageRow}>
+              <button
+                type="button"
+                className={styles.noticeDeleteButton}
+                disabled={deletingNotice}
+                onClick={onDeleteNotice}
+              >
+                {deletingNotice ? "삭제 중..." : "삭제"}
+              </button>
+            </div>
+          ) : null}
           <div className={styles.summary}>
             {item.summary.map((line, index) => (
               <p key={`${item.id}-${index}`}>{line}</p>

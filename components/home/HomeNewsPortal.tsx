@@ -4,8 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HomeNewsSection } from "@/components/home/HomeNewsSection";
 import { HomeNewsCardItem, HomeNewsCardsByCategory, HomeNewsDataset } from "@/components/home/home-news.types";
+import { getSession, getSessionAsync, hasDeskAccess, subscribeToAuth } from "@/lib/auth/storage";
 import { emptyHomeNewsDataset } from "@/lib/home-news/fallback";
-import { getHomeNotices, HOME_POPUP_NOTICE_EVENT, refreshHomePopupNoticeWorkspace, type HomeNotice } from "@/lib/home-popup/storage";
+import {
+  deleteHomeNotice,
+  getHomeNotices,
+  HOME_POPUP_NOTICE_EVENT,
+  refreshHomePopupNoticeWorkspace,
+  type HomeNotice,
+} from "@/lib/home-popup/storage";
 import { fetchHomeNewsDataset } from "@/lib/home-news/queries";
 import { setHomeNewsBriefingPreference } from "@/lib/home-news/like-actions";
 import { fetchHomeNewsLikeWorkspace } from "@/lib/home-news/like-queries";
@@ -55,6 +62,7 @@ function ensurePortalHost(targets: ReturnType<typeof findPortalTargets>) {
 function toNoticeCardItem(notice: HomeNotice): HomeNewsCardItem {
   return {
     id: `notice-${notice.id}`,
+    noticeId: notice.id,
     category: "politics",
     title: notice.title,
     summary: notice.body.split(/\r?\n/).filter((line) => line.trim().length > 0),
@@ -90,6 +98,8 @@ export function HomeNewsPortal() {
   const [noticeItems, setNoticeItems] = useState<HomeNewsCardItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingPreferenceId, setTogglingPreferenceId] = useState<string | null>(null);
+  const [deletingNoticeId, setDeletingNoticeId] = useState<string | null>(null);
+  const [canDeleteNotice, setCanDeleteNotice] = useState(false);
   const [requestedOpen, setRequestedOpen] = useState<{ id: string; token: number } | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
   const personalizedBaseData = useMemo(() => applyHomeNewsPersonalization(baseData, likeWorkspace), [baseData, likeWorkspace]);
@@ -109,6 +119,9 @@ export function HomeNewsPortal() {
       ...(activeData.temporarySections ?? []).filter((section) => section.id !== "notice"),
     ],
   }), [activeData, noticeItems]);
+  const syncNotices = () => {
+    setNoticeItems(getHomeNotices().map(toNoticeCardItem));
+  };
 
   function updateDatasetPreferenceState(
     dataset: HomeNewsDataset | null,
@@ -176,6 +189,31 @@ export function HomeNewsPortal() {
         requestedOpenItemId={requestedOpen?.id ?? null}
         requestedOpenToken={requestedOpen?.token ?? 0}
         togglingPreferenceId={togglingPreferenceId}
+        canDeleteNotice={canDeleteNotice}
+        deletingNoticeId={deletingNoticeId}
+        onDeleteNotice={(itemId) => {
+          const targetNotice = noticeItems.find((item) => item.id === itemId);
+          const noticeId = targetNotice?.noticeId;
+          if (!noticeId) return;
+
+          const ok = window.confirm("이 공지를 삭제하시겠습니까?");
+          if (!ok) return;
+
+          setDeletingNoticeId(itemId);
+          void (async () => {
+            try {
+              await deleteHomeNotice(noticeId);
+              await refreshHomePopupNoticeWorkspace();
+              syncNotices();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "공지를 삭제하지 못했습니다.";
+              console.warn(message);
+              window.alert(message);
+            } finally {
+              setDeletingNoticeId(null);
+            }
+          })();
+        }}
         onSelectTickerItem={(itemId) => setRequestedOpen({ id: itemId, token: Date.now() })}
         onSetPreference={(itemId, nextPreference) => {
           const allItems = [
@@ -229,7 +267,7 @@ export function HomeNewsPortal() {
         }}
       />
     ),
-    [activeDataWithNotices, loading, togglingPreferenceId],
+    [activeDataWithNotices, canDeleteNotice, deletingNoticeId, loading, noticeItems, togglingPreferenceId],
   );
 
   useEffect(() => {
@@ -237,10 +275,6 @@ export function HomeNewsPortal() {
 
     let cancelled = false;
     let cancelDeferredTasks = () => {};
-
-    const syncNotices = () => {
-      setNoticeItems(getHomeNotices().map(toNoticeCardItem));
-    };
 
     void (async () => {
       setLoading(true);
@@ -327,6 +361,18 @@ export function HomeNewsPortal() {
       cancelDeferredTasks();
       window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
     };
+  }, []);
+
+  useEffect(() => {
+    const syncManagePermission = async () => {
+      const session = getSession() ?? (await getSessionAsync());
+      setCanDeleteNotice(Boolean(session?.approved && hasDeskAccess(session.role)));
+    };
+
+    void syncManagePermission();
+    return subscribeToAuth((session) => {
+      setCanDeleteNotice(Boolean(session?.approved && hasDeskAccess(session.role)));
+    });
   }, []);
 
   useEffect(() => {

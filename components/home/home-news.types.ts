@@ -35,6 +35,7 @@ export type HomeNewsTickerItem = {
 
 export type HomeNewsCardItem = {
   id: string;
+  noticeId?: string;
   category: HomeNewsCategory;
   title: string;
   summary: string[];

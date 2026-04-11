@@ -12,6 +12,9 @@ type HomeNewsSectionProps = {
   togglingPreferenceId?: string | null;
   onSelectTickerItem?: (itemId: string) => void;
   onSetPreference?: (itemId: string, nextPreference: "like" | "dislike" | null) => void;
+  canDeleteNotice?: boolean;
+  deletingNoticeId?: string | null;
+  onDeleteNotice?: (itemId: string) => void;
 };
 
 export function HomeNewsSection({
@@ -22,6 +25,9 @@ export function HomeNewsSection({
   togglingPreferenceId = null,
   onSelectTickerItem,
   onSetPreference,
+  canDeleteNotice = false,
+  deletingNoticeId = null,
+  onDeleteNotice,
 }: HomeNewsSectionProps) {
   return (
     <section className={styles.section} aria-label="뉴스 브리핑">
@@ -40,6 +46,9 @@ export function HomeNewsSection({
         requestedOpenToken={requestedOpenToken}
         togglingPreferenceId={togglingPreferenceId}
         onSetPreference={onSetPreference}
+        canDeleteNotice={canDeleteNotice}
+        deletingNoticeId={deletingNoticeId}
+        onDeleteNotice={onDeleteNotice}
       />
     </section>
   );
