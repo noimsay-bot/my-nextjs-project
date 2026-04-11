@@ -33,6 +33,10 @@ function hasAccess(
     return session.canReview && !hasSubmittedReviewLock(session.id);
   }
 
+  if (pathname.startsWith("/restaurants")) {
+    return true;
+  }
+
   if (pathname.startsWith("/schedule/vacations")) {
     return session.role === "desk" || session.role === "admin" || session.role === "team_lead";
   }

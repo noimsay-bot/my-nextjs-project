@@ -21,6 +21,7 @@ import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/port
 const links = [
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
+  { href: "/restaurants", label: "내 주변 맛집" },
   { href: "/schedule", label: "DESK" },
   { href: "/review", label: "베스트리포트 평가" },
   { href: "/team-lead", label: "팀장" },
@@ -147,6 +148,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
             (link.href === "/review" && session.canReview && !reviewLocked),
@@ -155,6 +157,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
             (link.href === "/review" && session.canReview && !reviewLocked),
@@ -163,6 +166,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
             link.href === "/schedule" ||
@@ -172,6 +176,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
             (link.href === "/review" && session.canReview && !reviewLocked) ||
@@ -183,6 +188,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
             link.href === "/schedule" ||
@@ -194,6 +200,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen),
         );
@@ -267,6 +274,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
                 href={link.href}
                 className={
                   pathname === link.href ||
+                  (link.href === "/restaurants" && pathname.startsWith("/restaurants")) ||
                   (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
                   (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
                   (link.href === "/admin" && pathname.startsWith("/admin"))

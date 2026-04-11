@@ -1,4 +1,5 @@
 import "./globals.css";
+import "leaflet/dist/leaflet.css";
 import type { Metadata, Viewport } from "next";
 import { ThemeScript } from "@/components/theme/theme-script";
 
