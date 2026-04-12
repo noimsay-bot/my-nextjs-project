@@ -34,9 +34,9 @@ export const vacationStyleTones: Record<VacationType, VacationStyleTone> = {
     color: "#d1fae5",
   },
   공가: {
-    background: "rgba(245, 158, 11, 0.22)",
-    border: "1px solid #D97706",
-    borderColor: "#D97706",
+    background: "rgba(51,65,85,.42)",
+    border: "1px solid rgba(148,163,184,.5)",
+    borderColor: "rgba(148,163,184,.5)",
     color: "#FFFFFF",
   },
   근속휴가: {

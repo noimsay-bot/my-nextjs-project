@@ -2126,6 +2126,123 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   white-space: nowrap;
 }
 
+.schedule-current-trips-card {
+  width: 100%;
+  border: 1px solid rgba(148,163,184,.22);
+  border-radius: 18px;
+  background: rgba(15,23,42,.18);
+  overflow: hidden;
+}
+
+.schedule-current-trips-card__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: #f8fbff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-current-trips-card__toggle strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.schedule-current-trips-card__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(148,163,184,.22);
+  background: rgba(255,255,255,.05);
+  font-size: 15px;
+  transition: transform 160ms ease;
+}
+
+.schedule-current-trips-card__chevron--expanded {
+  transform: rotate(180deg);
+}
+
+.schedule-current-trips-card__body {
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 14px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.schedule-current-trips-card__person {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-current-trips-card__name {
+  font-size: 15px;
+  color: #f8fbff;
+}
+
+.schedule-current-trips-card__items {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-current-trips-card__item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148,163,184,.16);
+  background: rgba(255,255,255,.05);
+}
+
+.schedule-current-trips-card__item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.schedule-current-trips-card__item-head strong {
+  font-size: 14px;
+  line-height: 1.35;
+  color: #f8fbff;
+}
+
+.schedule-current-trips-card__type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(125,211,252,.18);
+  color: #d8fbff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.schedule-current-trips-card__schedules {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #e2e8f0;
+}
+
+.schedule-current-trips-card__empty {
+  font-size: 13px;
+  padding: 2px 0;
+}
+
 .schedule-published-hero__user-actions {
   display: flex;
   align-items: center;
@@ -2137,6 +2254,10 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 .schedule-published-panel--mobile-layout .schedule-published-hero__user > .btn,
 .schedule-published-panel--mobile-layout .schedule-published-hero__right .schedule-calendar-top-actions > .btn {
   flex: 0 0 auto;
+}
+
+.schedule-published-panel--mobile-layout .schedule-current-trips-card__body {
+  max-height: none;
 }
 
 .schedule-published-panel--mobile-layout .schedule-calendar-scroll--daily {

@@ -1,6 +1,7 @@
 ﻿﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { HomeNewsCurrentTrips } from "@/components/home/HomeNewsCurrentTrips";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
@@ -39,7 +40,9 @@ import {
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
-import { applyScheduleAssignmentNameTagsToSchedule } from "@/lib/team-lead/storage";
+import {
+  applyScheduleAssignmentNameTagsToSchedule,
+} from "@/lib/team-lead/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
@@ -762,7 +765,6 @@ export function PublishedSchedulesPanel() {
     () => new Set(recommendedCandidates.map((candidate) => getRefKey(candidate))),
     [recommendedCandidates],
   );
-
   const routeScopeLabel = useMemo(() => {
     if (activeItems.length === 0) return "게시된 근무표";
     const first = activeItems[0];
@@ -1237,6 +1239,7 @@ export function PublishedSchedulesPanel() {
                   <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
                 </div>
                 <div className="schedule-published-hero__right">
+                  <HomeNewsCurrentTrips />
                   <div className="schedule-toolbar-actions schedule-published-hero__user">
                     <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
                     <div className="schedule-published-hero__user-actions">
