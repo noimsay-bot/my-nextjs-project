@@ -137,6 +137,10 @@
   gap: 12px;
 }
 
+.currentTripsTabCard {
+  width: min(100%, 420px);
+}
+
 .tabList {
   display: flex;
   gap: 10px;
@@ -215,6 +219,10 @@
   background: rgba(255, 255, 255, 0.08);
   font-size: 12px;
   font-weight: 800;
+}
+
+.currentTripsTabCard :global(.schedule-current-trips-card__body) {
+  padding-top: 14px;
 }
 
 .panel {

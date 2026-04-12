@@ -1,7 +1,6 @@
 ﻿﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { HomeNewsCurrentTrips } from "@/components/home/HomeNewsCurrentTrips";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
@@ -1239,7 +1238,6 @@ export function PublishedSchedulesPanel() {
                   <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
                 </div>
                 <div className="schedule-published-hero__right">
-                  <HomeNewsCurrentTrips />
                   <div className="schedule-toolbar-actions schedule-published-hero__user">
                     <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
                     <div className="schedule-published-hero__user-actions">

@@ -33,11 +33,19 @@ function formatTripRange(startDateKey: string, endDateKey: string) {
 
 type HomeNewsCurrentTripsProps = {
   className?: string;
+  defaultExpanded?: boolean;
+  hideToggle?: boolean;
+  onCountChange?: (count: number) => void;
 };
 
-export function HomeNewsCurrentTrips({ className = "" }: HomeNewsCurrentTripsProps) {
+export function HomeNewsCurrentTrips({
+  className = "",
+  defaultExpanded = false,
+  hideToggle = false,
+  onCountChange,
+}: HomeNewsCurrentTripsProps) {
   const [tripCards, setTripCards] = useState<TeamLeadTripPersonCard[]>(() => getTeamLeadTripCards(["국내출장", "해외출장"]));
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const lastFocusRefreshAtRef = useRef(0);
   const todayKey = useMemo(() => getTodayDateKey(), []);
 
@@ -89,22 +97,34 @@ export function HomeNewsCurrentTrips({ className = "" }: HomeNewsCurrentTripsPro
     [todayKey, tripCards],
   );
 
+  useEffect(() => {
+    onCountChange?.(currentTripCards.length);
+  }, [currentTripCards.length, onCountChange]);
+
   return (
-    <div className={["schedule-current-trips-card", className].filter(Boolean).join(" ")}>
-      <button
-        type="button"
-        className="schedule-current-trips-card__toggle"
-        aria-expanded={isExpanded}
-        onClick={() => setIsExpanded((current) => !current)}
-      >
-        <strong>현재 출장자</strong>
-        <span
-          aria-hidden="true"
-          className={`schedule-current-trips-card__chevron ${isExpanded ? "schedule-current-trips-card__chevron--expanded" : ""}`}
+    <div
+      className={[
+        "schedule-current-trips-card",
+        hideToggle ? "schedule-current-trips-card--embedded" : "",
+        className,
+      ].filter(Boolean).join(" ")}
+    >
+      {hideToggle ? null : (
+        <button
+          type="button"
+          className="schedule-current-trips-card__toggle"
+          aria-expanded={isExpanded}
+          onClick={() => setIsExpanded((current) => !current)}
         >
-          ˅
-        </span>
-      </button>
+          <strong>현재 출장자</strong>
+          <span
+            aria-hidden="true"
+            className={`schedule-current-trips-card__chevron ${isExpanded ? "schedule-current-trips-card__chevron--expanded" : ""}`}
+          >
+            ˅
+          </span>
+        </button>
+      )}
       {isExpanded ? (
         <div className="schedule-current-trips-card__body">
           {currentTripCards.length > 0 ? (

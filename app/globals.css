@@ -2178,6 +2178,10 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   overflow-y: auto;
 }
 
+.schedule-current-trips-card--embedded .schedule-current-trips-card__body {
+  padding-top: 14px;
+}
+
 .schedule-current-trips-card__person {
   display: grid;
   gap: 8px;

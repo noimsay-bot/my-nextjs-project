@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { HomeNewsCard } from "@/components/home/HomeNewsCard";
+import { HomeNewsCurrentTrips } from "@/components/home/HomeNewsCurrentTrips";
 import styles from "@/components/home/HomeNews.module.css";
 import {
   HOME_NEWS_CATEGORIES,
@@ -11,12 +12,33 @@ import {
   HomeNewsTemporarySection,
   HomeNewsTemporarySectionId,
 } from "@/components/home/home-news.types";
+import {
+  getTeamLeadTripCards,
+  refreshTeamLeadState,
+  TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+} from "@/lib/team-lead/storage";
+
+const CURRENT_TRIPS_TAB_KEY = "current_trips";
+
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getCurrentTripCount() {
+  const todayKey = toDateKey(new Date());
+  return getTeamLeadTripCards(["국내출장", "해외출장"])
+    .map((card) => ({
+      ...card,
+      items: card.items.filter((item) => item.startDateKey <= todayKey && item.endDateKey >= todayKey),
+    }))
+    .filter((card) => card.items.length > 0).length;
+}
 
 function getInitialCategory(cardsByCategory: Partial<HomeNewsCardsByCategory>) {
   return HOME_NEWS_CATEGORIES.find((category) => (cardsByCategory[category] ?? []).length > 0) ?? HOME_NEWS_CATEGORIES[0];
 }
 
-type HomeNewsTabKey = HomeNewsCategory | HomeNewsTemporarySectionId;
+type HomeNewsTabKey = HomeNewsCategory | HomeNewsTemporarySectionId | typeof CURRENT_TRIPS_TAB_KEY;
 
 function getInitialTab(
   cardsByCategory: Partial<HomeNewsCardsByCategory>,
@@ -62,27 +84,71 @@ export function HomeNewsTabs({
   onDeleteNotice,
 }: HomeNewsTabsProps) {
   const groupId = useId();
+  const [currentTripCount, setCurrentTripCount] = useState(0);
+  const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
+  const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
+  const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
   const categoryTabs = HOME_NEWS_CATEGORIES.map((category) => ({
     key: category as HomeNewsTabKey,
     label: HOME_NEWS_CATEGORY_LABELS[category],
     items: cardsByCategory[category] ?? [],
   }));
+  const temporaryTabs = temporarySections.map((section) => ({
+    key: section.id as HomeNewsTabKey,
+    label: section.label,
+    items: section.items,
+  }));
+  const noticeTab = temporaryTabs.find((tab) => tab.key === "notice");
+  const otherTemporaryTabs = temporaryTabs.filter((tab) => tab.key !== "notice");
+  const currentTripsTab =
+    currentTripCount > 0
+      ? [{
+          key: CURRENT_TRIPS_TAB_KEY as HomeNewsTabKey,
+          label: "현재 출장자",
+          items: [],
+        }]
+      : [];
   const tabs = [
-    ...temporarySections.map((section) => ({
-      key: section.id as HomeNewsTabKey,
-      label: section.label,
-      items: section.items,
-    })),
+    ...(noticeTab ? [noticeTab] : []),
+    ...currentTripsTab,
+    ...otherTemporaryTabs,
     ...categoryTabs,
   ];
   const hasNoticeTab = tabs.some((tab) => tab.key === "notice");
-  const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
-  const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
-  const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
   const items = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
   const isNoticeActive = activeCategory === "notice";
+  const isCurrentTripsActive = activeCategory === CURRENT_TRIPS_TAB_KEY;
+
+  const handleCurrentTripCountChange = useCallback((count: number) => {
+    setCurrentTripCount(count);
+  }, []);
 
   useEffect(() => {
+    const syncCurrentTripCount = () => {
+      setCurrentTripCount(getCurrentTripCount());
+    };
+
+    void refreshTeamLeadState().then(syncCurrentTripCount);
+    window.addEventListener("storage", syncCurrentTripCount);
+    window.addEventListener("focus", syncCurrentTripCount);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCurrentTripCount);
+    return () => {
+      window.removeEventListener("storage", syncCurrentTripCount);
+      window.removeEventListener("focus", syncCurrentTripCount);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCurrentTripCount);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.key === activeCategory)) {
+      setActiveCategory(getInitialTab(cardsByCategory, temporarySections));
+      return;
+    }
+
+    if (activeCategory === CURRENT_TRIPS_TAB_KEY) {
+      return;
+    }
+
     const nextCategory = getInitialTab(cardsByCategory, temporarySections);
     const currentItems = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
     const nextItems = tabs.find((tab) => tab.key === nextCategory)?.items ?? [];
@@ -130,7 +196,7 @@ export function HomeNewsTabs({
               }}
             >
               <span>{tab.label}</span>
-              <span className={styles.tabCount}>{tab.items.length}</span>
+              <span className={styles.tabCount}>{tab.key === CURRENT_TRIPS_TAB_KEY ? currentTripCount : tab.items.length}</span>
             </button>
           );
         })}
@@ -141,7 +207,14 @@ export function HomeNewsTabs({
         aria-labelledby={`${groupId}-${activeCategory}-tab`}
         className={styles.panel}
       >
-        {loading && !(isNoticeActive && items.length > 0) ? (
+        {isCurrentTripsActive ? (
+          <HomeNewsCurrentTrips
+            className={styles.currentTripsTabCard}
+            defaultExpanded
+            hideToggle
+            onCountChange={handleCurrentTripCountChange}
+          />
+        ) : loading && !(isNoticeActive && items.length > 0) ? (
           <div className={styles.grid}>
             {[0, 1].map((item) => (
               <div key={item} className={styles.cardSkeleton} aria-hidden="true" />
