@@ -61,6 +61,9 @@ type BuildHomeNewsDatasetOptions = {
 
 const LOCAL_ELECTION_SECTION_EXPIRES_AT = "2026-06-05T00:00:00+09:00";
 const LOCAL_ELECTION_SECTION_PATTERNS = /(지방선거|광역단체장|서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|경기도지사|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사|후보 확정|공천 확정|경선 확정|전략공천|단수공천|후보 선출|후보 결정)/;
+const LOCAL_ELECTION_OFFICE_PATTERNS = /(서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|경기도지사|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사|경기지사|강원지사|제주도지사)/;
+const LOCAL_ELECTION_PARTY_PATTERNS = /(국민의힘|더불어민주당|민주당|개혁신당|조국혁신당|진보당)/;
+const LOCAL_ELECTION_SELECTION_PATTERNS = /(후보\s*확정|후보\s*결정|후보\s*선출|공천\s*확정|전략\s*공천|단수\s*공천|경선\s*확정|후보\s*[가-힣]{2,4})/;
 
 export function sortHomeNewsBriefings(left: HomeNewsBriefingRecord, right: HomeNewsBriefingRecord) {
   return sortHomeNewsByImportance(left, right);
@@ -106,14 +109,22 @@ function sanitizeRecord(record: HomeNewsBriefingRecord): HomeNewsBriefingRecord 
   };
 }
 
-function normalizeHeadlineKey(value: string) {
-  const normalized = value
+function normalizeHeadlineText(value: string) {
+  return value
     .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[“"][^”"]+[”"]/g, " ")
+    .replace(/[‘'][^’']+[’']/g, " ")
     .replace(/[-|]\s*[^-|]+$/g, " ")
+    .replace(/후보(?:에|로|는|가|를|도)/g, "후보 ")
+    .replace(/(?:현|전)\s*(시장|지사)/g, " ")
     .replace(/[“”"'`·,.:!?()\[\]]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function normalizeHeadlineKey(value: string) {
+  const normalized = normalizeHeadlineText(value);
 
   const tokens = normalized
     .split(" ")
@@ -124,12 +135,53 @@ function normalizeHeadlineKey(value: string) {
   return tokens.join(" ");
 }
 
+function extractLocalElectionCandidateName(value: string) {
+  const normalized = normalizeHeadlineText(value);
+  const candidatePatterns = [
+    /후보\s*([가-힣]{2,4})/,
+    /([가-힣]{2,4})\s+(?:국민의힘|더불어민주당|민주당|개혁신당|조국혁신당|진보당)?\s*(?:서울시장|부산시장|대구시장|인천시장|광주시장|대전시장|울산시장|세종시장|경기도지사|강원도지사|충북지사|충남지사|전북지사|전남지사|경북지사|경남지사|제주지사|경기지사|강원지사|제주도지사)\s*후보/,
+  ];
+
+  for (const pattern of candidatePatterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return "";
+}
+
+function buildLocalElectionEventKey(record: HomeNewsBriefingRecord) {
+  const combinedText = [record.title, ...(record.summary_lines ?? []), ...(record.tags ?? [])].join(" ");
+  if (!LOCAL_ELECTION_SECTION_PATTERNS.test(combinedText)) {
+    return "";
+  }
+
+  const normalized = normalizeHeadlineText(combinedText);
+  const office = normalized.match(LOCAL_ELECTION_OFFICE_PATTERNS)?.[1] ?? "";
+  const party = normalized.match(LOCAL_ELECTION_PARTY_PATTERNS)?.[1] ?? "";
+  const candidate = extractLocalElectionCandidateName(combinedText);
+
+  if (!office || !candidate || !LOCAL_ELECTION_SELECTION_PATTERNS.test(normalized)) {
+    return "";
+  }
+
+  return ["local-election", party, office, candidate, "candidate_selected"].filter(Boolean).join("|");
+}
+
 function dedupeHomeNewsRecords(records: HomeNewsBriefingRecord[]) {
   const seenIds = new Set<string>();
   const seenHeadlineKeys = new Set<string>();
+  const seenEventKeys = new Set<string>();
 
   return records.filter((record) => {
     if (seenIds.has(record.id)) return false;
+
+    const eventKey = buildLocalElectionEventKey(record);
+    if (eventKey && seenEventKeys.has(eventKey)) {
+      return false;
+    }
 
     const headlineKey = normalizeHeadlineKey(record.title);
     if (headlineKey && seenHeadlineKeys.has(headlineKey)) {
@@ -137,6 +189,9 @@ function dedupeHomeNewsRecords(records: HomeNewsBriefingRecord[]) {
     }
 
     seenIds.add(record.id);
+    if (eventKey) {
+      seenEventKeys.add(eventKey);
+    }
     if (headlineKey) {
       seenHeadlineKeys.add(headlineKey);
     }

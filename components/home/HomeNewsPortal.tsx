@@ -19,9 +19,11 @@ import { fetchHomeNewsLikeWorkspace } from "@/lib/home-news/like-queries";
 import { toHomeNewsPreferenceRecord } from "@/lib/home-news/like-types";
 import { applyHomeNewsPersonalization } from "@/lib/home-news/personalization";
 import { generateTimedLivePreview } from "@/lib/home-news/timed-live-preview-actions";
+import { getCurrentHomeIssueSetDate, getCurrentHomeIssueSetSlot } from "@/lib/home-news/current-issue-set";
 
 const HOST_SELECTOR = '[data-home-news-slot="true"]';
 const DEFERRED_NEWS_TASK_DELAY_MS = 120;
+const LIVE_PREVIEW_CACHE_KEY = "jtbc-home-news-live-preview-v1";
 
 function findPortalTargets() {
   const panel = document.querySelector<HTMLElement>(".schedule-published-panel > .panel-pad");
@@ -88,6 +90,56 @@ function scheduleDeferredTask(callback: () => void) {
 
   const handle = globalThis.setTimeout(callback, DEFERRED_NEWS_TASK_DELAY_MS);
   return () => globalThis.clearTimeout(handle);
+}
+
+function clearCachedLivePreview() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(LIVE_PREVIEW_CACHE_KEY);
+}
+
+function isCacheableLivePreviewDataset(dataset: HomeNewsDataset | null | undefined): dataset is HomeNewsDataset & {
+  runtimeBriefing: NonNullable<HomeNewsDataset["runtimeBriefing"]>;
+} {
+  return Boolean(dataset?.sourceKind === "timed_live_preview" && dataset.runtimeBriefing?.generatedAt);
+}
+
+function readCachedLivePreview(now = new Date()) {
+  if (typeof window === "undefined") return null;
+
+  const raw = window.sessionStorage.getItem(LIVE_PREVIEW_CACHE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as HomeNewsDataset;
+    if (!isCacheableLivePreviewDataset(parsed)) {
+      clearCachedLivePreview();
+      return null;
+    }
+
+    const cachedDate = getCurrentHomeIssueSetDate(new Date(parsed.runtimeBriefing.generatedAt));
+    const currentDate = getCurrentHomeIssueSetDate(now);
+    const currentSlot = getCurrentHomeIssueSetSlot(now);
+
+    if (cachedDate !== currentDate || parsed.runtimeBriefing.briefingSlot !== currentSlot) {
+      clearCachedLivePreview();
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    clearCachedLivePreview();
+    return null;
+  }
+}
+
+function writeCachedLivePreview(dataset: HomeNewsDataset | null | undefined) {
+  if (typeof window === "undefined") return;
+  if (!isCacheableLivePreviewDataset(dataset)) {
+    clearCachedLivePreview();
+    return;
+  }
+
+  window.sessionStorage.setItem(LIVE_PREVIEW_CACHE_KEY, JSON.stringify(dataset));
 }
 
 export function HomeNewsPortal() {
@@ -275,8 +327,10 @@ export function HomeNewsPortal() {
 
     let cancelled = false;
     let cancelDeferredTasks = () => {};
+    const cachedPreview = readCachedLivePreview();
 
-    setLoading(true);
+    setLivePreviewData(cachedPreview);
+    setLoading(!cachedPreview);
     syncNotices();
 
     void (async () => {
@@ -288,44 +342,70 @@ export function HomeNewsPortal() {
         if (resolvedDataset.errorMessage) {
           console.warn(resolvedDataset.errorMessage);
         }
-        setLoading(false);
+
+        if (resolvedDataset.source === "issue_set") {
+          setLivePreviewData(null);
+          clearCachedLivePreview();
+          setLoading(false);
+
+          cancelDeferredTasks = scheduleDeferredTask(() => {
+            void (async () => {
+              try {
+                const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
+                if (!cancelled) {
+                  setLikeWorkspace(nextLikeWorkspace);
+                }
+              } catch (error) {
+                if (!cancelled) {
+                  console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
+                  setLikeWorkspace(null);
+                }
+              }
+            })();
+          });
+          return;
+        }
+
+        const shouldHoldLoadingForLivePreview = !cachedPreview && resolvedDataset.source === "supabase";
+        if (!shouldHoldLoadingForLivePreview) {
+          setLoading(false);
+        }
 
         cancelDeferredTasks = scheduleDeferredTask(() => {
           void (async () => {
-            try {
-              const nextLikeWorkspace = await fetchHomeNewsLikeWorkspace();
-              if (!cancelled) {
-                setLikeWorkspace(nextLikeWorkspace);
-              }
-            } catch (error) {
-              if (!cancelled) {
-                console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
-                setLikeWorkspace(null);
-              }
-            }
+            const [nextLikeWorkspace, previewResult] = await Promise.all([
+              fetchHomeNewsLikeWorkspace()
+                .then((workspace) => workspace)
+                .catch((error) => {
+                  if (!cancelled) {
+                    console.warn(error instanceof Error ? error.message : "좋아요 상태를 불러오지 못했습니다.");
+                  }
+                  return null;
+                }),
+              generateTimedLivePreview()
+                .then((result) => result)
+                .catch((error) => ({
+                  ok: false,
+                  message: error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.",
+                })),
+            ]);
 
-            if (resolvedDataset.source === "issue_set") {
-              if (!cancelled) {
-                setLivePreviewData(null);
-              }
-              return;
-            }
+            if (cancelled) return;
 
-            try {
-              const previewResult = await generateTimedLivePreview();
-              if (cancelled) return;
-              if (previewResult.ok && previewResult.data) {
-                setLivePreviewData(previewResult.data);
-                return;
-              }
+            setLikeWorkspace(nextLikeWorkspace);
 
+            if (previewResult.ok && previewResult.data) {
+              setLivePreviewData(previewResult.data);
+              writeCachedLivePreview(previewResult.data);
+            } else {
               console.warn(previewResult.message);
-              setLivePreviewData(null);
-            } catch (error) {
-              if (!cancelled) {
-                console.warn(error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.");
+              if (!cachedPreview) {
                 setLivePreviewData(null);
               }
+            }
+
+            if (shouldHoldLoadingForLivePreview) {
+              setLoading(false);
             }
           })();
         });
