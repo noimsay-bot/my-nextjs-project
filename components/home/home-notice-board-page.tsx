@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSession, hasDeskAccess, subscribeToAuth } from "@/lib/auth/storage";
 import {
   CommunityBoardCategory,
+  CommunityBoardAttachment,
   CommunityBoardComment,
   CommunityBoardPost,
   deleteCommunityBoardPost,
@@ -53,6 +54,7 @@ type CommunityListItem =
       body: string;
       authorId: string;
       authorName: string;
+      attachment?: CommunityBoardAttachment | null;
       createdAt: string;
       updatedAt: string;
     };
@@ -103,9 +105,46 @@ function toManualPostItem(post: CommunityBoardPost): CommunityListItem {
     body: post.body,
     authorId: post.authorId,
     authorName: post.authorName,
+    attachment: post.attachment ?? null,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
   };
+}
+
+async function readFileAsAttachment(file: File): Promise<CommunityBoardAttachment> {
+  if (file.size > 6 * 1024 * 1024) {
+    throw new Error("첨부 파일은 6MB 이내로 업로드해 주세요.");
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("파일을 읽지 못했습니다."));
+    };
+    reader.onerror = () => reject(new Error("파일을 읽지 못했습니다."));
+    reader.readAsDataURL(file);
+  });
+
+  return {
+    fileName: file.name,
+    mimeType: file.type || "application/octet-stream",
+    sizeBytes: file.size,
+    dataUrl,
+  };
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)}MB`;
+  }
+  if (sizeBytes >= 1024) {
+    return `${Math.round(sizeBytes / 1024)}KB`;
+  }
+  return `${sizeBytes}B`;
 }
 
 function getToneBadgeStyle(tone: HomeNotice["tone"]) {
@@ -134,6 +173,7 @@ export default function HomeNoticeBoardPage() {
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [attachment, setAttachment] = useState<CommunityBoardAttachment | null>(null);
   const [editor, setEditor] = useState<CommunityEditorState | null>(null);
   const [pageByCategory, setPageByCategory] = useState<Record<CommunityBoardCategory, number>>({
     notice: 1,
@@ -273,12 +313,14 @@ export default function HomeNoticeBoardPage() {
     setEditor(null);
     setTitle("");
     setBody("");
+    setAttachment(null);
   }, []);
 
   const startCreate = useCallback((category: CommunityBoardCategory) => {
     setEditor({ mode: "create", category, item: null });
     setTitle("");
     setBody("");
+    setAttachment(null);
     setMessage(null);
   }, []);
 
@@ -286,6 +328,7 @@ export default function HomeNoticeBoardPage() {
     setEditor({ mode: "edit", category: item.category, item });
     setTitle(item.title);
     setBody(item.body);
+    setAttachment(item.source === "manual" ? item.attachment ?? null : null);
     setExpandedItemId(item.id);
     setMessage(null);
   }, []);
@@ -422,6 +465,68 @@ export default function HomeNoticeBoardPage() {
                       onChange={(event) => setBody(event.target.value)}
                       placeholder="내용"
                     />
+                    {category === "resource" ? (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        <label style={{ display: "grid", gap: 8 }}>
+                          <span>첨부 문서</span>
+                          <input
+                            className="field-input"
+                            type="file"
+                            onChange={(event) => {
+                              const nextFile = event.target.files?.[0] ?? null;
+                              if (!nextFile) return;
+                              void readFileAsAttachment(nextFile)
+                                .then((nextAttachment) => {
+                                  setAttachment(nextAttachment);
+                                  setMessage(null);
+                                })
+                                .catch((error) => {
+                                  setMessage({
+                                    tone: "warn",
+                                    text: error instanceof Error ? error.message : "파일을 읽지 못했습니다.",
+                                  });
+                                })
+                                .finally(() => {
+                                  event.currentTarget.value = "";
+                                });
+                            }}
+                            disabled={saving}
+                          />
+                        </label>
+                        {attachment ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                              padding: "10px 12px",
+                              borderRadius: 14,
+                              border: "1px solid rgba(255,255,255,.08)",
+                              background: "rgba(255,255,255,.04)",
+                            }}
+                          >
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <strong style={{ fontSize: 13 }}>{attachment.fileName}</strong>
+                              <span className="muted" style={{ fontSize: 12 }}>{formatFileSize(attachment.sizeBytes)}</span>
+                            </div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <a className="btn white" href={attachment.dataUrl} download={attachment.fileName}>
+                                다운로드 확인
+                              </a>
+                              <button type="button" className="btn" onClick={() => setAttachment(null)} disabled={saving}>
+                                첨부 제거
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            자료실 글에는 문서 파일을 하나 첨부할 수 있습니다.
+                          </span>
+                        )}
+                      </div>
+                    ) : null}
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
                       <button type="button" className="btn" onClick={resetEditor} disabled={saving}>
                         취소
@@ -441,18 +546,20 @@ export default function HomeNoticeBoardPage() {
                                   body,
                                 });
                               } else {
-                                await updateCommunityBoardPost({
-                                  postId: editor.item.id.replace("manual:", ""),
-                                  title,
-                                  body,
-                                });
-                              }
+                              await updateCommunityBoardPost({
+                                postId: editor.item.id.replace("manual:", ""),
+                                title,
+                                body,
+                                attachment: category === "resource" ? attachment : null,
+                              });
+                            }
                               setMessage({ tone: "ok", text: "글을 수정했습니다." });
                             } else {
                               await saveCommunityBoardPost({
                                 category,
                                 title,
                                 body,
+                                attachment: category === "resource" ? attachment : null,
                               });
                               setPageByCategory((current) => ({ ...current, [category]: 1 }));
                               setMessage({ tone: "ok", text: `${communityCategoryLabels[category]} 게시판에 글을 등록했습니다.` });
@@ -632,6 +739,29 @@ export default function HomeNoticeBoardPage() {
                                 ) : null}
 
                                 <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7, color: "#f8fbff", fontSize: 14 }}>{item.body}</div>
+                                {item.source === "manual" && item.category === "resource" && item.attachment ? (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      gap: 10,
+                                      alignItems: "center",
+                                      flexWrap: "wrap",
+                                      padding: "10px 12px",
+                                      borderRadius: 14,
+                                      border: "1px solid rgba(255,255,255,.08)",
+                                      background: "rgba(255,255,255,.04)",
+                                    }}
+                                  >
+                                    <div style={{ display: "grid", gap: 4 }}>
+                                      <strong style={{ fontSize: 13 }}>{item.attachment.fileName}</strong>
+                                      <span className="muted" style={{ fontSize: 12 }}>{formatFileSize(item.attachment.sizeBytes)}</span>
+                                    </div>
+                                    <a className="btn white" href={item.attachment.dataUrl} download={item.attachment.fileName}>
+                                      다운로드
+                                    </a>
+                                  </div>
+                                ) : null}
                                 <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
                                   작성 {item.authorName} · 생성 {formatDateTime(item.createdAt)} · 수정 {formatDateTime(item.updatedAt)}
                                 </div>

@@ -8,7 +8,7 @@ import {
 } from "@/lib/supabase/portal";
 
 const HOME_POPUP_NOTICE_ROW_KEY = "active";
-const HOME_NOTICE_STORE_VERSION = 4;
+const HOME_NOTICE_STORE_VERSION = 5;
 
 export const HOME_POPUP_NOTICE_EVENT = "j-home-popup-notice-updated";
 export const HOME_POPUP_NOTICE_STATUS_EVENT = "j-home-popup-notice-status";
@@ -41,8 +41,16 @@ export interface CommunityBoardPost {
   body: string;
   authorId: string;
   authorName: string;
+  attachment?: CommunityBoardAttachment | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CommunityBoardAttachment {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl: string;
 }
 
 export interface CommunityBoardComment {
@@ -127,6 +135,18 @@ function validateCommunityCommentContent(content: string) {
   }
   if (normalized.length > 300) {
     throw new Error("댓글은 300자 이내로 입력해 주세요.");
+  }
+  return normalized;
+}
+
+function validateCommunityBoardAttachment(attachment: CommunityBoardAttachment | null | undefined) {
+  const normalized = normalizeCommunityBoardAttachment(attachment);
+  if (!normalized) return null;
+  if (normalized.sizeBytes > 6 * 1024 * 1024) {
+    throw new Error("첨부 파일은 6MB 이내로 업로드해 주세요.");
+  }
+  if (!normalized.dataUrl.startsWith("data:")) {
+    throw new Error("첨부 파일 형식을 확인해 주세요.");
   }
   return normalized;
 }
@@ -245,8 +265,27 @@ function normalizeCommunityBoardPost(
     body: input.body.trim(),
     authorId: input.authorId.trim(),
     authorName: input.authorName.trim(),
+    attachment: normalizeCommunityBoardAttachment(input.attachment),
     createdAt: normalizeIsoDate(input.createdAt, fallbackDate),
     updatedAt: normalizeIsoDate(input.updatedAt, fallbackDate),
+  };
+}
+
+function normalizeCommunityBoardAttachment(value: unknown): CommunityBoardAttachment | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const fileName = typeof record.fileName === "string" ? record.fileName.trim() : "";
+  const mimeType = typeof record.mimeType === "string" ? record.mimeType.trim() : "";
+  const dataUrl = typeof record.dataUrl === "string" ? record.dataUrl.trim() : "";
+  const sizeBytes = typeof record.sizeBytes === "number" && Number.isFinite(record.sizeBytes) ? record.sizeBytes : 0;
+  if (!fileName || !dataUrl || sizeBytes <= 0) {
+    return null;
+  }
+  return {
+    fileName,
+    mimeType,
+    sizeBytes,
+    dataUrl,
   };
 }
 
@@ -333,7 +372,7 @@ function parseStorePayload(row: HomePopupNoticeStateRow | null | undefined) {
 
   try {
     const parsed = JSON.parse(raw) as Partial<HomeNoticeStorePayload>;
-    if ((parsed?.version !== 2 && parsed?.version !== 3 && parsed?.version !== HOME_NOTICE_STORE_VERSION) || !Array.isArray(parsed.notices)) {
+    if ((parsed?.version !== 2 && parsed?.version !== 3 && parsed?.version !== 4 && parsed?.version !== HOME_NOTICE_STORE_VERSION) || !Array.isArray(parsed.notices)) {
       return {
         notices: rowToLegacyNotice(row),
         communityPosts: [],
@@ -366,6 +405,7 @@ function parseStorePayload(row: HomePopupNoticeStateRow | null | undefined) {
               body: item.body,
               authorId: item.authorId,
               authorName: item.authorName,
+              attachment: item.attachment,
             }),
           )
           .filter((item) => item.title && item.body && item.authorId && item.authorName),
@@ -932,6 +972,7 @@ export async function saveCommunityBoardPost(input: {
   category: CommunityBoardCategory;
   title: string;
   body: string;
+  attachment?: CommunityBoardAttachment | null;
 }) {
   const session = await getPortalSession();
   if (!session?.approved) {
@@ -943,6 +984,7 @@ export async function saveCommunityBoardPost(input: {
 
   const title = input.title.trim();
   const body = input.body.trim();
+  const attachment = validateCommunityBoardAttachment(input.attachment);
   if (!title || !body) {
     throw new Error("제목과 본문을 모두 입력해 주세요.");
   }
@@ -958,6 +1000,7 @@ export async function saveCommunityBoardPost(input: {
     body,
     authorId: session.id,
     authorName: session.username,
+    attachment,
     createdAt: now,
     updatedAt: now,
   });
@@ -986,6 +1029,7 @@ export async function updateCommunityBoardPost(input: {
   postId: string;
   title: string;
   body: string;
+  attachment?: CommunityBoardAttachment | null;
 }) {
   const session = await getPortalSession();
   if (!session?.approved) {
@@ -995,6 +1039,7 @@ export async function updateCommunityBoardPost(input: {
   const postId = input.postId.trim();
   const title = input.title.trim();
   const body = input.body.trim();
+  const attachment = validateCommunityBoardAttachment(input.attachment);
   if (!postId) {
     throw new Error("수정할 글을 찾지 못했습니다.");
   }
@@ -1028,6 +1073,7 @@ export async function updateCommunityBoardPost(input: {
           ...post,
           title,
           body,
+          attachment,
           updatedAt: new Date().toISOString(),
         })
       : post,
