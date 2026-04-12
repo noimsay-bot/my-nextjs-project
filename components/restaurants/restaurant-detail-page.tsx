@@ -168,9 +168,7 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
                 <div className="panel-pad" style={{ display: "grid", gap: 8 }}>
                   <strong style={{ fontSize: 18 }}>기본 정보</strong>
                   <span className="muted">등록일 {formatCreatedAt(restaurant.createdAt) || "-"}</span>
-                  <span className="muted">등록자 {restaurant.authorName || "이름 미확인"}</span>
-                  <span className="muted">위도 {restaurant.lat.toFixed(6)}</span>
-                  <span className="muted">경도 {restaurant.lng.toFixed(6)}</span>
+                  <span className="muted">등록자 {restaurant.authorName || "-"}</span>
                 </div>
               </div>
 
@@ -207,7 +205,8 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
                   <RestaurantCommentList
                     comments={comments}
                     currentUserId={session?.id ?? null}
-                    onDeleted={async () => {
+                    restaurantAuthorId={restaurant.authorId}
+                    onChanged={async () => {
                       await loadComments();
                     }}
                   />

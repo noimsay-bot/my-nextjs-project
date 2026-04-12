@@ -19,6 +19,7 @@ import {
 import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
 
 const links = [
+  { href: "/community", label: "커뮤니티" },
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/restaurants", label: "내 주변 맛집" },
@@ -148,6 +149,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/community" ||
             link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
@@ -157,6 +159,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/community" ||
             link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
@@ -166,6 +169,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/community" ||
             link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
@@ -176,6 +180,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/community" ||
             link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
@@ -188,6 +193,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/community" ||
             link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen) ||
@@ -200,6 +206,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
         return links.filter(
           (link) =>
             link.href === "/" ||
+            link.href === "/community" ||
             link.href === "/restaurants" ||
             (link.href === "/vacation" && vacationRequestOpen) ||
             (link.href === "/submissions" && submissionAccessOpen),
@@ -274,6 +281,8 @@ function PortalHeader({ pathname }: { pathname: string }) {
                 href={link.href}
                 className={
                   pathname === link.href ||
+                  (link.href === "/community" && pathname.startsWith("/community")) ||
+                  (link.href === "/community" && pathname.startsWith("/notices")) ||
                   (link.href === "/restaurants" && pathname.startsWith("/restaurants")) ||
                   (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
                   (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||

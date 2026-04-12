@@ -1062,7 +1062,6 @@ export function PublishedSchedulesPanel() {
     return (
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-          <div className="chip">게시된 근무표</div>
           <div className="status note">게시된 근무표가 없습니다.</div>
         </div>
       </section>
@@ -1075,12 +1074,10 @@ export function PublishedSchedulesPanel() {
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="schedule-published-hero">
             <div className="schedule-published-hero__left">
-              <div className="chip">게시된 근무표</div>
               <div className="muted schedule-published-hero__published">숨김 처리된 게시 근무표만 있습니다.</div>
             </div>
             <div className="schedule-published-hero__right">
               <div className="schedule-toolbar-actions schedule-published-hero__user">
-                <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
                 {canHidePublishedSchedules ? (
                   <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
                     {hideMode ? "숨김 완료" : "근무표 숨김"}
@@ -1201,7 +1198,6 @@ export function PublishedSchedulesPanel() {
               ) : null}
               <div className="schedule-published-hero">
                 <div className="schedule-published-hero__left">
-                  <div className="chip">게시된 근무표</div>
                   <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                   <div className="schedule-toolbar-actions schedule-published-hero__months">
                     {activeItems.map((item) => {
@@ -1239,7 +1235,6 @@ export function PublishedSchedulesPanel() {
                 </div>
                 <div className="schedule-published-hero__right">
                   <div className="schedule-toolbar-actions schedule-published-hero__user">
-                    <span className="muted">{username ? `${username} 기준` : "로그인 사용자 없음"}</span>
                     <div className="schedule-published-hero__user-actions">
                       <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
                         {showMine ? "전체 보기" : "내 근무 보기"}

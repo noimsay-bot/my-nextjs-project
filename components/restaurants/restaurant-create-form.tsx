@@ -67,7 +67,7 @@ export function RestaurantCreateForm({ authorId }: { authorId: string | null }) 
           lng: formatCoordinate(result.location.lng),
         }));
         setMessageTone("ok");
-        setMessage("현재 위치 좌표를 입력했습니다.");
+        setMessage("현재 위치를 반영했습니다.");
         return;
       }
 
@@ -158,9 +158,7 @@ export function RestaurantCreateForm({ authorId }: { authorId: string | null }) 
             {selectedPlace ? <span className="chip">선택 완료</span> : <span className="chip">미선택</span>}
           </div>
 
-          {!searchEnabled ? (
-            <div className="status note">API 키가 없어서 수동 입력 모드로 표시합니다.</div>
-          ) : null}
+          {!searchEnabled ? <div className="status note">API 키가 없어서 장소 검색을 사용할 수 없습니다.</div> : null}
 
           <label style={{ display: "grid", gap: 8 }}>
             <span>가게명</span>
@@ -183,31 +181,6 @@ export function RestaurantCreateForm({ authorId }: { authorId: string | null }) 
               disabled={submitting}
             />
           </label>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span>위도 lat</span>
-              <input
-                className="field-input"
-                inputMode="decimal"
-                placeholder="예: 37.566500"
-                value={form.lat}
-                onChange={(event) => updateField("lat", event.target.value)}
-                disabled={submitting}
-              />
-            </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span>경도 lng</span>
-              <input
-                className="field-input"
-                inputMode="decimal"
-                placeholder="예: 126.978000"
-                value={form.lng}
-                onChange={(event) => updateField("lng", event.target.value)}
-                disabled={submitting}
-              />
-            </label>
-          </div>
 
           {form.placeId ? (
             <div className="muted" style={{ fontSize: 12 }}>

@@ -8,7 +8,7 @@ const RESTAURANT_COLUMNS_CANDIDATES = [
   "id, name, address, lat, lng, author_id, created_at",
 ];
 
-function mapRestaurantRow(item: Record<string, unknown>, authorName: string | null): RestaurantRow | null {
+function mapRestaurantRow(item: Record<string, unknown>): RestaurantRow | null {
   if (
     typeof item.id !== "string" ||
     typeof item.name !== "string" ||
@@ -29,13 +29,13 @@ function mapRestaurantRow(item: Record<string, unknown>, authorName: string | nu
     lat: item.lat,
     lng: item.lng,
     authorId: item.author_id,
-    authorName,
+    authorName: null,
     createdAt: item.created_at,
   };
 }
 
-async function fetchProfileNames(profileIds: string[]) {
-  if (profileIds.length === 0) {
+async function fetchProfileNames(authorIds: string[]) {
+  if (authorIds.length === 0) {
     return new Map<string, string>();
   }
 
@@ -43,16 +43,20 @@ async function fetchProfileNames(profileIds: string[]) {
   const { data, error } = await supabase
     .from("profiles")
     .select("id, name")
-    .in("id", profileIds);
+    .in("id", authorIds);
 
-  if (error || !data) {
+  if (error) {
     return new Map<string, string>();
   }
 
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
   return new Map(
-    data.flatMap((item) =>
-      typeof item.id === "string" && typeof item.name === "string" ? [[item.id, item.name.trim()]] : [],
-    ),
+    rows.flatMap((item) => {
+      if (typeof item.id !== "string" || typeof item.name !== "string" || !item.name.trim()) {
+        return [];
+      }
+      return [[item.id, item.name.trim()] as const];
+    }),
   );
 }
 
@@ -83,27 +87,18 @@ export async function fetchRestaurants() {
       };
     }
 
-    const authorNameMap = await fetchProfileNames(
-      Array.from(
-        new Set(
-          (rawRows ?? [])
-            .map((item) => (typeof item.author_id === "string" ? item.author_id : ""))
-            .filter((item) => item.length > 0),
-        ),
-      ),
-    );
-
     const restaurants: RestaurantRow[] = (rawRows ?? []).flatMap((item) => {
-      const mapped = mapRestaurantRow(
-        item,
-        typeof item.author_id === "string" ? authorNameMap.get(item.author_id) ?? null : null,
-      );
+      const mapped = mapRestaurantRow(item);
       return mapped ? [mapped] : [];
     });
+    const authorNames = await fetchProfileNames(Array.from(new Set(restaurants.map((restaurant) => restaurant.authorId))));
 
     return {
       ok: true as const,
-      restaurants,
+      restaurants: restaurants.map((restaurant) => ({
+        ...restaurant,
+        authorName: authorNames.get(restaurant.authorId) ?? null,
+      })),
     };
   } catch (error) {
     return {
@@ -149,14 +144,18 @@ export async function fetchRestaurantDetail(restaurantId: string) {
       };
     }
 
-    const authorId = typeof rawRow.author_id === "string" ? rawRow.author_id : "";
-    const authorNameMap = await fetchProfileNames(authorId ? [authorId] : []);
-    const restaurant = mapRestaurantRow(rawRow, authorNameMap.get(authorId) ?? null);
+    const restaurant = mapRestaurantRow(rawRow);
+    const authorNames = restaurant ? await fetchProfileNames([restaurant.authorId]) : new Map<string, string>();
 
     return {
       ok: true as const,
       detail: {
-        restaurant,
+        restaurant: restaurant
+          ? {
+              ...restaurant,
+              authorName: authorNames.get(restaurant.authorId) ?? null,
+            }
+          : null,
         comments: [],
       } satisfies RestaurantDetailData,
     };
@@ -187,16 +186,6 @@ export async function fetchRestaurantComments(restaurantId: string) {
     }
 
     const rows = (data ?? []) as Array<Record<string, unknown>>;
-    const authorNameMap = await fetchProfileNames(
-      Array.from(
-        new Set(
-          rows
-            .map((item) => (typeof item.author_id === "string" ? item.author_id : ""))
-            .filter((item) => item.length > 0),
-        ),
-      ),
-    );
-
     const comments: RestaurantCommentRow[] = rows.flatMap((item) => {
       if (
         typeof item.id !== "string" ||
@@ -213,7 +202,7 @@ export async function fetchRestaurantComments(restaurantId: string) {
           id: item.id,
           restaurantId: item.restaurant_id,
           authorId: item.author_id,
-          authorName: authorNameMap.get(item.author_id) ?? null,
+          authorName: null,
           content: item.content,
           createdAt: item.created_at,
         },

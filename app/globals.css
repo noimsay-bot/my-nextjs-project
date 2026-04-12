@@ -2676,3 +2676,16 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 .restaurants-map__label::before {
   display: none;
 }
+
+.community-board-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .community-board-grid {
+    grid-template-columns: 1fr;
+  }
+}

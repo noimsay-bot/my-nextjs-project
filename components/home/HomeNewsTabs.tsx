@@ -86,6 +86,7 @@ export function HomeNewsTabs({
   const groupId = useId();
   const [currentTripCount, setCurrentTripCount] = useState(0);
   const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
   const categoryTabs = HOME_NEWS_CATEGORIES.map((category) => ({
@@ -154,6 +155,7 @@ export function HomeNewsTabs({
     const nextItems = tabs.find((tab) => tab.key === nextCategory)?.items ?? [];
     if (currentItems.length === 0 && nextItems.length > 0) {
       setActiveCategory(nextCategory);
+      setIsPanelOpen(true);
     }
   }, [activeCategory, cardsByCategory, recommendedCategory, tabs, temporarySections]);
 
@@ -165,6 +167,7 @@ export function HomeNewsTabs({
 
     setHasUserSelectedCategory(true);
     setActiveCategory(matchedTab.key);
+    setIsPanelOpen(true);
     setExpandedCardId(requestedOpenItemId);
   }, [requestedOpenItemId, requestedOpenToken, tabs]);
 
@@ -172,6 +175,7 @@ export function HomeNewsTabs({
     if (!recommendedCategory || hasUserSelectedCategory || hasNoticeTab) return;
     if ((cardsByCategory[recommendedCategory] ?? []).length === 0) return;
     setActiveCategory(recommendedCategory);
+    setIsPanelOpen(true);
   }, [cardsByCategory, hasNoticeTab, hasUserSelectedCategory, recommendedCategory]);
 
   return (
@@ -179,19 +183,26 @@ export function HomeNewsTabs({
       <div className={styles.tabList} role="tablist" aria-label="뉴스 카테고리">
         {tabs.map((tab) => {
           const isActive = tab.key === activeCategory;
+          const isSelected = isActive && isPanelOpen;
           return (
             <button
               key={tab.key}
               id={`${groupId}-${tab.key}-tab`}
               type="button"
               role="tab"
-              aria-selected={isActive}
-              aria-controls={`${groupId}-${tab.key}-panel`}
-              tabIndex={isActive ? 0 : -1}
-              className={`${styles.tabButton} ${tab.key === "notice" ? styles.tabButtonNotice : ""} ${isActive ? styles.tabButtonActive : ""} ${tab.key === "notice" && isActive ? styles.tabButtonNoticeActive : ""}`}
+              aria-selected={isSelected}
+              aria-controls={isSelected ? `${groupId}-${tab.key}-panel` : undefined}
+              tabIndex={isSelected ? 0 : -1}
+              className={`${styles.tabButton} ${tab.key === "notice" ? styles.tabButtonNotice : ""} ${isSelected ? styles.tabButtonActive : ""} ${tab.key === "notice" && isSelected ? styles.tabButtonNoticeActive : ""}`}
               onClick={() => {
                 setHasUserSelectedCategory(true);
+                if (isActive && isPanelOpen) {
+                  setIsPanelOpen(false);
+                  setExpandedCardId(null);
+                  return;
+                }
                 setActiveCategory(tab.key);
+                setIsPanelOpen(true);
                 setExpandedCardId(null);
               }}
             >
@@ -201,52 +212,54 @@ export function HomeNewsTabs({
           );
         })}
       </div>
-      <div
-        id={`${groupId}-${activeCategory}-panel`}
-        role="tabpanel"
-        aria-labelledby={`${groupId}-${activeCategory}-tab`}
-        className={styles.panel}
-      >
-        {isCurrentTripsActive ? (
-          <HomeNewsCurrentTrips
-            className={styles.currentTripsTabCard}
-            defaultExpanded
-            hideToggle
-            onCountChange={handleCurrentTripCountChange}
-          />
-        ) : loading && !(isNoticeActive && items.length > 0) ? (
-          <div className={styles.grid}>
-            {[0, 1].map((item) => (
-              <div key={item} className={styles.cardSkeleton} aria-hidden="true" />
-            ))}
-          </div>
-        ) : items.length > 0 ? (
-          <div className={styles.grid}>
-            {items.map((item) => (
-              <HomeNewsCard
-                key={item.id}
-                item={item}
-                expanded={expandedCardId === item.id}
-                onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
-                togglingPreference={togglingPreferenceId === item.id}
-                canDeleteNotice={canDeleteNotice && activeCategory === "notice" && Boolean(item.noticeId)}
-                deletingNotice={deletingNoticeId === item.id}
-                onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
-                onSetPreference={
-                  onSetPreference
-                    ? (nextPreference) => onSetPreference(item.id, nextPreference)
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        ) : (
-          <div className={styles.empty} role="status" aria-live="polite">
-            <strong>아직 들어온 브리핑이 없습니다.</strong>
-            <p>실제 뉴스 데이터가 연결되면 이 자리에서 카테고리별 핵심 카드가 바로 보입니다.</p>
-          </div>
-        )}
-      </div>
+      {isPanelOpen ? (
+        <div
+          id={`${groupId}-${activeCategory}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${groupId}-${activeCategory}-tab`}
+          className={styles.panel}
+        >
+          {isCurrentTripsActive ? (
+            <HomeNewsCurrentTrips
+              className={styles.currentTripsTabCard}
+              defaultExpanded
+              hideToggle
+              onCountChange={handleCurrentTripCountChange}
+            />
+          ) : loading && !(isNoticeActive && items.length > 0) ? (
+            <div className={styles.grid}>
+              {[0, 1].map((item) => (
+                <div key={item} className={styles.cardSkeleton} aria-hidden="true" />
+              ))}
+            </div>
+          ) : items.length > 0 ? (
+            <div className={styles.grid}>
+              {items.map((item) => (
+                <HomeNewsCard
+                  key={item.id}
+                  item={item}
+                  expanded={expandedCardId === item.id}
+                  onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
+                  togglingPreference={togglingPreferenceId === item.id}
+                  canDeleteNotice={canDeleteNotice && activeCategory === "notice" && Boolean(item.noticeId)}
+                  deletingNotice={deletingNoticeId === item.id}
+                  onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
+                  onSetPreference={
+                    onSetPreference
+                      ? (nextPreference) => onSetPreference(item.id, nextPreference)
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <div className={styles.empty} role="status" aria-live="polite">
+              <strong>아직 들어온 브리핑이 없습니다.</strong>
+              <p>실제 뉴스 데이터가 연결되면 이 자리에서 카테고리별 핵심 카드가 바로 보입니다.</p>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

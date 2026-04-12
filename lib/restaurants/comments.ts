@@ -54,6 +54,85 @@ export async function createRestaurantComment(authorId: string, restaurantId: st
   }
 }
 
+export async function updateRestaurantComment(editorId: string, commentId: string, input: RestaurantCommentCreateInput) {
+  const validated = validateCommentContent(input);
+  if (!validated.ok) {
+    return validated;
+  }
+
+  try {
+    const supabase = createClient();
+    const { data: commentRow, error: commentError } = await supabase
+      .from("restaurant_comments")
+      .select("id, restaurant_id, author_id")
+      .eq("id", commentId)
+      .maybeSingle<{ id: string; restaurant_id: string; author_id: string }>();
+
+    if (commentError) {
+      return {
+        ok: false as const,
+        message: commentError.message,
+      };
+    }
+
+    if (!commentRow) {
+      return {
+        ok: false as const,
+        message: "수정할 코멘트를 찾지 못했습니다.",
+      };
+    }
+
+    let canEdit = commentRow.author_id === editorId;
+    if (!canEdit) {
+      const { data: restaurantRow, error: restaurantError } = await supabase
+        .from("restaurants")
+        .select("author_id")
+        .eq("id", commentRow.restaurant_id)
+        .maybeSingle<{ author_id: string }>();
+
+      if (restaurantError) {
+        return {
+          ok: false as const,
+          message: restaurantError.message,
+        };
+      }
+
+      canEdit = restaurantRow?.author_id === editorId;
+    }
+
+    if (!canEdit) {
+      return {
+        ok: false as const,
+        message: "코멘트 작성자 또는 맛집 등록자만 수정할 수 있습니다.",
+      };
+    }
+
+    const { error } = await supabase
+      .from("restaurant_comments")
+      .update({
+        content: validated.content,
+      })
+      .eq("id", commentId);
+
+    if (error) {
+      return {
+        ok: false as const,
+        message: error.message,
+      };
+    }
+
+    return {
+      ok: true as const,
+      message: "코멘트를 수정했습니다.",
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "코멘트 수정에 실패했습니다.",
+    };
+  }
+}
+
 export async function deleteRestaurantComment(authorId: string, commentId: string) {
   try {
     const supabase = createClient();

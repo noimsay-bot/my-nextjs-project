@@ -18,7 +18,7 @@ import { setHomeNewsBriefingPreference } from "@/lib/home-news/like-actions";
 import { fetchHomeNewsLikeWorkspace } from "@/lib/home-news/like-queries";
 import { toHomeNewsPreferenceRecord } from "@/lib/home-news/like-types";
 import { applyHomeNewsPersonalization } from "@/lib/home-news/personalization";
-import { generateTimedLivePreview } from "@/lib/home-news/timed-live-preview-actions";
+import { generateTimedLivePreview, type TimedLivePreviewResult } from "@/lib/home-news/timed-live-preview-actions";
 import { getCurrentHomeIssueSetDate, getCurrentHomeIssueSetSlot } from "@/lib/home-news/current-issue-set";
 
 const HOST_SELECTOR = '[data-home-news-slot="true"]';
@@ -384,7 +384,7 @@ export function HomeNewsPortal() {
                 }),
               generateTimedLivePreview()
                 .then((result) => result)
-                .catch((error) => ({
+                .catch((error): TimedLivePreviewResult => ({
                   ok: false,
                   message: error instanceof Error ? error.message : "현재 시각 기준 뉴스 미리보기를 불러오지 못했습니다.",
                 })),
