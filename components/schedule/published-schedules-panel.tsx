@@ -853,6 +853,7 @@ export function PublishedSchedulesPanel() {
     if (!selectedItem) return;
 
     let frameId = 0;
+    let debounceTimer = 0;
     const scrollNode = scheduleScrollRef.current;
     const zoomNode = scheduleZoomRef.current;
     if (!scrollNode || !zoomNode) return;
@@ -871,26 +872,43 @@ export function PublishedSchedulesPanel() {
       setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
     };
 
-    const queueMeasure = () => {
+    const queueMeasure = (delay = 0) => {
       cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(measureSchedule);
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        frameId = window.requestAnimationFrame(() => {
+          const viewportScale = window.visualViewport?.scale ?? 1;
+          if (shouldAutoFitSchedule && Math.abs(viewportScale - 1) > 0.02) return;
+          measureSchedule();
+        });
+      }, delay);
     };
 
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
-            queueMeasure();
+            queueMeasure(shouldAutoFitSchedule ? 90 : 0);
           });
+    const handleOrientationChange = () => {
+      queueMeasure();
+    };
+    const handleViewportResize = () => {
+      queueMeasure(shouldAutoFitSchedule ? 120 : 0);
+    };
+    const visualViewport = window.visualViewport;
 
     resizeObserver?.observe(scrollNode);
     resizeObserver?.observe(zoomNode);
     queueMeasure();
-    window.addEventListener("orientationchange", queueMeasure);
+    window.addEventListener("orientationchange", handleOrientationChange);
+    visualViewport?.addEventListener("resize", handleViewportResize);
     return () => {
       cancelAnimationFrame(frameId);
+      window.clearTimeout(debounceTimer);
       resizeObserver?.disconnect();
-      window.removeEventListener("orientationchange", queueMeasure);
+      window.removeEventListener("orientationchange", handleOrientationChange);
+      visualViewport?.removeEventListener("resize", handleViewportResize);
     };
   }, [selectedItem, shouldAutoFitSchedule]);
 
@@ -1313,11 +1331,13 @@ export function PublishedSchedulesPanel() {
                 ref={scheduleZoomRef}
                 className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
                 style={{
-                  transform: shouldAutoFitSchedule ? `scale(${appliedScheduleScale})` : undefined,
+                  transform: shouldAutoFitSchedule ? `translateZ(0) scale(${appliedScheduleScale})` : undefined,
                   transformOrigin: shouldAutoFitSchedule ? "top left" : undefined,
                   position: shouldAutoFitSchedule ? "absolute" : undefined,
                   top: shouldAutoFitSchedule ? 0 : undefined,
                   left: shouldAutoFitSchedule ? 0 : undefined,
+                  willChange: shouldAutoFitSchedule ? "transform" : undefined,
+                  backfaceVisibility: shouldAutoFitSchedule ? "hidden" : undefined,
                 }}
               >
               <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
@@ -1504,6 +1524,7 @@ export function PublishedSchedulesPanel() {
                                   const isMine = Boolean(username) && username === assignmentDisplay.name;
                                   const mineHighlighted = isMine && (showMine || editMode);
                                   const requestableCategory = isExchangeableCategory(category);
+                                  const isAutoGeneralAssignment = isAutoGeneralAssignmentCategory(category);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
                                   const recommendedHighlighted =
@@ -1586,6 +1607,8 @@ export function PublishedSchedulesPanel() {
                                             ? "#f5eaff"
                                             : duplicated
                                               ? "#ffe4e6"
+                                            : isAutoGeneralAssignment
+                                              ? "#f8fbff"
                                             : recommendedHighlighted || mineHighlighted
                                               ? "#ffffff"
                                               : dimOtherNames
