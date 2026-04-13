@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
-import { PortalUsageTracker } from "@/components/portal/portal-usage-tracker";
 import {
   getSession,
   hasAdminAccess,
@@ -330,7 +329,6 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="shell">
-      <PortalUsageTracker />
       <PortalHeader pathname={pathname} />
       <main style={{ marginTop: 20 }}>
         <AppRouteBoundary resetKey={pathname}>

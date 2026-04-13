@@ -989,13 +989,6 @@ export function ScheduleApp() {
     }
   };
 
-  const openPublishDialog = () => {
-    setPublishMonthKey(
-      visibleSchedule?.monthKey ?? state.generatedHistory[state.generatedHistory.length - 1]?.monthKey ?? "",
-    );
-    setPublishOpen(true);
-  };
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <section className="panel">
@@ -1316,9 +1309,6 @@ export function ScheduleApp() {
                   }}
               >
                 이전 달
-              </button>
-              <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={openPublishDialog}>
-                근무표 게시
               </button>
               {isAllDaysEditMode ? (
                 <>

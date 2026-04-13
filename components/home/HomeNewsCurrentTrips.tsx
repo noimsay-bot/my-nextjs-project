@@ -25,6 +25,12 @@ function travelTypeLabel(value: string) {
   return "";
 }
 
+function formatTripRange(startDateKey: string, endDateKey: string) {
+  if (!startDateKey) return "";
+  if (startDateKey === endDateKey) return startDateKey;
+  return `${startDateKey} ~ ${endDateKey}`;
+}
+
 type HomeNewsCurrentTripsProps = {
   className?: string;
   defaultExpanded?: boolean;
@@ -131,6 +137,9 @@ export function HomeNewsCurrentTrips({
                       <div className="schedule-current-trips-card__item-head">
                         <strong>{item.tripTagLabel || "출장명 없음"}</strong>
                         <span className="schedule-current-trips-card__type">{travelTypeLabel(item.travelType)}</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {formatTripRange(item.startDateKey, item.endDateKey)}
                       </div>
                       <div className="schedule-current-trips-card__schedules">
                         {item.schedules.length > 0 ? (

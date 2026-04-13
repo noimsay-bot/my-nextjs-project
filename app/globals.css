@@ -2445,9 +2445,6 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   display: grid;
   gap: 10px;
   justify-items: start;
-  position: sticky;
-  top: 20px;
-  z-index: 3;
 }
 
 .schedule-assignment-date-nav {
@@ -2460,8 +2457,6 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   display: grid;
   gap: 6px;
   align-content: start;
-  position: sticky;
-  top: 20px;
   padding: 10px 4px;
   border-radius: 18px;
   border: 1px solid var(--line);
