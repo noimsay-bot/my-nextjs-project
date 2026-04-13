@@ -49,15 +49,6 @@ const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
-const PUBLISHED_NAME_TEXT_STYLE = {
-  display: "inline-block",
-  flex: "0 1 auto",
-  width: "100%",
-  margin: "0 auto",
-  overflow: "visible",
-  textOverflow: "clip",
-} as const;
-const PUBLISHED_NAME_MEASUREMENT_ITERATIONS = 7;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
 function getWeekdayLabel(dow: number) {
@@ -853,11 +844,10 @@ export function PublishedSchedulesPanel() {
     if (!selectedItem) return;
 
     let frameId = 0;
-    const scrollNode = scheduleScrollRef.current;
-    const zoomNode = scheduleZoomRef.current;
-    if (!scrollNode || !zoomNode) return;
-
     const measureSchedule = () => {
+      const scrollNode = scheduleScrollRef.current;
+      const zoomNode = scheduleZoomRef.current;
+      if (!scrollNode || !zoomNode) return;
       const nextWidth = Math.ceil(zoomNode.offsetWidth);
       const nextHeight = Math.ceil(zoomNode.offsetHeight);
       if (nextWidth <= 0 || nextHeight <= 0) return;
@@ -876,23 +866,26 @@ export function PublishedSchedulesPanel() {
       frameId = window.requestAnimationFrame(measureSchedule);
     };
 
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            queueMeasure();
-          });
-
-    resizeObserver?.observe(scrollNode);
-    resizeObserver?.observe(zoomNode);
     queueMeasure();
+    window.addEventListener("resize", queueMeasure);
     window.addEventListener("orientationchange", queueMeasure);
     return () => {
       cancelAnimationFrame(frameId);
-      resizeObserver?.disconnect();
+      window.removeEventListener("resize", queueMeasure);
       window.removeEventListener("orientationchange", queueMeasure);
     };
-  }, [selectedItem, shouldAutoFitSchedule]);
+  }, [
+    compactMonthCardHeight,
+    displayDays,
+    editMode,
+    requests,
+    selectedItem,
+    selectedRoute,
+    shouldAutoFitSchedule,
+    showMine,
+    username,
+    isCompactMonthlyView,
+  ]);
 
   useEffect(() => {
     if (!isCompactMonthlyView) {
@@ -1606,12 +1599,14 @@ export function PublishedSchedulesPanel() {
                                           className="schedule-name-chip__text"
                                           minFontSize={shouldAutoFitSchedule ? 5 : 9}
                                           maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
-                                          observeElementResize={!shouldAutoFitSchedule}
-                                          observeWindowResize={!shouldAutoFitSchedule}
-                                          measurementIterations={
-                                            shouldAutoFitSchedule ? PUBLISHED_NAME_MEASUREMENT_ITERATIONS : undefined
-                                          }
-                                          style={PUBLISHED_NAME_TEXT_STYLE}
+                                          style={{
+                                            display: "inline-block",
+                                            flex: "0 1 auto",
+                                            width: "100%",
+                                            margin: "0 auto",
+                                            overflow: "visible",
+                                            textOverflow: "clip",
+                                          }}
                                         />
                                         {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
                                       </button>

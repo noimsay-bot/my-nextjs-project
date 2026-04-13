@@ -9,9 +9,6 @@ type FittedNameTextProps = {
   maxFontSize?: number;
   lineHeight?: number;
   style?: CSSProperties;
-  observeElementResize?: boolean;
-  observeWindowResize?: boolean;
-  measurementIterations?: number;
 };
 
 let measureCanvas: HTMLCanvasElement | null = null;
@@ -52,9 +49,6 @@ export function FittedNameText({
   maxFontSize = 14,
   lineHeight = 1.15,
   style,
-  observeElementResize = true,
-  observeWindowResize = true,
-  measurementIterations = 12,
 }: FittedNameTextProps) {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [fontSize, setFontSize] = useState(maxFontSize);
@@ -79,7 +73,7 @@ export function FittedNameText({
       let high = maxFontSize;
       let best = minFontSize;
 
-      for (let index = 0; index < measurementIterations; index += 1) {
+      for (let index = 0; index < 12; index += 1) {
         const mid = (low + high) / 2;
         const measuredWidth = measureTextWidth(text, mid, node);
         if (measuredWidth <= availableWidth) {
@@ -100,28 +94,21 @@ export function FittedNameText({
 
     scheduleUpdate();
 
-    const resizeObserver =
-      observeElementResize && typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleUpdate) : null;
-    if (resizeObserver) {
-      resizeObserver.observe(element);
-      if (element.parentElement) {
-        resizeObserver.observe(element.parentElement);
-      }
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleUpdate);
+    resizeObserver?.observe(element);
+    if (element.parentElement) {
+      resizeObserver?.observe(element.parentElement);
     }
 
-    if (observeWindowResize) {
-      window.addEventListener("resize", scheduleUpdate);
-    }
+    window.addEventListener("resize", scheduleUpdate);
     void document.fonts?.ready?.then(scheduleUpdate);
 
     return () => {
       window.cancelAnimationFrame(frame);
-      if (observeWindowResize) {
-        window.removeEventListener("resize", scheduleUpdate);
-      }
+      window.removeEventListener("resize", scheduleUpdate);
       resizeObserver?.disconnect();
     };
-  }, [text, minFontSize, maxFontSize, measurementIterations, observeElementResize, observeWindowResize]);
+  }, [text, minFontSize, maxFontSize]);
 
   return (
     <span
