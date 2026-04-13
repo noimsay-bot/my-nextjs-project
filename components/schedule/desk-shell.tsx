@@ -16,6 +16,7 @@ const items = [
 export function DeskShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const headerRef = useRef<HTMLElement | null>(null);
+  const isStickyPage = pathname.startsWith("/schedule/schedule-assignment");
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -52,7 +53,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
     <section style={{ display: "grid", gap: 16 }}>
       <article
         ref={headerRef}
-        className="panel desk-shell-sticky"
+        className={`panel ${isStickyPage ? "desk-shell-sticky" : ""}`}
         style={{
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
