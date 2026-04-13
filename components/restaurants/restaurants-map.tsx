@@ -17,10 +17,12 @@ export function RestaurantsMap({
   currentLocation,
   restaurants,
   onSelectRestaurant,
+  prioritizeRestaurantFocus = false,
 }: {
   currentLocation: RestaurantLocation | null;
   restaurants: NearbyRestaurant[];
   onSelectRestaurant?: (restaurant: NearbyRestaurant) => void;
+  prioritizeRestaurantFocus?: boolean;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +162,28 @@ export function RestaurantsMap({
       return;
     }
 
+    if (prioritizeRestaurantFocus && restaurants.length > 0) {
+      if (currentLocation) {
+        map.fitBounds(
+          [
+            [currentLocation.lat, currentLocation.lng],
+            ...restaurants.map<[number, number]>((restaurant) => [restaurant.lat, restaurant.lng]),
+          ],
+          {
+            padding: [30, 30],
+            maxZoom: CURRENT_LOCATION_ZOOM,
+          },
+        );
+        return;
+      }
+
+      if (restaurants.length === 1) {
+        const [restaurant] = restaurants;
+        map.setView([restaurant.lat, restaurant.lng], 16);
+        return;
+      }
+    }
+
     if (currentLocation) {
       const nearbyPoints = restaurants
         .filter((restaurant) => restaurant.distanceMeters !== null && restaurant.distanceMeters <= NEARBY_VIEW_DISTANCE_METERS)
@@ -187,7 +211,7 @@ export function RestaurantsMap({
     map.fitBounds(points, {
       padding: [30, 30],
     });
-  }, [currentLocation, isMapReady, restaurants]);
+  }, [currentLocation, isMapReady, prioritizeRestaurantFocus, restaurants]);
 
   return (
     <div
