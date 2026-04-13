@@ -1,6 +1,6 @@
 ﻿﻿"use client";
 
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
@@ -36,7 +36,7 @@ import {
   PublishedScheduleItem,
   refreshPublishedSchedules,
 } from "@/lib/schedule/published";
-import { readStoredScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
+import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
 import {
@@ -59,26 +59,6 @@ const PUBLISHED_NAME_TEXT_STYLE = {
 } as const;
 const PUBLISHED_NAME_MEASUREMENT_ITERATIONS = 7;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
-
-function getInitialPublishedScheduleLayoutMode(): PublishedScheduleLayoutMode {
-  if (typeof window === "undefined") return "desktop";
-  const hasCoarsePointer = window.matchMedia("(any-pointer: coarse)").matches;
-  return getPublishedScheduleLayoutMode(window.innerWidth, window.innerHeight, hasCoarsePointer);
-}
-
-function getTaggedPublishedItems() {
-  return getPublishedSchedules().map((item) => ({
-    ...item,
-    schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
-  }));
-}
-
-function getTaggedScheduleHistory() {
-  return readStoredScheduleState().generatedHistory.map((schedule) => ({
-    monthKey: schedule.monthKey,
-    schedule: applyScheduleAssignmentNameTagsToSchedule(schedule),
-  }));
-}
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -574,16 +554,26 @@ function isSwapCandidateValid(
 }
 
 export function PublishedSchedulesPanel() {
-  const [items, setItems] = useState<PublishedScheduleItem[]>(() => getTaggedPublishedItems());
+  const [items, setItems] = useState<PublishedScheduleItem[]>(() =>
+    getPublishedSchedules().map((item) => ({
+      ...item,
+      schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+    })),
+  );
   const [itemsLoading, setItemsLoading] = useState(() => getPublishedSchedules().length === 0);
-  const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>(() => getTaggedScheduleHistory());
+  const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>(() =>
+    readStoredScheduleState().generatedHistory.map((schedule) => ({
+      monthKey: schedule.monthKey,
+      schedule: applyScheduleAssignmentNameTagsToSchedule(schedule),
+    })),
+  );
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [hideMode, setHideMode] = useState(false);
   const [hiddenPublishedMonthKeys, setHiddenPublishedMonthKeys] = useState<string[]>([]);
   const [draftHiddenPublishedMonthKeys, setDraftHiddenPublishedMonthKeys] = useState<string[]>([]);
-  const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>(() => getInitialPublishedScheduleLayoutMode());
+  const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [inlineConfirmRefKey, setInlineConfirmRefKey] = useState<string | null>(null);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
@@ -615,45 +605,67 @@ export function PublishedSchedulesPanel() {
     setDraftHiddenPublishedMonthKeys(nextHidden);
   }, [session?.id, session?.username]);
 
-  const syncItemsFromCache = () => {
-    const nextItems = getTaggedPublishedItems();
-    startTransition(() => {
-      setItems(nextItems);
-      setItemsLoading(false);
-    });
-  };
-
   const loadItems = async () => {
     setItemsLoading(true);
     try {
       await refreshPublishedSchedules();
-      syncItemsFromCache();
+      const nextItems = getPublishedSchedules().map((item) => ({
+        ...item,
+        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+      }));
+      setItems(nextItems);
     } finally {
       setItemsLoading(false);
     }
   };
 
-  const syncRequestsFromCache = () => {
-    startTransition(() => {
-      setRequests(getScheduleChangeRequests());
-    });
-  };
-
   const loadRequests = async () => {
     await refreshScheduleChangeRequests();
-    syncRequestsFromCache();
+    setRequests(getScheduleChangeRequests());
   };
 
   const syncScheduleHistory = () => {
-    startTransition(() => {
-      setScheduleHistory(getTaggedScheduleHistory());
-    });
+    const nextHistory = readStoredScheduleState().generatedHistory.map((schedule) => ({
+      monthKey: schedule.monthKey,
+      schedule: applyScheduleAssignmentNameTagsToSchedule(schedule),
+    }));
+    setScheduleHistory(nextHistory);
+  };
+
+  const loadScheduleHistory = async () => {
+    await refreshScheduleState();
+    syncScheduleHistory();
   };
 
   useEffect(() => {
+    let cancelled = false;
+    let deferredHandle = 0;
+
     void loadItems().finally(() => {
       lastFocusRefreshAtRef.current = Date.now();
     });
+
+    const runDeferredLoads = () => {
+      if (cancelled) return;
+      void loadRequests();
+      void loadScheduleHistory();
+    };
+
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+      const idleHandle = window.requestIdleCallback(() => {
+        runDeferredLoads();
+      }, { timeout: 1200 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(idleHandle);
+      };
+    }
+
+    deferredHandle = window.setTimeout(runDeferredLoads, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(deferredHandle);
+    };
   }, []);
 
   useEffect(() => {
@@ -667,13 +679,6 @@ export function PublishedSchedulesPanel() {
       if (editMode) {
         void loadRequests();
       }
-    };
-    const syncPublishedItems = () => {
-      syncItemsFromCache();
-    };
-    const syncChangeRequests = () => {
-      if (!editMode) return;
-      syncRequestsFromCache();
     };
     const onFocusRefresh = () => {
       const now = Date.now();
@@ -692,21 +697,21 @@ export function PublishedSchedulesPanel() {
     };
     window.addEventListener("storage", refreshVisibleData);
     window.addEventListener("focus", onFocusRefresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncPublishedItems);
-    window.addEventListener(CHANGE_REQUESTS_EVENT, syncChangeRequests);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
+    window.addEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
     window.addEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
     window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     return () => {
       window.removeEventListener("storage", refreshVisibleData);
       window.removeEventListener("focus", onFocusRefresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncPublishedItems);
-      window.removeEventListener(CHANGE_REQUESTS_EVENT, syncChangeRequests);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
+      window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
       window.removeEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     };
-  }, [editMode]);
+  }, []);
 
   useEffect(() => {
     setSelectedRoute([]);
