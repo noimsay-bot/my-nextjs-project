@@ -249,6 +249,13 @@ export function readStoredScheduleState() {
   return cloneScheduleStateValue(scheduleStateCache);
 }
 
+export function readStoredScheduleAutoAssignmentState() {
+  return {
+    generalTeamPeople: [...scheduleStateCache.generalTeamPeople],
+    offPeople: [...scheduleStateCache.offPeople],
+  };
+}
+
 export async function refreshScheduleState() {
   if (scheduleRefreshPromise) {
     return scheduleRefreshPromise;

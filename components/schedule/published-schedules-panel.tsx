@@ -703,6 +703,7 @@ export function PublishedSchedulesPanel() {
     };
     const onScheduleStateRefresh = () => {
       syncScheduleHistory();
+      syncItemsFromCache();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
