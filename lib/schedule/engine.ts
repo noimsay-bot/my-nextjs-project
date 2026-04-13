@@ -212,16 +212,6 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
   });
 }
 
-export function applyGeneralAssignmentsToSchedule(
-  schedule: GeneratedSchedule,
-  generalTeamPeople: string[],
-  offPeople: string[] = [],
-) {
-  const nextSchedule = normalizeGeneratedSchedule(JSON.parse(JSON.stringify(schedule)) as GeneratedSchedule);
-  syncGeneralAssignments(nextSchedule.days, generalTeamPeople, offPeople);
-  return nextSchedule;
-}
-
 export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): ScheduleState {
   const base = cloneScheduleState(defaultScheduleState);
   if (!input) return base;

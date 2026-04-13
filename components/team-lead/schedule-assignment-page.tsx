@@ -630,9 +630,28 @@ export function ScheduleAssignmentPage() {
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
+  const getStickyHeaderOffset = () => {
+    if (typeof window === "undefined") return 24;
+    if (window.innerWidth <= 960) return 24;
+
+    const selectors = [".portal-header-shell", ".desk-shell-sticky"];
+    return selectors.reduce((offset, selector) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) return offset;
+
+      const computed = window.getComputedStyle(element);
+      if (computed.display === "none" || computed.visibility === "hidden" || computed.position !== "sticky") {
+        return offset;
+      }
+
+      return offset + element.getBoundingClientRect().height;
+    }, 20);
+  };
+
   const scrollCardToTop = (target: HTMLElement | null, behavior: ScrollBehavior) => {
     if (!target) return;
-    const targetTop = Math.max(0, window.scrollY + target.getBoundingClientRect().top - 24);
+    const stickyOffset = getStickyHeaderOffset();
+    const targetTop = Math.max(0, window.scrollY + target.getBoundingClientRect().top - stickyOffset);
     window.scrollTo({ top: targetTop, behavior });
   };
 
