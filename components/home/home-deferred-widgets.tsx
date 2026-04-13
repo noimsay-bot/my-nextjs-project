@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
 
 const HomePopupNoticeModal = dynamic(
   () => import("@/components/home/HomePopupNoticeModal").then((module) => module.HomePopupNoticeModal),
@@ -13,10 +14,44 @@ const HomeNewsPortal = dynamic(
 );
 
 export function HomeDeferredWidgets() {
+  const [showPopup, setShowPopup] = useState(false);
+  const [showNews, setShowNews] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const isMobileLike = window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth <= 820;
+    const popupDelay = isMobileLike ? 320 : 80;
+    const newsDelay = isMobileLike ? 1100 : 180;
+
+    const popupTimer = window.setTimeout(() => {
+      setShowPopup(true);
+    }, popupDelay);
+
+    let idleHandle = 0;
+    let newsTimer = 0;
+    if (typeof window.requestIdleCallback === "function") {
+      idleHandle = window.requestIdleCallback(() => {
+        setShowNews(true);
+      }, { timeout: newsDelay + 1200 });
+    }
+    newsTimer = window.setTimeout(() => {
+      setShowNews(true);
+    }, newsDelay);
+
+    return () => {
+      window.clearTimeout(popupTimer);
+      window.clearTimeout(newsTimer);
+      if (idleHandle) {
+        window.cancelIdleCallback(idleHandle);
+      }
+    };
+  }, []);
+
   return (
     <>
-      <HomePopupNoticeModal />
-      <HomeNewsPortal />
+      {showPopup ? <HomePopupNoticeModal /> : null}
+      {showNews ? <HomeNewsPortal /> : null}
     </>
   );
 }

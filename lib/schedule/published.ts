@@ -23,6 +23,7 @@ interface ScheduleMonthPublishRow {
 
 export const PUBLISHED_SCHEDULES_EVENT = "j-special-force-published-schedules-updated";
 export const PUBLISHED_SCHEDULES_STATUS_EVENT = "j-special-force-published-schedules-status";
+const PUBLISHED_SCHEDULES_CACHE_KEY = "j-special-force-published-schedules-cache-v1";
 
 let publishedSchedulesCache: PublishedScheduleItem[] = [];
 let publishedRefreshPromise: Promise<PublishedScheduleItem[]> | null = null;
@@ -32,6 +33,36 @@ function cloneItems(items: PublishedScheduleItem[]) {
     ...item,
     schedule: normalizePublishedSchedule(JSON.parse(JSON.stringify(item.schedule)) as GeneratedSchedule),
   }));
+}
+
+function readPublishedSchedulesStorage() {
+  if (typeof window === "undefined") return [] as PublishedScheduleItem[];
+
+  try {
+    const raw = window.localStorage.getItem(PUBLISHED_SCHEDULES_CACHE_KEY);
+    if (!raw) return [] as PublishedScheduleItem[];
+    const parsed = JSON.parse(raw) as PublishedScheduleItem[];
+    if (!Array.isArray(parsed)) return [] as PublishedScheduleItem[];
+    return rowsToItems(
+      parsed.map((item) => ({
+        month_key: item.monthKey,
+        published_state: item.schedule,
+        published_at: item.publishedAt,
+      })),
+    );
+  } catch {
+    return [] as PublishedScheduleItem[];
+  }
+}
+
+function writePublishedSchedulesStorage(items: PublishedScheduleItem[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(PUBLISHED_SCHEDULES_CACHE_KEY, JSON.stringify(items));
+  } catch {
+    // Ignore storage quota and serialization failures.
+  }
 }
 
 function createPublishedTitle(schedule: GeneratedSchedule) {
@@ -89,6 +120,9 @@ function rowsToItems(rows: ScheduleMonthPublishRow[]) {
 }
 
 export function getPublishedSchedules(): PublishedScheduleItem[] {
+  if (publishedSchedulesCache.length === 0) {
+    publishedSchedulesCache = cloneItems(readPublishedSchedulesStorage());
+  }
   return cloneItems(publishedSchedulesCache);
 }
 
@@ -101,6 +135,7 @@ export async function refreshPublishedSchedules() {
     const session = await getPortalSession();
     if (!session?.approved) {
       publishedSchedulesCache = [];
+      writePublishedSchedulesStorage([]);
       emitPublishedSchedulesEvent();
       return [];
     }
@@ -117,6 +152,7 @@ export async function refreshPublishedSchedules() {
       if (isSupabaseSchemaMissingError(error)) {
         console.warn(getSupabaseStorageErrorMessage(error, "schedule_months"));
         publishedSchedulesCache = [];
+        writePublishedSchedulesStorage([]);
         emitPublishedSchedulesEvent();
         return [];
       }
@@ -125,6 +161,7 @@ export async function refreshPublishedSchedules() {
     }
 
     publishedSchedulesCache = cloneItems(rowsToItems(data ?? []));
+    writePublishedSchedulesStorage(publishedSchedulesCache);
     emitPublishedSchedulesEvent();
     return getPublishedSchedules();
   })().finally(() => {
@@ -155,6 +192,7 @@ async function persistPublishedItem(monthKey: string, payload: { published_state
 export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
   const previous = cloneItems(publishedSchedulesCache);
   publishedSchedulesCache = cloneItems(items).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  writePublishedSchedulesStorage(publishedSchedulesCache);
   emitPublishedSchedulesEvent();
 
   try {
@@ -172,6 +210,7 @@ export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
       message: "게시 근무표 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
     });
     publishedSchedulesCache = previous;
+    writePublishedSchedulesStorage(publishedSchedulesCache);
     emitPublishedSchedulesEvent();
     await refreshPublishedSchedules();
     throw error;
@@ -194,6 +233,7 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
   );
 
   publishedSchedulesCache = cloneItems(next);
+  writePublishedSchedulesStorage(publishedSchedulesCache);
   emitPublishedSchedulesEvent();
 
   try {
@@ -207,6 +247,7 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
       message: "근무표 게시에 실패했습니다. DB 기준 상태로 복구합니다.",
     });
     publishedSchedulesCache = previous;
+    writePublishedSchedulesStorage(publishedSchedulesCache);
     emitPublishedSchedulesEvent();
     await refreshPublishedSchedules();
     throw error;
@@ -218,6 +259,7 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
 export function removePublishedSchedule(monthKey: string) {
   const previous = cloneItems(publishedSchedulesCache);
   publishedSchedulesCache = previous.filter((item) => item.monthKey !== monthKey);
+  writePublishedSchedulesStorage(publishedSchedulesCache);
   emitPublishedSchedulesEvent();
 
   void persistPublishedItem(monthKey, {
@@ -229,6 +271,7 @@ export function removePublishedSchedule(monthKey: string) {
       message: "게시 근무표 삭제에 실패했습니다. DB 기준 상태로 복구합니다.",
     });
     publishedSchedulesCache = previous;
+    writePublishedSchedulesStorage(publishedSchedulesCache);
     emitPublishedSchedulesEvent();
     await refreshPublishedSchedules();
   });
