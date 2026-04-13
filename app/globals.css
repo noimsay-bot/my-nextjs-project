@@ -474,7 +474,7 @@ button {
   letter-spacing: 0.06em;
 }
 
-.portal-header-shell {
+.portal-header-shell--sticky {
   position: sticky;
   top: 0;
   z-index: 100;
@@ -1730,7 +1730,7 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 }
 
 @media (max-width: 960px) {
-  .portal-header-shell,
+  .portal-header-shell--sticky,
   .desk-shell-sticky {
     position: static;
     top: auto;

@@ -47,7 +47,7 @@ function readStoredTheme(): PortalTheme {
   return PORTAL_THEMES.includes(storedTheme as PortalTheme) ? (storedTheme as PortalTheme) : "dark";
 }
 
-function PortalHeader({ pathname }: { pathname: string }) {
+function PortalHeader({ pathname, sticky }: { pathname: string; sticky: boolean }) {
   const router = useRouter();
   const headerRef = useRef<HTMLElement | null>(null);
   const initialSession = getSession();
@@ -249,7 +249,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
   };
 
   return (
-    <section ref={headerRef} className="panel portal-header-shell">
+    <section ref={headerRef} className={`panel portal-header-shell${sticky ? " portal-header-shell--sticky" : ""}`}>
       <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
         <div style={{ display: "flex", justifyContent: "stretch" }}>
           <Link href="/" className="brand-logo" aria-label="홈으로 이동">
@@ -358,10 +358,11 @@ function PortalHeader({ pathname }: { pathname: string }) {
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const stickyHeader = pathname === "/schedule/schedule-assignment";
 
   return (
     <div className="shell">
-      <PortalHeader pathname={pathname} />
+      <PortalHeader pathname={pathname} sticky={stickyHeader} />
       <main style={{ marginTop: 20 }}>
         <AppRouteBoundary resetKey={pathname}>
           {children}
