@@ -1,7 +1,6 @@
 ﻿﻿"use client";
 
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
@@ -81,13 +80,6 @@ function getTaggedScheduleHistory() {
   }));
 }
 
-function shouldSkipInitialScheduleHistory() {
-  if (typeof window === "undefined") return false;
-  const isHomeRoute = window.location.pathname === "/";
-  const hasCoarsePointer = window.matchMedia("(any-pointer: coarse)").matches;
-  return isHomeRoute && getPublishedScheduleLayoutMode(window.innerWidth, window.innerHeight, hasCoarsePointer) === "mobile";
-}
-
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
@@ -99,14 +91,6 @@ function getAssignmentChipTag(category: string, name: string, day: DaySchedule) 
 
 function getAssignmentChipText(name: string, tag: "gov" | "law" | null) {
   return tag ? `${name}${scheduleAssignmentNameTagLabels[tag]}` : name;
-}
-
-function getStaticPublishedNameFontSize(text: string, compact: boolean) {
-  const length = [...text.trim()].length;
-  if (length <= 2) return compact ? 14 : 16;
-  if (length === 3) return compact ? 12 : 14;
-  if (length === 4) return compact ? 10.5 : 12;
-  return compact ? 9 : 10.5;
 }
 
 function getPublishedScheduleLayoutMode(
@@ -590,12 +574,9 @@ function isSwapCandidateValid(
 }
 
 export function PublishedSchedulesPanel() {
-  const pathname = usePathname();
   const [items, setItems] = useState<PublishedScheduleItem[]>(() => getTaggedPublishedItems());
   const [itemsLoading, setItemsLoading] = useState(() => getPublishedSchedules().length === 0);
-  const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>(() =>
-    shouldSkipInitialScheduleHistory() ? [] : getTaggedScheduleHistory(),
-  );
+  const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>(() => getTaggedScheduleHistory());
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -621,7 +602,6 @@ export function PublishedSchedulesPanel() {
   const lastFocusRefreshAtRef = useRef(0);
   const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
-  const isHomeRoute = pathname === "/";
 
   useEffect(() => {
     return subscribeToAuth((nextSession) => {
@@ -703,7 +683,6 @@ export function PublishedSchedulesPanel() {
     };
     const onScheduleStateRefresh = () => {
       syncScheduleHistory();
-      syncItemsFromCache();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
@@ -792,7 +771,6 @@ export function PublishedSchedulesPanel() {
     if (activeItems.length === 0) return null;
     return activeItems.find((item) => item.monthKey === selectedMonthKey) ?? activeItems[activeItems.length - 1];
   }, [activeItems, selectedMonthKey]);
-  const isMobileHomeLiteMode = isHomeRoute && scheduleLayoutMode === "mobile" && !editMode;
 
   const previousSelectedItem = useMemo(() => {
     if (!selectedItem) return null;
@@ -804,18 +782,14 @@ export function PublishedSchedulesPanel() {
   const previousDisplaySource = useMemo(() => {
     if (!selectedItem) return null;
     if (previousSelectedItem) return previousSelectedItem;
-    if (isMobileHomeLiteMode) return null;
     const selectedHistoryIndex = scheduleHistory.findIndex((item) => item.monthKey === selectedItem.monthKey);
     if (selectedHistoryIndex <= 0) return null;
     return scheduleHistory[selectedHistoryIndex - 1] ?? null;
-  }, [isMobileHomeLiteMode, previousSelectedItem, scheduleHistory, selectedItem]);
+  }, [previousSelectedItem, scheduleHistory, selectedItem]);
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const allPendingRequests = useMemo(
-    () => (editMode ? requests.filter((item) => item.status === "pending") : []),
-    [editMode, requests],
-  );
+  const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
     () => (selectedItem ? buildDisplayDays(selectedItem, previousDisplaySource) : []),
@@ -1593,25 +1567,20 @@ export function PublishedSchedulesPanel() {
                                     index,
                                     name,
                                   };
-                                  const isInteractionMode = editMode && Boolean(username);
-                                  const pending = isInteractionMode ? isPendingRef(allPendingRequests, ref) : false;
                                   const personObject: ScheduleNameObject = {
                                     key: `${day.ownerMonthKey}-${category}-${name}-${index}`,
                                     name: assignmentDisplay.name,
                                     ref,
-                                    pending,
+                                    pending: isPendingRef(allPendingRequests, ref),
                                   };
-                                  const ownPendingRequest = isInteractionMode
-                                    ? findOwnPendingRequestForRef(allPendingRequests, ref, session?.id)
-                                    : null;
+                                  const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                   const isMine = Boolean(username) && username === assignmentDisplay.name;
                                   const mineHighlighted = isMine && (showMine || editMode);
                                   const requestableCategory = isExchangeableCategory(category);
                                   const isAutoGeneralAssignment = isAutoGeneralAssignmentCategory(category);
-                                  const routeSelected = isInteractionMode ? routeIncludes(selectedRoute, ref) : false;
-                                  const firstSelected = isInteractionMode ? sameRef(firstSelectedRef, ref) : false;
+                                  const routeSelected = routeIncludes(selectedRoute, ref);
+                                  const firstSelected = sameRef(firstSelectedRef, ref);
                                   const recommendedHighlighted =
-                                    isInteractionMode &&
                                     Boolean(firstSelectedRef) &&
                                     requestableCategory &&
                                     !routeSelected &&
@@ -1708,36 +1677,18 @@ export function PublishedSchedulesPanel() {
                                           cursor: editMode && requestableCategory && (!personObject.pending || ownPendingRequest) ? "pointer" : "default",
                                         }}
                                       >
-                                        {isMobileHomeLiteMode ? (
-                                          <span
-                                            className="schedule-name-chip__text"
-                                            style={{
-                                              ...PUBLISHED_NAME_TEXT_STYLE,
-                                              display: "block",
-                                              whiteSpace: "nowrap",
-                                              lineHeight: 1.12,
-                                              fontSize: getStaticPublishedNameFontSize(
-                                                getAssignmentChipText(assignmentDisplay.name, nameTag),
-                                                isCompactMonthlyView,
-                                              ),
-                                            }}
-                                          >
-                                            {getAssignmentChipText(assignmentDisplay.name, nameTag)}
-                                          </span>
-                                        ) : (
-                                          <FittedNameText
-                                            text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
-                                            className="schedule-name-chip__text"
-                                            minFontSize={shouldAutoFitSchedule ? 5 : 9}
-                                            maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
-                                            observeElementResize={!shouldAutoFitSchedule}
-                                            observeWindowResize={!shouldAutoFitSchedule}
-                                            measurementIterations={
-                                              shouldAutoFitSchedule ? PUBLISHED_NAME_MEASUREMENT_ITERATIONS : undefined
-                                            }
-                                            style={PUBLISHED_NAME_TEXT_STYLE}
-                                          />
-                                        )}
+                                        <FittedNameText
+                                          text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
+                                          className="schedule-name-chip__text"
+                                          minFontSize={shouldAutoFitSchedule ? 5 : 9}
+                                          maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                          observeElementResize={!shouldAutoFitSchedule}
+                                          observeWindowResize={!shouldAutoFitSchedule}
+                                          measurementIterations={
+                                            shouldAutoFitSchedule ? PUBLISHED_NAME_MEASUREMENT_ITERATIONS : undefined
+                                          }
+                                          style={PUBLISHED_NAME_TEXT_STYLE}
+                                        />
                                         {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
                                       </button>
                                       {showInlineConfirm ? (

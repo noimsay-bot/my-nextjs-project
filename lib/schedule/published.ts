@@ -1,6 +1,6 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
 import { applyGeneralAssignmentsToSchedule, normalizeGeneratedSchedule } from "@/lib/schedule/engine";
-import { readStoredScheduleAutoAssignmentState } from "@/lib/schedule/storage";
+import { readStoredScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -27,12 +27,11 @@ const PUBLISHED_SCHEDULES_CACHE_KEY = "j-special-force-published-schedules-cache
 
 let publishedSchedulesCache: PublishedScheduleItem[] = [];
 let publishedRefreshPromise: Promise<PublishedScheduleItem[]> | null = null;
-let publishedAutoAssignmentSignature = "";
 
 function cloneItems(items: PublishedScheduleItem[]) {
   return items.map((item) => ({
     ...item,
-    schedule: JSON.parse(JSON.stringify(item.schedule)) as GeneratedSchedule,
+    schedule: normalizePublishedSchedule(JSON.parse(JSON.stringify(item.schedule)) as GeneratedSchedule),
   }));
 }
 
@@ -79,7 +78,7 @@ function normalizeAssignments(assignments: Record<string, string[]>) {
 }
 
 function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
-  const currentState = readStoredScheduleAutoAssignmentState();
+  const currentState = readStoredScheduleState();
   const normalizedSchedule = applyGeneralAssignmentsToSchedule(
     normalizeGeneratedSchedule(schedule),
     currentState.generalTeamPeople,
@@ -96,22 +95,6 @@ function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSched
       };
     }),
   };
-}
-
-function getPublishedAutoAssignmentSignature() {
-  const currentState = readStoredScheduleAutoAssignmentState();
-  return `${currentState.generalTeamPeople.join("\u0001")}\u0002${currentState.offPeople.join("\u0001")}`;
-}
-
-function syncPublishedSchedulesAutoAssignments() {
-  const nextSignature = getPublishedAutoAssignmentSignature();
-  if (publishedAutoAssignmentSignature === nextSignature) return;
-  publishedSchedulesCache = publishedSchedulesCache.map((item) => ({
-    ...item,
-    schedule: normalizePublishedSchedule(item.schedule),
-  }));
-  publishedAutoAssignmentSignature = nextSignature;
-  writePublishedSchedulesStorage(publishedSchedulesCache);
 }
 
 function emitPublishedSchedulesEvent() {
@@ -140,7 +123,6 @@ export function getPublishedSchedules(): PublishedScheduleItem[] {
   if (publishedSchedulesCache.length === 0) {
     publishedSchedulesCache = cloneItems(readPublishedSchedulesStorage());
   }
-  syncPublishedSchedulesAutoAssignments();
   return cloneItems(publishedSchedulesCache);
 }
 
@@ -153,7 +135,6 @@ export async function refreshPublishedSchedules() {
     const session = await getPortalSession();
     if (!session?.approved) {
       publishedSchedulesCache = [];
-      publishedAutoAssignmentSignature = getPublishedAutoAssignmentSignature();
       writePublishedSchedulesStorage([]);
       emitPublishedSchedulesEvent();
       return [];
@@ -171,7 +152,6 @@ export async function refreshPublishedSchedules() {
       if (isSupabaseSchemaMissingError(error)) {
         console.warn(getSupabaseStorageErrorMessage(error, "schedule_months"));
         publishedSchedulesCache = [];
-        publishedAutoAssignmentSignature = getPublishedAutoAssignmentSignature();
         writePublishedSchedulesStorage([]);
         emitPublishedSchedulesEvent();
         return [];
@@ -181,7 +161,6 @@ export async function refreshPublishedSchedules() {
     }
 
     publishedSchedulesCache = cloneItems(rowsToItems(data ?? []));
-    publishedAutoAssignmentSignature = getPublishedAutoAssignmentSignature();
     writePublishedSchedulesStorage(publishedSchedulesCache);
     emitPublishedSchedulesEvent();
     return getPublishedSchedules();
@@ -213,7 +192,6 @@ async function persistPublishedItem(monthKey: string, payload: { published_state
 export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
   const previous = cloneItems(publishedSchedulesCache);
   publishedSchedulesCache = cloneItems(items).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
-  syncPublishedSchedulesAutoAssignments();
   writePublishedSchedulesStorage(publishedSchedulesCache);
   emitPublishedSchedulesEvent();
 
@@ -255,7 +233,6 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
   );
 
   publishedSchedulesCache = cloneItems(next);
-  syncPublishedSchedulesAutoAssignments();
   writePublishedSchedulesStorage(publishedSchedulesCache);
   emitPublishedSchedulesEvent();
 
@@ -282,7 +259,6 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
 export function removePublishedSchedule(monthKey: string) {
   const previous = cloneItems(publishedSchedulesCache);
   publishedSchedulesCache = previous.filter((item) => item.monthKey !== monthKey);
-  syncPublishedSchedulesAutoAssignments();
   writePublishedSchedulesStorage(publishedSchedulesCache);
   emitPublishedSchedulesEvent();
 

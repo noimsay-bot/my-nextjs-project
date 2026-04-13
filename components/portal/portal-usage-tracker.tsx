@@ -17,33 +17,12 @@ export function PortalUsageTracker() {
 
   useEffect(() => {
     if (!session?.approved) return;
-    if (typeof window === "undefined") return;
+    void trackPortalVisit(session, pathname);
+  }, [pathname, session?.approved, session?.id]);
 
-    const isMobileHome =
-      pathname === "/" && (window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth <= 820);
-    const delay = isMobileHome ? 2600 : 400;
-    let idleHandle = 0;
-    let timer = 0;
-    let cancelled = false;
-
-    const runTracking = () => {
-      if (cancelled) return;
-      void trackPortalVisit(session, pathname);
-      void trackPortalPageView(session, pathname);
-    };
-
-    if (typeof window.requestIdleCallback === "function") {
-      idleHandle = window.requestIdleCallback(runTracking, { timeout: delay + 1400 });
-    }
-    timer = window.setTimeout(runTracking, delay);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      if (idleHandle) {
-        window.cancelIdleCallback(idleHandle);
-      }
-    };
+  useEffect(() => {
+    if (!session?.approved) return;
+    void trackPortalPageView(session, pathname);
   }, [pathname, session?.approved, session?.id]);
 
   return null;
