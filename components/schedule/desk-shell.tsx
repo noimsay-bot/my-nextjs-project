@@ -20,6 +20,10 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
+    if (!isStickyPage) {
+      document.documentElement.style.removeProperty("--desk-header-offset");
+      return;
+    }
     const root = document.documentElement;
     const updateDeskOffset = () => {
       const height = headerRef.current?.getBoundingClientRect().height ?? 0;
@@ -47,7 +51,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("resize", updateDeskOffset);
       root.style.removeProperty("--desk-header-offset");
     };
-  }, []);
+  }, [isStickyPage]);
 
   return (
     <section style={{ display: "grid", gap: 16 }}>

@@ -532,7 +532,13 @@ function isSwapCandidateValid(
 }
 
 export function PublishedSchedulesPanel() {
-  const [items, setItems] = useState<PublishedScheduleItem[]>([]);
+  const [items, setItems] = useState<PublishedScheduleItem[]>(() =>
+    getPublishedSchedules().map((item) => ({
+      ...item,
+      schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+    })),
+  );
+  const [itemsLoading, setItemsLoading] = useState(() => getPublishedSchedules().length === 0);
   const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>([]);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
@@ -572,12 +578,17 @@ export function PublishedSchedulesPanel() {
   }, [session?.id, session?.username]);
 
   const loadItems = async () => {
-    await refreshPublishedSchedules();
-    const nextItems = getPublishedSchedules().map((item) => ({
-      ...item,
-      schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
-    }));
-    setItems(nextItems);
+    setItemsLoading(true);
+    try {
+      await refreshPublishedSchedules();
+      const nextItems = getPublishedSchedules().map((item) => ({
+        ...item,
+        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+      }));
+      setItems(nextItems);
+    } finally {
+      setItemsLoading(false);
+    }
   };
 
   const loadRequests = async () => {
@@ -599,15 +610,47 @@ export function PublishedSchedulesPanel() {
   };
 
   useEffect(() => {
-    void Promise.all([loadItems(), loadRequests(), loadScheduleHistory()]).finally(() => {
+    let cancelled = false;
+    let deferredHandle = 0;
+
+    void loadItems().finally(() => {
       lastFocusRefreshAtRef.current = Date.now();
     });
+
+    const runDeferredLoads = () => {
+      if (cancelled) return;
+      void loadRequests();
+      void loadScheduleHistory();
+    };
+
+    if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+      const idleHandle = window.requestIdleCallback(() => {
+        runDeferredLoads();
+      }, { timeout: 1200 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(idleHandle);
+      };
+    }
+
+    deferredHandle = window.setTimeout(runDeferredLoads, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(deferredHandle);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!editMode) return;
+    void loadRequests();
+  }, [editMode]);
 
   useEffect(() => {
     const refreshVisibleData = () => {
       void loadItems();
-      void loadRequests();
+      if (editMode) {
+        void loadRequests();
+      }
     };
     const onFocusRefresh = () => {
       const now = Date.now();
@@ -640,7 +683,7 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     };
-  }, []);
+  }, [editMode]);
 
   useEffect(() => {
     setSelectedRoute([]);
@@ -1053,6 +1096,16 @@ export function PublishedSchedulesPanel() {
     }
     void submitRequest();
   };
+
+  if (itemsLoading && items.length === 0) {
+    return (
+      <section className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div className="status note">게시 근무표를 불러오는 중입니다.</div>
+        </div>
+      </section>
+    );
+  }
 
   if (items.length === 0) {
     return (
