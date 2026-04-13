@@ -1,6 +1,7 @@
 "use client";
 
 import { getUsers } from "@/lib/auth/storage";
+import { formatPortalUsageDayKey } from "@/lib/portal/usage";
 import {
   buildScheduleAssignmentNameTagKey,
   defaultPointers,
@@ -183,6 +184,19 @@ interface TeamLeadScheduleAssignmentRow {
 interface TeamLeadStateRow {
   key: string;
   state: unknown;
+}
+
+interface PortalUsageEventRow {
+  user_id: string | null;
+  user_name: string;
+  user_login_id: string;
+  user_role: AdminProfileItem["role"];
+  event_type: "visit" | "page_view";
+  feature_key: string;
+  feature_label: string;
+  route_path: string;
+  day_key: string;
+  occurred_at: string;
 }
 
 let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} };
@@ -1601,9 +1615,57 @@ export interface AdminProfileItem {
   updatedAt: string;
 }
 
+export interface AdminUsageSummary {
+  todayVisitCount: number;
+  todayPageViewCount: number;
+  activeUsersToday: number;
+  topFeatureLabel: string;
+  topFeatureCount: number;
+}
+
+export interface AdminUsageDailyTrendItem {
+  dayKey: string;
+  visitCount: number;
+  pageViewCount: number;
+  activeUserCount: number;
+}
+
+export interface AdminUsageFeatureItem {
+  featureKey: string;
+  featureLabel: string;
+  todayCount: number;
+  weeklyCount: number;
+  uniqueUsersToday: number;
+  lastUsedAt: string | null;
+}
+
+export interface AdminUsageUserItem {
+  profileId: string;
+  name: string;
+  loginId: string;
+  email: string;
+  role: AdminProfileItem["role"];
+  todayVisitCount: number;
+  todayPageViewCount: number;
+  weeklyVisitCount: number;
+  weeklyPageViewCount: number;
+  topFeatureLabel: string;
+  topFeatureCount: number;
+  lastActiveAt: string | null;
+}
+
+export interface AdminUsageAnalyticsWorkspace {
+  summary: AdminUsageSummary;
+  dailyTrend: AdminUsageDailyTrendItem[];
+  featureItems: AdminUsageFeatureItem[];
+  userItems: AdminUsageUserItem[];
+  errorMessage: string;
+}
+
 export interface AdminWorkspace {
   profiles: AdminProfileItem[];
   reviewManagement: ReviewManagementWorkspace;
+  usageAnalytics: AdminUsageAnalyticsWorkspace;
 }
 
 export interface ReviewerRoleProfileItem {
@@ -1702,6 +1764,7 @@ export interface TeamLeadBestReportResultsWorkspace {
 
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
   "id, email, login_id, name, role, approved, created_at, updated_at";
+const ADMIN_USAGE_WINDOW_DAYS = 7;
 
 async function getPrivilegedPortalSession() {
   const authModule = await import("@/lib/auth/storage");
@@ -1752,6 +1815,211 @@ function formatReviewerRoleProfile(row: ReviewManagementProfileRow): ReviewerRol
         : "member",
     approved: row.approved,
   };
+}
+
+function createEmptyAdminUsageAnalytics(errorMessage = ""): AdminUsageAnalyticsWorkspace {
+  return {
+    summary: {
+      todayVisitCount: 0,
+      todayPageViewCount: 0,
+      activeUsersToday: 0,
+      topFeatureLabel: "-",
+      topFeatureCount: 0,
+    },
+    dailyTrend: [],
+    featureItems: [],
+    userItems: [],
+    errorMessage,
+  };
+}
+
+function getRecentPortalUsageDayKeys(dayCount: number) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Array.from({ length: dayCount }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (dayCount - index - 1));
+    return formatPortalUsageDayKey(date);
+  });
+}
+
+function buildAdminUsageAnalytics(
+  profiles: AdminProfileItem[],
+  events: PortalUsageEventRow[],
+): AdminUsageAnalyticsWorkspace {
+  const todayDayKey = formatPortalUsageDayKey();
+  const recentDayKeys = getRecentPortalUsageDayKeys(ADMIN_USAGE_WINDOW_DAYS);
+  const recentDayKeySet = new Set(recentDayKeys);
+  const filteredEvents = events.filter((event) => recentDayKeySet.has(event.day_key));
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+  const todayActiveUserIds = new Set<string>();
+  const trendActiveUserSets = new Map<string, Set<string>>();
+  const featureUserSets = new Map<string, Set<string>>();
+  const userFeatureCounts = new Map<string, Map<string, number>>();
+
+  const dailyTrendMap = new Map<string, AdminUsageDailyTrendItem>(
+    recentDayKeys.map((dayKey) => [
+      dayKey,
+      {
+        dayKey,
+        visitCount: 0,
+        pageViewCount: 0,
+        activeUserCount: 0,
+      },
+    ]),
+  );
+
+  const featureItemMap = new Map<string, AdminUsageFeatureItem>();
+  const userItemMap = new Map<string, AdminUsageUserItem>(
+    profiles.map((profile) => [
+      profile.id,
+      {
+        profileId: profile.id,
+        name: profile.name,
+        loginId: profile.loginId,
+        email: profile.email,
+        role: profile.role,
+        todayVisitCount: 0,
+        todayPageViewCount: 0,
+        weeklyVisitCount: 0,
+        weeklyPageViewCount: 0,
+        topFeatureLabel: "-",
+        topFeatureCount: 0,
+        lastActiveAt: null,
+      },
+    ]),
+  );
+
+  filteredEvents.forEach((event) => {
+    const userId = event.user_id;
+    if (!userId) return;
+    const profile = profileMap.get(userId);
+    if (!profile) return;
+
+    const isToday = event.day_key === todayDayKey;
+    const userItem = userItemMap.get(userId);
+    const trendItem = dailyTrendMap.get(event.day_key);
+    if (!userItem || !trendItem) return;
+
+    trendActiveUserSets.set(event.day_key, trendActiveUserSets.get(event.day_key) ?? new Set<string>());
+    trendActiveUserSets.get(event.day_key)?.add(userId);
+
+    if (!userItem.lastActiveAt || userItem.lastActiveAt < event.occurred_at) {
+      userItem.lastActiveAt = event.occurred_at;
+    }
+
+    if (event.event_type === "visit") {
+      userItem.weeklyVisitCount += 1;
+      trendItem.visitCount += 1;
+      if (isToday) {
+        userItem.todayVisitCount += 1;
+        todayActiveUserIds.add(userId);
+      }
+      return;
+    }
+
+    userItem.weeklyPageViewCount += 1;
+    trendItem.pageViewCount += 1;
+    if (isToday) {
+      userItem.todayPageViewCount += 1;
+      todayActiveUserIds.add(userId);
+    }
+
+    const featureItem = featureItemMap.get(event.feature_key) ?? {
+      featureKey: event.feature_key,
+      featureLabel: event.feature_label,
+      todayCount: 0,
+      weeklyCount: 0,
+      uniqueUsersToday: 0,
+      lastUsedAt: null,
+    };
+    featureItem.weeklyCount += 1;
+    if (isToday) {
+      featureItem.todayCount += 1;
+      featureUserSets.set(event.feature_key, featureUserSets.get(event.feature_key) ?? new Set<string>());
+      featureUserSets.get(event.feature_key)?.add(userId);
+    }
+    if (!featureItem.lastUsedAt || featureItem.lastUsedAt < event.occurred_at) {
+      featureItem.lastUsedAt = event.occurred_at;
+    }
+    featureItemMap.set(event.feature_key, featureItem);
+
+    const featureCounts = userFeatureCounts.get(userId) ?? new Map<string, number>();
+    featureCounts.set(event.feature_label, (featureCounts.get(event.feature_label) ?? 0) + 1);
+    userFeatureCounts.set(userId, featureCounts);
+  });
+
+  dailyTrendMap.forEach((item, dayKey) => {
+    item.activeUserCount = trendActiveUserSets.get(dayKey)?.size ?? 0;
+  });
+
+  featureItemMap.forEach((item) => {
+    item.uniqueUsersToday = featureUserSets.get(item.featureKey)?.size ?? 0;
+  });
+
+  userItemMap.forEach((item, userId) => {
+    const featureCounts = userFeatureCounts.get(userId);
+    if (!featureCounts) return;
+    const topFeature = Array.from(featureCounts.entries()).sort(
+      (left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "ko"),
+    )[0];
+    if (!topFeature) return;
+    item.topFeatureLabel = topFeature[0];
+    item.topFeatureCount = topFeature[1];
+  });
+
+  const featureItems = Array.from(featureItemMap.values()).sort(
+    (left, right) =>
+      right.todayCount - left.todayCount ||
+      right.weeklyCount - left.weeklyCount ||
+      left.featureLabel.localeCompare(right.featureLabel, "ko"),
+  );
+  const topFeature = featureItems[0];
+  const userItems = Array.from(userItemMap.values()).sort(
+    (left, right) =>
+      right.todayVisitCount - left.todayVisitCount ||
+      right.todayPageViewCount - left.todayPageViewCount ||
+      right.weeklyPageViewCount - left.weeklyPageViewCount ||
+      left.name.localeCompare(right.name, "ko"),
+  );
+
+  return {
+    summary: {
+      todayVisitCount: userItems.reduce((sum, item) => sum + item.todayVisitCount, 0),
+      todayPageViewCount: userItems.reduce((sum, item) => sum + item.todayPageViewCount, 0),
+      activeUsersToday: todayActiveUserIds.size,
+      topFeatureLabel: topFeature?.featureLabel ?? "-",
+      topFeatureCount: topFeature?.todayCount ?? 0,
+    },
+    dailyTrend: recentDayKeys
+      .map((dayKey) => dailyTrendMap.get(dayKey))
+      .filter((item): item is AdminUsageDailyTrendItem => Boolean(item)),
+    featureItems,
+    userItems,
+    errorMessage: "",
+  };
+}
+
+async function getAdminUsageAnalyticsWorkspaceInternal(
+  profiles: AdminProfileItem[],
+): Promise<AdminUsageAnalyticsWorkspace> {
+  const supabase = await getPrivilegedSupabaseClient();
+  const sinceDayKey = getRecentPortalUsageDayKeys(ADMIN_USAGE_WINDOW_DAYS)[0] ?? formatPortalUsageDayKey();
+  const { data, error } = await supabase
+    .from("portal_usage_events")
+    .select("user_id, user_name, user_login_id, user_role, event_type, feature_key, feature_label, route_path, day_key, occurred_at")
+    .gte("day_key", sinceDayKey)
+    .order("occurred_at", { ascending: false })
+    .returns<PortalUsageEventRow[]>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      return createEmptyAdminUsageAnalytics(getSupabaseStorageErrorMessage(error, "사용 통계"));
+    }
+    throw new Error(error.message);
+  }
+
+  return buildAdminUsageAnalytics(profiles, data ?? []);
 }
 
 function normalizeReviewAccessState(raw: unknown) {
@@ -2671,9 +2939,12 @@ export async function getAdminWorkspace(): Promise<AdminWorkspace> {
     throw new Error(profileError.message);
   }
 
+  const formattedProfiles = (profiles ?? []).map(formatAdminProfile);
+
   return {
-    profiles: (profiles ?? []).map(formatAdminProfile),
+    profiles: formattedProfiles,
     reviewManagement: await getReviewManagementWorkspaceInternal(),
+    usageAnalytics: await getAdminUsageAnalyticsWorkspaceInternal(formattedProfiles),
   };
 }
 

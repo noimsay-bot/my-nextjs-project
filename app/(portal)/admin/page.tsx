@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   AdminProfileItem,
+  AdminUsageAnalyticsWorkspace,
   deleteAdminProfile,
   getAdminWorkspace,
   updateAdminProfileAccess,
@@ -100,8 +101,42 @@ function formatDateTime(value: string | null | undefined) {
   return date.toLocaleString("ko-KR");
 }
 
+function formatDayLabel(dayKey: string) {
+  const date = new Date(`${dayKey}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dayKey;
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function StatCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 6,
+        padding: 16,
+        borderRadius: 18,
+        border: "1px solid rgba(255,255,255,.08)",
+        background: "rgba(255,255,255,.03)",
+      }}
+    >
+      <span className="muted">{label}</span>
+      <strong style={{ fontSize: 28, lineHeight: 1.1 }}>{value}</strong>
+      {hint ? <span className="muted">{hint}</span> : null}
+    </article>
+  );
+}
+
 export default function AdminPage() {
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
+  const [usageAnalytics, setUsageAnalytics] = useState<AdminUsageAnalyticsWorkspace | null>(null);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -113,6 +148,7 @@ export default function AdminPage() {
     try {
       const workspace = await getAdminWorkspace();
       setProfiles(workspace.profiles);
+      setUsageAnalytics(workspace.usageAnalytics);
       setDraftRoles(
         Object.fromEntries(workspace.profiles.map((profile) => [profile.id, profile.role])),
       );
@@ -193,6 +229,127 @@ export default function AdminPage() {
                 </div>
               </article>
             ))}
+          </div>
+        </div>
+      </article>
+
+      <article className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="chip">사용 통계</div>
+              <span className="muted">오늘 접속과 최근 7일 기능 사용량</span>
+            </div>
+            <span className="muted">접속 1회는 30분 이상 비활성 뒤 다시 포털에 들어온 경우로 계산합니다.</span>
+          </div>
+
+          {usageAnalytics?.errorMessage ? <div className="status note">{usageAnalytics.errorMessage}</div> : null}
+
+          <div className="subgrid-2">
+            <StatCard label="오늘 접속" value={`${usageAnalytics?.summary.todayVisitCount ?? 0}`} hint="회" />
+            <StatCard label="오늘 기능 사용" value={`${usageAnalytics?.summary.todayPageViewCount ?? 0}`} hint="회" />
+            <StatCard label="오늘 활성 사용자" value={`${usageAnalytics?.summary.activeUsersToday ?? 0}`} hint="명" />
+            <StatCard
+              label="오늘 많이 쓴 기능"
+              value={usageAnalytics?.summary.topFeatureLabel ?? "-"}
+              hint={`${usageAnalytics?.summary.topFeatureCount ?? 0}회`}
+            />
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="chip">최근 7일 추이</div>
+            <div
+              style={{
+                display: "grid",
+                gap: 10,
+                gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+              }}
+            >
+              {(usageAnalytics?.dailyTrend ?? []).map((item) => (
+                <article
+                  key={item.dayKey}
+                  style={{
+                    display: "grid",
+                    gap: 4,
+                    padding: 14,
+                    borderRadius: 16,
+                    border: "1px solid rgba(255,255,255,.08)",
+                    background: "rgba(255,255,255,.03)",
+                  }}
+                >
+                  <strong>{formatDayLabel(item.dayKey)}</strong>
+                  <span className="muted">접속 {item.visitCount}회</span>
+                  <span className="muted">기능 {item.pageViewCount}회</span>
+                  <span className="muted">활성 {item.activeUserCount}명</span>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="chip">기능별 사용량</div>
+            <table className="table-like">
+              <thead>
+                <tr>
+                  <th>기능</th>
+                  <th>오늘</th>
+                  <th>7일</th>
+                  <th>오늘 사용자</th>
+                  <th>최근 사용</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(usageAnalytics?.featureItems ?? []).slice(0, 12).map((item) => (
+                  <tr key={item.featureKey}>
+                    <td>{item.featureLabel}</td>
+                    <td>{item.todayCount}회</td>
+                    <td>{item.weeklyCount}회</td>
+                    <td>{item.uniqueUsersToday}명</td>
+                    <td>{formatDateTime(item.lastUsedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!usageAnalytics?.featureItems.length ? (
+              <div className="status note">{loading ? "불러오는 중입니다." : "아직 기록된 기능 사용 통계가 없습니다."}</div>
+            ) : null}
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="chip">사용자별 접속 현황</div>
+            <table className="table-like">
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>role</th>
+                  <th>오늘 접속</th>
+                  <th>오늘 기능</th>
+                  <th>7일 접속</th>
+                  <th>7일 기능</th>
+                  <th>많이 쓴 기능</th>
+                  <th>최근 활동</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(usageAnalytics?.userItems ?? []).map((item) => (
+                  <tr key={item.profileId}>
+                    <td>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <strong>{item.name}</strong>
+                        <span className="muted">{item.loginId || item.email}</span>
+                      </div>
+                    </td>
+                    <td>{roleLabels[item.role]}</td>
+                    <td>{item.todayVisitCount}회</td>
+                    <td>{item.todayPageViewCount}회</td>
+                    <td>{item.weeklyVisitCount}회</td>
+                    <td>{item.weeklyPageViewCount}회</td>
+                    <td>{item.topFeatureLabel === "-" ? "-" : `${item.topFeatureLabel} (${item.topFeatureCount}회)`}</td>
+                    <td>{formatDateTime(item.lastActiveAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </article>

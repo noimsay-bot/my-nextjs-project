@@ -11,6 +11,8 @@ import {
   refreshHomePopupNoticeWorkspace,
 } from "@/lib/home-popup/storage";
 
+const HOME_POPUP_NOTICE_LOAD_DELAY_MS = 180;
+
 function getNoticeToneStyle(tone: "normal" | "urgent") {
   if (tone === "urgent") {
     return {
@@ -62,7 +64,23 @@ export function HomePopupNoticeModal() {
   };
 
   useEffect(() => {
-    void loadNotice();
+    if (typeof window === "undefined") return;
+
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(() => {
+        void loadNotice();
+      }, { timeout: 1200 });
+      return () => {
+        window.cancelIdleCallback(handle);
+      };
+    }
+
+    const handle = window.setTimeout(() => {
+      void loadNotice();
+    }, HOME_POPUP_NOTICE_LOAD_DELAY_MS);
+    return () => {
+      window.clearTimeout(handle);
+    };
   }, []);
 
   useEffect(() => {

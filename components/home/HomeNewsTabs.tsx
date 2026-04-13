@@ -14,7 +14,6 @@ import {
 } from "@/components/home/home-news.types";
 import {
   getTeamLeadTripCards,
-  refreshTeamLeadState,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
 
@@ -84,7 +83,7 @@ export function HomeNewsTabs({
   onDeleteNotice,
 }: HomeNewsTabsProps) {
   const groupId = useId();
-  const [currentTripCount, setCurrentTripCount] = useState(0);
+  const [currentTripCount, setCurrentTripCount] = useState(() => getCurrentTripCount());
   const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
@@ -129,7 +128,7 @@ export function HomeNewsTabs({
       setCurrentTripCount(getCurrentTripCount());
     };
 
-    void refreshTeamLeadState().then(syncCurrentTripCount);
+    syncCurrentTripCount();
     window.addEventListener("storage", syncCurrentTripCount);
     window.addEventListener("focus", syncCurrentTripCount);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCurrentTripCount);
