@@ -824,7 +824,6 @@ export function PublishedSchedulesPanel() {
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
   const canControlScheduleZoom = false;
-  const scheduleZoomPercent = Math.round(appliedScheduleScale * 100);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -844,10 +843,7 @@ export function PublishedSchedulesPanel() {
 
       const containerWidth = scrollNode.clientWidth;
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const autoFitCap = 1;
-      const nextFitScale = shouldAutoFitSchedule
-        ? Math.min(autoFitCap, Math.max(0.15, widthFitScale))
-        : 1;
+      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, Math.max(0.15, widthFitScale)) : 1;
       setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
     };
 
@@ -1186,16 +1182,6 @@ export function PublishedSchedulesPanel() {
                   <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                 </div>
               </div>
-              {canControlScheduleZoom ? (
-                <div className="schedule-published-zoom-controls">
-                  <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
-                    축소
-                  </button>
-                  <button className="btn" disabled={scheduleZoomFactor >= TOUCH_SCHEDULE_ZOOM_MAX} onClick={zoomInSchedule}>
-                    확대
-                  </button>
-                </div>
-              ) : null}
               <div className="schedule-published-hero">
                 <div className="schedule-published-hero__left">
                   <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
@@ -1266,13 +1252,22 @@ export function PublishedSchedulesPanel() {
                 </div>
               </div>
 
+              {canControlScheduleZoom ? (
+                <div className="schedule-published-zoom-controls">
+                  <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
+                    축소
+                  </button>
+                  <button className="btn" disabled={scheduleZoomFactor >= TOUCH_SCHEDULE_ZOOM_MAX} onClick={zoomInSchedule}>
+                    확대
+                  </button>
+                </div>
+              ) : null}
               <div
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
                 style={{
                   overflowX: shouldAutoFitSchedule ? "auto" : undefined,
-                  overflowY: shouldAutoFitSchedule ? "auto" : undefined,
-                  touchAction: shouldAutoFitSchedule ? "pan-x pan-y pinch-zoom" : undefined,
+                  overflowY: shouldAutoFitSchedule ? "visible" : undefined,
                   WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
                 }}
               >
