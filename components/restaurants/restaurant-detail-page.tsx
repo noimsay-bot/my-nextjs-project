@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSession, initializeAuth, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
 import { RestaurantsMap } from "@/components/restaurants/restaurants-map";
 import { RestaurantCommentForm } from "@/components/restaurants/restaurant-comment-form";
@@ -29,6 +29,7 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "warn" | "note">("note");
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const noteSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +108,26 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
     );
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !restaurant) return;
+    const isMobileViewport = window.innerWidth <= 960;
+    if (!isMobileViewport) return;
+
+    const scrollTarget = noteSectionRef.current;
+    const frameId = window.requestAnimationFrame(() => {
+      if (scrollTarget) {
+        const targetTop = Math.max(0, window.scrollY + scrollTarget.getBoundingClientRect().top - 16);
+        window.scrollTo({ top: targetTop, behavior: "auto" });
+        return;
+      }
+      window.scrollTo({ top: 0, behavior: "auto" });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [restaurant]);
+
   const detailRestaurantForMap = useMemo<NearbyRestaurant[]>(() => {
     if (!restaurant) return [];
     return [
@@ -149,7 +170,7 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
             </div>
 
             {restaurant.note ? (
-              <div className="panel" style={{ background: "rgba(35, 52, 84, 0.22)" }}>
+              <div ref={noteSectionRef} className="panel" style={{ background: "rgba(35, 52, 84, 0.22)" }}>
                 <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
                   <strong style={{ fontSize: 18 }}>등록 메모</strong>
                   <div style={{ lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{restaurant.note}</div>
