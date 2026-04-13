@@ -150,9 +150,8 @@ function normalizeExtraHolidaysText(value: unknown) {
   return [...merged].join(", ");
 }
 
-function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[], offPeople: string[] = []) {
+function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]) {
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
-  const offSet = new Set(offPeople.map((name) => name.trim()).filter(Boolean));
   let previousNight: string[] = [];
 
   orderedDays.forEach((day) => {
@@ -197,7 +196,7 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
     });
 
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !offSet.has(name) && !assignedNames.has(name) && !previousNight.includes(name),
+      (name) => !assignedNames.has(name) && !previousNight.includes(name),
     );
 
     if (nextGeneralNames.length > 0) {
@@ -268,12 +267,11 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     normalizedGeneralTeamPeople.length > 0
       ? normalizedGeneralTeamPeople
       : [...GENERAL_TEAM_DEFAULT_NAMES];
-  const normalizedOffPeople = Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean)));
   if (generated) {
-    syncGeneralAssignments(generated.days, generalTeamPeople, normalizedOffPeople);
+    syncGeneralAssignments(generated.days, generalTeamPeople);
   }
   generatedHistory.forEach((item) => {
-    syncGeneralAssignments(item.days, generalTeamPeople, normalizedOffPeople);
+    syncGeneralAssignments(item.days, generalTeamPeople);
   });
   return {
     ...base,
@@ -284,7 +282,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays),
     generalTeamPeople,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
-    offPeople: normalizedOffPeople,
+    offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
     offExcludeByCategory: nextOffExcludeByCategory,
     orders: nextOrders,
@@ -1522,7 +1520,6 @@ export function openSnapshot(state: ScheduleState, snapshotId: string) {
 
 function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule) {
   const normalizedGenerated = normalizeGeneratedSchedule(generated);
-  syncGeneralAssignments(normalizedGenerated.days, next.generalTeamPeople, next.offPeople);
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
   normalizedGenerated.days.forEach((day) => {
