@@ -45,7 +45,11 @@ function emitSchedulePersistStatus(detail: { ok: boolean; message: string }) {
 }
 
 function cloneScheduleStateValue(state: ScheduleState) {
-  return sanitizeScheduleState(JSON.parse(JSON.stringify(state)) as Partial<ScheduleState>);
+  return JSON.parse(JSON.stringify(state)) as ScheduleState;
+}
+
+function sanitizeClonedScheduleState(state: ScheduleState) {
+  return sanitizeScheduleState(cloneScheduleStateValue(state));
 }
 
 function readE2eScheduleStateSeed() {
@@ -160,7 +164,7 @@ async function persistScheduleStateNow(state: ScheduleState) {
   }
 
   const supabase = await getPortalSupabaseClient();
-  const nextState = cloneScheduleStateValue(state);
+  const nextState = sanitizeClonedScheduleState(state);
   const monthKeys = nextState.generatedHistory.map((item) => item.monthKey);
   const monthRows = nextState.generatedHistory.map((item) => ({
     month_key: item.monthKey,
@@ -208,7 +212,7 @@ function schedulePersist(state: ScheduleState) {
 
     void persistScheduleStateNow(nextState)
       .then((persisted) => {
-        scheduleStateCache = cloneScheduleStateValue(persisted);
+        scheduleStateCache = sanitizeClonedScheduleState(persisted);
         emitScheduleStateEvent();
         scheduledPersistResolve?.(scheduleStateCache);
       })
@@ -245,6 +249,13 @@ export function readStoredScheduleState() {
   return cloneScheduleStateValue(scheduleStateCache);
 }
 
+export function readStoredScheduleAutoAssignmentState() {
+  return {
+    generalTeamPeople: [...scheduleStateCache.generalTeamPeople],
+    offPeople: [...scheduleStateCache.offPeople],
+  };
+}
+
 export async function refreshScheduleState() {
   if (scheduleRefreshPromise) {
     return scheduleRefreshPromise;
@@ -252,7 +263,7 @@ export async function refreshScheduleState() {
 
   scheduleRefreshPromise = loadScheduleStateFromDb()
     .then((state) => {
-      scheduleStateCache = cloneScheduleStateValue(state);
+      scheduleStateCache = sanitizeClonedScheduleState(state);
       emitScheduleStateEvent();
       return readStoredScheduleState();
     })
@@ -264,7 +275,7 @@ export async function refreshScheduleState() {
 }
 
 export function saveScheduleState(state: ScheduleState) {
-  scheduleStateCache = cloneScheduleStateValue(state);
+  scheduleStateCache = sanitizeClonedScheduleState(state);
   emitScheduleStateEvent();
   if (E2E_SCHEDULE_STATE_SEED_ENABLED) {
     writeE2eScheduleStateSeed(scheduleStateCache);
