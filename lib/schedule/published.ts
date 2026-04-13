@@ -1,5 +1,6 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
-import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
+import { applyGeneralAssignmentsToSchedule, normalizeGeneratedSchedule } from "@/lib/schedule/engine";
+import { readStoredScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -46,7 +47,12 @@ function normalizeAssignments(assignments: Record<string, string[]>) {
 }
 
 function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
-  const normalizedSchedule = normalizeGeneratedSchedule(schedule);
+  const currentState = readStoredScheduleState();
+  const normalizedSchedule = applyGeneralAssignmentsToSchedule(
+    normalizeGeneratedSchedule(schedule),
+    currentState.generalTeamPeople,
+    currentState.offPeople,
+  );
   return {
     ...normalizedSchedule,
     days: normalizedSchedule.days.map((day) => {

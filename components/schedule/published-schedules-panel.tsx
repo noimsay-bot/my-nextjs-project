@@ -407,9 +407,18 @@ function rotateRoutePreview(items: PublishedScheduleItem[], route: SchedulePerso
   return scheduleMap;
 }
 
+function isAutoGeneralAssignmentCategory(category: string) {
+  return category === "일반" || category === "주말일반근무";
+}
+
+function isExchangeableCategory(category: string) {
+  return !isAutoGeneralAssignmentCategory(category);
+}
+
 function hasAssignmentElsewhereOnDay(day: DaySchedule | undefined, ref: SchedulePersonRef, name: string) {
   if (!day) return false;
   return Object.entries(day.assignments).some(([category, names]) =>
+    !isAutoGeneralAssignmentCategory(category) &&
     names.some((currentName, index) => {
       if (currentName !== name) return false;
       return !(category === ref.category && index === ref.index);
@@ -473,9 +482,12 @@ function buildDayIndex(items: PublishedScheduleItem[]) {
   return index;
 }
 
-function hasAssignmentOnDay(day: DaySchedule | undefined, name: string) {
+function hasAssignmentOnDay(day: DaySchedule | undefined, name: string, ignoreAutoGeneral = false) {
   if (!day) return false;
-  return Object.values(day.assignments).some((names) => names.includes(name));
+  return Object.entries(day.assignments).some(([category, names]) => {
+    if (ignoreAutoGeneral && isAutoGeneralAssignmentCategory(category)) return false;
+    return names.includes(name);
+  });
 }
 
 function isHolidayLikeDay(dayIndex: Map<string, DaySchedule>, dateKey: string) {
@@ -494,7 +506,7 @@ function getNightShiftGroup(dayIndex: Map<string, DaySchedule>, dateKey: string)
 
 function hasWorkAfterNightShift(dayIndex: Map<string, DaySchedule>, name: string, dateKey: string) {
   const nextDay = dayIndex.get(getNextDateKey(dateKey));
-  return hasAssignmentOnDay(nextDay, name);
+  return hasAssignmentOnDay(nextDay, name, true);
 }
 
 function hadNightShiftPreviousDay(dayIndex: Map<string, DaySchedule>, name: string, dateKey: string) {
@@ -509,6 +521,7 @@ function isSwapCandidateValid(
   todayKey: string,
 ) {
   const categoryLabel = getScheduleCategoryLabel(source.category);
+  if (!isExchangeableCategory(source.category) || !isExchangeableCategory(target.category)) return false;
   if (source.category !== target.category) return false;
   if (!hasCompatibleVacationType(source, target)) return false;
   if (source.name === target.name) return false;
@@ -520,8 +533,8 @@ function isSwapCandidateValid(
   if (categoryLabel === "야근" && getNightShiftGroup(dayIndex, source.dateKey) !== getNightShiftGroup(dayIndex, target.dateKey)) {
     return false;
   }
-  if (hasAssignmentOnDay(dayIndex.get(source.dateKey), target.name)) return false;
-  if (hasAssignmentOnDay(dayIndex.get(target.dateKey), source.name)) return false;
+  if (hasAssignmentOnDay(dayIndex.get(source.dateKey), target.name, true)) return false;
+  if (hasAssignmentOnDay(dayIndex.get(target.dateKey), source.name, true)) return false;
   if (hadNightShiftPreviousDay(dayIndex, target.name, source.dateKey)) return false;
   if (hadNightShiftPreviousDay(dayIndex, source.name, target.dateKey)) return false;
   if (categoryLabel === "야근") {
@@ -542,6 +555,7 @@ export function PublishedSchedulesPanel() {
   const [draftHiddenPublishedMonthKeys, setDraftHiddenPublishedMonthKeys] = useState<string[]>([]);
   const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
+  const [inlineConfirmRefKey, setInlineConfirmRefKey] = useState<string | null>(null);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
@@ -939,6 +953,7 @@ export function PublishedSchedulesPanel() {
       if (index === 0) return [];
       return current.filter((_, entryIndex) => entryIndex !== index);
     });
+    setInlineConfirmRefKey(null);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -946,6 +961,7 @@ export function PublishedSchedulesPanel() {
 
   const handleNameClick = async (person: ScheduleNameObject) => {
     if (!editMode || !username) return;
+    if (!isExchangeableCategory(person.ref.category)) return;
 
     if (person.pending) {
       const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, person.ref, session?.id);
@@ -987,6 +1003,7 @@ export function PublishedSchedulesPanel() {
         return;
       }
       setSelectedRoute([person.ref]);
+      setInlineConfirmRefKey(null);
       setConfirmConflictRequest(false);
       setRequestMessage("");
       setRequestMessageTone("ok");
@@ -1006,7 +1023,9 @@ export function PublishedSchedulesPanel() {
       return;
     }
 
-    setSelectedRoute([...selectedRoute, person.ref]);
+    const nextRoute = [...selectedRoute, person.ref];
+    setSelectedRoute(nextRoute);
+    setInlineConfirmRefKey(selectedRoute.length === 1 ? getRefKey(person.ref) : null);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -1014,6 +1033,7 @@ export function PublishedSchedulesPanel() {
 
   const clearRoute = () => {
     setSelectedRoute([]);
+    setInlineConfirmRefKey(null);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -1039,6 +1059,7 @@ export function PublishedSchedulesPanel() {
       );
       setRequestMessageTone("ok");
       setConfirmConflictRequest(false);
+      setInlineConfirmRefKey(null);
       setSelectedRoute([]);
     } catch (error) {
       setRequestMessage(error instanceof Error ? error.message : "근무 변경 요청을 저장하지 못했습니다.");
@@ -1131,6 +1152,7 @@ export function PublishedSchedulesPanel() {
                             if (routeIncludes(current, candidate) || current.length >= MAX_ROUTE_SIZE) return current;
                             return [...current, candidate];
                           });
+                          setInlineConfirmRefKey(null);
                           setRequestMessage("");
                         }}
                       >
@@ -1474,10 +1496,12 @@ export function PublishedSchedulesPanel() {
                                   const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                   const isMine = Boolean(username) && username === assignmentDisplay.name;
                                   const mineHighlighted = isMine && (showMine || editMode);
+                                  const requestableCategory = isExchangeableCategory(category);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
                                   const recommendedHighlighted =
                                     Boolean(firstSelectedRef) &&
+                                    requestableCategory &&
                                     !routeSelected &&
                                     !personObject.pending &&
                                     recommendedCandidateKeys.has(getRefKey(ref));
@@ -1485,96 +1509,157 @@ export function PublishedSchedulesPanel() {
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
+                                  const showInlineConfirm =
+                                    inlineConfirmRefKey === getRefKey(ref) &&
+                                    selectedRoute.length === 2 &&
+                                    sameRef(selectedRoute[1] ?? null, ref);
                                   return (
-                                    <button
+                                    <div
                                       key={personObject.key}
-                                      type="button"
-                                      className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
-                                      onClick={() => void handleNameClick(personObject)}
                                       style={{
-                                        display: "flex",
-                                        flexDirection: "column",
+                                        position: "relative",
                                         gridColumn: "auto",
                                         justifySelf: "stretch",
-                                        alignItems: "center",
-                                        justifyContent: "center",
                                         width: "100%",
-                                        maxWidth: "100%",
-                                        gap: personObject.pending ? 0 : 5,
-                                        minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
-                                        padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
-                                        borderRadius: 0,
-                                        background: personObject.pending
-                                          ? "rgba(245,158,11,.18)"
-                                          : duplicated
-                                            ? "rgba(239,68,68,.22)"
-                                          : routeSelected
-                                            ? firstSelected
-                                              ? "rgba(168,85,247,.28)"
-                                              : "rgba(56,189,248,.22)"
-                                            : recommendedHighlighted
-                                              ? "rgba(124,58,237,.32)"
-                                            : dimOtherNames
-                                                ? "rgba(255,255,255,.06)"
-                                                : nameTagColors
-                                                  ? nameTagColors.background
-                                                : assignmentDisplay.chipStyle?.background
-                                                  ? assignmentDisplay.chipStyle.background
-                                                  : mineHighlighted
-                                                    ? "rgba(148,163,184,.38)"
-                                                    : "rgba(255,255,255,.16)",
-                                        border: personObject.pending
-                                          ? "1px solid rgba(245,158,11,.35)"
-                                          : duplicated
-                                            ? "1px solid rgba(239,68,68,.28)"
-                                          : routeSelected
-                                            ? firstSelected
-                                              ? "1px solid rgba(192,132,252,.78)"
-                                              : "1px solid rgba(56,189,248,.75)"
-                                            : recommendedHighlighted
-                                              ? "3px solid rgba(255,255,255,.95)"
-                                            : mineHighlighted
-                                              ? "2px solid rgba(226,232,240,.82)"
-                                            : dimOtherNames
-                                                ? "1px solid rgba(255,255,255,.08)"
-                                                : nameTagColors
-                                                  ? nameTagColors.border
-                                              : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: routeSelected && firstSelected
-                                          ? "#f5eaff"
-                                          : duplicated
-                                            ? "#ffe4e6"
-                                          : recommendedHighlighted || mineHighlighted
-                                            ? "#ffffff"
-                                            : dimOtherNames
-                                              ? "rgba(248,251,255,.48)"
-                                              : nameTagColors
-                                                ? nameTagColors.color
-                                                : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: mineHighlighted ? 800 : 700,
-                                        lineHeight: 1.3,
-                                        boxShadow: "none",
-                                        textShadow: undefined,
-                                        opacity: dimOtherNames ? 0.42 : 1,
-                                        cursor: editMode && (!personObject.pending || ownPendingRequest) ? "pointer" : "default",
                                       }}
+                                    >
+                                      <button
+                                        type="button"
+                                        className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                        disabled={editMode && !requestableCategory}
+                                        onClick={() => void handleNameClick(personObject)}
+                                        style={{
+                                          width: "100%",
+                                          maxWidth: "100%",
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          gap: personObject.pending ? 0 : 5,
+                                          minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
+                                          padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
+                                          borderRadius: 0,
+                                          background: personObject.pending
+                                            ? "rgba(245,158,11,.18)"
+                                            : duplicated
+                                              ? "rgba(239,68,68,.22)"
+                                            : routeSelected
+                                              ? firstSelected
+                                                ? "rgba(168,85,247,.28)"
+                                                : "rgba(56,189,248,.22)"
+                                              : recommendedHighlighted
+                                                ? "rgba(124,58,237,.32)"
+                                              : dimOtherNames
+                                                  ? "rgba(255,255,255,.06)"
+                                                  : nameTagColors
+                                                    ? nameTagColors.background
+                                                  : assignmentDisplay.chipStyle?.background
+                                                    ? assignmentDisplay.chipStyle.background
+                                                    : mineHighlighted
+                                                      ? "rgba(148,163,184,.38)"
+                                                      : "rgba(255,255,255,.16)",
+                                          border: personObject.pending
+                                            ? "1px solid rgba(245,158,11,.35)"
+                                            : duplicated
+                                              ? "1px solid rgba(239,68,68,.28)"
+                                            : routeSelected
+                                              ? firstSelected
+                                                ? "1px solid rgba(192,132,252,.78)"
+                                                : "1px solid rgba(56,189,248,.75)"
+                                              : recommendedHighlighted
+                                                ? "3px solid rgba(255,255,255,.95)"
+                                              : mineHighlighted
+                                                ? "2px solid rgba(226,232,240,.82)"
+                                              : dimOtherNames
+                                                  ? "1px solid rgba(255,255,255,.08)"
+                                                  : nameTagColors
+                                                    ? nameTagColors.border
+                                                : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                          color: routeSelected && firstSelected
+                                            ? "#f5eaff"
+                                            : duplicated
+                                              ? "#ffe4e6"
+                                            : recommendedHighlighted || mineHighlighted
+                                              ? "#ffffff"
+                                              : dimOtherNames
+                                                ? "rgba(248,251,255,.48)"
+                                                : nameTagColors
+                                                  ? nameTagColors.color
+                                                  : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                          fontWeight: mineHighlighted ? 800 : 700,
+                                          lineHeight: 1.3,
+                                          boxShadow: "none",
+                                          textShadow: undefined,
+                                          opacity: dimOtherNames ? 0.42 : requestableCategory ? 1 : 0.72,
+                                          cursor: editMode && requestableCategory && (!personObject.pending || ownPendingRequest) ? "pointer" : "default",
+                                        }}
                                       >
                                         <FittedNameText
-                                        text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
-                                        className="schedule-name-chip__text"
-                                        minFontSize={shouldAutoFitSchedule ? 5 : 9}
-                                        maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
-                                        style={{
-                                          display: "inline-block",
-                                          flex: "0 1 auto",
-                                          width: "100%",
-                                          margin: "0 auto",
-                                          overflow: "visible",
-                                          textOverflow: "clip",
-                                        }}
-                                      />
-                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
-                                    </button>
+                                          text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
+                                          className="schedule-name-chip__text"
+                                          minFontSize={shouldAutoFitSchedule ? 5 : 9}
+                                          maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                          style={{
+                                            display: "inline-block",
+                                            flex: "0 1 auto",
+                                            width: "100%",
+                                            margin: "0 auto",
+                                            overflow: "visible",
+                                            textOverflow: "clip",
+                                          }}
+                                        />
+                                        {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
+                                      </button>
+                                      {showInlineConfirm ? (
+                                        <div
+                                          style={{
+                                            position: "absolute",
+                                            left: "50%",
+                                            top: "100%",
+                                            transform: "translateX(-50%)",
+                                            marginTop: 4,
+                                            zIndex: 6,
+                                            minWidth: 132,
+                                            padding: "6px 8px",
+                                            borderRadius: 10,
+                                            border: "1px solid rgba(255,255,255,.18)",
+                                            background: "rgba(9,17,30,.96)",
+                                            boxShadow: "0 12px 24px rgba(0,0,0,.24)",
+                                            display: "grid",
+                                            gap: 6,
+                                          }}
+                                        >
+                                          <span style={{ fontSize: 11, lineHeight: 1.25, textAlign: "center", color: "#f8fbff" }}>
+                                            변경 요청하시겠습니까?
+                                          </span>
+                                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                                            <button
+                                              type="button"
+                                              className="btn primary"
+                                              style={{ padding: "4px 8px", fontSize: 11, minHeight: 0 }}
+                                              onClick={() => {
+                                                setInlineConfirmRefKey(null);
+                                                onConfirmRequest();
+                                              }}
+                                            >
+                                              확인
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="btn"
+                                              style={{ padding: "4px 8px", fontSize: 11, minHeight: 0 }}
+                                              onClick={() => {
+                                                setInlineConfirmRefKey(null);
+                                                setSelectedRoute((current) => current.slice(0, 1));
+                                                setConfirmConflictRequest(false);
+                                              }}
+                                            >
+                                              취소
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
                                   );
                                 })
                               ) : (

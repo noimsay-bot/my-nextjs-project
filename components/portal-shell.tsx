@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import {
@@ -47,9 +47,8 @@ function readStoredTheme(): PortalTheme {
   return PORTAL_THEMES.includes(storedTheme as PortalTheme) ? (storedTheme as PortalTheme) : "dark";
 }
 
-function PortalHeader({ pathname, sticky }: { pathname: string; sticky: boolean }) {
+function PortalHeader({ pathname }: { pathname: string }) {
   const router = useRouter();
-  const headerRef = useRef<HTMLElement | null>(null);
   const initialSession = getSession();
   const [session, setSession] = useState(initialSession);
   const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
@@ -111,37 +110,6 @@ function PortalHeader({ pathname, sticky }: { pathname: string; sticky: boolean 
       window.removeEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
     };
   }, [shouldTrackReviewLock, session?.id]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const root = document.documentElement;
-    const updateHeaderOffset = () => {
-      const height = headerRef.current?.getBoundingClientRect().height ?? 0;
-      root.style.setProperty("--portal-header-offset", `${Math.ceil(height) + 10}px`);
-    };
-
-    updateHeaderOffset();
-
-    if (typeof ResizeObserver === "undefined" || !headerRef.current) {
-      window.addEventListener("resize", updateHeaderOffset);
-      return () => {
-        window.removeEventListener("resize", updateHeaderOffset);
-        root.style.removeProperty("--portal-header-offset");
-      };
-    }
-
-    const observer = new ResizeObserver(() => {
-      updateHeaderOffset();
-    });
-    observer.observe(headerRef.current);
-    window.addEventListener("resize", updateHeaderOffset);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateHeaderOffset);
-      root.style.removeProperty("--portal-header-offset");
-    };
-  }, []);
 
   const visibleLinks = useMemo(() => {
     switch (session?.role) {
@@ -249,7 +217,7 @@ function PortalHeader({ pathname, sticky }: { pathname: string; sticky: boolean 
   };
 
   return (
-    <section ref={headerRef} className={`panel portal-header-shell${sticky ? " portal-header-shell--sticky" : ""}`}>
+    <section className="panel portal-header-shell">
       <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
         <div style={{ display: "flex", justifyContent: "stretch" }}>
           <Link href="/" className="brand-logo" aria-label="홈으로 이동">
@@ -358,11 +326,10 @@ function PortalHeader({ pathname, sticky }: { pathname: string; sticky: boolean 
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const stickyHeader = pathname === "/schedule/schedule-assignment";
 
   return (
     <div className="shell">
-      <PortalHeader pathname={pathname} sticky={stickyHeader} />
+      <PortalHeader pathname={pathname} />
       <main style={{ marginTop: 20 }}>
         <AppRouteBoundary resetKey={pathname}>
           {children}
