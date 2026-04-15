@@ -38,7 +38,7 @@ import {
 } from "@/lib/schedule/published";
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
-import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef } from "@/lib/schedule/types";
+import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, VacationType } from "@/lib/schedule/types";
 import {
   applyScheduleAssignmentNameTagsToSchedule,
 } from "@/lib/team-lead/storage";
