@@ -75,15 +75,9 @@ function getPublishedScheduleLayoutMode(
   return "desktop";
 }
 
-const vacationLegendStyles = {
-  ...vacationStyleTones,
-  기타: vacationStyleTones["건강검진"] || { background: "rgba(167, 139, 250, 0.16)", border: "1px solid #a78bfa", color: "#ddd6fe" }
-};
+const vacationLegendStyles = vacationStyleTones;
 
-const displayVacationLabels = {
-  ...vacationTypeLabels,
-  기타: "기타"
-};
+const displayVacationLabels = vacationTypeLabels;
 
 const displayVacationOrder: VacationType[] = ["연차", "대휴", "기타"];
 
