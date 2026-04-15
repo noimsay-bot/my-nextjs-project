@@ -77,15 +77,15 @@ function getPublishedScheduleLayoutMode(
 
 const vacationLegendStyles = {
   ...vacationStyleTones,
-  etc: vacationStyleTones["건강검진"] || { background: "rgba(167, 139, 250, 0.16)", border: "1px solid #a78bfa", color: "#ddd6fe" }
+  기타: vacationStyleTones["건강검진"] || { background: "rgba(167, 139, 250, 0.16)", border: "1px solid #a78bfa", color: "#ddd6fe" }
 };
 
 const displayVacationLabels = {
   ...vacationTypeLabels,
-  etc: "기타"
+  기타: "기타"
 };
 
-const displayVacationOrder: (VacationType | "etc")[] = ["연차", "대휴", "공가", "etc"];
+const displayVacationOrder: VacationType[] = ["연차", "대휴", "기타"];
 
 const dutyLegendStyles = {
   조근: {
@@ -141,9 +141,14 @@ function getAssignmentDisplay(category: string, value: string) {
     };
   }
   const parsed = parseVacationEntry(value);
+  // 호환성 로직: 기존 데이터(etc, 경조, 공가)를 "기타"로 매핑
+  const type = (parsed.type as string) === "etc" || (parsed.type as string) === "경조" || (parsed.type as string) === "공가"
+    ? "기타"
+    : parsed.type;
+
   return {
     name: parsed.name,
-    chipStyle: vacationLegendStyles[parsed.type as keyof typeof vacationLegendStyles],
+    chipStyle: vacationLegendStyles[type as keyof typeof vacationLegendStyles],
     isVacation: true,
   };
 }
@@ -1054,7 +1059,7 @@ export function PublishedSchedulesPanel() {
 
     const lastSelectedRef = selectedRoute[selectedRoute.length - 1];
     if (lastSelectedRef && !hasCompatibleVacationType(lastSelectedRef, person.ref)) {
-      setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차, 대휴, 공가, 경조는 서로 다른 유형끼리 바꿀 수 없습니다.");
+      setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차, 대휴, 기타는 서로 다른 유형끼리 바꿀 수 없습니다.");
       setRequestMessageTone("warn");
       return;
     }

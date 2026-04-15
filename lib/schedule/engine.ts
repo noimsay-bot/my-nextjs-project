@@ -1,4 +1,4 @@
-﻿import {
+﻿﻿import {
   categories,
   createEmptyOffByCategory,
   DEFAULT_JCHECK_COUNT,
@@ -336,10 +336,10 @@ export function splitNames(value: string) {
 
 export function parseVacationEntry(value: string): { type: VacationType; name: string } {
   const trimmed = value.trim();
-  const matched = /^(연차|대휴|etc|기타|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
+  const matched = /^(연차|대휴|etc|기타|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed); // 기존 데이터 호환을 위해 모든 유형을 매칭
   if (matched) {
     const type = matched[1];
-    const normalizedType = (type === "연차" || type === "대휴") ? type : "etc";
+    const normalizedType = (type === "연차" || type === "대휴") ? type : "기타"; // "etc", "공가", "경조" 등 모든 기타 유형을 "기타"로 매핑
     return {
       type: normalizedType as VacationType,
       name: matched[2].trim(),
@@ -355,7 +355,7 @@ export function formatVacationEntry(type: VacationType, name: string) {
   return `${type}:${name.trim()}`;
 }
 
-const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "etc"];
+const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "기타"];
 
 function getNextVacationType(type: VacationType): VacationType {
   const currentIndex = VACATION_TYPE_SEQUENCE.indexOf(type);

@@ -19,7 +19,7 @@ export interface Conflict {
   name: string;
 }
 
-export type VacationType = "연차" | "대휴" | "공가" | "근속휴가" | "건강검진" | "경조";
+export type VacationType = "연차" | "대휴" | "기타";
 export type ScheduleAssignmentNameTag = "gov" | "law";
 
 export interface DaySchedule {
