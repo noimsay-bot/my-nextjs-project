@@ -85,7 +85,7 @@ const displayVacationLabels = {
   etc: "기타"
 };
 
-const displayVacationOrder: VacationType[] = ["연차", "대휴", "etc"];
+const displayVacationOrder: (VacationType | "etc")[] = ["연차", "대휴", "공가", "etc"];
 
 const dutyLegendStyles = {
   조근: {

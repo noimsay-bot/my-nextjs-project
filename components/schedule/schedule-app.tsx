@@ -1,4 +1,4 @@
-﻿﻿"use client";
+﻿﻿﻿﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -116,7 +116,7 @@ const displayVacationLabels = {
   etc: "기타"
 };
 
-const displayVacationOrder: VacationType[] = ["연차", "대휴", "etc"];
+const displayVacationOrder: (VacationType | "etc")[] = ["연차", "대휴", "공가", "etc"];
 
 const dutyLegendStyles = {
   조근: {
@@ -2569,7 +2569,7 @@ export function ScheduleApp() {
                           key={type}
                           type="button"
                           className="btn"
-                          onClick={() => setAddPersonVacationType(type)}
+                          onClick={() => setAddPersonVacationType(type as VacationType)}
                           style={{
                             padding: "8px 12px",
                             fontWeight: 800,
