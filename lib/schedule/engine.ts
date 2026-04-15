@@ -150,7 +150,7 @@ function normalizeExtraHolidaysText(value: unknown) {
   return [...merged].join(", ");
 }
 
-function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]) {
+function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], generalTeamPeople: string[]) {
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   let previousNight: string[] = [];
 
@@ -195,8 +195,9 @@ function syncGeneralAssignments(days: DaySchedule[], generalTeamPeople: string[]
       if (vacationName) assignedNames.add(vacationName);
     });
 
+    const offSet = new Set(getEffectiveOffByCategory(state, "evening"));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !assignedNames.has(name) && !previousNight.includes(name),
+      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !offSet.has(name),
     );
 
     if (nextGeneralNames.length > 0) {
@@ -260,6 +261,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   const generatedHistory = (input.generatedHistory ?? (generated ? [generated] : [])).map((item) =>
     normalizeGeneratedSchedule(item),
   );
+
   const normalizedGeneralTeamPeople = normalizeEditableNameList(
     input.generalTeamPeople ?? base.generalTeamPeople ?? GENERAL_TEAM_DEFAULT_NAMES,
   );
@@ -267,20 +269,15 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     normalizedGeneralTeamPeople.length > 0
       ? normalizedGeneralTeamPeople
       : [...GENERAL_TEAM_DEFAULT_NAMES];
-  if (generated) {
-    syncGeneralAssignments(generated.days, generalTeamPeople);
-  }
-  generatedHistory.forEach((item) => {
-    syncGeneralAssignments(item.days, generalTeamPeople);
-  });
-  return {
+
+  const nextState: ScheduleState = {
     ...base,
     ...input,
     year: clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year),
     month: clampNumber(input.month ?? base.month, SCHEDULE_MONTHS[0], SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1], base.month),
     jcheckCount: DEFAULT_JCHECK_COUNT,
     extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays),
-    generalTeamPeople,
+    generalTeamPeople: generalTeamPeople,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
@@ -311,6 +308,15 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     editingMonthKey,
     selectedPerson: input.selectedPerson ?? null,
   };
+
+  if (nextState.generated) {
+    syncGeneralAssignments(nextState, nextState.generated.days, generalTeamPeople);
+  }
+  nextState.generatedHistory.forEach((item) => {
+    syncGeneralAssignments(nextState, item.days, generalTeamPeople);
+  });
+
+  return nextState;
 }
 
 export function getUniquePeople(state: ScheduleState) {
@@ -330,10 +336,12 @@ export function splitNames(value: string) {
 
 export function parseVacationEntry(value: string): { type: VacationType; name: string } {
   const trimmed = value.trim();
-  const matched = /^(연차|대휴|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
+  const matched = /^(연차|대휴|etc|기타|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
   if (matched) {
+    const type = matched[1];
+    const normalizedType = (type === "연차" || type === "대휴") ? type : "etc";
     return {
-      type: matched[1] as VacationType,
+      type: normalizedType as VacationType,
       name: matched[2].trim(),
     };
   }
@@ -347,7 +355,7 @@ export function formatVacationEntry(type: VacationType, name: string) {
   return `${type}:${name.trim()}`;
 }
 
-const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "공가", "근속휴가", "건강검진", "경조"];
+const VACATION_TYPE_SEQUENCE: VacationType[] = ["연차", "대휴", "etc"];
 
 function getNextVacationType(type: VacationType): VacationType {
   const currentIndex = VACATION_TYPE_SEQUENCE.indexOf(type);
@@ -1813,4 +1821,3 @@ export function compactGeneratedAssignments(state: ScheduleState) {
   });
   return syncGeneratedSchedule(next, generated);
 }
-

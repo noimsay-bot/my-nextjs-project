@@ -1,4 +1,4 @@
-﻿"use client";
+﻿﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -106,7 +106,17 @@ interface AddPersonDialogState {
   dayLabel: string;
 }
 
-const vacationLegendStyles = vacationStyleTones;
+const vacationLegendStyles = {
+  ...vacationStyleTones,
+  etc: vacationStyleTones["건강검진"] || { background: "rgba(167, 139, 250, 0.16)", border: "1px solid #a78bfa", color: "#ddd6fe" }
+};
+
+const displayVacationLabels = {
+  ...vacationTypeLabels,
+  etc: "기타"
+};
+
+const displayVacationOrder: VacationType[] = ["연차", "대휴", "etc"];
 
 const dutyLegendStyles = {
   조근: {
@@ -119,7 +129,7 @@ const dutyLegendStyles = {
 function VacationLegendChips() {
   return (
     <>
-      {vacationLegendOrder.map((type) => (
+      {displayVacationOrder.map((type) => (
         <span
           key={type}
           style={{
@@ -131,10 +141,10 @@ function VacationLegendChips() {
             fontSize: 14,
             fontWeight: 800,
             lineHeight: 1.2,
-            ...vacationLegendStyles[type],
+            ...vacationLegendStyles[type as keyof typeof vacationLegendStyles],
           }}
         >
-          {vacationTypeLabels[type]}
+          {displayVacationLabels[type as keyof typeof displayVacationLabels]}
         </span>
       ))}
     </>
@@ -153,7 +163,7 @@ function getAssignmentDisplay(category: string, value: string) {
   const parsed = parseVacationEntry(value);
   return {
     name: parsed.name,
-    chipStyle: vacationLegendStyles[parsed.type],
+    chipStyle: vacationLegendStyles[parsed.type as keyof typeof vacationLegendStyles],
     isVacation: true,
   };
 }
@@ -989,6 +999,29 @@ export function ScheduleApp() {
     }
   };
 
+  const onImportPublished = () => {
+    if (!visiblePublishedItem || !visibleSchedule) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`${visibleSchedule.month}월 게시된 근무표를 현재 관리 화면으로 가져오시겠습니까? 현재 관리 화면의 ${visibleSchedule.month}월 데이터가 게시본으로 덮어씌워집니다.`)
+    ) {
+      return;
+    }
+
+    const publishedSchedule = JSON.parse(JSON.stringify(visiblePublishedItem.schedule));
+
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generatedHistory: current.generatedHistory.map((item) =>
+          item.monthKey === publishedSchedule.monthKey ? publishedSchedule : item
+        ),
+        generated: current.generated?.monthKey === publishedSchedule.monthKey ? publishedSchedule : current.generated,
+      })
+    );
+    setMessage({ tone: "ok", text: "게시된 근무표를 가져왔습니다." });
+  };
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <section className="panel">
@@ -1002,6 +1035,9 @@ export function ScheduleApp() {
               setPublishOpen(true);
             }} disabled={isEditingDate}>
               근무표 게시
+            </button>
+            <button className="btn" disabled={isEditingDate || !visiblePublishedItem} onClick={onImportPublished}>
+              게시본 불러오기
             </button>
             <ScheduleManagementLinks inline />
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
@@ -1586,10 +1622,10 @@ export function ScheduleApp() {
                                 </strong>
                               </div>
                               {editMode && isEditingVisibleMonth ? (
-                                <div style={{ display: "grid", gap: 6, justifyItems: "end", gridColumn: 2, gridRow: 1 }}>
+                                <div style={{ display: "flex", gap: 4, alignItems: "center", gridColumn: 2, gridRow: 1, justifySelf: "end" }}>
                                   <button
                                     className="btn"
-                                    style={{ width: 34, padding: "4px 0" }}
+                                    style={{ width: 22, height: 22, padding: 0, display: "grid", placeItems: "center", fontSize: 14 }}
                                     onClick={() => {
                                       setAddPersonDialog({
                                         dateKey: day.dateKey,
@@ -1604,8 +1640,12 @@ export function ScheduleApp() {
                                   <button
                                     className="btn"
                                     style={{
-                                      width: 34,
-                                      padding: "4px 0",
+                                      width: 22,
+                                      height: 22,
+                                      padding: 0,
+                                      display: "grid",
+                                      placeItems: "center",
+                                      fontSize: 14,
                                       color: "#ffd7d7",
                                       borderColor: "rgba(239,68,68,.38)",
                                       background: "rgba(239,68,68,.18)",
@@ -1625,7 +1665,7 @@ export function ScheduleApp() {
                                   {canOpenManualInput(category) ? (
                                     <button
                                       className="btn"
-                                      style={{ padding: "4px 9px" }}
+                                      style={{ padding: "2px 6px", fontSize: 11 }}
                                       onClick={() => {
                                         const value = window.prompt(`${getScheduleCategoryLabel(category)} 이름을 쉼표로 입력하세요`, names.join(", "));
                                         if (value === null) return;
@@ -1853,11 +1893,11 @@ export function ScheduleApp() {
                                           className="btn"
                                           style={{
                                             position: "absolute",
-                                            top: -6,
-                                            right: -6,
-                                            width: 22,
-                                            minWidth: 22,
-                                            height: 22,
+                                            top: -4,
+                                            right: -4,
+                                            width: 18,
+                                            minWidth: 18,
+                                            height: 18,
                                             padding: 0,
                                             borderRadius: 999,
                                             display: "grid",
@@ -2522,7 +2562,7 @@ export function ScheduleApp() {
                 <div style={{ display: "grid", gap: 8 }}>
                   <span className="muted">휴가 유형</span>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-                    {deskEditableVacationTypes.map((type) => {
+                    {displayVacationOrder.map((type) => {
                       const selected = addPersonVacationType === type;
                       return (
                         <button
@@ -2533,12 +2573,12 @@ export function ScheduleApp() {
                           style={{
                             padding: "8px 12px",
                             fontWeight: 800,
-                            ...vacationLegendStyles[type],
-                            border: selected ? "2px solid rgba(255,255,255,.96)" : vacationLegendStyles[type].border,
-                            color: selected ? "#ffffff" : vacationLegendStyles[type].color,
+                            ...vacationLegendStyles[type as keyof typeof vacationLegendStyles],
+                            border: selected ? "2px solid rgba(255,255,255,.96)" : vacationLegendStyles[type as keyof typeof vacationLegendStyles].border,
+                            color: selected ? "#ffffff" : vacationLegendStyles[type as keyof typeof vacationLegendStyles].color,
                             background: selected
-                              ? `linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.04)), ${vacationLegendStyles[type].background}`
-                              : vacationLegendStyles[type].background,
+                              ? `linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.04)), ${vacationLegendStyles[type as keyof typeof vacationLegendStyles].background}`
+                              : vacationLegendStyles[type as keyof typeof vacationLegendStyles].background,
                             boxShadow: selected
                               ? "0 0 0 2px rgba(255,255,255,.18), 0 10px 24px rgba(15,23,42,.34), inset 0 1px 0 rgba(255,255,255,.22)"
                               : "inset 0 1px 0 rgba(255,255,255,.08)",
@@ -2546,7 +2586,7 @@ export function ScheduleApp() {
                             filter: selected ? "saturate(1.15) brightness(1.08)" : "saturate(.92)",
                           }}
                         >
-                          {vacationTypeLabels[type]}
+                          {displayVacationLabels[type as keyof typeof displayVacationLabels]}
                         </button>
                       );
                     })}
@@ -2571,5 +2611,3 @@ export function ScheduleApp() {
     </div>
   );
 }
-
-

@@ -1,4 +1,4 @@
-﻿﻿"use client";
+﻿﻿﻿﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
@@ -75,7 +75,17 @@ function getPublishedScheduleLayoutMode(
   return "desktop";
 }
 
-const vacationLegendStyles = vacationStyleTones;
+const vacationLegendStyles = {
+  ...vacationStyleTones,
+  etc: vacationStyleTones["건강검진"] || { background: "rgba(167, 139, 250, 0.16)", border: "1px solid #a78bfa", color: "#ddd6fe" }
+};
+
+const displayVacationLabels = {
+  ...vacationTypeLabels,
+  etc: "기타"
+};
+
+const displayVacationOrder: VacationType[] = ["연차", "대휴", "etc"];
 
 const dutyLegendStyles = {
   조근: {
@@ -88,7 +98,7 @@ const dutyLegendStyles = {
 function VacationLegendChips() {
   return (
     <>
-      {vacationLegendOrder.map((type) => (
+      {displayVacationOrder.map((type) => (
         <span
           key={type}
           style={{
@@ -100,10 +110,10 @@ function VacationLegendChips() {
             fontSize: 14,
             fontWeight: 800,
             lineHeight: 1.2,
-            ...vacationLegendStyles[type],
+            ...vacationLegendStyles[type as keyof typeof vacationLegendStyles],
           }}
         >
-          {vacationTypeLabels[type]}
+          {displayVacationLabels[type as keyof typeof displayVacationLabels]}
         </span>
       ))}
     </>
@@ -133,7 +143,7 @@ function getAssignmentDisplay(category: string, value: string) {
   const parsed = parseVacationEntry(value);
   return {
     name: parsed.name,
-    chipStyle: vacationLegendStyles[parsed.type],
+    chipStyle: vacationLegendStyles[parsed.type as keyof typeof vacationLegendStyles],
     isVacation: true,
   };
 }
