@@ -168,7 +168,7 @@ export default function HomeNoticeBoardPage() {
   const [notices, setNotices] = useState<HomeNotice[]>(() => getHomeNotices());
   const [communityPosts, setCommunityPosts] = useState<CommunityBoardPost[]>(() => getCommunityBoardPosts());
   const [communityComments, setCommunityComments] = useState<CommunityBoardComment[]>(() => getCommunityBoardComments());
-  const [loading, setLoading] = useState(notices.length === 0 && communityPosts.length === 0);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -212,17 +212,25 @@ export default function HomeNoticeBoardPage() {
   }, [syncFromCache]);
 
   useEffect(() => {
-    void loadWorkspace();
-    const onRefresh = () => {
+    if (session?.approved) {
       void loadWorkspace();
-    };
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(HOME_POPUP_NOTICE_EVENT, onRefresh);
+    } else if (session) {
+      // 세션은 있으나 승인되지 않은 경우 로딩을 멈추고 빈 목록을 표시
+      setLoading(false);
+    }
+  }, [loadWorkspace, session?.approved, session]);
+
+  useEffect(() => {
+    const onFocus = () => void loadWorkspace();
+    const onStorageUpdate = () => syncFromCache();
+
+    window.addEventListener("focus", onFocus);
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, onStorageUpdate);
     return () => {
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, onRefresh);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, onStorageUpdate);
     };
-  }, [loadWorkspace]);
+  }, [loadWorkspace, syncFromCache]);
 
   useEffect(() => {
     return subscribeToAuth((nextSession) => {
