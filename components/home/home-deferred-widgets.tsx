@@ -13,6 +13,8 @@ const HomeNewsPortal = dynamic(
   { ssr: false },
 );
 
+import { ScrollToTop } from "@/components/home/ScrollToTop";
+
 export function HomeDeferredWidgets() {
   const [showPopup, setShowPopup] = useState(false);
   const [showNews, setShowNews] = useState(false);
@@ -52,6 +54,7 @@ export function HomeDeferredWidgets() {
     <>
       {showPopup ? <HomePopupNoticeModal /> : null}
       {showNews ? <HomeNewsPortal /> : null}
+      <ScrollToTop />
     </>
   );
 }

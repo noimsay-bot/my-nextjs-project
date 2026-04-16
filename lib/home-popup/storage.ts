@@ -1004,10 +1004,26 @@ export async function saveCommunityBoardPost(input: {
     createdAt: now,
     updatedAt: now,
   });
+
+  let nextNotices = workspace.notices;
+  if (input.category === "notice") {
+    const shadowNotice = normalizeHomeNotice({
+      id: `shadow:${nextPost.id}`,
+      title,
+      body,
+      kind: "general",
+      tone: "normal",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    nextNotices = sortNotices([shadowNotice, ...nextNotices]);
+  }
+
   const nextPosts = sortCommunityPosts([nextPost, ...workspace.communityPosts]);
   const supabase = await getPortalSupabaseClient();
   const persistedWorkspace = await persistNotices(
-    workspace.notices,
+    nextNotices,
     nextPosts,
     getCommunityBoardComments(),
     session.id,
@@ -1078,9 +1094,21 @@ export async function updateCommunityBoardPost(input: {
         })
       : post,
   );
+
+  const nextNotices = workspace.notices.map((notice) =>
+    notice.id === `shadow:${postId}`
+      ? normalizeHomeNotice({
+          ...notice,
+          title,
+          body,
+          updatedAt: new Date().toISOString(),
+        })
+      : notice,
+  );
+
   const supabase = await getPortalSupabaseClient();
   const persistedWorkspace = await persistNotices(
-    workspace.notices,
+    nextNotices,
     nextPosts,
     getCommunityBoardComments(),
     session.id,
@@ -1130,9 +1158,11 @@ export async function deleteCommunityBoardPost(postId: string) {
   }
 
   const nextPosts = workspace.communityPosts.filter((post) => post.id !== trimmedPostId);
+  const nextNotices = workspace.notices.filter((notice) => notice.id !== `shadow:${trimmedPostId}`);
+
   const supabase = await getPortalSupabaseClient();
   const nextComments = getCommunityBoardComments().filter((comment) => comment.targetKey !== `manual:${trimmedPostId}`);
-  const persistedWorkspace = await persistNotices(workspace.notices, nextPosts, nextComments, session.id, supabase);
+  const persistedWorkspace = await persistNotices(nextNotices, nextPosts, nextComments, session.id, supabase);
   syncCaches(
     persistedWorkspace.notices,
     persistedWorkspace.communityPosts,

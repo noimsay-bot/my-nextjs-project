@@ -19,12 +19,6 @@ function travelTypeLabel(value: AssignmentTravelType) {
   return "";
 }
 
-function formatTripRange(startDateKey: string, endDateKey: string) {
-  if (!startDateKey) return "";
-  if (startDateKey === endDateKey) return startDateKey;
-  return `${startDateKey} ~ ${endDateKey}`;
-}
-
 export function TripBoardPage({
   title,
   travelTypes,
@@ -143,7 +137,7 @@ export function TripBoardPage({
                   <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
                     <strong style={{ fontSize: 20 }}>{card.name}</strong>
                     <span className="muted">
-                      {card.items.length}건 / {card.items.reduce((sum, item) => sum + item.dayCount, 0)}일
+                      {card.items.length}건
                     </span>
                   </span>
                   <span
@@ -204,9 +198,6 @@ export function TripBoardPage({
                           >
                             {travelTypeLabel(item.travelType)}
                           </span>
-                        </div>
-                        <div className="muted">
-                          {formatTripRange(item.startDateKey, item.endDateKey)} / {item.dayCount}일
                         </div>
                         <div className="muted">
                           {item.duties.length > 0 ? item.duties.join(", ") : "근무유형 미입력"}

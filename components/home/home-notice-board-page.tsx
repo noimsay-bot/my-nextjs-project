@@ -239,7 +239,9 @@ export default function HomeNoticeBoardPage() {
   }, []);
 
   const boardItemsByCategory = useMemo<Record<CommunityBoardCategory, CommunityListItem[]>>(() => {
-    const autoNoticeItems = notices.map(toAutomaticNoticeItem);
+    const autoNoticeItems = notices
+      .filter((n) => !n.id.startsWith("shadow:"))
+      .map(toAutomaticNoticeItem);
     const manualItems = communityPosts.map(toManualPostItem);
     return {
       notice: [...autoNoticeItems, ...manualItems.filter((item) => item.category === "notice")].sort((left, right) =>

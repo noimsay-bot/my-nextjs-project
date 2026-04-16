@@ -172,7 +172,7 @@ export function HomeNewsPortal() {
     ],
   }), [activeData, noticeItems]);
   const syncNotices = () => {
-    setNoticeItems(getHomeNotices().map(toNoticeCardItem));
+    setNoticeItems(getHomeNotices().slice(0, 6).map(toNoticeCardItem));
   };
 
   function updateDatasetPreferenceState(

@@ -205,13 +205,15 @@ export function RestaurantsPage() {
                   {currentLocation ? "현재 위치와 등록 맛집을 함께 표시합니다." : "위치 권한이 없어도 등록 맛집은 계속 볼 수 있습니다."}
                 </span>
               </div>
-              <RestaurantsMap
-                currentLocation={currentLocation}
-                restaurants={nearbyRestaurants}
-                onSelectRestaurant={(restaurant) => {
-                  router.push(`/restaurants/${restaurant.id}`);
-                }}
-              />
+              <div style={{ height: "clamp(260px, 35vh, 400px)", borderRadius: 16, overflow: "hidden", position: "relative", border: "1px solid rgba(255,255,255,.12)" }}>
+                <RestaurantsMap
+                  currentLocation={currentLocation}
+                  restaurants={nearbyRestaurants}
+                  onSelectRestaurant={(restaurant) => {
+                    router.push(`/restaurants/${restaurant.id}`);
+                  }}
+                />
+              </div>
             </div>
           </div>
 
