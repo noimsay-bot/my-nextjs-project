@@ -13,7 +13,7 @@ import {
   SCHEDULE_YEARS,
   categories,
   defaultScheduleState,
-  getAssignmentDisplayRank,
+  getDayCategoryDisplayLabel,
   getDayDuplicateNameSet,
   getScheduleCategoryLabel,
   getVisibleAssignmentDisplayRank,
@@ -33,6 +33,11 @@ import {
   resolveScheduleChangeRequest,
 } from "@/lib/schedule/change-requests";
 import { syncVacationMonthSheetFromGeneratedSchedule } from "@/lib/vacation/storage";
+import {
+  applyScheduleAssignmentNameTagsToSchedule,
+  refreshTeamLeadState,
+  TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+} from "@/lib/team-lead/storage";
 import {
   addManualField,
   addPersonToCategory,
@@ -55,6 +60,7 @@ import {
   sanitizeScheduleState,
   setMonthStartPointer,
   swapPersonSlots,
+  updateDayAssignmentLabel,
   updateDayHeaderName,
   updateManualAssignment,
 } from "@/lib/schedule/engine";
@@ -218,16 +224,73 @@ function canOpenManualInput(category: string) {
   return isManualField(category) && category !== "오프";
 }
 
-function getCategoryDisplayLabel(category: string) {
-  const label = getScheduleCategoryLabel(category);
+function getCategoryDisplayLabel(day: DaySchedule, category: string) {
+  const label = getDayCategoryDisplayLabel(day, category);
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
-function getDayAssignmentSortRank(dateKey: string, category: string, isWeekendLike: boolean) {
-  if (dateKey === "2026-05-01" && category === "야근") {
+const weekdayHolidayVisibleAssignmentOrder = ["조근", "일반", "석근", "야근"] as const;
+const weekendVisibleAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
+const weekendPersistentCategories = ["청와대", "국회", "청사"] as const;
+
+function getDayAssignmentSortRank(day: DaySchedule, category: string) {
+  const isWeekendLike = day.isWeekend || day.isHoliday;
+  if (day.dateKey === "2026-05-01" && category === "야근") {
     return 999;
   }
+  if (day.isWeekend) {
+    const weekendIndex = weekendVisibleAssignmentOrder.indexOf(category as (typeof weekendVisibleAssignmentOrder)[number]);
+    if (weekendIndex >= 0) return weekendIndex;
+  }
+  if (!day.isWeekend && day.isHoliday) {
+    const normalized = getScheduleCategoryLabel(category);
+    const holidayIndex = weekdayHolidayVisibleAssignmentOrder.indexOf(
+      normalized as (typeof weekdayHolidayVisibleAssignmentOrder)[number],
+    );
+    if (holidayIndex >= 0) return holidayIndex;
+  }
   return getVisibleAssignmentDisplayRank(category, isWeekendLike);
+}
+
+function getVisibleDayAssignments(day: DaySchedule) {
+  const isWeekendLike = day.isWeekend || day.isHoliday;
+  const visibleMap = new Map<string, string[]>();
+  const overrideOrder = (day.assignmentOrderOverrides ?? []).filter((category, index, array) => array.indexOf(category) === index);
+
+  Object.entries(day.assignments).forEach(([category, names]) => {
+    if (isWeekendLike) {
+      if (category === "휴가" || category === "제크") return;
+    } else if (["국회", "청사", "청와대"].includes(category)) {
+      return;
+    }
+    visibleMap.set(category, names);
+  });
+
+  if (day.isWeekend) {
+    weekendPersistentCategories.forEach((category) => {
+      if (!visibleMap.has(category)) {
+        visibleMap.set(category, day.assignments[category] ?? []);
+      }
+    });
+  }
+
+  return Array.from(visibleMap.entries()).sort(
+    ([leftCategory], [rightCategory]) => {
+      const leftOverrideIndex = overrideOrder.indexOf(leftCategory);
+      const rightOverrideIndex = overrideOrder.indexOf(rightCategory);
+      if (leftOverrideIndex >= 0 || rightOverrideIndex >= 0) {
+        if (leftOverrideIndex < 0) return 1;
+        if (rightOverrideIndex < 0) return -1;
+        if (leftOverrideIndex !== rightOverrideIndex) return leftOverrideIndex - rightOverrideIndex;
+      }
+      return getDayAssignmentSortRank(day, leftCategory) - getDayAssignmentSortRank(day, rightCategory);
+    },
+  );
+}
+
+function canEditAssignmentLabel(day: DaySchedule, category: string) {
+  if (day.manualExtras.includes(category)) return true;
+  return ["청와대", "국회", "청사"].includes(category);
 }
 
 function parseScheduleDragPayload(value: string): ScheduleDragPayload | null {
@@ -362,14 +425,25 @@ export function ScheduleApp() {
   const isEditingDate = Boolean(state.editDateKey);
   const activeEditMonthKey = state.editingMonthKey ?? state.generated?.monthKey ?? null;
 
+  const applyNameTagsToState = (input: ScheduleState) => {
+    const generated = input.generated ? applyScheduleAssignmentNameTagsToSchedule(input.generated) : null;
+    const generatedHistory = input.generatedHistory.map((schedule) => applyScheduleAssignmentNameTagsToSchedule(schedule));
+    return {
+      ...input,
+      generated,
+      generatedHistory,
+    };
+  };
+
   const loadState = async () => {
     try {
+      await refreshTeamLeadState();
       const nextState = await refreshScheduleState();
       editBackupRef.current = null;
-      setState(nextState);
+      setState(applyNameTagsToState(nextState));
     } catch {
       editBackupRef.current = null;
-      setState(readStoredScheduleState() ?? defaultScheduleState);
+      setState(applyNameTagsToState(readStoredScheduleState() ?? defaultScheduleState));
     }
   };
 
@@ -383,9 +457,15 @@ export function ScheduleApp() {
 
   const loadPublishedItems = async () => {
     try {
+      await refreshTeamLeadState();
       await refreshPublishedSchedules();
     } finally {
-      setPublishedItems(getPublishedSchedules());
+      setPublishedItems(
+        getPublishedSchedules().map((item) => ({
+          ...item,
+          schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+        })),
+      );
     }
   };
 
@@ -457,9 +537,11 @@ export function ScheduleApp() {
 
     window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(CHANGE_REQUESTS_EVENT, refreshForRouteState);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshForRouteState);
     return () => {
       window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshForRouteState);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshForRouteState);
     };
   }, []);
 
@@ -1092,7 +1174,7 @@ export function ScheduleApp() {
           </div>
           <div className="status note">
             연장은 주 단위로 묶여 배정됩니다. 한 주에 4명을 먼저 잡고, 휴가나 오프가 있으면 그 주 안에서 다시 맞춥니다.
-            평일 휴일로 입력한 날짜에는 `조근 / 연장 / 일반 / 야근 / 국회` 칸만 만들고 자동 배치는 하지 않습니다.
+            평일 휴일로 입력한 날짜는 휴일 기준 칸 순서로 보여 주고, 주말은 `조근 / 일반 / 뉴스대기 / 청와대 / 국회 / 청사 / 야근` 순서를 유지합니다.
           </div>
           <div className="subgrid-2">
             <label>
@@ -1411,16 +1493,7 @@ export function ScheduleApp() {
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const duplicateNameSet = getDayDuplicateNameSet(day);
                   const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
-                  const visibleAssignments = Object.entries(day.assignments)
-                    .filter(([category]) => {
-                      if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
-                      return !["국회", "청사", "청와대"].includes(category);
-                    })
-                    .sort(
-                      ([leftCategory], [rightCategory]) =>
-                        getDayAssignmentSortRank(day.dateKey, leftCategory, isWeekendLike) -
-                        getDayAssignmentSortRank(day.dateKey, rightCategory, isWeekendLike),
-                    );
+                  const visibleAssignments = getVisibleDayAssignments(day);
 
                   return (
                     <article
@@ -1617,11 +1690,29 @@ export function ScheduleApp() {
                                     textAlign: "center",
                                   }}
                                 >
-                                  {getCategoryDisplayLabel(category)}
+                                  {getCategoryDisplayLabel(day, category)}
                                 </strong>
                               </div>
                               {editMode && isEditingVisibleMonth ? (
                                 <div style={{ display: "flex", gap: 4, alignItems: "center", gridColumn: 2, gridRow: 1, justifySelf: "end" }}>
+                                  {canEditAssignmentLabel(day, category) ? (
+                                    <button
+                                      className="btn"
+                                      style={{ padding: "2px 6px", fontSize: 11 }}
+                                      onClick={() => {
+                                        const value = window.prompt(
+                                          "칸 이름을 입력하세요",
+                                          day.assignmentLabelOverrides?.[category] ?? getScheduleCategoryLabel(category),
+                                        );
+                                        if (value === null) return;
+                                        updateEditingState((current) =>
+                                          updateDayAssignmentLabel(current, day.dateKey, category, value),
+                                        );
+                                      }}
+                                    >
+                                      이름
+                                    </button>
+                                  ) : null}
                                   <button
                                     className="btn"
                                     style={{ width: 22, height: 22, padding: 0, display: "grid", placeItems: "center", fontSize: 14 }}
@@ -2345,19 +2436,9 @@ export function ScheduleApp() {
                     const dayCardStyle = getDayCardStyle(day);
                     const centeredDayLabel = getCenteredDayLabel(day);
                     const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
-                    const isWeekendLike = day.isWeekend || day.isHoliday;
                     const duplicateNameSet = getDayDuplicateNameSet(day);
                     const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
-                    const previewAssignments = Object.entries(day.assignments)
-                      .filter(([category, names]) =>
-                        names.length > 0 &&
-                        (!isWeekendLike ? true : category !== "휴가" && category !== "제크" && category !== "청사"),
-                      )
-                      .sort(
-                        ([leftCategory], [rightCategory]) =>
-                          getDayAssignmentSortRank(day.dateKey, leftCategory, isWeekendLike) -
-                          getDayAssignmentSortRank(day.dateKey, rightCategory, isWeekendLike),
-                      );
+                    const previewAssignments = getVisibleDayAssignments(day).filter(([, names]) => names.length > 0 || day.isWeekend);
 
                     return (
                       <article
@@ -2441,7 +2522,7 @@ export function ScheduleApp() {
                                     textAlign: "center",
                                   }}
                                 >
-                                  {getCategoryDisplayLabel(category)}
+                                  {getCategoryDisplayLabel(day, category)}
                                 </strong>
                               <div className="schedule-name-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 0, minHeight: 42, width: "100%" }}>
                                 {names.map((name, index) => {

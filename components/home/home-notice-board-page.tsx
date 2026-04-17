@@ -8,16 +8,20 @@ import {
   CommunityBoardComment,
   CommunityBoardPost,
   deleteCommunityBoardPost,
+  deleteHomeDday,
   deleteHomeNotice,
   getCommunityBoardComments,
   getCommunityBoardPosts,
+  getHomeDdays,
   getHomeNotices,
   HOME_POPUP_NOTICE_EVENT,
   refreshHomePopupNoticeWorkspace,
+  saveHomeDday,
   saveCommunityBoardComment,
   saveCommunityBoardPost,
   updateCommunityBoardPost,
   updateHomeNotice,
+  type HomeDdayItem,
   type HomeNotice,
 } from "@/lib/home-popup/storage";
 
@@ -166,6 +170,7 @@ function getToneBadgeStyle(tone: HomeNotice["tone"]) {
 export default function HomeNoticeBoardPage() {
   const [session, setSession] = useState(() => getSession());
   const [notices, setNotices] = useState<HomeNotice[]>(() => getHomeNotices());
+  const [ddays, setDdays] = useState<HomeDdayItem[]>(() => getHomeDdays());
   const [communityPosts, setCommunityPosts] = useState<CommunityBoardPost[]>(() => getCommunityBoardPosts());
   const [communityComments, setCommunityComments] = useState<CommunityBoardComment[]>(() => getCommunityBoardComments());
   const [loading, setLoading] = useState(true);
@@ -173,6 +178,8 @@ export default function HomeNoticeBoardPage() {
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [ddayTitle, setDdayTitle] = useState("");
+  const [ddayTargetDate, setDdayTargetDate] = useState("");
   const [attachment, setAttachment] = useState<CommunityBoardAttachment | null>(null);
   const [editor, setEditor] = useState<CommunityEditorState | null>(null);
   const [pageByCategory, setPageByCategory] = useState<Record<CommunityBoardCategory, number>>({
@@ -182,6 +189,8 @@ export default function HomeNoticeBoardPage() {
     resource: 1,
   });
   const [saving, setSaving] = useState(false);
+  const [ddaySaving, setDdaySaving] = useState(false);
+  const [deletingDdayId, setDeletingDdayId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [commentDraftByTarget, setCommentDraftByTarget] = useState<Record<string, string>>({});
   const [commentSavingTargetKey, setCommentSavingTargetKey] = useState<string | null>(null);
@@ -191,6 +200,7 @@ export default function HomeNoticeBoardPage() {
 
   const syncFromCache = useCallback(() => {
     setNotices(getHomeNotices());
+    setDdays(getHomeDdays());
     setCommunityPosts(getCommunityBoardPosts());
     setCommunityComments(getCommunityBoardComments());
   }, []);
@@ -324,6 +334,11 @@ export default function HomeNoticeBoardPage() {
     setTitle("");
     setBody("");
     setAttachment(null);
+  }, []);
+
+  const resetDdayEditor = useCallback(() => {
+    setDdayTitle("");
+    setDdayTargetDate("");
   }, []);
 
   const startCreate = useCallback((category: CommunityBoardCategory) => {
@@ -475,6 +490,127 @@ export default function HomeNoticeBoardPage() {
                       onChange={(event) => setBody(event.target.value)}
                       placeholder="내용"
                     />
+                    {category === "notice" ? (
+                      <section
+                        style={{
+                          display: "grid",
+                          gap: 12,
+                          padding: 12,
+                          borderRadius: 16,
+                          border: "1px solid rgba(255,255,255,.08)",
+                          background: "rgba(255,255,255,.025)",
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <strong style={{ fontSize: 14 }}>홈 디데이</strong>
+                          <span className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                            홈 뉴스 상단 우측에 노출됩니다. 이름과 목표 날짜를 정해 최대 3개까지 등록할 수 있습니다.
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 10,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                          }}
+                        >
+                          <input
+                            className="field-input"
+                            style={{ flex: "1 1 220px" }}
+                            value={ddayTitle}
+                            onChange={(event) => setDdayTitle(event.target.value)}
+                            placeholder="예: 창립기념행사"
+                            disabled={ddaySaving || ddays.length >= 3}
+                          />
+                          <input
+                            className="field-input"
+                            type="date"
+                            style={{ flex: "1 1 180px" }}
+                            value={ddayTargetDate}
+                            onChange={(event) => setDdayTargetDate(event.target.value)}
+                            disabled={ddaySaving || ddays.length >= 3}
+                          />
+                          <button
+                            type="button"
+                            className="btn white"
+                            disabled={ddaySaving || ddays.length >= 3}
+                            onClick={async () => {
+                              setDdaySaving(true);
+                              try {
+                                await saveHomeDday({ title: ddayTitle, targetDate: ddayTargetDate });
+                                syncFromCache();
+                                resetDdayEditor();
+                                setMessage({ tone: "ok", text: "디데이를 등록했습니다." });
+                              } catch (error) {
+                                setMessage({
+                                  tone: "warn",
+                                  text: error instanceof Error ? error.message : "디데이를 등록하지 못했습니다.",
+                                });
+                              } finally {
+                                setDdaySaving(false);
+                              }
+                            }}
+                          >
+                            {ddaySaving ? "등록 중..." : "디데이 생성"}
+                          </button>
+                        </div>
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          등록됨 {ddays.length}/3
+                        </span>
+                        {ddays.length > 0 ? (
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {ddays.map((dday) => (
+                              <div
+                                key={dday.id}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  alignItems: "center",
+                                  flexWrap: "wrap",
+                                  padding: "10px 12px",
+                                  borderRadius: 14,
+                                  border: "1px solid rgba(255,255,255,.08)",
+                                  background: "rgba(255,255,255,.04)",
+                                }}
+                              >
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  <strong style={{ fontSize: 13 }}>{dday.title}</strong>
+                                  <span className="muted" style={{ fontSize: 12 }}>{dday.targetDate}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={deletingDdayId === dday.id}
+                                  onClick={async () => {
+                                    setDeletingDdayId(dday.id);
+                                    try {
+                                      await deleteHomeDday(dday.id);
+                                      syncFromCache();
+                                      setMessage({ tone: "ok", text: "디데이를 삭제했습니다." });
+                                    } catch (error) {
+                                      setMessage({
+                                        tone: "warn",
+                                        text: error instanceof Error ? error.message : "디데이를 삭제하지 못했습니다.",
+                                      });
+                                    } finally {
+                                      setDeletingDdayId(null);
+                                    }
+                                  }}
+                                >
+                                  {deletingDdayId === dday.id ? "삭제 중..." : "삭제"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            아직 등록된 디데이가 없습니다.
+                          </span>
+                        )}
+                      </section>
+                    ) : null}
                     {category === "resource" ? (
                       <div style={{ display: "grid", gap: 10 }}>
                         <label style={{ display: "grid", gap: 8 }}>

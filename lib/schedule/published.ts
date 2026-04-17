@@ -1,5 +1,6 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
 import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
+import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -82,6 +83,58 @@ function rowsToItems(rows: ScheduleMonthPublishRow[]) {
     .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
 }
 
+function normalizeComparableAssignments(assignments: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(assignments ?? {})
+      .filter(([category]) => category !== "일반")
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([category, names]) => [category, [...names]]),
+  );
+}
+
+function canRepairPublishedGeneralAssignments(
+  published: GeneratedSchedule,
+  generated: GeneratedSchedule,
+) {
+  if (published.days.length !== generated.days.length) return false;
+
+  return published.days.every((day, index) => {
+    const generatedDay = generated.days[index];
+    if (!generatedDay || day.dateKey !== generatedDay.dateKey) return false;
+    return (
+      JSON.stringify(normalizeComparableAssignments(day.assignments ?? {})) ===
+      JSON.stringify(normalizeComparableAssignments(generatedDay.assignments ?? {}))
+    );
+  });
+}
+
+async function repairPublishedItems(items: PublishedScheduleItem[]) {
+  if (items.length === 0) return { items, changed: false, changedMonthKeys: [] as string[] };
+
+  await refreshScheduleState();
+  const generatedMap = new Map(
+    readStoredScheduleState().generatedHistory.map((schedule) => [schedule.monthKey, normalizePublishedSchedule(schedule)]),
+  );
+
+  let changed = false;
+  const changedMonthKeys: string[] = [];
+  const nextItems = items.map((item) => {
+    const generated = generatedMap.get(item.monthKey);
+    if (!generated) return item;
+    if (!canRepairPublishedGeneralAssignments(item.schedule, generated)) return item;
+    if (JSON.stringify(item.schedule) === JSON.stringify(generated)) return item;
+    changed = true;
+    changedMonthKeys.push(item.monthKey);
+    return {
+      ...item,
+      title: createPublishedTitle(generated),
+      schedule: generated,
+    };
+  });
+
+  return { items: nextItems, changed, changedMonthKeys };
+}
+
 export function getPublishedSchedules(): PublishedScheduleItem[] {
   return cloneItems(publishedSchedulesCache);
 }
@@ -118,8 +171,21 @@ export async function refreshPublishedSchedules() {
       throw new Error(error.message);
     }
 
-    publishedSchedulesCache = cloneItems(rowsToItems(data ?? []));
+    const repaired = await repairPublishedItems(rowsToItems(data ?? []));
+    publishedSchedulesCache = cloneItems(repaired.items);
     emitPublishedSchedulesEvent();
+    if (repaired.changed) {
+      await Promise.all(
+        repaired.items
+          .filter((item) => repaired.changedMonthKeys.includes(item.monthKey))
+          .map((item) =>
+          persistPublishedItem(item.monthKey, {
+            published_state: item.schedule,
+            published_at: item.publishedAt || new Date().toISOString(),
+          }),
+        ),
+      );
+    }
     return getPublishedSchedules();
   })().finally(() => {
     publishedRefreshPromise = null;

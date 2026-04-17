@@ -8,6 +8,10 @@ type HomeNewsTickerProps = {
 };
 
 export function HomeNewsTicker({ items, loading = false, onSelectItem }: HomeNewsTickerProps) {
+  const handleSelectItem = (itemId: string) => {
+    onSelectItem?.(itemId);
+  };
+
   if (loading) {
     return (
       <div className={styles.tickerSkeleton} aria-hidden="true">
@@ -39,7 +43,11 @@ export function HomeNewsTicker({ items, loading = false, onSelectItem }: HomeNew
                 aria-label={`${HOME_NEWS_CATEGORY_LABELS[item.category]} 브리핑`}
                 aria-hidden={groupIndex === 1}
                 tabIndex={groupIndex === 1 ? -1 : 0}
-                onClick={() => onSelectItem?.(item.id)}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  handleSelectItem(item.id);
+                }}
+                onClick={() => handleSelectItem(item.id)}
               >
                 <span className={styles.tickerCategory}>{HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
                 <span className={styles.tickerText}>{item.text}</span>

@@ -1,5 +1,5 @@
 import { parseVacationEntry } from "@/lib/schedule/engine";
-import { getAssignmentDisplayRank, getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { getAssignmentDisplayRank, getDayCategoryDisplayLabel } from "@/lib/schedule/constants";
 import { DaySchedule } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -26,7 +26,7 @@ function getVisibleAssignments(day: DaySchedule, highlightedName?: string | null
     })
     .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory))
     .map(([category, names]) => ({
-      label: getScheduleCategoryLabel(category),
+      label: getDayCategoryDisplayLabel(day, category),
       names: names
         .map((name) => (category === "휴가" ? parseVacationEntry(name).name : name))
         .filter(Boolean)

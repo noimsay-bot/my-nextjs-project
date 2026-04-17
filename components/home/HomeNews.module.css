@@ -7,9 +7,20 @@
 }
 
 .metaBar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 2px 0;
+}
+
+.metaBarInfo {
   display: grid;
   gap: 4px;
-  padding: 2px 2px 0;
+  width: fit-content;
+  max-width: 100%;
+  flex: 0 1 auto;
 }
 
 .metaBarTitle {
@@ -24,6 +35,103 @@
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.metaBarDdays {
+  display: flex;
+  flex: 1 1 420px;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.metaBarDdayCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 160px;
+  padding: 9px 12px;
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  color: inherit;
+  text-align: left;
+  cursor: default;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.14) 0%, rgba(15, 23, 42, 0.38) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.metaBarDdayInfo {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
+}
+
+.metaBarDdayTitle {
+  color: rgba(255, 248, 235, 0.94);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metaBarDdayValue {
+  color: #fef3c7;
+  flex: 0 0 auto;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.metaBarDdayDate {
+  color: rgba(255, 244, 214, 0.75);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .metaBar {
+    gap: 8px;
+  }
+
+  .metaBarInfo {
+    width: 100%;
+  }
+
+  .metaBarDdays {
+    width: 100%;
+    flex: 1 1 100%;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
+  .metaBarDdayCard {
+    min-width: 0;
+    flex: 1 1 0;
+    gap: 8px;
+    padding: 8px 8px;
+  }
+
+  .metaBarDdayInfo {
+    gap: 1px;
+  }
+
+  .metaBarDdayTitle {
+    font-size: 11px;
+  }
+
+  .metaBarDdayValue {
+    font-size: clamp(22px, 6vw, 28px);
+  }
+
+  .metaBarDdayDate {
+    font-size: 10px;
+  }
 }
 
 .tickerViewport {

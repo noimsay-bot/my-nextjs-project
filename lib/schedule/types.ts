@@ -36,6 +36,8 @@ export interface DaySchedule {
   vacations: string[];
   assignments: Record<string, string[]>;
   assignmentNameTags?: Record<string, ScheduleAssignmentNameTag>;
+  assignmentLabelOverrides?: Record<string, string>;
+  assignmentOrderOverrides?: string[];
   manualExtras: string[];
   headerName: string;
   conflicts: Conflict[];

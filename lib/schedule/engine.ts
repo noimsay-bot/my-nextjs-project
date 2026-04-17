@@ -34,10 +34,20 @@ export function cloneScheduleState(state: ScheduleState): ScheduleState {
 function normalizeDayAssignments(day: DaySchedule) {
   const entries = Object.entries(day.assignments ?? {});
   const isWeekendLike = day.isWeekend || day.isHoliday;
+  const overrideOrder = (day.assignmentOrderOverrides ?? []).filter((category, index, array) =>
+    array.indexOf(category) === index && entries.some(([entryCategory]) => entryCategory === category),
+  );
   return Object.fromEntries(
     entries
       .map(([category, names], index) => ({ category, names, index }))
       .sort((left, right) => {
+        const leftOverrideIndex = overrideOrder.indexOf(left.category);
+        const rightOverrideIndex = overrideOrder.indexOf(right.category);
+        if (leftOverrideIndex >= 0 || rightOverrideIndex >= 0) {
+          if (leftOverrideIndex < 0) return 1;
+          if (rightOverrideIndex < 0) return -1;
+          if (leftOverrideIndex !== rightOverrideIndex) return leftOverrideIndex - rightOverrideIndex;
+        }
         const leftRank = getStoredAssignmentDisplayRank(left.category, isWeekendLike);
         const rightRank = getStoredAssignmentDisplayRank(right.category, isWeekendLike);
         if (leftRank !== rightRank) return leftRank - rightRank;
@@ -56,6 +66,22 @@ function normalizeDayAssignmentNameTags(day: DaySchedule) {
       return (day.assignments[category] ?? []).includes(name);
     }),
   ) as Record<string, ScheduleAssignmentNameTag>;
+}
+
+function normalizeDayAssignmentLabelOverrides(day: DaySchedule) {
+  return Object.fromEntries(
+    Object.entries(day.assignmentLabelOverrides ?? {}).filter(([category, value]) => {
+      if (!Object.prototype.hasOwnProperty.call(day.assignments ?? {}, category)) return false;
+      return typeof value === "string" && value.trim().length > 0;
+    }),
+  ) as Record<string, string>;
+}
+
+function normalizeDayAssignmentOrderOverrides(day: DaySchedule) {
+  return (day.assignmentOrderOverrides ?? []).filter((category, index, array) => {
+    if (array.indexOf(category) !== index) return false;
+    return Object.prototype.hasOwnProperty.call(day.assignments ?? {}, category);
+  });
 }
 
 const REQUIRED_DAY_ASSIGNMENT_OVERRIDES: Record<
@@ -109,6 +135,16 @@ function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
       isHoliday: override.isHoliday,
       assignments: override.assignments,
     }),
+    assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides({
+      ...day,
+      isHoliday: override.isHoliday,
+      assignments: override.assignments,
+    }),
+    assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides({
+      ...day,
+      isHoliday: override.isHoliday,
+      assignments: override.assignments,
+    }),
     manualExtras: [],
   };
 }
@@ -121,6 +157,8 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
       return {
         ...normalizedDay,
         assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
+        assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
+        assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
       };
     }),
   };
@@ -1589,6 +1627,27 @@ export function updateManualAssignment(state: ScheduleState, dateKey: string, ca
   return syncGeneratedSchedule(next, generated);
 }
 
+export function updateDayAssignmentLabel(state: ScheduleState, dateKey: string, category: string, value: string) {
+  if (!state.generated) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day || !Object.prototype.hasOwnProperty.call(day.assignments, category)) return state;
+
+  const trimmed = value.trim();
+  const baseLabel = getScheduleCategoryLabel(category).trim();
+  const nextOverrides = { ...(day.assignmentLabelOverrides ?? {}) };
+
+  if (!trimmed || trimmed === baseLabel) {
+    delete nextOverrides[category];
+  } else {
+    nextOverrides[category] = trimmed;
+  }
+
+  day.assignmentLabelOverrides = nextOverrides;
+  return syncGeneratedSchedule(next, generated);
+}
+
 export function addManualField(state: ScheduleState, dateKey: string, name: string) {
   if (!state.generated) return state;
   const next = cloneScheduleState(state);
@@ -1604,6 +1663,7 @@ export function addManualField(state: ScheduleState, dateKey: string, name: stri
   }
   day.assignments[finalName] = [];
   day.manualExtras.push(finalName);
+  day.assignmentOrderOverrides = [...(day.assignmentOrderOverrides ?? Object.keys(day.assignments)), finalName];
   return syncGeneratedSchedule(next, generated);
 }
 
@@ -1614,6 +1674,12 @@ export function removeAssignmentCategory(state: ScheduleState, dateKey: string, 
   const day = generated.days.find((item) => item.dateKey === dateKey);
   if (!day || !Object.prototype.hasOwnProperty.call(day.assignments, category)) return state;
   delete day.assignments[category];
+  if (day.assignmentLabelOverrides) {
+    delete day.assignmentLabelOverrides[category];
+  }
+  if (day.assignmentOrderOverrides) {
+    day.assignmentOrderOverrides = day.assignmentOrderOverrides.filter((item) => item !== category);
+  }
   day.manualExtras = day.manualExtras.filter((item) => item !== category);
   day.conflicts = day.conflicts.filter((item) => item.category !== category);
   if (category === "휴가") day.vacations = [];
@@ -1643,6 +1709,7 @@ export function moveAssignmentCategory(
   if (targetIndex < 0) return state;
   reordered.splice(targetIndex, 0, sourceCategory);
   day.assignments = Object.fromEntries(reordered.map((key) => [key, day.assignments[key] ?? []]));
+  day.assignmentOrderOverrides = reordered;
 
   return syncGeneratedSchedule(next, generated);
 }
@@ -1670,6 +1737,7 @@ export function shiftAssignmentCategory(
   const [movedCategory] = reordered.splice(sourceIndex, 1);
   reordered.splice(targetIndex, 0, movedCategory);
   day.assignments = Object.fromEntries(reordered.map((key) => [key, day.assignments[key] ?? []]));
+  day.assignmentOrderOverrides = reordered;
 
   return syncGeneratedSchedule(next, generated);
 }

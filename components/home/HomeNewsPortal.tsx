@@ -7,10 +7,14 @@ import { HomeNewsCardItem, HomeNewsCardsByCategory, HomeNewsDataset } from "@/co
 import { getSession, getSessionAsync, hasDeskAccess, subscribeToAuth } from "@/lib/auth/storage";
 import { emptyHomeNewsDataset } from "@/lib/home-news/fallback";
 import {
+  deleteHomeDday,
   deleteHomeNotice,
+  getHomeDdays,
   getHomeNotices,
   HOME_POPUP_NOTICE_EVENT,
   refreshHomePopupNoticeWorkspace,
+  updateHomeDday,
+  type HomeDdayItem,
   type HomeNotice,
 } from "@/lib/home-popup/storage";
 import { fetchHomeNewsDataset } from "@/lib/home-news/queries";
@@ -148,10 +152,12 @@ export function HomeNewsPortal() {
   const [livePreviewData, setLivePreviewData] = useState<HomeNewsDataset | null>(null);
   const [likeWorkspace, setLikeWorkspace] = useState<Awaited<ReturnType<typeof fetchHomeNewsLikeWorkspace>> | null>(null);
   const [noticeItems, setNoticeItems] = useState<HomeNewsCardItem[]>([]);
+  const [ddayItems, setDdayItems] = useState<HomeDdayItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingPreferenceId, setTogglingPreferenceId] = useState<string | null>(null);
   const [deletingNoticeId, setDeletingNoticeId] = useState<string | null>(null);
   const [canDeleteNotice, setCanDeleteNotice] = useState(false);
+  const [canManageDdays, setCanManageDdays] = useState(false);
   const [requestedOpen, setRequestedOpen] = useState<{ id: string; token: number } | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
   const personalizedBaseData = useMemo(() => applyHomeNewsPersonalization(baseData, likeWorkspace), [baseData, likeWorkspace]);
@@ -173,6 +179,7 @@ export function HomeNewsPortal() {
   }), [activeData, noticeItems]);
   const syncNotices = () => {
     setNoticeItems(getHomeNotices().slice(0, 6).map(toNoticeCardItem));
+    setDdayItems(getHomeDdays());
   };
 
   function updateDatasetPreferenceState(
@@ -237,6 +244,57 @@ export function HomeNewsPortal() {
     () => (
       <HomeNewsSection
         data={activeDataWithNotices}
+        ddayItems={ddayItems}
+        canManageDdays={canManageDdays}
+        onManageDday={(item) => {
+          if (!canManageDdays) return;
+
+          const action = window.prompt(
+            `디데이 관리\n수정은 'edit', 삭제는 'delete'를 입력하세요.`,
+            "edit",
+          );
+          if (!action) return;
+
+          const normalizedAction = action.trim().toLowerCase();
+          if (normalizedAction === "delete") {
+            const ok = window.confirm(`'${item.title}' 디데이를 삭제하시겠습니까?`);
+            if (!ok) return;
+
+            void (async () => {
+              try {
+                await deleteHomeDday(item.id);
+                await refreshHomePopupNoticeWorkspace();
+                syncNotices();
+              } catch (error) {
+                const message = error instanceof Error ? error.message : "디데이를 삭제하지 못했습니다.";
+                console.warn(message);
+                window.alert(message);
+              }
+            })();
+            return;
+          }
+
+          if (normalizedAction !== "edit") {
+            return;
+          }
+
+          const nextTitle = window.prompt("디데이 이름을 입력하세요.", item.title);
+          if (nextTitle === null) return;
+          const nextTargetDate = window.prompt("목표 날짜를 YYYY-MM-DD 형식으로 입력하세요.", item.targetDate);
+          if (nextTargetDate === null) return;
+
+          void (async () => {
+            try {
+              await updateHomeDday({ ddayId: item.id, title: nextTitle, targetDate: nextTargetDate });
+              await refreshHomePopupNoticeWorkspace();
+              syncNotices();
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "디데이를 수정하지 못했습니다.";
+              console.warn(message);
+              window.alert(message);
+            }
+          })();
+        }}
         loading={loading}
         requestedOpenItemId={requestedOpen?.id ?? null}
         requestedOpenToken={requestedOpen?.token ?? 0}
@@ -319,7 +377,7 @@ export function HomeNewsPortal() {
         }}
       />
     ),
-    [activeDataWithNotices, canDeleteNotice, deletingNoticeId, loading, noticeItems, togglingPreferenceId],
+    [activeDataWithNotices, canDeleteNotice, canManageDdays, ddayItems, deletingNoticeId, loading, noticeItems, togglingPreferenceId],
   );
 
   useEffect(() => {
@@ -441,11 +499,13 @@ export function HomeNewsPortal() {
     const syncManagePermission = async () => {
       const session = getSession() ?? (await getSessionAsync());
       setCanDeleteNotice(Boolean(session?.approved && hasDeskAccess(session.role)));
+      setCanManageDdays(Boolean(session?.approved && hasDeskAccess(session.role)));
     };
 
     void syncManagePermission();
     return subscribeToAuth((session) => {
       setCanDeleteNotice(Boolean(session?.approved && hasDeskAccess(session.role)));
+      setCanManageDdays(Boolean(session?.approved && hasDeskAccess(session.role)));
     });
   }, []);
 

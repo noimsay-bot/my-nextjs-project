@@ -3,9 +3,13 @@ import { HomeNewsTicker } from "@/components/home/HomeNewsTicker";
 import { HomeNewsTabs } from "@/components/home/HomeNewsTabs";
 import styles from "@/components/home/HomeNews.module.css";
 import { HomeNewsDataset } from "@/components/home/home-news.types";
+import { type HomeDdayItem } from "@/lib/home-popup/storage";
 
 type HomeNewsSectionProps = {
   data: HomeNewsDataset;
+  ddayItems?: HomeDdayItem[];
+  canManageDdays?: boolean;
+  onManageDday?: (item: HomeDdayItem) => void;
   loading?: boolean;
   requestedOpenItemId?: string | null;
   requestedOpenToken?: number;
@@ -19,6 +23,9 @@ type HomeNewsSectionProps = {
 
 export function HomeNewsSection({
   data,
+  ddayItems = [],
+  canManageDdays = false,
+  onManageDday,
   loading = false,
   requestedOpenItemId = null,
   requestedOpenToken = 0,
@@ -31,7 +38,7 @@ export function HomeNewsSection({
 }: HomeNewsSectionProps) {
   return (
     <section className={styles.section} aria-label="뉴스 브리핑">
-      <HomeNewsMeta data={data} />
+      <HomeNewsMeta data={data} ddayItems={ddayItems} canManageDdays={canManageDdays} onManageDday={onManageDday} />
       <HomeNewsTicker
         items={data.tickerItems}
         loading={loading}

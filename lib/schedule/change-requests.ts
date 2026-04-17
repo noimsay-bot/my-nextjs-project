@@ -8,6 +8,8 @@ import {
   SchedulePersonRef,
   ScheduleState,
 } from "@/lib/schedule/types";
+import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { sanitizeScheduleState } from "@/lib/schedule/engine";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -191,10 +193,73 @@ function buildScheduleMap(items: GeneratedSchedule[], monthKeys: Set<string>) {
   );
 }
 
+function isAutoManagedGeneralCategory(category: string) {
+  return getScheduleCategoryLabel(category) === "일반";
+}
+
+function isGeneralAssistRoute(route: SchedulePersonRef[]) {
+  if (route.length !== 2) return false;
+  const generalCount = route.filter((ref) => isAutoManagedGeneralCategory(ref.category)).length;
+  return generalCount === 1;
+}
+
+function hasAutoManagedGeneralRef(route: SchedulePersonRef[]) {
+  return route.some((ref) => isAutoManagedGeneralCategory(ref.category));
+}
+
+function applyGeneralAssistRoute(
+  scheduleMap: Map<string, GeneratedSchedule>,
+  route: SchedulePersonRef[],
+) {
+  if (!isGeneralAssistRoute(route)) return false;
+
+  const workRef = route.find((ref) => !isAutoManagedGeneralCategory(ref.category)) ?? null;
+  const generalRef = route.find((ref) => isAutoManagedGeneralCategory(ref.category)) ?? null;
+  if (!workRef || !generalRef) return false;
+  if (workRef.category === "휴가" || generalRef.category === "휴가") return false;
+
+  const workSchedule = scheduleMap.get(workRef.monthKey);
+  const generalSchedule = scheduleMap.get(generalRef.monthKey);
+  if (!workSchedule || !generalSchedule) return false;
+
+  const workSlot = findRefSlot(workSchedule, workRef);
+  const generalSlot = findRefSlot(generalSchedule, generalRef);
+  if (!workSlot || !generalSlot) return false;
+
+  const promotedName = generalSlot.list[generalSlot.index]?.trim();
+  if (!promotedName) return false;
+
+  workSlot.list.splice(workSlot.index, 1);
+  generalSlot.list.splice(generalSlot.index, 1);
+  generalSlot.day.assignments[generalRef.category] = [...generalSlot.list];
+  generalSlot.day.assignments[workRef.category] = [
+    ...(generalSlot.day.assignments[workRef.category] ?? []),
+    promotedName,
+  ];
+
+  return true;
+}
+
+function syncGeneralAssignmentsForSchedules(
+  currentState: ScheduleState,
+  schedules: GeneratedSchedule[],
+) {
+  const syncedState = sanitizeScheduleState({
+    ...currentState,
+    generated: null,
+    generatedHistory: schedules.map((schedule) => cloneValue(schedule)),
+  });
+  return syncedState.generatedHistory;
+}
+
 function rotateAssignmentsAcrossSchedules(
   scheduleMap: Map<string, GeneratedSchedule>,
   route: SchedulePersonRef[],
 ) {
+  if (applyGeneralAssistRoute(scheduleMap, route)) {
+    return true;
+  }
+
   const slots = route.map((ref) => {
     const schedule = scheduleMap.get(ref.monthKey);
     if (!schedule) return null;
@@ -257,15 +322,22 @@ async function applyRequestToScheduleState(request: ScheduleChangeRequest) {
   } satisfies ScheduleState;
   try {
     await saveScheduleState(nextState);
-    return { matched: true, applied: true, snapshots };
+    const savedState = cloneValue(readStoredScheduleState());
+    const nextSchedules = savedState.generatedHistory.filter((item) => monthKeys.has(item.monthKey));
+    return { matched: true, applied: true, snapshots, nextSchedules };
   } catch {
-    return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
+    return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[], nextSchedules: [] as GeneratedSchedule[] };
   }
 }
 
-async function applyRequestToPublishedSchedules(request: ScheduleChangeRequest) {
+async function applyRequestToPublishedSchedules(
+  request: ScheduleChangeRequest,
+  resolvedSchedules: GeneratedSchedule[] = [],
+) {
   await refreshPublishedSchedules();
+  await refreshScheduleState();
   const items = getPublishedSchedules();
+  const currentState = cloneValue(readStoredScheduleState());
   const monthKeys = collectMonthKeys(request);
   const scheduleMap = buildScheduleMap(
     items.map((item) => item.schedule),
@@ -283,8 +355,14 @@ async function applyRequestToPublishedSchedules(request: ScheduleChangeRequest) 
     return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
   }
 
+  const syncedSchedules =
+    resolvedSchedules.length > 0
+      ? resolvedSchedules.map((schedule) => cloneValue(schedule))
+      : syncGeneralAssignmentsForSchedules(currentState, Array.from(scheduleMap.values()));
+  const syncedScheduleMap = new Map(syncedSchedules.map((schedule) => [schedule.monthKey, schedule]));
+
   const nextItems = items.map((item) => {
-    const schedule = scheduleMap.get(item.monthKey);
+    const schedule = syncedScheduleMap.get(item.monthKey) ?? scheduleMap.get(item.monthKey);
     return schedule ? { ...item, schedule } : item;
   });
   try {
@@ -406,6 +484,9 @@ export async function createScheduleChangeRequest(input: {
 
   const createdAt = nowStamp();
   const route = normalizeRoute(input.route ?? [input.source, input.target]);
+  if (hasAutoManagedGeneralRef(route)) {
+    throw new Error("일반 근무는 변경 요청 대상이 아닙니다. 실제 근무가 변경되면 일반 근무는 자동으로 다시 계산됩니다.");
+  }
   const nextItem = normalizeRequest({
     id: crypto.randomUUID(),
     monthKey: input.monthKey,
@@ -514,9 +595,16 @@ export async function resolveScheduleChangeRequest(
     if (target.status !== "pending") {
       return { ok: false as const, applied: false };
     }
+    if (hasAutoManagedGeneralRef(target.route)) {
+      emitChangeRequestStatus({
+        ok: false,
+        message: "일반 근무는 변경 요청 대상이 아닙니다. 실제 근무가 변경되면 일반 근무는 자동으로 다시 계산됩니다.",
+      });
+      return { ok: false as const, applied: false };
+    }
 
     const scheduleResult = await applyRequestToScheduleState(target);
-    const publishedResult = await applyRequestToPublishedSchedules(target);
+    const publishedResult = await applyRequestToPublishedSchedules(target, scheduleResult.nextSchedules ?? []);
     const hasApplyFailure =
       (scheduleResult.matched && !scheduleResult.applied) || (publishedResult.matched && !publishedResult.applied);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { HomeNewsCard } from "@/components/home/HomeNewsCard";
 import { HomeNewsCurrentTrips } from "@/components/home/HomeNewsCurrentTrips";
 import styles from "@/components/home/HomeNews.module.css";
@@ -89,6 +89,7 @@ export function HomeNewsTabs({
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const categoryTabs = HOME_NEWS_CATEGORIES.map((category) => ({
     key: category as HomeNewsTabKey,
     label: HOME_NEWS_CATEGORY_LABELS[category],
@@ -172,6 +173,21 @@ export function HomeNewsTabs({
   }, [requestedOpenItemId, requestedOpenToken, tabs]);
 
   useEffect(() => {
+    if (!requestedOpenItemId) return;
+    if (!isPanelOpen) return;
+    if (expandedCardId !== requestedOpenItemId) return;
+
+    const handle = window.requestAnimationFrame(() => {
+      cardRefs.current.get(requestedOpenItemId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(handle);
+  }, [expandedCardId, isPanelOpen, requestedOpenItemId, requestedOpenToken]);
+
+  useEffect(() => {
     if (!recommendedCategory || hasUserSelectedCategory || hasNoticeTab) return;
     if ((cardsByCategory[recommendedCategory] ?? []).length === 0) return;
     setActiveCategory(recommendedCategory);
@@ -235,21 +251,31 @@ export function HomeNewsTabs({
           ) : items.length > 0 ? (
             <div className={styles.grid}>
               {items.map((item) => (
-                <HomeNewsCard
+                <div
                   key={item.id}
-                  item={item}
-                  expanded={expandedCardId === item.id}
-                  onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
-                  togglingPreference={togglingPreferenceId === item.id}
-                  canDeleteNotice={canDeleteNotice && activeCategory === "notice" && Boolean(item.noticeId)}
-                  deletingNotice={deletingNoticeId === item.id}
-                  onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
-                  onSetPreference={
-                    onSetPreference
-                      ? (nextPreference) => onSetPreference(item.id, nextPreference)
-                      : undefined
-                  }
-                />
+                  ref={(node) => {
+                    if (node) {
+                      cardRefs.current.set(item.id, node);
+                      return;
+                    }
+                    cardRefs.current.delete(item.id);
+                  }}
+                >
+                  <HomeNewsCard
+                    item={item}
+                    expanded={expandedCardId === item.id}
+                    onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
+                    togglingPreference={togglingPreferenceId === item.id}
+                    canDeleteNotice={canDeleteNotice && activeCategory === "notice" && Boolean(item.noticeId)}
+                    deletingNotice={deletingNoticeId === item.id}
+                    onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
+                    onSetPreference={
+                      onSetPreference
+                        ? (nextPreference) => onSetPreference(item.id, nextPreference)
+                        : undefined
+                    }
+                  />
+                </div>
               ))}
             </div>
           ) : (

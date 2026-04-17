@@ -16,22 +16,36 @@ export function getScheduleCategoryLabel(category: string) {
   return category;
 }
 
+export function getDayCategoryDisplayLabel(day: DaySchedule, category: string) {
+  const override = day.assignmentLabelOverrides?.[category]?.trim();
+  return override || getScheduleCategoryLabel(category);
+}
+
 function normalizeScheduleDuplicateName(value: string) {
   return value.trim();
+}
+
+function normalizeScheduleAssignmentPersonName(category: string, value: string) {
+  const normalized = normalizeScheduleDuplicateName(value);
+  if (!normalized) return "";
+  if (category !== "휴가") return normalized;
+
+  const matched = /^(연차|대휴|etc|기타|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(normalized);
+  return matched ? matched[2].trim() : normalized;
 }
 
 export function getDayDuplicateNameSet(day: DaySchedule) {
   const counts = new Map<string, number>();
 
-  const pushName = (value: string) => {
-    const normalized = normalizeScheduleDuplicateName(value);
+  const pushName = (category: string, value: string) => {
+    const normalized = normalizeScheduleAssignmentPersonName(category, value);
     if (!normalized) return;
     counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
   };
 
-  pushName(day.headerName ?? "");
-  Object.values(day.assignments ?? {}).forEach((names) => {
-    names.forEach((name) => pushName(name));
+  pushName("header", day.headerName ?? "");
+  Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
+    names.forEach((name) => pushName(category, name));
   });
 
   return new Set(

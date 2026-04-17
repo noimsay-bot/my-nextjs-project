@@ -10,6 +10,7 @@ import { printHtmlDocument } from "@/lib/print";
 import {
   buildScheduleAssignmentNameTagKey,
   getAssignmentDisplayRank,
+  getDayCategoryDisplayLabel,
   getDayDuplicateNameSet,
   getScheduleCategoryLabel,
   getVisibleAssignmentDisplayRank,
@@ -41,6 +42,8 @@ import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/l
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, VacationType } from "@/lib/schedule/types";
 import {
   applyScheduleAssignmentNameTagsToSchedule,
+  refreshTeamLeadState,
+  TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -158,8 +161,8 @@ function getCenteredDayLabel(day: DaySchedule) {
   return dayBadge(day);
 }
 
-function getCategoryDisplayLabel(category: string) {
-  const label = getScheduleCategoryLabel(category);
+function getCategoryDisplayLabel(day: DaySchedule, category: string) {
+  const label = getDayCategoryDisplayLabel(day, category);
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
@@ -349,6 +352,22 @@ function getRefKey(ref: SchedulePersonRef) {
   return `${ref.monthKey}:${ref.dateKey}:${ref.category}:${ref.index}:${ref.name}`;
 }
 
+function isAutoManagedGeneralCategory(category: string) {
+  return getScheduleCategoryLabel(category) === "일반";
+}
+
+function isGeneralAssistRoute(route: SchedulePersonRef[]) {
+  if (route.length !== 2) return false;
+  const generalCount = route.filter((ref) => isAutoManagedGeneralCategory(ref.category)).length;
+  return generalCount === 1;
+}
+
+function getComparableAssignmentName(category: string, value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return category === "휴가" ? parseVacationEntry(trimmed).name.trim() : trimmed;
+}
+
 function routeIncludes(route: SchedulePersonRef[], ref: SchedulePersonRef) {
   return route.some((candidate) => sameRef(candidate, ref));
 }
@@ -399,6 +418,9 @@ function findRefSlot(
 function rotateRoutePreview(items: PublishedScheduleItem[], route: SchedulePersonRef[]) {
   const monthKeys = new Set(route.map((ref) => ref.monthKey));
   const scheduleMap = buildScheduleMap(items, monthKeys);
+  if (applyGeneralAssistPreview(scheduleMap, route)) {
+    return scheduleMap;
+  }
   const slots = route.map((ref) => findRefSlot(scheduleMap, ref));
   if (slots.some((slot) => !slot)) return null;
   const resolvedSlots = slots as NonNullable<(typeof slots)[number]>[];
@@ -416,11 +438,43 @@ function rotateRoutePreview(items: PublishedScheduleItem[], route: SchedulePerso
   return scheduleMap;
 }
 
+function applyGeneralAssistPreview(
+  scheduleMap: Map<string, PublishedScheduleItem["schedule"]>,
+  route: SchedulePersonRef[],
+) {
+  if (!isGeneralAssistRoute(route)) return false;
+
+  const workRef = route.find((ref) => !isAutoManagedGeneralCategory(ref.category)) ?? null;
+  const generalRef = route.find((ref) => isAutoManagedGeneralCategory(ref.category)) ?? null;
+  if (!workRef || !generalRef) return false;
+  if (workRef.category === "휴가" || generalRef.category === "휴가") return false;
+
+  const workSlot = findRefSlot(scheduleMap, workRef);
+  const generalSlot = findRefSlot(scheduleMap, generalRef);
+  if (!workSlot || !generalSlot) return false;
+
+  const promotedName = generalSlot.list[generalSlot.index]?.trim();
+  if (!promotedName) return false;
+
+  workSlot.list.splice(workSlot.index, 1);
+  generalSlot.list.splice(generalSlot.index, 1);
+  generalSlot.day.assignments[generalRef.category] = [...generalSlot.list];
+  generalSlot.day.assignments[workRef.category] = [
+    ...(generalSlot.day.assignments[workRef.category] ?? []),
+    promotedName,
+  ];
+
+  return true;
+}
+
 function hasAssignmentElsewhereOnDay(day: DaySchedule | undefined, ref: SchedulePersonRef, name: string) {
   if (!day) return false;
+  const comparableName = getComparableAssignmentName(ref.category, name);
+  if (!comparableName) return false;
   return Object.entries(day.assignments).some(([category, names]) =>
+    !isAutoManagedGeneralCategory(category) &&
     names.some((currentName, index) => {
-      if (currentName !== name) return false;
+      if (getComparableAssignmentName(category, currentName) !== comparableName) return false;
       return !(category === ref.category && index === ref.index);
     }),
   );
@@ -430,6 +484,30 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
   if (route.length < 2) return false;
   const previewMap = rotateRoutePreview(items, route);
   if (!previewMap) return true;
+
+  if (isGeneralAssistRoute(route)) {
+    const allDays = Array.from(previewMap.values())
+      .flatMap((schedule) => schedule.days)
+      .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+
+    if (allDays.some((day) => getDayDuplicateNameSet(day).size > 0)) {
+      return true;
+    }
+
+    let previousNight: string[] = [];
+    for (const day of allDays) {
+      const hasNightConflict = Object.entries(day.assignments).some(([category, names]) =>
+        category !== "휴가" &&
+        !isAutoManagedGeneralCategory(category) &&
+        names.some((name) => previousNight.includes(name.trim())),
+      );
+      if (hasNightConflict) return true;
+      previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+    }
+
+    return false;
+  }
+
   const dayIndex = new Map<string, DaySchedule>();
   previewMap.forEach((schedule) => {
     schedule.days.forEach((day) => {
@@ -482,14 +560,28 @@ function buildDayIndex(items: PublishedScheduleItem[]) {
   return index;
 }
 
-function hasAssignmentOnDay(day: DaySchedule | undefined, name: string) {
+function hasAssignmentOnDay(day: DaySchedule | undefined, name: string, category = "") {
   if (!day) return false;
-  return Object.values(day.assignments).some((names) => names.includes(name));
+  const comparableName = getComparableAssignmentName(category, name);
+  if (!comparableName) return false;
+  return Object.entries(day.assignments).some(([category, names]) =>
+    !isAutoManagedGeneralCategory(category) &&
+    names.some((currentName) => getComparableAssignmentName(category, currentName) === comparableName),
+  );
 }
 
 function isHolidayLikeDay(dayIndex: Map<string, DaySchedule>, dateKey: string) {
   const day = dayIndex.get(dateKey);
   return Boolean(day && (day.isWeekend || day.isHoliday));
+}
+
+function isWeekdayHolidayDay(dayIndex: Map<string, DaySchedule>, dateKey: string) {
+  const day = dayIndex.get(dateKey);
+  return Boolean(day && !day.isWeekend && (day.isCustomHoliday || day.isWeekdayHoliday || day.isHoliday));
+}
+
+function usesWeekdayHolidayGrouping(category: string) {
+  return !["휴가", "주말조근", "주말일반근무", "뉴스대기"].includes(category);
 }
 
 function getNightShiftGroup(dayIndex: Map<string, DaySchedule>, dateKey: string) {
@@ -518,19 +610,27 @@ function isSwapCandidateValid(
   todayKey: string,
 ) {
   const categoryLabel = getScheduleCategoryLabel(source.category);
-  if (source.category !== target.category) return false;
+  if (isAutoManagedGeneralCategory(source.category)) return false;
+  if (isAutoManagedGeneralCategory(target.category)) return false;
   if (!hasCompatibleVacationType(source, target)) return false;
   if (source.name === target.name) return false;
   if (source.dateKey <= todayKey || target.dateKey <= todayKey) return false;
   if (source.dateKey === target.dateKey) return false;
+  if (source.category !== target.category) return false;
+  if (
+    usesWeekdayHolidayGrouping(source.category) &&
+    isWeekdayHolidayDay(dayIndex, source.dateKey) !== isWeekdayHolidayDay(dayIndex, target.dateKey)
+  ) {
+    return false;
+  }
   if (categoryLabel === "조근" && isHolidayLikeDay(dayIndex, source.dateKey) !== isHolidayLikeDay(dayIndex, target.dateKey)) {
     return false;
   }
   if (categoryLabel === "야근" && getNightShiftGroup(dayIndex, source.dateKey) !== getNightShiftGroup(dayIndex, target.dateKey)) {
     return false;
   }
-  if (hasAssignmentOnDay(dayIndex.get(source.dateKey), target.name)) return false;
-  if (hasAssignmentOnDay(dayIndex.get(target.dateKey), source.name)) return false;
+  if (hasAssignmentOnDay(dayIndex.get(source.dateKey), target.name, target.category)) return false;
+  if (hasAssignmentOnDay(dayIndex.get(target.dateKey), source.name, source.category)) return false;
   if (hadNightShiftPreviousDay(dayIndex, target.name, source.dateKey)) return false;
   if (hadNightShiftPreviousDay(dayIndex, source.name, target.dateKey)) return false;
   if (categoryLabel === "야근") {
@@ -589,6 +689,7 @@ export function PublishedSchedulesPanel() {
   const loadItems = async () => {
     setItemsLoading(true);
     try {
+      await refreshTeamLeadState();
       await refreshPublishedSchedules();
       const nextItems = getPublishedSchedules().map((item) => ({
         ...item,
@@ -614,6 +715,7 @@ export function PublishedSchedulesPanel() {
   };
 
   const loadScheduleHistory = async () => {
+    await refreshTeamLeadState();
     await refreshScheduleState();
     syncScheduleHistory();
   };
@@ -680,6 +782,7 @@ export function PublishedSchedulesPanel() {
     window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
     window.addEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshVisibleData);
     window.addEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
     window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
@@ -688,6 +791,7 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
       window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshVisibleData);
       window.removeEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
@@ -998,6 +1102,12 @@ export function PublishedSchedulesPanel() {
 
   const handleNameClick = async (person: ScheduleNameObject) => {
     if (!editMode || !username) return;
+
+    if (isAutoManagedGeneralCategory(person.ref.category)) {
+      setRequestMessage("일반 근무는 교환 후보가 아닙니다. 실제 근무가 변경되면 일반 근무는 그 날짜 기준으로 자동 다시 계산됩니다.");
+      setRequestMessageTone("warn");
+      return;
+    }
 
     if (person.pending) {
       const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, person.ref, session?.id);
@@ -1502,7 +1612,7 @@ export function PublishedSchedulesPanel() {
                                   whiteSpace: "pre-line",
                                 }}
                               >
-                                {getCategoryDisplayLabel(category)}
+                                  {getCategoryDisplayLabel(day, category)}
                               </strong>
                               <div
                                 className={`schedule-name-grid ${isCompactMonthlyView ? "schedule-name-grid--monthly" : ""}`}
@@ -1535,7 +1645,8 @@ export function PublishedSchedulesPanel() {
                                   };
                                   const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                   const isMine = Boolean(username) && username === assignmentDisplay.name;
-                                  const mineHighlighted = isMine && (showMine || editMode);
+                                  const mineHighlighted =
+                                    isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
                                   const recommendedHighlighted =

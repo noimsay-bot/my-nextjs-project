@@ -1135,12 +1135,8 @@ export function applyScheduleAssignmentNameTagsToSchedule(
   let changed = false;
 
   const days = schedule.days.map((day) => {
-    const dayRows = monthRows[day.dateKey];
-    if (!dayRows) return day;
-
+    const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
     const rows = getScheduleAssignmentRows(day, dayRows);
-    if (rows.length === 0) return day;
-
     const nextTags = { ...(day.assignmentNameTags ?? {}) };
     let dayChanged = false;
 
@@ -1151,17 +1147,16 @@ export function applyScheduleAssignmentNameTagsToSchedule(
 
       const tagKey = buildScheduleAssignmentNameTagKey(parsed.category, parsed.name);
       const nextTag = getScheduleAssignmentNameTagForDuty(row.duty);
+      const currentTag = nextTags[tagKey] ?? null;
 
-      if (nextTag) {
-        if (nextTags[tagKey] !== nextTag) {
-          nextTags[tagKey] = nextTag;
-          dayChanged = true;
-        }
-        return;
+      if (currentTag && (currentTag === "gov" || currentTag === "law")) {
+        delete nextTags[tagKey];
+        dayChanged = true;
       }
 
-      if (tagKey in nextTags) {
-        delete nextTags[tagKey];
+      if (!nextTag) return;
+      if (nextTags[tagKey] !== nextTag) {
+        nextTags[tagKey] = nextTag;
         dayChanged = true;
       }
     });
