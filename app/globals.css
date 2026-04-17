@@ -2531,6 +2531,13 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   letter-spacing: 0.04em;
 }
 
+.portal-scroll-top-button {
+  position: fixed;
+  left: 12px;
+  top: calc(50vh - 16px);
+  z-index: 30;
+}
+
 html[data-theme="light"] .schedule-assignment-today-button {
   background: linear-gradient(180deg, #ffffff 0%, #dbeafe 100%);
   color: #173a79;
@@ -2539,6 +2546,13 @@ html[data-theme="light"] .schedule-assignment-today-button {
 }
 
 html[data-theme="light"] .schedule-assignment-top-button {
+  background: linear-gradient(180deg, #ffffff 0%, #dbeafe 100%);
+  color: #173a79;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
+}
+
+html[data-theme="light"] .portal-scroll-top-button {
   background: linear-gradient(180deg, #ffffff 0%, #dbeafe 100%);
   color: #173a79;
   border: 1px solid rgba(37, 99, 235, 0.28);
@@ -2658,6 +2672,10 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   .schedule-assignment-today-button {
     width: auto;
     min-width: 72px;
+  }
+
+  .portal-scroll-top-button {
+    left: 12px;
   }
 }
 

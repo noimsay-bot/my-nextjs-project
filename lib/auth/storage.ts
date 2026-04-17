@@ -64,6 +64,8 @@ const ROLE_EXPERIENCE_CACHE_KEY = "j-special-force-role-experience-v1";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
 const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 const SESSION_REFRESH_STALE_MS = 60_000;
+const APPROVAL_REQUIRED_MESSAGE = "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.";
+const PROFILE_SYNC_FAILED_MESSAGE = "계정 정보를 확인하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.";
 
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
 let cachedExperienceRole = readStoredExperienceRole();
@@ -79,6 +81,7 @@ let reviewAccessChannel: BrowserRealtimeChannel | null = null;
 let sessionRefreshListenersInitialized = false;
 let lastSessionRefreshAt = cachedSession ? Date.now() : 0;
 let cachedReviewAccessProfileIds: string[] | null = null;
+let lastAuthBlockReason: "approval" | "profile_sync" | null = null;
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -397,27 +400,6 @@ function profileToAccount(profile: ProfileRow): UserAccount {
   };
 }
 
-function fallbackSessionFromUser(user: User): SessionUser {
-  const role = normalizeRole(
-    typeof user.user_metadata.role === "string" ? user.user_metadata.role : "member",
-  );
-  return buildSessionWithExperience({
-    id: user.id,
-    email: user.email ?? "",
-    loginId: typeof user.user_metadata.login_id === "string" ? user.user_metadata.login_id : "",
-    username:
-      typeof user.user_metadata.name === "string" && user.user_metadata.name.trim()
-        ? user.user_metadata.name.trim()
-        : user.email ?? "User",
-    role,
-    actualRole: role,
-    approved: true,
-    mustChangePassword: readMustChangePassword(user),
-    canReview: hasIntrinsicReviewAccess(role),
-    actualCanReview: hasIntrinsicReviewAccess(role),
-  });
-}
-
 function notifySessionChange(session: SessionUser | null) {
   listeners.forEach((listener) => listener(session));
 }
@@ -479,28 +461,25 @@ async function fetchProfile(userId: string) {
   return data;
 }
 
-async function ensureProfile(user: User) {
-  const existing = await fetchProfile(user.id);
-  if (existing) return existing;
+function buildProfileInsertPayload(user: User) {
+  return {
+    id: user.id,
+    email: user.email ?? "",
+    login_id: typeof user.user_metadata.login_id === "string" ? user.user_metadata.login_id : null,
+    name:
+      typeof user.user_metadata.name === "string" && user.user_metadata.name.trim()
+        ? user.user_metadata.name.trim()
+        : user.email ?? "User",
+    role: "member" as const,
+    approved: true,
+  };
+}
 
+async function insertOwnProfile(user: User) {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("profiles")
-    .upsert(
-      {
-        id: user.id,
-        email: user.email ?? "",
-        login_id: typeof user.user_metadata.login_id === "string" ? user.user_metadata.login_id : null,
-        name:
-          typeof user.user_metadata.name === "string" && user.user_metadata.name.trim()
-            ? user.user_metadata.name.trim()
-            : user.email ?? "User",
-      },
-      {
-        onConflict: "id",
-        ignoreDuplicates: false,
-      },
-    )
+    .insert(buildProfileInsertPayload(user))
     .select(PROFILE_COLUMNS)
     .single<ProfileRow>();
 
@@ -509,6 +488,50 @@ async function ensureProfile(user: User) {
   }
 
   return data;
+}
+
+async function repairProfileViaApi() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const response = await window.fetch("/api/auth/repair-profile", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
+    return payload?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureProfile(user: User) {
+  const existing = await fetchProfile(user.id);
+  if (existing) return existing;
+
+  const inserted = await insertOwnProfile(user);
+  if (inserted) return inserted;
+
+  const afterInsert = await fetchProfile(user.id);
+  if (afterInsert) {
+    return afterInsert;
+  }
+
+  const repaired = await repairProfileViaApi();
+  if (!repaired) {
+    return null;
+  }
+
+  return fetchProfile(user.id);
 }
 
 function canReuseCachedSession(user: User, force: boolean) {
@@ -525,23 +548,53 @@ async function syncSessionFromUser(user: User, options?: { force?: boolean }) {
 
   const profile = await ensureProfile(user);
   if (profile && !profile.approved) {
+    lastAuthBlockReason = "approval";
+    await forceLogoutForUnapprovedUser();
+    return null;
+  }
+  if (!profile) {
+    if (cachedSession?.id === user.id) {
+      syncReviewAccessSubscription();
+      syncProfileSubscription(user.id);
+      return cachedSession;
+    }
+
+    lastAuthBlockReason = "profile_sync";
     await forceLogoutForUnapprovedUser();
     return null;
   }
 
   const grantedProfileIds = await fetchGrantedReviewAccessProfileIds({ force });
   const mustChangePassword = readMustChangePassword(user);
-  const nextSession = profile
-    ? profileToSession(
-        profile,
-        hasIntrinsicReviewAccess(profile.role) || grantedProfileIds.includes(profile.id),
-        mustChangePassword,
-      )
-    : fallbackSessionFromUser(user);
+  const nextSession = profileToSession(
+    profile,
+    hasIntrinsicReviewAccess(profile.role) || grantedProfileIds.includes(profile.id),
+    mustChangePassword,
+  );
+  lastAuthBlockReason = null;
   setCachedSession(nextSession);
   syncReviewAccessSubscription();
   syncProfileSubscription(user.id);
   return nextSession;
+}
+
+async function buildBlockedAuthMessage(userId: string) {
+  if (lastAuthBlockReason === "approval") {
+    lastAuthBlockReason = null;
+    return APPROVAL_REQUIRED_MESSAGE;
+  }
+
+  if (lastAuthBlockReason === "profile_sync") {
+    lastAuthBlockReason = null;
+    return PROFILE_SYNC_FAILED_MESSAGE;
+  }
+
+  const profile = await fetchProfile(userId);
+  if (profile && !profile.approved) {
+    return APPROVAL_REQUIRED_MESSAGE;
+  }
+
+  return PROFILE_SYNC_FAILED_MESSAGE;
 }
 
 function initAuthListener() {
@@ -790,7 +843,7 @@ export async function registerUser(input: {
       if (!nextSession) {
         return {
           ok: false as const,
-          message: "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.",
+          message: await buildBlockedAuthMessage(data.user.id),
         };
       }
     }
@@ -842,7 +895,7 @@ export async function loginUser(input: { loginId: string; password: string }) {
     if (!session) {
       return {
         ok: false as const,
-        message: "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.",
+        message: await buildBlockedAuthMessage(data.user.id),
       };
     }
 

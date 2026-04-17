@@ -12,6 +12,7 @@ import {
 } from "@/lib/schedule/storage";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
+import { getPortalSupabaseClient } from "@/lib/supabase/portal";
 import {
   AssignmentTripTagPhase,
   AssignmentTimeColor,
@@ -627,8 +628,36 @@ export function ScheduleAssignmentPage() {
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const jumpToTodayPendingRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
+  const pendingAssignmentWritesRef = useRef(0);
+  const deferredRealtimeRefreshRef = useRef(false);
+  const editingDayRowsRef = useRef<Record<string, ScheduleAssignmentDayRows>>({});
+  const editingTripTagRef = useRef<{ tripTagId: string; rowKey: string; value: string } | null>(null);
+  const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
+  const flushDeferredRefreshRef = useRef<() => void>(() => {});
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
+
+  flushDeferredRefreshRef.current = () => {
+    if (!deferredRealtimeRefreshRef.current) return;
+    if (pendingAssignmentWritesRef.current > 0) return;
+    if (Object.keys(editingDayRowsRef.current).length > 0) return;
+    if (editingTripTagRef.current) return;
+    const refreshSchedules = refreshSchedulesRef.current;
+    if (!refreshSchedules) return;
+    deferredRealtimeRefreshRef.current = false;
+    lastFocusRefreshAtRef.current = Date.now();
+    void refreshSchedules();
+  };
+
+  useEffect(() => {
+    editingDayRowsRef.current = editingDayRows;
+    flushDeferredRefreshRef.current();
+  }, [editingDayRows]);
+
+  useEffect(() => {
+    editingTripTagRef.current = editingTripTag;
+    flushDeferredRefreshRef.current();
+  }, [editingTripTag]);
 
   const getStickyHeaderOffset = () => {
     if (typeof window === "undefined") return 24;
@@ -677,10 +706,27 @@ export function ScheduleAssignmentPage() {
       await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
       syncFromCache();
     };
+    refreshSchedulesRef.current = refreshSchedules;
+    const hasBlockingDrafts = () =>
+      pendingAssignmentWritesRef.current > 0 ||
+      Object.keys(editingDayRowsRef.current).length > 0 ||
+      Boolean(editingTripTagRef.current);
     const refreshSchedulesOnFocus = () => {
       const now = Date.now();
       if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
       lastFocusRefreshAtRef.current = now;
+      if (hasBlockingDrafts()) {
+        deferredRealtimeRefreshRef.current = true;
+        return;
+      }
+      void refreshSchedules();
+    };
+    const onRealtimeAssignmentChange = () => {
+      if (hasBlockingDrafts()) {
+        deferredRealtimeRefreshRef.current = true;
+        return;
+      }
+      lastFocusRefreshAtRef.current = Date.now();
       void refreshSchedules();
     };
     const onStatus = (event: Event) => {
@@ -688,15 +734,44 @@ export function ScheduleAssignmentPage() {
       if (!detail || detail.ok) return;
       setImportMessage({ tone: "warn", text: detail.message });
     };
+    let cancelled = false;
+    let cleanupRealtime: (() => void) | null = null;
     syncFromCache();
     void refreshSchedules().finally(() => {
       lastFocusRefreshAtRef.current = Date.now();
     });
+    void getPortalSupabaseClient()
+      .then((supabase) => {
+        if (cancelled) return;
+        const channel = supabase
+          .channel("team-lead-schedule-assignment-watch")
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "team_lead_schedule_assignments",
+            },
+            onRealtimeAssignmentChange,
+          )
+          .subscribe();
+        cleanupRealtime = () => {
+          void supabase.removeChannel(channel);
+        };
+      })
+      .catch(() => {
+        cleanupRealtime = null;
+      });
     window.addEventListener("focus", refreshSchedulesOnFocus);
     window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     return () => {
+      cancelled = true;
+      if (refreshSchedulesRef.current === refreshSchedules) {
+        refreshSchedulesRef.current = null;
+      }
+      cleanupRealtime?.();
       window.removeEventListener("focus", refreshSchedulesOnFocus);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
@@ -754,10 +829,24 @@ export function ScheduleAssignmentPage() {
     scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
   };
 
-  const updateStore = (recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore) => {
+  const updateStore = (
+    recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore,
+    monthKeys:
+      | string[]
+      | ((next: ScheduleAssignmentDataStore) => string[]) = [selectedMonthKey],
+  ) => {
     setStore((current) => {
       const next = recipe(current);
-      saveScheduleAssignmentStore(next);
+      const touchedMonthKeys = Array.from(
+        new Set(
+          (typeof monthKeys === "function" ? monthKeys(next) : monthKeys).filter(Boolean),
+        ),
+      );
+      pendingAssignmentWritesRef.current += 1;
+      saveScheduleAssignmentStore(next, touchedMonthKeys).finally(() => {
+        pendingAssignmentWritesRef.current = Math.max(0, pendingAssignmentWritesRef.current - 1);
+        flushDeferredRefreshRef.current();
+      });
       return next;
     });
   };
@@ -928,7 +1017,7 @@ export function ScheduleAssignmentPage() {
           ),
         ]),
       ),
-    }));
+    }), (next) => Object.keys({ ...next.entries, ...next.rows }));
     setEditingTripTag((current) => (current?.tripTagId === tripTagId ? null : current));
   };
 
@@ -970,7 +1059,7 @@ export function ScheduleAssignmentPage() {
           ),
         ]),
       ),
-    }));
+    }), (next) => Object.keys({ ...next.entries, ...next.rows }));
   };
 
   const createSingleDayTripTag = (rowKey: string, currentTripTagId: string) => {
@@ -1012,7 +1101,7 @@ export function ScheduleAssignmentPage() {
           ),
         ]),
       ),
-    }));
+    }), (next) => Object.keys({ ...next.entries, ...next.rows }));
   };
 
   const updateRowDuty = (dateKey: string, row: ScheduleAssignmentRow, duty: string) => {

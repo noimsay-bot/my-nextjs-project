@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export function ScrollToTop() {
+export function ScrollToTop({ className = "" }: { className?: string }) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -19,13 +19,9 @@ export function ScrollToTop() {
   return (
     <button
       type="button"
+      className={`portal-scroll-top-button ${className}`.trim()}
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
       style={{
-        position: "fixed",
-        left: "12px",
-        top: "50%",
-        transform: "translateY(-50%)",
-        zIndex: 9999,
         padding: "16px 8px",
         backgroundColor: "rgba(15, 23, 42, 0.8)",
         backdropFilter: "blur(12px)",

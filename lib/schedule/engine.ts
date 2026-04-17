@@ -798,7 +798,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
         assignments["연장"] = [];
       }
 
-      assignments["일반"] = takeSequentialCandidatesByOrder(nextState, "evening", 3, pointers);
+      assignments["석근"] = takeSequentialCandidatesByOrder(nextState, "evening", 3, pointers);
     }
 
     if (!isCustomHoliday) {
@@ -856,7 +856,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
 
     refillCategory("조근", "morning");
     refillCategory("연장", "extension");
-    refillCategory("일반", "evening");
+    refillCategory("석근", "evening");
     refillCategory("야근", dow === 5 ? "nightFriday" : dow === 6 ? "nightSaturday" : dow === 0 ? "nightSunday" : "nightWeekday");
     refillCategory("주말조근", "holidayDuty");
     refillCategory("주말일반근무", "holidayDuty");
@@ -927,6 +927,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
 function mapCategoryToPointer(category: string, day: DaySchedule): CategoryKey {
   if (category === "조근") return "morning";
   if (category === "연장") return "extension";
+  if (category === "석근") return "evening";
   if (category === "일반") return "evening";
   if (category === "제크") return "jcheck";
   if (category === "주말조근") return "holidayDuty";
@@ -1317,7 +1318,7 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
   };
 
   const tryResolveByCategoryPriority = (day: DaySchedule, name: string, preferredCategory?: string) => {
-    const priorityCategories = ["조근", "일반", "제크"];
+    const priorityCategories = ["조근", "석근", "일반", "제크"];
     const orderedCategories = [
       ...(preferredCategory && priorityCategories.includes(preferredCategory) ? [preferredCategory] : []),
       ...priorityCategories.filter((category) => category !== preferredCategory),
@@ -1332,7 +1333,7 @@ export function autoRebalance(state: ScheduleState): GenerationResult {
   };
 
   const tryResolveSameDayDuplicateBeforeNight = (day: DaySchedule, name: string) => {
-    const priorityCategories = ["조근", "일반", "제크", "주말조근", "주말일반근무", "뉴스대기"];
+    const priorityCategories = ["조근", "석근", "일반", "제크", "주말조근", "주말일반근무", "뉴스대기"];
     const duplicateCategories = priorityCategories.filter(
       (currentCategory) => currentCategory !== "야근" && (day.assignments[currentCategory] ?? []).includes(name),
     );

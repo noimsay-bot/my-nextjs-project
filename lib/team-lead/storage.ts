@@ -178,6 +178,7 @@ interface TeamLeadScheduleAssignmentRow {
   month_key: string;
   entries: ScheduleAssignmentMonthStore | null;
   rows: Record<string, ScheduleAssignmentDayRows> | null;
+  updated_at?: string;
 }
 
 interface TeamLeadStateRow {
@@ -186,14 +187,26 @@ interface TeamLeadStateRow {
 }
 
 let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} };
+let assignmentMonthUpdatedAtCache: Record<string, string> = {};
 let contributionManualCache = {} as ContributionManualStore;
 let finalCutCache = {} as Record<string, FinalCutDecision>;
 let submissionAccessCache = false;
 let teamLeadRefreshPromise: Promise<void> | null = null;
 let assignmentPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let assignmentPersistResolvers: Array<() => void> = [];
+let assignmentPersistMonthKeys = new Set<string>();
 let finalCutPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let finalCutPersistResolvers: Array<() => void> = [];
+
+class ScheduleAssignmentConflictError extends Error {
+  monthKeys: string[];
+
+  constructor(monthKeys: string[]) {
+    super("다른 사용자가 먼저 일정배정을 저장했습니다.");
+    this.name = "ScheduleAssignmentConflictError";
+    this.monthKeys = monthKeys;
+  }
+}
 
 export function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
   return `${dateKey}::${category}::${index}::${name}`;
@@ -371,6 +384,31 @@ function normalizeScheduleAssignmentDataStore(store: unknown): ScheduleAssignmen
   };
 }
 
+function setAssignmentMonthUpdatedAt(monthKey: string, updatedAt: string | null | undefined) {
+  if (updatedAt) {
+    assignmentMonthUpdatedAtCache[monthKey] = updatedAt;
+    return;
+  }
+
+  delete assignmentMonthUpdatedAtCache[monthKey];
+}
+
+function applyAssignmentRowsToCache(rows: TeamLeadScheduleAssignmentRow[]) {
+  assignmentStoreCache = {
+    entries: Object.fromEntries(
+      rows.map((row) => [row.month_key, normalizeMonthEntries(row.entries ?? {})]),
+    ),
+    rows: Object.fromEntries(
+      rows.map((row) => [row.month_key, normalizeMonthRows(row.rows ?? {})]),
+    ),
+  };
+  assignmentMonthUpdatedAtCache = Object.fromEntries(
+    rows
+      .filter((row) => Boolean(row.updated_at))
+      .map((row) => [row.month_key, row.updated_at as string]),
+  );
+}
+
 export function getScheduleAssignmentStore(): ScheduleAssignmentDataStore {
   return normalizeScheduleAssignmentDataStore(assignmentStoreCache);
 }
@@ -385,7 +423,33 @@ export function emitTeamLeadStorageStatus(detail: { ok: boolean; message: string
   window.dispatchEvent(new CustomEvent(TEAM_LEAD_STORAGE_STATUS_EVENT, { detail }));
 }
 
-async function persistScheduleAssignmentStore(store: ScheduleAssignmentDataStore) {
+async function readAssignmentMonthUpdatedAt(
+  supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>,
+  monthKey: string,
+) {
+  const cachedUpdatedAt = assignmentMonthUpdatedAtCache[monthKey];
+  if (cachedUpdatedAt) {
+    return cachedUpdatedAt;
+  }
+
+  const { data, error } = await supabase
+    .from("team_lead_schedule_assignments")
+    .select("month_key, updated_at")
+    .eq("month_key", monthKey)
+    .maybeSingle<{ month_key: string; updated_at: string }>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  setAssignmentMonthUpdatedAt(monthKey, data?.updated_at);
+  return data?.updated_at ?? null;
+}
+
+async function persistScheduleAssignmentStore(
+  store: ScheduleAssignmentDataStore,
+  monthKeys: string[],
+) {
   const session = await getPortalSession();
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
@@ -393,41 +457,64 @@ async function persistScheduleAssignmentStore(store: ScheduleAssignmentDataStore
 
   const supabase = await getPortalSupabaseClient();
   const normalized = normalizeScheduleAssignmentDataStore(store);
-  const rows = Object.keys({ ...normalized.entries, ...normalized.rows }).map((monthKey) => ({
-    month_key: monthKey,
-    entries: normalized.entries[monthKey] ?? {},
-    rows: normalized.rows[monthKey] ?? {},
-    updated_by: session.id,
-  }));
+  const targetMonthKeys = Array.from(new Set(monthKeys.filter(Boolean)));
+  const conflictMonthKeys: string[] = [];
 
-  const { data: existingRows, error: selectError } = await supabase
-    .from("team_lead_schedule_assignments")
-    .select("month_key")
-    .returns<Array<{ month_key: string }>>();
+  for (const monthKey of targetMonthKeys) {
+    const row = {
+      month_key: monthKey,
+      entries: normalized.entries[monthKey] ?? {},
+      rows: normalized.rows[monthKey] ?? {},
+      updated_by: session.id,
+    };
+    const knownUpdatedAt = await readAssignmentMonthUpdatedAt(supabase, monthKey);
 
-  if (selectError) {
-    throw new Error(selectError.message);
-  }
+    if (knownUpdatedAt) {
+      const { data, error } = await supabase
+        .from("team_lead_schedule_assignments")
+        .update({
+          entries: row.entries,
+          rows: row.rows,
+          updated_by: row.updated_by,
+        })
+        .eq("month_key", monthKey)
+        .eq("updated_at", knownUpdatedAt)
+        .select("month_key, updated_at")
+        .maybeSingle<{ month_key: string; updated_at: string }>();
 
-  if (rows.length > 0) {
-    const { error: upsertError } = await supabase.from("team_lead_schedule_assignments").upsert(rows);
-    if (upsertError) {
-      throw new Error(upsertError.message);
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (!data?.updated_at) {
+        conflictMonthKeys.push(monthKey);
+        continue;
+      }
+
+      setAssignmentMonthUpdatedAt(monthKey, data.updated_at);
+      continue;
     }
-  }
 
-  const staleMonthKeys = (existingRows ?? [])
-    .map((row) => row.month_key)
-    .filter((monthKey) => !rows.some((row) => row.month_key === monthKey));
-
-  if (staleMonthKeys.length > 0) {
-    const { error: deleteError } = await supabase
+    const { data, error } = await supabase
       .from("team_lead_schedule_assignments")
-      .delete()
-      .in("month_key", staleMonthKeys);
-    if (deleteError) {
-      throw new Error(deleteError.message);
+      .insert(row)
+      .select("month_key, updated_at")
+      .single<{ month_key: string; updated_at: string }>();
+
+    if (error) {
+      if (error.code === "23505") {
+        conflictMonthKeys.push(monthKey);
+        continue;
+      }
+
+      throw new Error(error.message);
     }
+
+    setAssignmentMonthUpdatedAt(monthKey, data.updated_at);
+  }
+
+  if (conflictMonthKeys.length > 0) {
+    throw new ScheduleAssignmentConflictError(conflictMonthKeys);
   }
 }
 
@@ -458,6 +545,7 @@ export async function refreshTeamLeadState() {
     const session = await getPortalSession();
     if (!session?.approved) {
       assignmentStoreCache = { entries: {}, rows: {} };
+      assignmentMonthUpdatedAtCache = {};
       contributionManualCache = {};
       finalCutCache = {};
       emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
@@ -470,7 +558,7 @@ export async function refreshTeamLeadState() {
     const [{ data: assignmentRows, error: assignmentError }, { data: stateRows, error: stateError }] = await Promise.all([
       supabase
         .from("team_lead_schedule_assignments")
-        .select("month_key, entries, rows")
+        .select("month_key, entries, rows, updated_at")
         .returns<TeamLeadScheduleAssignmentRow[]>(),
       supabase
         .from("team_lead_state")
@@ -484,6 +572,7 @@ export async function refreshTeamLeadState() {
       if (isSupabaseSchemaMissingError(schemaError)) {
         console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_schedule_assignments / team_lead_state"));
         assignmentStoreCache = { entries: {}, rows: {} };
+        assignmentMonthUpdatedAtCache = {};
         contributionManualCache = {};
         finalCutCache = {};
         emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
@@ -498,14 +587,7 @@ export async function refreshTeamLeadState() {
       throw new Error(stateError?.message ?? "팀장 데이터를 불러오지 못했습니다.");
     }
 
-    assignmentStoreCache = {
-      entries: Object.fromEntries(
-        (assignmentRows ?? []).map((row) => [row.month_key, normalizeMonthEntries(row.entries ?? {})]),
-      ),
-      rows: Object.fromEntries(
-        (assignmentRows ?? []).map((row) => [row.month_key, normalizeMonthRows(row.rows ?? {})]),
-      ),
-    };
+    applyAssignmentRowsToCache(assignmentRows ?? []);
 
     const stateMap = new Map((stateRows ?? []).map((row) => [row.key, row.state] as const));
     contributionManualCache = normalizeContributionManualStore(stateMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY));
@@ -520,9 +602,13 @@ export async function refreshTeamLeadState() {
   return teamLeadRefreshPromise;
 }
 
-export function saveScheduleAssignmentStore(store: ScheduleAssignmentDataStore) {
+export function saveScheduleAssignmentStore(
+  store: ScheduleAssignmentDataStore,
+  monthKeys: string[] = Object.keys({ ...store.entries, ...store.rows }),
+) {
   assignmentStoreCache = normalizeScheduleAssignmentDataStore(store);
   emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+  monthKeys.filter(Boolean).forEach((monthKey) => assignmentPersistMonthKeys.add(monthKey));
 
   if (assignmentPersistTimer) {
     clearTimeout(assignmentPersistTimer);
@@ -531,12 +617,19 @@ export function saveScheduleAssignmentStore(store: ScheduleAssignmentDataStore) 
   return new Promise<void>((resolve) => {
     assignmentPersistResolvers.push(resolve);
     assignmentPersistTimer = setTimeout(() => {
+      const pendingMonthKeys = Array.from(assignmentPersistMonthKeys);
+      assignmentPersistMonthKeys.clear();
       assignmentPersistTimer = null;
-      persistScheduleAssignmentStore(assignmentStoreCache)
+      persistScheduleAssignmentStore(assignmentStoreCache, pendingMonthKeys)
         .catch(async (error) => {
           emitTeamLeadStorageStatus({
             ok: false,
-            message: error instanceof Error ? error.message : "일정배정 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+            message:
+              error instanceof ScheduleAssignmentConflictError
+                ? "다른 사용자가 먼저 같은 일정배정을 저장했습니다. 최신 내용으로 다시 불러왔습니다."
+                : error instanceof Error
+                  ? error.message
+                  : "일정배정 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
           });
           await refreshTeamLeadState();
         })

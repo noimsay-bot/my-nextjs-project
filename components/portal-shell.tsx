@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
+import { ScrollToTop } from "@/components/home/ScrollToTop";
 import {
   getSession,
   hasAdminAccess,
@@ -326,6 +327,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const shouldShowGlobalScrollTop = !pathname?.endsWith("/schedule-assignment");
 
   return (
     <div className="shell">
@@ -335,6 +337,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
           {children}
         </AppRouteBoundary>
       </main>
+      {shouldShowGlobalScrollTop ? <ScrollToTop /> : null}
     </div>
   );
 }
