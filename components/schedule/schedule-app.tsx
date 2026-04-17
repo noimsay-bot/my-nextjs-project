@@ -403,6 +403,7 @@ export function ScheduleApp() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishMonthKey, setPublishMonthKey] = useState<string>("");
   const [publishedItems, setPublishedItems] = useState<PublishedScheduleItem[]>([]);
+  const [hasPreGenerateBackup, setHasPreGenerateBackup] = useState(false);
   const [originalPreviewSnapshot, setOriginalPreviewSnapshot] = useState<SnapshotItem | null>(null);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [addPersonDialog, setAddPersonDialog] = useState<AddPersonDialogState | null>(null);
@@ -417,6 +418,7 @@ export function ScheduleApp() {
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
   const generalTeamInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
+  const preGenerateBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const isEditingDateRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
@@ -440,9 +442,13 @@ export function ScheduleApp() {
       await refreshTeamLeadState();
       const nextState = await refreshScheduleState();
       editBackupRef.current = null;
+      preGenerateBackupRef.current = null;
+      setHasPreGenerateBackup(false);
       setState(applyNameTagsToState(nextState));
     } catch {
       editBackupRef.current = null;
+      preGenerateBackupRef.current = null;
+      setHasPreGenerateBackup(false);
       setState(applyNameTagsToState(readStoredScheduleState() ?? defaultScheduleState));
     }
   };
@@ -611,6 +617,10 @@ export function ScheduleApp() {
     if (state.generatedHistory.length === 0) return state.generated;
     return state.generatedHistory.find((item) => item.monthKey === visibleMonthKey) ?? state.generatedHistory[state.generatedHistory.length - 1];
   }, [state.generated, state.generatedHistory, visibleMonthKey]);
+  const visibleMonthTabs = useMemo(
+    () => (state.generatedHistory.length > 0 ? state.generatedHistory : visibleSchedule ? [visibleSchedule] : []),
+    [state.generatedHistory, visibleSchedule],
+  );
   const originalSnapshotEntries = useMemo(
     () =>
       Object.keys(state.snapshots)
@@ -651,22 +661,6 @@ export function ScheduleApp() {
     return JSON.stringify(visibleSchedule) !== JSON.stringify(visiblePublishedItem.schedule);
   }, [visiblePublishedItem, visibleSchedule]);
   const visibleIndex = visibleSchedule ? state.generatedHistory.findIndex((item) => item.monthKey === visibleSchedule.monthKey) : -1;
-  const previousVisibleMonth = useMemo(
-    () => (visibleSchedule ? getAdjacentMonth(visibleSchedule.year, visibleSchedule.month, -1) : null),
-    [visibleSchedule],
-  );
-  const nextVisibleMonth = useMemo(
-    () => (visibleSchedule ? getAdjacentMonth(visibleSchedule.year, visibleSchedule.month, 1) : null),
-    [visibleSchedule],
-  );
-  const hasPreviousVisibleMonth = useMemo(
-    () => Boolean(previousVisibleMonth && state.generatedHistory.some((item) => item.monthKey === previousVisibleMonth.monthKey)),
-    [previousVisibleMonth, state.generatedHistory],
-  );
-  const hasNextVisibleMonth = useMemo(
-    () => Boolean(nextVisibleMonth && state.generatedHistory.some((item) => item.monthKey === nextVisibleMonth.monthKey)),
-    [nextVisibleMonth, state.generatedHistory],
-  );
   const targetHasExistingMonth = useMemo(
     () => state.generatedHistory.some((item) => item.monthKey === targetMonthKey),
     [state.generatedHistory, targetMonthKey],
@@ -995,6 +989,8 @@ export function ScheduleApp() {
       setOverwriteConfirmOpen(true);
       return;
     }
+    preGenerateBackupRef.current = cloneScheduleState(state);
+    setHasPreGenerateBackup(true);
     const result = generateSchedule(state);
     const nextState = sanitizeScheduleState(result.state);
     if (nextState.generated) {
@@ -1007,6 +1003,8 @@ export function ScheduleApp() {
 
   const confirmGenerate = () => {
     setOverwriteConfirmOpen(false);
+    preGenerateBackupRef.current = cloneScheduleState(state);
+    setHasPreGenerateBackup(true);
     const result = generateSchedule(state);
     const nextState = sanitizeScheduleState(result.state);
     if (nextState.generated) {
@@ -1080,27 +1078,27 @@ export function ScheduleApp() {
     }
   };
 
-  const onImportPublished = () => {
-    if (!visiblePublishedItem || !visibleSchedule) return;
+  const onRestorePreviousSchedule = () => {
+    if (!preGenerateBackupRef.current) return;
     if (
       typeof window !== "undefined" &&
-      !window.confirm(`${visibleSchedule.month}월 게시된 근무표를 현재 관리 화면으로 가져오시겠습니까? 현재 관리 화면의 ${visibleSchedule.month}월 데이터가 게시본으로 덮어씌워집니다.`)
+      !window.confirm("작성 직전의 근무표로 되돌리시겠습니까? 지금 상태는 덮어써집니다.")
     ) {
       return;
     }
 
-    const publishedSchedule = JSON.parse(JSON.stringify(visiblePublishedItem.schedule));
+    const backup = cloneScheduleState(preGenerateBackupRef.current);
 
     setState((current) =>
-      sanitizeScheduleState({
-        ...current,
-        generatedHistory: current.generatedHistory.map((item) =>
-          item.monthKey === publishedSchedule.monthKey ? publishedSchedule : item
-        ),
-        generated: current.generated?.monthKey === publishedSchedule.monthKey ? publishedSchedule : current.generated,
-      })
+      sanitizeScheduleState(backup)
     );
-    setMessage({ tone: "ok", text: "게시된 근무표를 가져왔습니다." });
+    if (backup.generated) {
+      syncVacationMonthSheetFromGeneratedSchedule(backup.generated);
+    }
+    setVisibleMonthKey(backup.generated?.monthKey ?? null);
+    preGenerateBackupRef.current = null;
+    setHasPreGenerateBackup(false);
+    setMessage({ tone: "ok", text: "작성 직전의 근무표로 복원했습니다." });
   };
 
   return (
@@ -1117,8 +1115,8 @@ export function ScheduleApp() {
             }} disabled={isEditingDate}>
               근무표 게시
             </button>
-            <button className="btn" disabled={isEditingDate || !visiblePublishedItem} onClick={onImportPublished}>
-              게시본 불러오기
+            <button className="btn" disabled={isEditingDate || !hasPreGenerateBackup} onClick={onRestorePreviousSchedule}>
+              직전 근무표 복원
             </button>
             <ScheduleManagementLinks inline />
             {hasUnpublishedChanges ? <span style={{ color: "#fecaca", fontSize: 13, fontWeight: 800 }}>수정사항이 있습니다. 다시 게시하세요</span> : null}
@@ -1413,20 +1411,65 @@ export function ScheduleApp() {
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="schedule-toolbar">
             <div className="chip">DESK</div>
+            {visibleMonthTabs.length > 0 ? (
+              <div
+                style={{
+                  flex: "1 1 320px",
+                  minWidth: 0,
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  role="tablist"
+                  aria-label="월별 근무 탭"
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "nowrap",
+                    overflowX: "auto",
+                    paddingBottom: 4,
+                    WebkitOverflowScrolling: "touch",
+                    scrollbarWidth: "thin",
+                    alignItems: "center",
+                  }}
+                >
+                  {visibleMonthTabs.map((item) => {
+                    const active = item.monthKey === (visibleSchedule?.monthKey ?? visibleMonthKey ?? "");
+                    return (
+                      <button
+                        key={item.monthKey}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        disabled={isEditingDate}
+                        className="btn"
+                        onClick={() => setVisibleMonthKey(item.monthKey)}
+                        style={{
+                          flex: "0 0 auto",
+                          minWidth: "fit-content",
+                          padding: "8px 14px",
+                          borderRadius: 999,
+                          background: active ? "rgba(96, 165, 250, 0.22)" : "rgba(15, 23, 42, 0.78)",
+                          border: active ? "1px solid rgba(103, 232, 249, 0.5)" : "1px solid rgba(148, 163, 184, 0.22)",
+                          color: active ? "#e0f2fe" : "#dbeafe",
+                          boxShadow: active ? "0 10px 24px rgba(8, 145, 178, 0.24)" : "none",
+                          whiteSpace: "nowrap",
+                          opacity: isEditingDate ? 0.65 : 1,
+                          cursor: isEditingDate ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {item.year}년 {item.month}월
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
             {visibleSchedule ? (
               <div className="schedule-toolbar-actions schedule-toolbar-actions--controls">
                 <VacationLegendChips />
-              <button
-                className="btn"
-                disabled={isEditingDate || !hasPreviousVisibleMonth}
-                  onClick={() => {
-                    if (!previousVisibleMonth) return;
-                    setVisibleMonthKey(previousVisibleMonth.monthKey);
-                    setState((current) => sanitizeScheduleState({ ...current, year: previousVisibleMonth.year, month: previousVisibleMonth.month }));
-                  }}
-              >
-                이전 달
-              </button>
               {isAllDaysEditMode ? (
                 <>
                   <button className="btn white" onClick={confirmDayEdit}>
@@ -1442,17 +1485,6 @@ export function ScheduleApp() {
                 </button>
               )}
               <strong className="schedule-current-title">{visibleSchedule.year}년 {visibleSchedule.month}월</strong>
-              <button
-                className="btn"
-                  disabled={isEditingDate || !hasNextVisibleMonth}
-                  onClick={() => {
-                    if (!nextVisibleMonth) return;
-                    setVisibleMonthKey(nextVisibleMonth.monthKey);
-                    setState((current) => sanitizeScheduleState({ ...current, year: nextVisibleMonth.year, month: nextVisibleMonth.month }));
-                  }}
-                >
-                  다음 달
-                </button>
                 <button className="btn" onClick={printVisibleSchedule}>
                   출력
                 </button>

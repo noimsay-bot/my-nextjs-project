@@ -94,6 +94,24 @@
   white-space: nowrap;
 }
 
+html[data-theme="light"] .metaBarDdayCard {
+  border-color: rgba(245, 158, 11, 0.24);
+  background: linear-gradient(180deg, rgba(253, 224, 71, 0.22) 0%, rgba(255, 251, 235, 0.9) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+html[data-theme="light"] .metaBarDdayTitle {
+  color: rgba(146, 64, 14, 0.82);
+}
+
+html[data-theme="light"] .metaBarDdayValue {
+  color: rgba(202, 138, 4, 0.86);
+}
+
+html[data-theme="light"] .metaBarDdayDate {
+  color: rgba(180, 83, 9, 0.68);
+}
+
 @media (max-width: 768px) {
   .metaBar {
     gap: 8px;
@@ -327,6 +345,69 @@
   background: rgba(255, 255, 255, 0.08);
   font-size: 12px;
   font-weight: 800;
+}
+
+@media (max-width: 960px) {
+  .tabList {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    overflow-x: visible;
+    padding-bottom: 0;
+  }
+
+  .tabButton {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px 10px;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .tabCount {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 960px) and (orientation: landscape) {
+  .tabList {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tabButton {
+    min-height: 40px;
+    padding: 8px 9px;
+  }
+}
+
+html[data-theme="light"] .tabButtonActive {
+  background: rgba(96, 165, 250, 0.22);
+  border-color: rgba(59, 130, 246, 0.28);
+  color: #1d4ed8;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 8px 20px rgba(59, 130, 246, 0.12);
+}
+
+html[data-theme="light"] .tabButtonActive .tabCount {
+  background: rgba(219, 234, 254, 0.95);
+  color: #1d4ed8;
+}
+
+html[data-theme="light"] .tabButtonNoticeActive {
+  background: rgba(96, 165, 250, 0.26);
+  border-color: rgba(59, 130, 246, 0.34);
+  color: #1d4ed8;
+}
+
+html[data-theme="light"] .tabButtonNoticeActive .tabCount {
+  background: rgba(191, 219, 254, 0.96);
+  color: #1d4ed8;
 }
 
 .currentTripsTabCard :global(.schedule-current-trips-card__body) {

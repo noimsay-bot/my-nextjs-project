@@ -1449,6 +1449,12 @@ export function ScheduleAssignmentPage() {
                                   className="field-input"
                                   value={row.name}
                                   placeholder="이름 입력"
+                                  style={{
+                                    width: "clamp(84px, 9ch, 112px)",
+                                    minWidth: 84,
+                                    maxWidth: 112,
+                                    textAlign: "center",
+                                  }}
                                   onChange={(event) =>
                                     updateEditingCustomRow(day.dateKey, row.key, {
                                       name: event.target.value,
@@ -1456,7 +1462,18 @@ export function ScheduleAssignmentPage() {
                                   }
                                 />
                               ) : (
-                                <div className="field-input" style={{ width: "100%", textAlign: "left" }}>
+                                <div
+                                  className="field-input"
+                                  style={{
+                                    width: "clamp(84px, 9ch, 112px)",
+                                    minWidth: 84,
+                                    maxWidth: 112,
+                                    textAlign: "center",
+                                    justifyContent: "center",
+                                    display: "flex",
+                                    alignItems: "center",
+                                  }}
+                                >
                                   {row.name || "이름 없음"}
                                 </div>
                               )}
@@ -1499,6 +1516,7 @@ export function ScheduleAssignmentPage() {
                               className="field-select"
                               value={row.duty}
                               disabled={isEditingPeople && !isDraftCustomRow}
+                              style={{ minWidth: 118, textAlign: "center", textAlignLast: "center" }}
                               onChange={(event) =>
                                 isDraftCustomRow
                                   ? updateEditingCustomRow(day.dateKey, row.key, { duty: event.target.value })

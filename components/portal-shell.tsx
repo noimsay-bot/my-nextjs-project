@@ -235,6 +235,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
           </Link>
         </div>
         <div
+          className="portal-header-main"
           style={{
             display: "flex",
             justifyContent: "space-between",

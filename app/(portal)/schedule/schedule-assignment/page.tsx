@@ -1,5 +1,5 @@
-import { ScheduleAssignmentPage } from "@/components/team-lead/schedule-assignment-page";
+import { ScheduleAssignmentRoute } from "@/components/schedule/schedule-assignment-route";
 
 export default function DeskScheduleAssignmentPage() {
-  return <ScheduleAssignmentPage />;
+  return <ScheduleAssignmentRoute />;
 }
