@@ -2056,38 +2056,23 @@ export function ScheduleAssignmentPage() {
                                 )}
                                 onFocus={(event) => {
                                   if (isEditingPeople) return;
-                                  void focusLockableField(
-                                    selectedMonthKey,
-                                    day.dateKey,
-                                    row.key,
-                                    "clockIn",
-                                    event.currentTarget,
-                                    {
-                                      onAcquired: () => {
-                                        if (!entry.clockIn && baseTimes?.clockInText) {
-                                          updateMonthEntry(row.key, (current) => ({
-                                            ...current,
-                                            clockIn: baseTimes.clockInText,
-                                            clockInConfirmed: false,
-                                            clockInColor: "",
-                                          }));
-                                        }
-                                        setActiveTimeField(clockInFieldKey);
-                                      },
-                                      selectText: true,
-                                    },
-                                  );
-                                }}
-                                onClick={() => {
-                                  if (!cellLockFeatureAvailableRef.current && !isEditingPeople) {
-                                    setActiveTimeField(clockInFieldKey);
+                                  if (clockInLockedByOther) {
+                                    handleCellLockBlocked(clockInLockState.lock);
+                                    return;
                                   }
-                                }}
-                                onBlur={() => {
-                                  if (ownedCellLockRef.current?.cellKey === clockInLockState.cellKey) {
-                                    void releaseOwnedCellLock(clockInLockState.cellKey);
+                                  if (!entry.clockIn && baseTimes?.clockInText) {
+                                    updateMonthEntry(row.key, (current) => ({
+                                      ...current,
+                                      clockIn: baseTimes.clockInText,
+                                      clockInConfirmed: false,
+                                      clockInColor: "",
+                                    }));
                                   }
+                                  setActiveTimeField(clockInFieldKey);
+                                  event.currentTarget.select();
                                 }}
+                                onClick={() => setActiveTimeField(clockInFieldKey)}
+                                onBlur={() => undefined}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
@@ -2124,38 +2109,23 @@ export function ScheduleAssignmentPage() {
                                 )}
                                 onFocus={(event) => {
                                   if (isEditingPeople) return;
-                                  void focusLockableField(
-                                    selectedMonthKey,
-                                    day.dateKey,
-                                    row.key,
-                                    "clockOut",
-                                    event.currentTarget,
-                                    {
-                                      onAcquired: () => {
-                                        if (!entry.clockOut && baseTimes?.clockOutText) {
-                                          updateMonthEntry(row.key, (current) => ({
-                                            ...current,
-                                            clockOut: baseTimes.clockOutText,
-                                            clockOutConfirmed: false,
-                                            clockOutColor: "",
-                                          }));
-                                        }
-                                        setActiveTimeField(clockOutFieldKey);
-                                      },
-                                      selectText: true,
-                                    },
-                                  );
-                                }}
-                                onClick={() => {
-                                  if (!cellLockFeatureAvailableRef.current && !isEditingPeople) {
-                                    setActiveTimeField(clockOutFieldKey);
+                                  if (clockOutLockedByOther) {
+                                    handleCellLockBlocked(clockOutLockState.lock);
+                                    return;
                                   }
-                                }}
-                                onBlur={() => {
-                                  if (ownedCellLockRef.current?.cellKey === clockOutLockState.cellKey) {
-                                    void releaseOwnedCellLock(clockOutLockState.cellKey);
+                                  if (!entry.clockOut && baseTimes?.clockOutText) {
+                                    updateMonthEntry(row.key, (current) => ({
+                                      ...current,
+                                      clockOut: baseTimes.clockOutText,
+                                      clockOutConfirmed: false,
+                                      clockOutColor: "",
+                                    }));
                                   }
+                                  setActiveTimeField(clockOutFieldKey);
+                                  event.currentTarget.select();
                                 }}
+                                onClick={() => setActiveTimeField(clockOutFieldKey)}
+                                onBlur={() => undefined}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
