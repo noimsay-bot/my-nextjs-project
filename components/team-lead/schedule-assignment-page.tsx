@@ -1803,6 +1803,10 @@ export function ScheduleAssignmentPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const jumpToDate = (dateKey: string) => {
+    scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
+  };
+
   const updateStore = (
     recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore,
     monthKeys:
@@ -2137,6 +2141,19 @@ export function ScheduleAssignmentPage() {
         >
           오늘
         </button>
+      </aside>
+      <aside className="schedule-assignment-date-nav" aria-label="해당 월 날짜 이동">
+        {monthDays.map((day) => (
+          <button
+            key={day.dateKey}
+            type="button"
+            className={`schedule-assignment-date-nav__button ${day.dateKey === todayDateKey ? "schedule-assignment-date-nav__button--today" : ""}`}
+            onClick={() => jumpToDate(day.dateKey)}
+            aria-label={`${day.month}월 ${day.day}일로 이동`}
+          >
+            {day.day}
+          </button>
+        ))}
       </aside>
       <div className="schedule-assignment-page-content">
       <article className="panel">
