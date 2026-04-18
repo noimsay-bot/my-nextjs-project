@@ -1523,6 +1523,44 @@ export function ScheduleAssignmentPage() {
   }, []);
 
   useEffect(() => {
+    const releaseScheduleInputClaimIfNeeded = (target: EventTarget | null) => {
+      const ownedClaim = ownedScheduleInputClaimRef.current;
+      if (!ownedClaim) return;
+
+      const targetElement = target instanceof Element ? target : null;
+      const targetScheduleInput = targetElement?.closest<HTMLInputElement>("[data-schedule-input-cell-key]") ?? null;
+      if (targetScheduleInput?.dataset.scheduleInputCellKey === ownedClaim.cellKey) {
+        return;
+      }
+
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLInputElement &&
+        activeElement.dataset.scheduleInputCellKey === ownedClaim.cellKey
+      ) {
+        return;
+      }
+
+      void clearOwnedScheduleInputClaim();
+    };
+
+    const onPointerDownCapture = (event: PointerEvent) => {
+      releaseScheduleInputClaimIfNeeded(event.target);
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      releaseScheduleInputClaimIfNeeded(event.target);
+    };
+
+    document.addEventListener("pointerdown", onPointerDownCapture, true);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDownCapture, true);
+      document.removeEventListener("focusin", onFocusIn);
+    };
+  }, []);
+
+  useEffect(() => {
     setEditingDayRows({});
   }, [selectedMonthKey]);
 
