@@ -2122,7 +2122,7 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   }
 
   .schedule-assignment-table {
-    min-width: 900px !important;
+    min-width: 1020px !important;
   }
 
   .schedule-assignment-schedule-cell {
@@ -2620,6 +2620,20 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   letter-spacing: 0.04em;
 }
 
+.schedule-assignment-name-column,
+.schedule-assignment-duty-column {
+  white-space: nowrap;
+}
+
+.schedule-assignment-name-editor {
+  min-width: 0;
+}
+
+.schedule-assignment-name-field,
+.schedule-assignment-duty-select {
+  max-width: 100%;
+}
+
 @media (max-width: 960px) and (orientation: landscape) {
   .portal-header-main {
     grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.95fr);
@@ -2772,15 +2786,36 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     grid-template-columns: 1fr;
   }
 
-  .schedule-assignment-date-nav {
-    display: none;
-  }
-
   .schedule-assignment-page-rail {
     position: sticky;
     top: calc(50vh - 16px);
     z-index: 2;
     margin-left: 0;
+  }
+
+  .schedule-assignment-table {
+    min-width: 1020px !important;
+  }
+
+  .schedule-assignment-name-column,
+  .schedule-assignment-name-cell {
+    min-width: 156px;
+  }
+
+  .schedule-assignment-duty-column,
+  .schedule-assignment-duty-cell {
+    min-width: 132px;
+  }
+
+  .schedule-assignment-name-field {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  .schedule-assignment-duty-select {
+    width: 100%;
+    min-width: 126px !important;
   }
 
   .schedule-assignment-today-button {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getSession, getUsers } from "@/lib/auth/storage";
 import {
   defaultPointers,
 } from "@/lib/schedule/constants";
@@ -162,6 +163,17 @@ type ImportMessageTone = "ok" | "warn" | "note";
 interface ImportMessage {
   tone: ImportMessageTone;
   text: string;
+}
+
+interface ScheduleAssignmentRealtimeRow {
+  month_key?: string;
+  updated_by?: string | null;
+}
+
+interface ScheduleAssignmentRealtimePayload {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  new: ScheduleAssignmentRealtimeRow;
+  old: ScheduleAssignmentRealtimeRow;
 }
 
 interface ImportedWorkbookRow {
@@ -630,10 +642,13 @@ export function ScheduleAssignmentPage() {
   const lastFocusRefreshAtRef = useRef(0);
   const pendingAssignmentWritesRef = useRef(0);
   const deferredRealtimeRefreshRef = useRef(false);
+  const deferredRealtimeMonthKeysRef = useRef<Set<string>>(new Set());
   const editingDayRowsRef = useRef<Record<string, ScheduleAssignmentDayRows>>({});
   const editingTripTagRef = useRef<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
+  const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
+  const selectedMonthKeyRef = useRef("");
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
 
@@ -642,11 +657,12 @@ export function ScheduleAssignmentPage() {
     if (pendingAssignmentWritesRef.current > 0) return;
     if (Object.keys(editingDayRowsRef.current).length > 0) return;
     if (editingTripTagRef.current) return;
-    const refreshSchedules = refreshSchedulesRef.current;
-    if (!refreshSchedules) return;
+    const refreshAssignments = refreshAssignmentsRef.current;
+    if (!refreshAssignments) return;
     deferredRealtimeRefreshRef.current = false;
+    deferredRealtimeMonthKeysRef.current.clear();
     lastFocusRefreshAtRef.current = Date.now();
-    void refreshSchedules();
+    void refreshAssignments();
   };
 
   useEffect(() => {
@@ -658,6 +674,10 @@ export function ScheduleAssignmentPage() {
     editingTripTagRef.current = editingTripTag;
     flushDeferredRefreshRef.current();
   }, [editingTripTag]);
+
+  useEffect(() => {
+    selectedMonthKeyRef.current = selectedMonthKey;
+  }, [selectedMonthKey]);
 
   const getStickyHeaderOffset = () => {
     if (typeof window === "undefined") return 24;
@@ -689,6 +709,16 @@ export function ScheduleAssignmentPage() {
   };
 
   useEffect(() => {
+    const buildRealtimeActorLabel = (actorId: string | null | undefined) => {
+      if (!actorId) return "다른 데스크 사용자";
+      const session = getSession();
+      if (session?.id === actorId) {
+        return `${session.username}`;
+      }
+      const matchedUser = getUsers().find((user) => user.id === actorId);
+      return matchedUser?.username || "다른 데스크 사용자";
+    };
+
     const syncFromCache = () => {
       const nextSchedules = getTeamLeadSchedules();
       setSchedules(nextSchedules);
@@ -699,14 +729,19 @@ export function ScheduleAssignmentPage() {
           : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
             ? todayMonthKey
             : nextSchedules[0]?.monthKey || "",
-      );
+        );
       setEditingDayRows({});
+    };
+    const refreshAssignmentStore = async () => {
+      await refreshTeamLeadState();
+      syncFromCache();
     };
     const refreshSchedules = async () => {
       await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
       syncFromCache();
     };
     refreshSchedulesRef.current = refreshSchedules;
+    refreshAssignmentsRef.current = refreshAssignmentStore;
     const hasBlockingDrafts = () =>
       pendingAssignmentWritesRef.current > 0 ||
       Object.keys(editingDayRowsRef.current).length > 0 ||
@@ -721,13 +756,37 @@ export function ScheduleAssignmentPage() {
       }
       void refreshSchedules();
     };
-    const onRealtimeAssignmentChange = () => {
+    const onRealtimeAssignmentChange = (payload: ScheduleAssignmentRealtimePayload) => {
+      const monthKey = payload.new.month_key || payload.old.month_key || "";
+      const actorId = payload.new.updated_by ?? payload.old.updated_by ?? null;
+      const actorLabel = buildRealtimeActorLabel(actorId);
+      const isOwnChange = actorId !== null && actorId === getSession()?.id;
+
+      if (isOwnChange) {
+        return;
+      }
+
       if (hasBlockingDrafts()) {
         deferredRealtimeRefreshRef.current = true;
+        if (monthKey) {
+          deferredRealtimeMonthKeysRef.current.add(monthKey);
+        }
+        if (monthKey && monthKey === selectedMonthKeyRef.current) {
+          setImportMessage({
+            tone: "warn",
+            text: `${actorLabel}님이 ${monthKey} 일정배정을 먼저 수정했습니다. 현재 입력이 저장되는 즉시 최신 내용으로 자동 동기화합니다.`,
+          });
+        }
         return;
       }
       lastFocusRefreshAtRef.current = Date.now();
-      void refreshSchedules();
+      if (monthKey && monthKey === selectedMonthKeyRef.current) {
+        setImportMessage({
+          tone: "note",
+          text: `${actorLabel}님이 ${monthKey} 일정배정을 수정해 최신 내용으로 자동 반영했습니다.`,
+        });
+      }
+      void refreshAssignmentStore();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
@@ -768,12 +827,15 @@ export function ScheduleAssignmentPage() {
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     return () => {
       cancelled = true;
-      if (refreshSchedulesRef.current === refreshSchedules) {
-        refreshSchedulesRef.current = null;
-      }
-      cleanupRealtime?.();
-      window.removeEventListener("focus", refreshSchedulesOnFocus);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+        if (refreshSchedulesRef.current === refreshSchedules) {
+          refreshSchedulesRef.current = null;
+        }
+        if (refreshAssignmentsRef.current === refreshAssignmentStore) {
+          refreshAssignmentsRef.current = null;
+        }
+        cleanupRealtime?.();
+        window.removeEventListener("focus", refreshSchedulesOnFocus);
+        window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
@@ -823,10 +885,6 @@ export function ScheduleAssignmentPage() {
 
   const scrollToPageTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const jumpToDate = (dateKey: string) => {
-    scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
   };
 
   const updateStore = (
@@ -1164,19 +1222,6 @@ export function ScheduleAssignmentPage() {
           오늘
         </button>
       </aside>
-      <aside className="schedule-assignment-date-nav" aria-label="해당 월 날짜 이동">
-        {monthDays.map((day) => (
-          <button
-            key={day.dateKey}
-            type="button"
-            className={`schedule-assignment-date-nav__button ${day.dateKey === todayDateKey ? "schedule-assignment-date-nav__button--today" : ""}`}
-            onClick={() => jumpToDate(day.dateKey)}
-            aria-label={`${day.month}월 ${day.day}일로 이동`}
-          >
-            {day.day}
-          </button>
-        ))}
-      </aside>
       <div className="schedule-assignment-page-content">
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
@@ -1361,8 +1406,8 @@ export function ScheduleAssignmentPage() {
                 <table className="table-like schedule-assignment-table" style={{ minWidth: 1140 }}>
                   <thead>
                     <tr>
-                      <th>이름</th>
-                      <th>근무유형</th>
+                      <th className="schedule-assignment-name-column">이름</th>
+                      <th className="schedule-assignment-duty-column">근무유형</th>
                       <th>출근</th>
                       <th>퇴근</th>
                       <th>일정 / 단독</th>
@@ -1402,8 +1447,9 @@ export function ScheduleAssignmentPage() {
 
                       return (
                         <tr key={row.key}>
-                          <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
+                          <td className="schedule-assignment-name-cell" style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <div
+                              className="schedule-assignment-name-editor"
                               style={{
                                 display: "grid",
                                 gridTemplateColumns: isEditingPeople ? "38px minmax(0, 1fr) auto" : "38px minmax(0, 1fr)",
@@ -1446,7 +1492,7 @@ export function ScheduleAssignmentPage() {
                               </button>
                               {isDraftCustomRow ? (
                                 <input
-                                  className="field-input"
+                                  className="field-input schedule-assignment-name-field"
                                   value={row.name}
                                   placeholder="이름 입력"
                                   style={{
@@ -1463,7 +1509,7 @@ export function ScheduleAssignmentPage() {
                                 />
                               ) : (
                                 <div
-                                  className="field-input"
+                                  className="field-input schedule-assignment-name-field"
                                   style={{
                                     width: "clamp(84px, 9ch, 112px)",
                                     minWidth: 84,
@@ -1511,9 +1557,9 @@ export function ScheduleAssignmentPage() {
                             ) : null}
                             </div>
                           </td>
-                          <td style={{ padding: "4px 5px", verticalAlign: "top" }}>
+                          <td className="schedule-assignment-duty-cell" style={{ padding: "4px 5px", verticalAlign: "top" }}>
                             <select
-                              className="field-select"
+                              className="field-select schedule-assignment-duty-select"
                               value={row.duty}
                               disabled={isEditingPeople && !isDraftCustomRow}
                               style={{ minWidth: 118, textAlign: "center", textAlignLast: "center" }}
