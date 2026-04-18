@@ -978,7 +978,6 @@ export function ScheduleAssignmentPage() {
     const currentLock = getActiveCellLock(monthKey, dateKey, rowKey, fieldKey, Date.now()).lock;
     if (currentLock?.locked_by && currentLock.locked_by !== sessionUserId) {
       handleCellLockBlocked(currentLock);
-      element?.blur();
       return false;
     }
 
@@ -989,7 +988,7 @@ export function ScheduleAssignmentPage() {
 
     void acquireCellLock(monthKey, dateKey, rowKey, fieldKey).then((acquired) => {
       if (!acquired) {
-        element?.blur();
+        return;
       }
     });
 
