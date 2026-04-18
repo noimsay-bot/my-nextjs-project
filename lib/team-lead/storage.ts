@@ -671,6 +671,8 @@ function getScheduleAssignmentDutySortRank(duty: string) {
       return 3;
     case "야근":
       return 4;
+    case "뉴스대기":
+      return 5;
     default:
       return 100;
   }
