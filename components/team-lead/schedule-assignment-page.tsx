@@ -265,7 +265,7 @@ function getScheduleAssignmentCellLockOwnerLabel(lock: ScheduleAssignmentCellLoc
 }
 
 function getScheduleAssignmentCellLockBlockedMessage(lock: ScheduleAssignmentCellLockRow | null | undefined) {
-  return `${getScheduleAssignmentCellLockOwnerLabel(lock)}님이 입력중입니다.`;
+  return `${getScheduleAssignmentCellLockOwnerLabel(lock)}님이 입력중...`;
 }
 
 function getLockAwareFieldStyle(
@@ -714,7 +714,7 @@ export function ScheduleAssignmentPage() {
   const editingDayRowsRef = useRef<Record<string, ScheduleAssignmentDayRows>>({});
   const editingTripTagRef = useRef<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const cellLocksRef = useRef<Record<string, ScheduleAssignmentCellLockRow>>({});
-  const cellLockFeatureAvailableRef = useRef(false);
+  const cellLockFeatureAvailableRef = useRef(true);
   const ownedCellLockRef = useRef<{
     cellKey: string;
     claimToken: string;
@@ -1871,14 +1871,8 @@ export function ScheduleAssignmentPage() {
                       const isEditingCurrentTripTag =
                         editingTripTag?.rowKey === row.key &&
                         editingTripTag.tripTagId === currentTripTagId;
-                      const coverageNoteLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "coverageNote");
-                      const coverageNoteLockedByOther =
-                        Boolean(coverageNoteLockState.lock?.locked_by) && coverageNoteLockState.lock?.locked_by !== sessionUserId;
-                      const coverageNoteReadOnly = !isEditingPeople && coverageNoteLockedByOther;
-                      const tripTagLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "tripTagLabel");
-                      const tripTagLockedByOther =
-                        Boolean(tripTagLockState.lock?.locked_by) && tripTagLockState.lock?.locked_by !== sessionUserId;
-                      const tripTagReadOnly = !isEditingPeople && tripTagLockedByOther;
+                      const coverageNoteReadOnly = false;
+                      const tripTagReadOnly = false;
                       const clockInLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockIn");
                       const clockInLockedByOther =
                         Boolean(clockInLockState.lock?.locked_by) && clockInLockState.lock?.locked_by !== sessionUserId;
@@ -1987,29 +1981,10 @@ export function ScheduleAssignmentPage() {
                               <input
                                 className="field-input"
                                 value={entry.coverageNote}
-                                placeholder={
-                                  coverageNoteLockedByOther
-                                    ? getScheduleAssignmentCellLockBlockedMessage(coverageNoteLockState.lock)
-                                    : "가점 사유 입력"
-                                }
+                                placeholder="가점 사유 입력"
                                 disabled={isEditingPeople}
                                 readOnly={coverageNoteReadOnly}
-                                style={getLockAwareFieldStyle({ gridColumn: "1 / -1" }, coverageNoteLockedByOther)}
-                                onFocus={(event) => {
-                                  if (isEditingPeople) return;
-                                  void focusLockableField(
-                                    selectedMonthKey,
-                                    day.dateKey,
-                                    row.key,
-                                    "coverageNote",
-                                    event.currentTarget,
-                                  );
-                                }}
-                                onBlur={() => {
-                                  if (ownedCellLockRef.current?.cellKey === coverageNoteLockState.cellKey) {
-                                    void releaseOwnedCellLock(coverageNoteLockState.cellKey);
-                                  }
-                                }}
+                                style={{ gridColumn: "1 / -1" }}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
@@ -2163,31 +2138,9 @@ export function ScheduleAssignmentPage() {
                                             className="field-input"
                                             value={editingTripTag?.value ?? ""}
                                             disabled={isEditingPeople}
-                                            placeholder={
-                                              tripTagLockedByOther
-                                                ? getScheduleAssignmentCellLockBlockedMessage(tripTagLockState.lock)
-                                                : undefined
-                                            }
+                                            placeholder={undefined}
                                             readOnly={tripTagReadOnly}
-                                            style={getLockAwareFieldStyle(
-                                              { minWidth: 0, width: 96, padding: "6px 8px", fontSize: 12, height: 32 },
-                                              tripTagLockedByOther,
-                                            )}
-                                            onFocus={(event) => {
-                                              if (isEditingPeople) return;
-                                              void focusLockableField(
-                                                selectedMonthKey,
-                                                day.dateKey,
-                                                row.key,
-                                                "tripTagLabel",
-                                                event.currentTarget,
-                                              );
-                                            }}
-                                            onBlur={() => {
-                                              if (ownedCellLockRef.current?.cellKey === tripTagLockState.cellKey) {
-                                                void releaseOwnedCellLock(tripTagLockState.cellKey);
-                                              }
-                                            }}
+                                            style={{ minWidth: 0, width: 96, padding: "6px 8px", fontSize: 12, height: 32 }}
                                             onChange={(event) =>
                                               setEditingTripTag((current) =>
                                                 current?.tripTagId === currentTripTagId
@@ -2352,6 +2305,18 @@ export function ScheduleAssignmentPage() {
                                           />
                                         ) : null}
                                       </div>
+                                      {scheduleLockedByOther ? (
+                                        <div
+                                          style={{
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            color: "#fca5a5",
+                                            paddingLeft: 4,
+                                          }}
+                                        >
+                                          {getScheduleAssignmentCellLockBlockedMessage(scheduleLockState.lock)}
+                                        </div>
+                                      ) : null}
                                     </div>
                                   );
                                 })}
