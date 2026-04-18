@@ -1847,6 +1847,14 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 }
 
 @media (max-width: 720px) {
+  .btn {
+    min-height: 40px;
+    padding: 9px 12px;
+    font-size: 13px;
+    line-height: 1.2;
+    border-radius: 12px;
+  }
+
   .shell {
     padding: 16px 12px 48px;
   }
@@ -1927,6 +1935,14 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   .schedule-toolbar-actions--controls > .btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .schedule-published-panel--mobile-layout .schedule-published-hero__months > .btn,
+  .schedule-published-panel--mobile-layout .schedule-published-hero__user > .btn,
+  .schedule-published-panel--mobile-layout .schedule-published-hero__right .schedule-calendar-top-actions > .btn {
+    min-height: 36px;
+    padding: 7px 10px;
+    font-size: 12px;
   }
 
   .schedule-calendar-scroll {

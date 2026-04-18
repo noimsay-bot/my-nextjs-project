@@ -385,7 +385,9 @@ export function HomeNewsPortal() {
 
     let cancelled = false;
     let cancelDeferredTasks = () => {};
+    let cancelWorkspaceRefresh = () => {};
     const cachedPreview = readCachedLivePreview();
+    const hasCachedPopupWorkspace = getHomeNotices().length > 0 || getHomeDdays().length > 0;
 
     setLivePreviewData(cachedPreview);
     setLoading(!cachedPreview);
@@ -475,22 +477,31 @@ export function HomeNewsPortal() {
       }
     })();
 
-    void refreshHomePopupNoticeWorkspace()
-      .then(() => {
-        if (!cancelled) {
-          syncNotices();
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
-        }
-      });
+    const refreshWorkspace = () => {
+      void refreshHomePopupNoticeWorkspace()
+        .then(() => {
+          if (!cancelled) {
+            syncNotices();
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
+          }
+        });
+    };
+
+    if (hasCachedPopupWorkspace) {
+      cancelWorkspaceRefresh = scheduleDeferredTask(refreshWorkspace);
+    } else {
+      refreshWorkspace();
+    }
 
     window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
     return () => {
       cancelled = true;
       cancelDeferredTasks();
+      cancelWorkspaceRefresh();
       window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
     };
   }, []);

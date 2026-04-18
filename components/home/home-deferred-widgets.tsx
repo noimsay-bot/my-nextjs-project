@@ -21,26 +21,58 @@ export function HomeDeferredWidgets() {
 
     const isMobileLike = window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth <= 820;
     const popupDelay = isMobileLike ? 280 : 80;
-    const newsDelay = isMobileLike ? 900 : 180;
+    const newsDelay = isMobileLike ? 1400 : 180;
+    const newsIdleTimeout = isMobileLike ? 2600 : newsDelay + 1200;
+    let newsScheduled = false;
 
     const popupTimer = window.setTimeout(() => {
       setShowPopup(true);
     }, popupDelay);
 
     let idleHandle = 0;
-    const newsTimer = window.setTimeout(() => {
-      setShowNews(true);
-    }, newsDelay);
+    let newsTimer = 0;
+    let loadFallbackTimer = 0;
 
-    if (typeof window.requestIdleCallback === "function") {
-      idleHandle = window.requestIdleCallback(() => {
-        setShowNews(true);
-      }, { timeout: newsDelay + 1200 });
+    const revealNews = () => {
+      if (newsScheduled) return;
+      newsScheduled = true;
+      setShowNews(true);
+    };
+
+    const scheduleNews = () => {
+      if (newsScheduled) return;
+
+      newsTimer = window.setTimeout(() => {
+        revealNews();
+      }, newsDelay);
+
+      if (typeof window.requestIdleCallback === "function") {
+        idleHandle = window.requestIdleCallback(() => {
+          revealNews();
+        }, { timeout: newsIdleTimeout });
+      }
+    };
+
+    if (isMobileLike && document.readyState !== "complete") {
+      const handleLoad = () => {
+        window.removeEventListener("load", handleLoad);
+        window.clearTimeout(loadFallbackTimer);
+        scheduleNews();
+      };
+
+      window.addEventListener("load", handleLoad, { once: true });
+      loadFallbackTimer = window.setTimeout(() => {
+        window.removeEventListener("load", handleLoad);
+        scheduleNews();
+      }, newsDelay + 1200);
+    } else {
+      scheduleNews();
     }
 
     return () => {
       window.clearTimeout(popupTimer);
       window.clearTimeout(newsTimer);
+      window.clearTimeout(loadFallbackTimer);
       if (idleHandle) {
         window.cancelIdleCallback(idleHandle);
       }
