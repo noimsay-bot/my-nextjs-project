@@ -964,7 +964,7 @@ export function ScheduleAssignmentPage() {
     }
   };
 
-  const focusLockableField = async (
+  const focusLockableField = (
     monthKey: string,
     dateKey: string,
     rowKey: string,
@@ -975,15 +975,24 @@ export function ScheduleAssignmentPage() {
       selectText?: boolean;
     },
   ) => {
-    const acquired = await acquireCellLock(monthKey, dateKey, rowKey, fieldKey);
-    if (!acquired) {
+    const currentLock = getActiveCellLock(monthKey, dateKey, rowKey, fieldKey, Date.now()).lock;
+    if (currentLock?.locked_by && currentLock.locked_by !== sessionUserId) {
+      handleCellLockBlocked(currentLock);
       element?.blur();
       return false;
     }
+
     options?.onAcquired?.();
     if (options?.selectText) {
       element?.select();
     }
+
+    void acquireCellLock(monthKey, dateKey, rowKey, fieldKey).then((acquired) => {
+      if (!acquired) {
+        element?.blur();
+      }
+    });
+
     return true;
   };
 
