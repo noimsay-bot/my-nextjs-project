@@ -713,7 +713,7 @@ export function ScheduleAssignmentPage() {
   const editingDayRowsRef = useRef<Record<string, ScheduleAssignmentDayRows>>({});
   const editingTripTagRef = useRef<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const cellLocksRef = useRef<Record<string, ScheduleAssignmentCellLockRow>>({});
-  const cellLockFeatureAvailableRef = useRef(true);
+  const cellLockFeatureAvailableRef = useRef(false);
   const ownedCellLockRef = useRef<{
     cellKey: string;
     claimToken: string;
