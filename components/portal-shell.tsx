@@ -331,7 +331,8 @@ function PortalHeader({ pathname }: { pathname: string }) {
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const shouldShowGlobalScrollTop = !pathname?.endsWith("/schedule-assignment");
+  const normalizedPathname = pathname ? pathname.replace(/\/+$/, "") || "/" : "";
+  const shouldShowGlobalScrollTop = !normalizedPathname.endsWith("/schedule-assignment");
 
   return (
     <div className="shell">
