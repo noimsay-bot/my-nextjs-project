@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
 import { getSession, getUsers } from "@/lib/auth/storage";
 import {
   defaultPointers,
@@ -796,6 +797,8 @@ export function ScheduleAssignmentPage() {
   const ownedScheduleInputClaimRef = useRef<{ cellKey: string; claimedAt: number } | null>(null);
   const scheduleInputPresenceMutationRef = useRef<Promise<void>>(Promise.resolve());
   const scheduleInputLatestStateRef = useRef<Record<string, ScheduleAssignmentInputBroadcastPayload>>({});
+  const scheduleInputPresenceSubscribedRef = useRef(false);
+  const pendingScheduleInputBroadcastRef = useRef<ScheduleAssignmentInputBroadcastPayload | null>(null);
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
   const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
@@ -1084,6 +1087,43 @@ export function ScheduleAssignmentPage() {
     await channel.track(payload);
   };
 
+  const reconcileOwnedScheduleInputClaim = (
+    nextLeaders: Record<string, ScheduleAssignmentInputLeader>,
+  ) => {
+    const ownedClaim = ownedScheduleInputClaimRef.current;
+    if (!ownedClaim) return;
+
+    const activeLeader = nextLeaders[ownedClaim.cellKey];
+    if (activeLeader?.userId === sessionUserId) return;
+
+    ownedScheduleInputClaimRef.current = null;
+    if (
+      document.activeElement instanceof HTMLInputElement &&
+      document.activeElement.dataset.scheduleInputCellKey === ownedClaim.cellKey
+    ) {
+      document.activeElement.blur();
+    }
+  };
+
+  const commitScheduleInputLeaders = (
+    nextLeaders: Record<string, ScheduleAssignmentInputLeader>,
+    options?: { immediate?: boolean },
+  ) => {
+    if (areScheduleInputLeadersEqual(scheduleInputLeadersRef.current, nextLeaders)) {
+      reconcileOwnedScheduleInputClaim(nextLeaders);
+      return;
+    }
+
+    scheduleInputLeadersRef.current = nextLeaders;
+    const apply = () => setScheduleInputLeaders(nextLeaders);
+    if (options?.immediate) {
+      flushSync(apply);
+    } else {
+      apply();
+    }
+    reconcileOwnedScheduleInputClaim(nextLeaders);
+  };
+
   const runScheduleInputPresenceMutation = async (
     handler: (channel: PortalRealtimeChannel) => Promise<void>,
   ) => {
@@ -1115,33 +1155,36 @@ export function ScheduleAssignmentPage() {
 
     if (payload.monthKey !== selectedMonthKeyRef.current) return;
 
-    const apply = () => {
-      setScheduleInputLeaders((current) => {
-        const nextLeaders = Object.fromEntries(
-          Object.entries(current).filter(([, leader]) => leader.userId !== payload.userId),
-        );
+    const nextLeaders = Object.fromEntries(
+      Object.entries(scheduleInputLeadersRef.current).filter(([, leader]) => leader.userId !== payload.userId),
+    );
 
-        if (payload.cellKey && payload.claimedAt) {
-          nextLeaders[payload.cellKey] = {
-            cellKey: payload.cellKey,
-            userId: payload.userId,
-            userName: payload.userName,
-            claimedAt: payload.claimedAt,
-            updatedAt: payload.updatedAt,
-          };
-        }
+    if (payload.cellKey && payload.claimedAt) {
+      const candidateLeader: ScheduleAssignmentInputLeader = {
+        cellKey: payload.cellKey,
+        userId: payload.userId,
+        userName: payload.userName,
+        claimedAt: payload.claimedAt,
+        updatedAt: payload.updatedAt,
+      };
+      nextLeaders[payload.cellKey] = getPreferredScheduleInputLeader(
+        nextLeaders[payload.cellKey],
+        candidateLeader,
+      ) ?? candidateLeader;
+    }
 
-        return areScheduleInputLeadersEqual(current, nextLeaders) ? current : nextLeaders;
-      });
-    };
-
-    apply();
+    commitScheduleInputLeaders(nextLeaders, options);
   };
 
   const broadcastScheduleInputState = async (
     channel: PortalRealtimeChannel,
     payload: ScheduleAssignmentInputBroadcastPayload,
   ) => {
+    if (!scheduleInputPresenceSubscribedRef.current) {
+      pendingScheduleInputBroadcastRef.current = payload;
+      return;
+    }
+
     await channel.send({
       type: "broadcast",
       event: "schedule-input-state",
@@ -1153,16 +1196,12 @@ export function ScheduleAssignmentPage() {
     const previousClaim = ownedScheduleInputClaimRef.current;
     ownedScheduleInputClaimRef.current = null;
     if (previousClaim) {
-      setScheduleInputLeaders((current) => {
-        const leader = current[previousClaim.cellKey];
-        if (!leader || leader.userId !== sessionUserId) {
-          return current;
-        }
-
-        const nextLeaders = { ...current };
+      const nextLeaders = { ...scheduleInputLeadersRef.current };
+      const leader = nextLeaders[previousClaim.cellKey];
+      if (leader?.userId === sessionUserId) {
         delete nextLeaders[previousClaim.cellKey];
-        return nextLeaders;
-      });
+        commitScheduleInputLeaders(nextLeaders, { immediate: true });
+      }
     }
 
     if (!previousClaim || !sessionUserId) return;
@@ -1205,24 +1244,28 @@ export function ScheduleAssignmentPage() {
       return true;
     }
 
-    setScheduleInputLeaders((current) => {
-      const nextLeaders = { ...current };
-      if (previousClaim) {
-        const previousLeader = nextLeaders[previousClaim.cellKey];
-        if (previousLeader?.userId === sessionUserId) {
-          delete nextLeaders[previousClaim.cellKey];
-        }
+    const nextLeaders = { ...scheduleInputLeadersRef.current };
+    if (previousClaim) {
+      const previousLeader = nextLeaders[previousClaim.cellKey];
+      if (previousLeader?.userId === sessionUserId) {
+        delete nextLeaders[previousClaim.cellKey];
       }
+    }
 
-      nextLeaders[cellKey] = {
-        cellKey,
-        userId: sessionUserId,
-        userName: session?.username ?? "다른 사용자",
-        claimedAt,
-        updatedAt: claimedAt,
-      };
-      return nextLeaders;
-    });
+    nextLeaders[cellKey] = getPreferredScheduleInputLeader(nextLeaders[cellKey], {
+      cellKey,
+      userId: sessionUserId,
+      userName: session?.username ?? "다른 사용자",
+      claimedAt,
+      updatedAt: claimedAt,
+    }) ?? {
+      cellKey,
+      userId: sessionUserId,
+      userName: session?.username ?? "다른 사용자",
+      claimedAt,
+      updatedAt: claimedAt,
+    };
+    commitScheduleInputLeaders(nextLeaders, { immediate: true });
 
     const payload: ScheduleAssignmentInputBroadcastPayload = {
       userId: sessionUserId,
@@ -1253,16 +1296,12 @@ export function ScheduleAssignmentPage() {
         delete nextStates[sessionUserId];
         scheduleInputLatestStateRef.current = nextStates;
       }
-      setScheduleInputLeaders((current) => {
-        const leader = current[cellKey];
-        if (!leader || leader.userId !== sessionUserId) {
-          return current;
-        }
-
-        const nextLeaders = { ...current };
+      const nextLeaders = { ...scheduleInputLeadersRef.current };
+      const leader = nextLeaders[cellKey];
+      if (leader?.userId === sessionUserId) {
         delete nextLeaders[cellKey];
-        return nextLeaders;
-      });
+        commitScheduleInputLeaders(nextLeaders, { immediate: true });
+      }
       return false;
     }
   };
@@ -1498,23 +1537,7 @@ export function ScheduleAssignmentPage() {
         ) ?? nextLeader;
       });
 
-      setScheduleInputLeaders((current) =>
-        areScheduleInputLeadersEqual(current, nextLeaders) ? current : nextLeaders,
-      );
-
-      const ownedClaim = ownedScheduleInputClaimRef.current;
-      if (ownedClaim) {
-        const activeLeader = nextLeaders[ownedClaim.cellKey];
-        if (!activeLeader || activeLeader.userId !== sessionUserId) {
-          ownedScheduleInputClaimRef.current = null;
-          if (
-            document.activeElement instanceof HTMLInputElement &&
-            document.activeElement.dataset.scheduleInputCellKey === ownedClaim.cellKey
-          ) {
-            document.activeElement.blur();
-          }
-        }
-      }
+      commitScheduleInputLeaders(nextLeaders);
     };
 
     const setupPresence = async () => {
@@ -1546,8 +1569,18 @@ export function ScheduleAssignmentPage() {
           syncLeadersFromPresence();
         })
         .subscribe(async (status) => {
-          if (status !== "SUBSCRIBED" || cancelled) return;
+          if (cancelled) return;
+          if (status !== "SUBSCRIBED") {
+            scheduleInputPresenceSubscribedRef.current = false;
+            return;
+          }
+          scheduleInputPresenceSubscribedRef.current = true;
           await syncScheduleInputPresence(channel);
+          const pendingPayload = pendingScheduleInputBroadcastRef.current;
+          if (pendingPayload) {
+            pendingScheduleInputBroadcastRef.current = null;
+            await broadcastScheduleInputState(channel, pendingPayload);
+          }
         });
 
       cleanupRealtime = () => {
@@ -1562,6 +1595,8 @@ export function ScheduleAssignmentPage() {
       const channel = scheduleInputPresenceChannelRef.current;
       scheduleInputPresenceChannelRef.current = null;
       scheduleInputPresenceMutationRef.current = Promise.resolve();
+      scheduleInputPresenceSubscribedRef.current = false;
+      pendingScheduleInputBroadcastRef.current = null;
       scheduleInputLatestStateRef.current = {};
       setScheduleInputLeaders({});
       ownedScheduleInputClaimRef.current = null;
