@@ -37,6 +37,9 @@ import {
   ScheduleAssignmentVisibleTripTag,
 } from "@/lib/team-lead/storage";
 
+type PortalSupabaseClient = Awaited<ReturnType<typeof getPortalSupabaseClient>>;
+type PortalRealtimeChannel = ReturnType<PortalSupabaseClient["channel"]>;
+
 const dutyOptions = [
   "조근",
   "일반",
@@ -202,6 +205,23 @@ interface ScheduleAssignmentCellLockRpcResult extends ScheduleAssignmentCellLock
   ok: boolean;
 }
 
+interface ScheduleAssignmentInputPresencePayload {
+  userId: string;
+  userName: string;
+  monthKey: string;
+  activeCellKey: string | null;
+  claimedAt: number | null;
+  updatedAt: number;
+}
+
+interface ScheduleAssignmentInputLeader {
+  cellKey: string;
+  userId: string;
+  userName: string;
+  claimedAt: number;
+  updatedAt: number;
+}
+
 interface ImportedWorkbookRow {
   day: number;
   headerName: string;
@@ -280,6 +300,20 @@ function getLockAwareFieldStyle(
     color: "#fecaca",
     cursor: "not-allowed",
   };
+}
+
+function getPreferredScheduleInputLeader(
+  current: ScheduleAssignmentInputLeader | undefined,
+  candidate: ScheduleAssignmentInputLeader,
+) {
+  if (!current) return candidate;
+  if (candidate.claimedAt !== current.claimedAt) {
+    return candidate.claimedAt < current.claimedAt ? candidate : current;
+  }
+  if (candidate.updatedAt !== current.updatedAt) {
+    return candidate.updatedAt < current.updatedAt ? candidate : current;
+  }
+  return candidate.userId.localeCompare(current.userId) < 0 ? candidate : current;
 }
 
 function getCoverageScoreStyle(score: number) {
@@ -703,6 +737,7 @@ export function ScheduleAssignmentPage() {
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const [cellLocks, setCellLocks] = useState<Record<string, ScheduleAssignmentCellLockRow>>({});
   const [cellLockClock, setCellLockClock] = useState(() => Date.now());
+  const [scheduleInputLeaders, setScheduleInputLeaders] = useState<Record<string, ScheduleAssignmentInputLeader>>({});
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
@@ -714,7 +749,7 @@ export function ScheduleAssignmentPage() {
   const editingDayRowsRef = useRef<Record<string, ScheduleAssignmentDayRows>>({});
   const editingTripTagRef = useRef<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const cellLocksRef = useRef<Record<string, ScheduleAssignmentCellLockRow>>({});
-  const cellLockFeatureAvailableRef = useRef(true);
+  const cellLockFeatureAvailableRef = useRef(false);
   const ownedCellLockRef = useRef<{
     cellKey: string;
     claimToken: string;
@@ -724,6 +759,9 @@ export function ScheduleAssignmentPage() {
     fieldKey: string;
   } | null>(null);
   const cellLockRenewTimerRef = useRef<number | null>(null);
+  const scheduleInputLeadersRef = useRef<Record<string, ScheduleAssignmentInputLeader>>({});
+  const scheduleInputPresenceChannelRef = useRef<PortalRealtimeChannel | null>(null);
+  const ownedScheduleInputClaimRef = useRef<{ cellKey: string; claimedAt: number } | null>(null);
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
   const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
@@ -761,6 +799,10 @@ export function ScheduleAssignmentPage() {
   useEffect(() => {
     cellLocksRef.current = cellLocks;
   }, [cellLocks]);
+
+  useEffect(() => {
+    scheduleInputLeadersRef.current = scheduleInputLeaders;
+  }, [scheduleInputLeaders]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -996,6 +1038,49 @@ export function ScheduleAssignmentPage() {
     return true;
   };
 
+  const syncScheduleInputPresence = async (channel: PortalRealtimeChannel) => {
+    const payload: ScheduleAssignmentInputPresencePayload = {
+      userId: sessionUserId ?? "",
+      userName: session?.username ?? "다른 사용자",
+      monthKey: selectedMonthKeyRef.current,
+      activeCellKey: ownedScheduleInputClaimRef.current?.cellKey ?? null,
+      claimedAt: ownedScheduleInputClaimRef.current?.claimedAt ?? null,
+      updatedAt: Date.now(),
+    };
+    await channel.track(payload);
+  };
+
+  const clearOwnedScheduleInputClaim = async () => {
+    ownedScheduleInputClaimRef.current = null;
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (!channel || !sessionUserId) return;
+    try {
+      await syncScheduleInputPresence(channel);
+    } catch {
+      // Ignore transient presence sync failures.
+    }
+  };
+
+  const claimScheduleInput = async (cellKey: string) => {
+    const currentLeader = scheduleInputLeadersRef.current[cellKey];
+    if (currentLeader && currentLeader.userId !== sessionUserId) {
+      return false;
+    }
+
+    ownedScheduleInputClaimRef.current = { cellKey, claimedAt: Date.now() };
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (!channel || !sessionUserId) {
+      return true;
+    }
+
+    try {
+      await syncScheduleInputPresence(channel);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const getStickyHeaderOffset = () => {
     if (typeof window === "undefined") return 24;
     if (window.innerWidth <= 960) return 24;
@@ -1160,6 +1245,90 @@ export function ScheduleAssignmentPage() {
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!selectedMonthKey || !sessionUserId) {
+      setScheduleInputLeaders({});
+      ownedScheduleInputClaimRef.current = null;
+      return undefined;
+    }
+
+    const syncLeadersFromPresence = () => {
+      const channel = scheduleInputPresenceChannelRef.current;
+      if (!channel) return;
+      const state = channel.presenceState<ScheduleAssignmentInputPresencePayload>();
+      const nextLeaders: Record<string, ScheduleAssignmentInputLeader> = {};
+
+      Object.values(state).forEach((entries) => {
+        entries.forEach((entry) => {
+          const activeCellKey = entry.activeCellKey;
+          const claimedAt = entry.claimedAt;
+          if (!activeCellKey || !claimedAt || entry.monthKey !== selectedMonthKeyRef.current) {
+            return;
+          }
+
+          const candidate: ScheduleAssignmentInputLeader = {
+            cellKey: activeCellKey,
+            userId: entry.userId,
+            userName: entry.userName,
+            claimedAt,
+            updatedAt: entry.updatedAt,
+          };
+          nextLeaders[activeCellKey] = getPreferredScheduleInputLeader(nextLeaders[activeCellKey], candidate);
+        });
+      });
+
+      setScheduleInputLeaders(nextLeaders);
+
+      const ownedClaim = ownedScheduleInputClaimRef.current;
+      if (!ownedClaim) return;
+
+      const leader = nextLeaders[ownedClaim.cellKey];
+      if (leader && leader.userId !== sessionUserId) {
+        ownedScheduleInputClaimRef.current = null;
+        if (
+          document.activeElement instanceof HTMLInputElement &&
+          document.activeElement.dataset.scheduleInputCellKey === ownedClaim.cellKey
+        ) {
+          document.activeElement.blur();
+        }
+      }
+    };
+
+    const setupPresence = async () => {
+      const supabase = await getPortalSupabaseClient();
+      const channel = supabase.channel(`team-lead-schedule-assignment-input-${selectedMonthKey}`, {
+        config: { presence: { key: sessionUserId } },
+      });
+
+      scheduleInputPresenceChannelRef.current = channel;
+
+      channel
+        .on("presence", { event: "sync" }, () => {
+          if (!cancelled) {
+            syncLeadersFromPresence();
+          }
+        })
+        .subscribe(async (status) => {
+          if (status !== "SUBSCRIBED" || cancelled) return;
+          await syncScheduleInputPresence(channel);
+        });
+    };
+
+    void setupPresence();
+
+    return () => {
+      cancelled = true;
+      const channel = scheduleInputPresenceChannelRef.current;
+      scheduleInputPresenceChannelRef.current = null;
+      setScheduleInputLeaders({});
+      ownedScheduleInputClaimRef.current = null;
+      if (!channel) return;
+      void getPortalSupabaseClient().then((supabase) => supabase.removeChannel(channel));
+    };
+  }, [selectedMonthKey, sessionUserId, session?.username]);
+
+  useEffect(() => {
+    let cancelled = false;
     let cleanupRealtime: (() => void) | null = null;
 
     if (!selectedMonthKey) {
@@ -1260,6 +1429,7 @@ export function ScheduleAssignmentPage() {
   useEffect(() => {
     const releaseForBlur = () => {
       void releaseOwnedCellLock();
+      void clearOwnedScheduleInputClaim();
     };
 
     window.addEventListener("blur", releaseForBlur);
@@ -2244,9 +2414,15 @@ export function ScheduleAssignmentPage() {
                               <div style={{ display: "grid", gap: 3 }}>
                                 {safeSchedules.map((schedule, index) => {
                                   const scheduleFieldKey = `schedule:${index}`;
-                                  const scheduleLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, scheduleFieldKey);
+                                  const scheduleCellKey = createScheduleAssignmentCellLockKey(
+                                    selectedMonthKey,
+                                    day.dateKey,
+                                    row.key,
+                                    scheduleFieldKey,
+                                  );
+                                  const scheduleLeader = scheduleInputLeaders[scheduleCellKey] ?? null;
                                   const scheduleLockedByOther =
-                                    Boolean(scheduleLockState.lock?.locked_by) && scheduleLockState.lock?.locked_by !== sessionUserId;
+                                    Boolean(scheduleLeader?.userId) && scheduleLeader.userId !== sessionUserId;
                                   const scheduleReadOnly = !isEditingPeople && scheduleLockedByOther;
 
                                   return (
@@ -2258,24 +2434,33 @@ export function ScheduleAssignmentPage() {
                                           value={schedule}
                                           readOnly={scheduleReadOnly}
                                           style={getLockAwareFieldStyle({ flex: 1 }, scheduleLockedByOther)}
+                                          data-schedule-input-cell-key={scheduleCellKey}
                                           placeholder={
                                             scheduleLockedByOther
-                                              ? getScheduleAssignmentCellLockBlockedMessage(scheduleLockState.lock)
+                                              ? `${scheduleLeader?.userName || "다른 사용자"}님이 입력중...`
                                               : "일정 내용 입력"
                                           }
                                           onFocus={(event) => {
                                             if (isEditingPeople) return;
-                                            void focusLockableField(
-                                              selectedMonthKey,
-                                              day.dateKey,
-                                              row.key,
-                                              scheduleFieldKey,
-                                              event.currentTarget,
-                                            );
+                                            if (scheduleLockedByOther) {
+                                              setImportMessage({
+                                                tone: "warn",
+                                                text: `${scheduleLeader?.userName || "다른 사용자"}님이 입력중...`,
+                                              });
+                                              return;
+                                            }
+                                            void claimScheduleInput(scheduleCellKey).then((claimed) => {
+                                              if (!claimed) {
+                                                setImportMessage({
+                                                  tone: "warn",
+                                                  text: `${scheduleLeader?.userName || "다른 사용자"}님이 입력중...`,
+                                                });
+                                              }
+                                            });
                                           }}
                                           onBlur={() => {
-                                            if (ownedCellLockRef.current?.cellKey === scheduleLockState.cellKey) {
-                                              void releaseOwnedCellLock(scheduleLockState.cellKey);
+                                            if (ownedScheduleInputClaimRef.current?.cellKey === scheduleCellKey) {
+                                              void clearOwnedScheduleInputClaim();
                                             }
                                           }}
                                           onChange={(event) =>
@@ -2314,7 +2499,7 @@ export function ScheduleAssignmentPage() {
                                             paddingLeft: 4,
                                           }}
                                         >
-                                          {getScheduleAssignmentCellLockBlockedMessage(scheduleLockState.lock)}
+                                          {`${scheduleLeader?.userName || "다른 사용자"}님이 입력중...`}
                                         </div>
                                       ) : null}
                                     </div>
