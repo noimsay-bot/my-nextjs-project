@@ -222,6 +222,15 @@ interface ScheduleAssignmentInputLeader {
   updatedAt: number;
 }
 
+interface ScheduleAssignmentInputBroadcastPayload {
+  userId: string;
+  userName: string;
+  monthKey: string;
+  cellKey: string | null;
+  claimedAt: number | null;
+  updatedAt: number;
+}
+
 interface ImportedWorkbookRow {
   day: number;
   headerName: string;
@@ -1068,6 +1077,40 @@ export function ScheduleAssignmentPage() {
     await nextMutation;
   };
 
+  const applyScheduleInputBroadcast = (payload: ScheduleAssignmentInputBroadcastPayload) => {
+    if (payload.monthKey !== selectedMonthKeyRef.current) return;
+
+    setScheduleInputLeaders((current) => {
+      const nextLeaders = Object.fromEntries(
+        Object.entries(current).filter(([, leader]) => leader.userId !== payload.userId),
+      );
+
+      if (!payload.cellKey || !payload.claimedAt) {
+        return nextLeaders;
+      }
+
+      nextLeaders[payload.cellKey] = {
+        cellKey: payload.cellKey,
+        userId: payload.userId,
+        userName: payload.userName,
+        claimedAt: payload.claimedAt,
+        updatedAt: payload.updatedAt,
+      };
+      return nextLeaders;
+    });
+  };
+
+  const broadcastScheduleInputState = async (
+    channel: PortalRealtimeChannel,
+    payload: ScheduleAssignmentInputBroadcastPayload,
+  ) => {
+    await channel.send({
+      type: "broadcast",
+      event: "schedule-input-state",
+      payload,
+    });
+  };
+
   const clearOwnedScheduleInputClaim = async () => {
     const previousClaim = ownedScheduleInputClaimRef.current;
     ownedScheduleInputClaimRef.current = null;
@@ -1087,6 +1130,14 @@ export function ScheduleAssignmentPage() {
     if (!previousClaim || !sessionUserId) return;
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
+        await broadcastScheduleInputState(channel, {
+          userId: sessionUserId,
+          userName: session?.username ?? "다른 사용자",
+          monthKey: selectedMonthKeyRef.current,
+          cellKey: null,
+          claimedAt: null,
+          updatedAt: Date.now(),
+        });
         await syncScheduleInputPresence(channel);
       });
     } catch {
@@ -1128,6 +1179,14 @@ export function ScheduleAssignmentPage() {
 
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
+        await broadcastScheduleInputState(channel, {
+          userId: sessionUserId,
+          userName: session?.username ?? "다른 사용자",
+          monthKey: selectedMonthKeyRef.current,
+          cellKey,
+          claimedAt,
+          updatedAt: Date.now(),
+        });
         await syncScheduleInputPresence(channel);
       });
       return true;
@@ -1376,6 +1435,11 @@ export function ScheduleAssignmentPage() {
       scheduleInputPresenceChannelRef.current = channel;
 
       channel
+        .on("broadcast", { event: "schedule-input-state" }, ({ payload }) => {
+          if (!cancelled) {
+            applyScheduleInputBroadcast(payload as ScheduleAssignmentInputBroadcastPayload);
+          }
+        })
         .on("presence", { event: "join" }, () => {
           if (!cancelled) {
             syncLeadersFromPresence();
