@@ -1100,25 +1100,37 @@ export function ScheduleAssignmentPage() {
       return false;
     }
 
+    const previousClaim = ownedScheduleInputClaimRef.current;
     const claimedAt = Date.now();
     ownedScheduleInputClaimRef.current = { cellKey, claimedAt };
     if (!sessionUserId) {
       return true;
     }
 
-    setScheduleInputLeaders((current) => ({
-      ...current,
-      [cellKey]: {
+    setScheduleInputLeaders((current) => {
+      const nextLeaders = { ...current };
+      if (previousClaim) {
+        const previousLeader = nextLeaders[previousClaim.cellKey];
+        if (previousLeader?.userId === sessionUserId) {
+          delete nextLeaders[previousClaim.cellKey];
+        }
+      }
+
+      nextLeaders[cellKey] = {
         cellKey,
         userId: sessionUserId,
         userName: session?.username ?? "다른 사용자",
         claimedAt,
         updatedAt: claimedAt,
-      },
-    }));
+      };
+      return nextLeaders;
+    });
 
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
+        if (previousClaim) {
+          await channel.untrack();
+        }
         await syncScheduleInputPresence(channel);
       });
       return true;
