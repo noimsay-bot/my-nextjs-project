@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getSession, getUsers } from "@/lib/auth/storage";
 import {
   defaultPointers,
@@ -80,6 +80,9 @@ const removeExclusiveVideoAt = (values: boolean[], index: number, nextCount: num
 const createCustomRowId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const coverageScoreSteps = [0, 0.5, 1, 1.5, 2] as const;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
+const CELL_LOCK_DURATION_SECONDS = 8;
+const CELL_LOCK_RENEW_INTERVAL_MS = 3_000;
+const CELL_LOCK_CLOCK_INTERVAL_MS = 1_000;
 const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
   "": "",
   departure: "출장출발",
@@ -176,6 +179,28 @@ interface ScheduleAssignmentRealtimePayload {
   old: ScheduleAssignmentRealtimeRow;
 }
 
+interface ScheduleAssignmentCellLockRow {
+  cell_key: string;
+  month_key: string;
+  date_key: string;
+  row_key: string;
+  field_key: string;
+  locked_by: string | null;
+  locked_by_name: string | null;
+  expires_at: string;
+  updated_at?: string;
+}
+
+interface ScheduleAssignmentCellLockRealtimePayload {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  new: Partial<ScheduleAssignmentCellLockRow>;
+  old: Partial<ScheduleAssignmentCellLockRow>;
+}
+
+interface ScheduleAssignmentCellLockRpcResult extends ScheduleAssignmentCellLockRow {
+  ok: boolean;
+}
+
 interface ImportedWorkbookRow {
   day: number;
   headerName: string;
@@ -216,6 +241,44 @@ function getTodayDateKey() {
 
 function getTodayMonthKey() {
   return getTodayDateKey().slice(0, 7);
+}
+
+function createScheduleAssignmentCellLockKey(
+  monthKey: string,
+  dateKey: string,
+  rowKey: string,
+  fieldKey: string,
+) {
+  return `${monthKey}::${dateKey}::${rowKey}::${fieldKey}`;
+}
+
+function isScheduleAssignmentCellLockActive(lock: ScheduleAssignmentCellLockRow | null | undefined, now: number) {
+  if (!lock?.expires_at) return false;
+  const expiresAt = new Date(lock.expires_at).getTime();
+  return Number.isFinite(expiresAt) && expiresAt > now;
+}
+
+function getScheduleAssignmentCellLockOwnerLabel(lock: ScheduleAssignmentCellLockRow | null | undefined) {
+  const label = lock?.locked_by_name?.trim();
+  return label || "다른 사용자";
+}
+
+function getScheduleAssignmentCellLockBlockedMessage(lock: ScheduleAssignmentCellLockRow | null | undefined) {
+  return `${getScheduleAssignmentCellLockOwnerLabel(lock)}님이 입력중입니다.`;
+}
+
+function getLockAwareFieldStyle(
+  style: CSSProperties | undefined,
+  lockedByOther: boolean,
+): CSSProperties | undefined {
+  if (!lockedByOther) return style;
+  return {
+    ...style,
+    borderColor: "rgba(248,113,113,.45)",
+    background: "rgba(127,29,29,.12)",
+    color: "#fecaca",
+    cursor: "not-allowed",
+  };
 }
 
 function getCoverageScoreStyle(score: number) {
@@ -628,6 +691,8 @@ function ScheduleDeleteConfirmButton({
 }
 
 export function ScheduleAssignmentPage() {
+  const session = getSession();
+  const sessionUserId = session?.id ?? null;
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
@@ -635,6 +700,8 @@ export function ScheduleAssignmentPage() {
   const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
   const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
+  const [cellLocks, setCellLocks] = useState<Record<string, ScheduleAssignmentCellLockRow>>({});
+  const [cellLockClock, setCellLockClock] = useState(() => Date.now());
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
@@ -645,6 +712,17 @@ export function ScheduleAssignmentPage() {
   const deferredRealtimeMonthKeysRef = useRef<Set<string>>(new Set());
   const editingDayRowsRef = useRef<Record<string, ScheduleAssignmentDayRows>>({});
   const editingTripTagRef = useRef<{ tripTagId: string; rowKey: string; value: string } | null>(null);
+  const cellLocksRef = useRef<Record<string, ScheduleAssignmentCellLockRow>>({});
+  const cellLockFeatureAvailableRef = useRef(true);
+  const ownedCellLockRef = useRef<{
+    cellKey: string;
+    claimToken: string;
+    monthKey: string;
+    dateKey: string;
+    rowKey: string;
+    fieldKey: string;
+  } | null>(null);
+  const cellLockRenewTimerRef = useRef<number | null>(null);
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
   const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
@@ -678,6 +756,236 @@ export function ScheduleAssignmentPage() {
   useEffect(() => {
     selectedMonthKeyRef.current = selectedMonthKey;
   }, [selectedMonthKey]);
+
+  useEffect(() => {
+    cellLocksRef.current = cellLocks;
+  }, [cellLocks]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCellLockClock(Date.now());
+    }, CELL_LOCK_CLOCK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const getActiveCellLock = (
+    monthKey: string,
+    dateKey: string,
+    rowKey: string,
+    fieldKey: string,
+    now = cellLockClock,
+  ) => {
+    const cellKey = createScheduleAssignmentCellLockKey(monthKey, dateKey, rowKey, fieldKey);
+    const lock = cellLocksRef.current[cellKey];
+    if (!isScheduleAssignmentCellLockActive(lock, now)) {
+      return { cellKey, lock: null as ScheduleAssignmentCellLockRow | null };
+    }
+    return { cellKey, lock };
+  };
+
+  const clearCellLockRenewTimer = () => {
+    if (cellLockRenewTimerRef.current) {
+      window.clearInterval(cellLockRenewTimerRef.current);
+      cellLockRenewTimerRef.current = null;
+    }
+  };
+
+  const upsertCellLock = (lock: ScheduleAssignmentCellLockRow) => {
+    setCellLocks((current) => ({
+      ...current,
+      [lock.cell_key]: lock,
+    }));
+  };
+
+  const removeCellLock = (cellKey: string) => {
+    setCellLocks((current) => {
+      if (!current[cellKey]) return current;
+      const next = { ...current };
+      delete next[cellKey];
+      return next;
+    });
+  };
+
+  const handleCellLockBlocked = (lock: ScheduleAssignmentCellLockRow | null | undefined) => {
+    setImportMessage({
+      tone: "warn",
+      text: getScheduleAssignmentCellLockBlockedMessage(lock),
+    });
+  };
+
+  const releaseOwnedCellLock = async (expectedCellKey?: string) => {
+    const currentLock = ownedCellLockRef.current;
+    if (!currentLock) return;
+    if (expectedCellKey && currentLock.cellKey !== expectedCellKey) return;
+
+    ownedCellLockRef.current = null;
+    clearCellLockRenewTimer();
+    removeCellLock(currentLock.cellKey);
+
+    if (!cellLockFeatureAvailableRef.current) return;
+
+    try {
+      const supabase = await getPortalSupabaseClient();
+      await supabase.rpc("release_team_lead_schedule_assignment_cell_lock", {
+        p_cell_key: currentLock.cellKey,
+        p_claim_token: currentLock.claimToken,
+      });
+    } catch {
+      // Stale locks expire automatically, so release failures can be ignored.
+    }
+  };
+
+  const acquireCellLock = async (
+    monthKey: string,
+    dateKey: string,
+    rowKey: string,
+    fieldKey: string,
+  ) => {
+    const cellKey = createScheduleAssignmentCellLockKey(monthKey, dateKey, rowKey, fieldKey);
+    const currentOwnedLock = ownedCellLockRef.current;
+    if (currentOwnedLock?.cellKey === cellKey) {
+      return true;
+    }
+
+    const existingLock = cellLocksRef.current[cellKey];
+    if (isScheduleAssignmentCellLockActive(existingLock, Date.now()) && existingLock?.locked_by && existingLock.locked_by !== sessionUserId) {
+      handleCellLockBlocked(existingLock);
+      return false;
+    }
+
+    if (!cellLockFeatureAvailableRef.current || !sessionUserId) {
+      return true;
+    }
+
+    if (currentOwnedLock) {
+      await releaseOwnedCellLock();
+    }
+
+    const claimToken = `${sessionUserId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    try {
+      const supabase = await getPortalSupabaseClient();
+      const { data, error } = await supabase.rpc("acquire_team_lead_schedule_assignment_cell_lock", {
+        p_month_key: monthKey,
+        p_date_key: dateKey,
+        p_row_key: rowKey,
+        p_field_key: fieldKey,
+        p_claim_token: claimToken,
+        p_duration_seconds: CELL_LOCK_DURATION_SECONDS,
+      });
+
+      if (error) {
+        if (/acquire_team_lead_schedule_assignment_cell_lock|team_lead_schedule_assignment_cell_locks/i.test(error.message)) {
+          cellLockFeatureAvailableRef.current = false;
+          return true;
+        }
+        throw new Error(error.message);
+      }
+
+      const result = Array.isArray(data) ? (data[0] as ScheduleAssignmentCellLockRpcResult | undefined) : undefined;
+      if (!result) {
+        return true;
+      }
+
+      const nextLock: ScheduleAssignmentCellLockRow = {
+        cell_key: result.cell_key,
+        month_key: result.month_key,
+        date_key: result.date_key,
+        row_key: result.row_key,
+        field_key: result.field_key,
+        locked_by: result.locked_by,
+        locked_by_name: result.locked_by_name,
+        expires_at: result.expires_at,
+        updated_at: result.updated_at,
+      };
+      upsertCellLock(nextLock);
+
+      if (!result.ok || (result.locked_by && result.locked_by !== sessionUserId)) {
+        handleCellLockBlocked(nextLock);
+        return false;
+      }
+
+      ownedCellLockRef.current = {
+        cellKey,
+        claimToken,
+        monthKey,
+        dateKey,
+        rowKey,
+        fieldKey,
+      };
+      clearCellLockRenewTimer();
+      cellLockRenewTimerRef.current = window.setInterval(() => {
+        const ownedLock = ownedCellLockRef.current;
+        if (
+          !ownedLock ||
+          ownedLock.cellKey !== cellKey ||
+          !cellLockFeatureAvailableRef.current
+        ) {
+          return;
+        }
+        void getPortalSupabaseClient()
+          .then((supabase) =>
+            supabase.rpc("acquire_team_lead_schedule_assignment_cell_lock", {
+              p_month_key: ownedLock.monthKey,
+              p_date_key: ownedLock.dateKey,
+              p_row_key: ownedLock.rowKey,
+              p_field_key: ownedLock.fieldKey,
+              p_claim_token: ownedLock.claimToken,
+              p_duration_seconds: CELL_LOCK_DURATION_SECONDS,
+            }),
+          )
+          .then(({ data, error }) => {
+            if (error) return;
+            const result = Array.isArray(data) ? (data[0] as ScheduleAssignmentCellLockRpcResult | undefined) : undefined;
+            if (!result) return;
+            upsertCellLock({
+              cell_key: result.cell_key,
+              month_key: result.month_key,
+              date_key: result.date_key,
+              row_key: result.row_key,
+              field_key: result.field_key,
+              locked_by: result.locked_by,
+              locked_by_name: result.locked_by_name,
+              expires_at: result.expires_at,
+              updated_at: result.updated_at,
+            });
+          })
+          .catch(() => {
+            // Ignore transient heartbeat failures and rely on the next renewal or expiry.
+          });
+      }, CELL_LOCK_RENEW_INTERVAL_MS);
+      return true;
+    } catch (error) {
+      setImportMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "입력 잠금 상태를 확인하지 못했습니다.",
+      });
+      return false;
+    }
+  };
+
+  const focusLockableField = async (
+    monthKey: string,
+    dateKey: string,
+    rowKey: string,
+    fieldKey: string,
+    element: HTMLInputElement | null,
+    options?: {
+      onAcquired?: () => void;
+      selectText?: boolean;
+    },
+  ) => {
+    const acquired = await acquireCellLock(monthKey, dateKey, rowKey, fieldKey);
+    if (!acquired) {
+      element?.blur();
+      return false;
+    }
+    options?.onAcquired?.();
+    if (options?.selectText) {
+      element?.select();
+    }
+    return true;
+  };
 
   const getStickyHeaderOffset = () => {
     if (typeof window === "undefined") return 24;
@@ -840,6 +1148,116 @@ export function ScheduleAssignmentPage() {
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, [todayMonthKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanupRealtime: (() => void) | null = null;
+
+    if (!selectedMonthKey) {
+      setCellLocks({});
+      return undefined;
+    }
+
+    const syncLocks = async () => {
+      if (!cellLockFeatureAvailableRef.current) {
+        setCellLocks({});
+        return;
+      }
+
+      try {
+        const supabase = await getPortalSupabaseClient();
+        const { data, error } = await supabase
+          .from("team_lead_schedule_assignment_cell_locks")
+          .select("cell_key, month_key, date_key, row_key, field_key, locked_by, locked_by_name, expires_at, updated_at")
+          .eq("month_key", selectedMonthKey)
+          .returns<ScheduleAssignmentCellLockRow[]>();
+
+        if (cancelled) return;
+
+        if (error) {
+          if (/team_lead_schedule_assignment_cell_locks/i.test(error.message)) {
+            cellLockFeatureAvailableRef.current = false;
+            setCellLocks({});
+            return;
+          }
+          throw new Error(error.message);
+        }
+
+        setCellLocks(
+          Object.fromEntries((data ?? []).map((row) => [row.cell_key, row])),
+        );
+
+        const channel = supabase
+          .channel(`team-lead-schedule-assignment-cell-locks-${selectedMonthKey}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "team_lead_schedule_assignment_cell_locks",
+              filter: `month_key=eq.${selectedMonthKey}`,
+            },
+            (payload: ScheduleAssignmentCellLockRealtimePayload) => {
+              const nextRow = payload.new.cell_key ? (payload.new as ScheduleAssignmentCellLockRow) : null;
+              const previousRow = payload.old.cell_key ? (payload.old as ScheduleAssignmentCellLockRow) : null;
+              const targetCellKey = nextRow?.cell_key ?? previousRow?.cell_key;
+              if (!targetCellKey) return;
+
+              if (payload.eventType === "DELETE" || !nextRow) {
+                removeCellLock(targetCellKey);
+                return;
+              }
+
+              upsertCellLock(nextRow);
+
+              if (
+                previousRow?.locked_by === sessionUserId &&
+                nextRow.locked_by &&
+                nextRow.locked_by !== sessionUserId &&
+                ownedCellLockRef.current?.cellKey === nextRow.cell_key
+              ) {
+                ownedCellLockRef.current = null;
+                clearCellLockRenewTimer();
+                handleCellLockBlocked(nextRow);
+                if (document.activeElement instanceof HTMLElement) {
+                  document.activeElement.blur();
+                }
+              }
+            },
+          )
+          .subscribe();
+
+        cleanupRealtime = () => {
+          void supabase.removeChannel(channel);
+        };
+      } catch (error) {
+        if (cancelled) return;
+        setImportMessage({
+          tone: "warn",
+          text: error instanceof Error ? error.message : "입력 잠금 상태를 불러오지 못했습니다.",
+        });
+      }
+    };
+
+    void syncLocks();
+
+    return () => {
+      cancelled = true;
+      cleanupRealtime?.();
+      void releaseOwnedCellLock();
+    };
+  }, [selectedMonthKey, sessionUserId]);
+
+  useEffect(() => {
+    const releaseForBlur = () => {
+      void releaseOwnedCellLock();
+    };
+
+    window.addEventListener("blur", releaseForBlur);
+    return () => {
+      window.removeEventListener("blur", releaseForBlur);
+    };
+  }, []);
 
   useEffect(() => {
     setEditingDayRows({});
@@ -1444,6 +1862,34 @@ export function ScheduleAssignmentPage() {
                       const isEditingCurrentTripTag =
                         editingTripTag?.rowKey === row.key &&
                         editingTripTag.tripTagId === currentTripTagId;
+                      const coverageNoteLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "coverageNote");
+                      const coverageNoteLockedByOther =
+                        Boolean(coverageNoteLockState.lock?.locked_by) && coverageNoteLockState.lock?.locked_by !== sessionUserId;
+                      const coverageNoteReadOnly =
+                        !isEditingPeople &&
+                        cellLockFeatureAvailableRef.current &&
+                        (!coverageNoteLockState.lock || coverageNoteLockedByOther);
+                      const tripTagLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "tripTagLabel");
+                      const tripTagLockedByOther =
+                        Boolean(tripTagLockState.lock?.locked_by) && tripTagLockState.lock?.locked_by !== sessionUserId;
+                      const tripTagReadOnly =
+                        !isEditingPeople &&
+                        cellLockFeatureAvailableRef.current &&
+                        (!tripTagLockState.lock || tripTagLockedByOther);
+                      const clockInLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockIn");
+                      const clockInLockedByOther =
+                        Boolean(clockInLockState.lock?.locked_by) && clockInLockState.lock?.locked_by !== sessionUserId;
+                      const clockInReadOnly =
+                        !isEditingPeople &&
+                        cellLockFeatureAvailableRef.current &&
+                        (!clockInLockState.lock || clockInLockedByOther);
+                      const clockOutLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockOut");
+                      const clockOutLockedByOther =
+                        Boolean(clockOutLockState.lock?.locked_by) && clockOutLockState.lock?.locked_by !== sessionUserId;
+                      const clockOutReadOnly =
+                        !isEditingPeople &&
+                        cellLockFeatureAvailableRef.current &&
+                        (!clockOutLockState.lock || clockOutLockedByOther);
 
                       return (
                         <tr key={row.key}>
@@ -1544,9 +1990,29 @@ export function ScheduleAssignmentPage() {
                               <input
                                 className="field-input"
                                 value={entry.coverageNote}
-                                placeholder="가점 사유 입력"
+                                placeholder={
+                                  coverageNoteLockedByOther
+                                    ? getScheduleAssignmentCellLockBlockedMessage(coverageNoteLockState.lock)
+                                    : "가점 사유 입력"
+                                }
                                 disabled={isEditingPeople}
-                                style={{ gridColumn: "1 / -1" }}
+                                readOnly={coverageNoteReadOnly}
+                                style={getLockAwareFieldStyle({ gridColumn: "1 / -1" }, coverageNoteLockedByOther)}
+                                onFocus={(event) => {
+                                  if (isEditingPeople) return;
+                                  void focusLockableField(
+                                    selectedMonthKey,
+                                    day.dateKey,
+                                    row.key,
+                                    "coverageNote",
+                                    event.currentTarget,
+                                  );
+                                }}
+                                onBlur={() => {
+                                  if (ownedCellLockRef.current?.cellKey === coverageNoteLockState.cellKey) {
+                                    void releaseOwnedCellLock(coverageNoteLockState.cellKey);
+                                  }
+                                }}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
@@ -1581,22 +2047,51 @@ export function ScheduleAssignmentPage() {
                                 type="text"
                                 inputMode="numeric"
                                 maxLength={5}
-                                placeholder="00:00"
+                                placeholder={
+                                  clockInLockedByOther
+                                    ? getScheduleAssignmentCellLockBlockedMessage(clockInLockState.lock)
+                                    : "00:00"
+                                }
                                 value={displayClockIn}
-                                style={{ width: 84, minWidth: 84, textAlign: "center", ...(timeColorStyle(clockInColor) ?? {}) }}
+                                readOnly={clockInReadOnly}
+                                style={getLockAwareFieldStyle(
+                                  { width: 84, minWidth: 84, textAlign: "center", ...(timeColorStyle(clockInColor) ?? {}) },
+                                  clockInLockedByOther,
+                                )}
                                 onFocus={(event) => {
-                                  if (!entry.clockIn && baseTimes?.clockInText) {
-                                    updateMonthEntry(row.key, (current) => ({
-                                      ...current,
-                                      clockIn: baseTimes.clockInText,
-                                      clockInConfirmed: false,
-                                      clockInColor: "",
-                                    }));
-                                  }
-                                  setActiveTimeField(clockInFieldKey);
-                                  event.currentTarget.select();
+                                  if (isEditingPeople) return;
+                                  void focusLockableField(
+                                    selectedMonthKey,
+                                    day.dateKey,
+                                    row.key,
+                                    "clockIn",
+                                    event.currentTarget,
+                                    {
+                                      onAcquired: () => {
+                                        if (!entry.clockIn && baseTimes?.clockInText) {
+                                          updateMonthEntry(row.key, (current) => ({
+                                            ...current,
+                                            clockIn: baseTimes.clockInText,
+                                            clockInConfirmed: false,
+                                            clockInColor: "",
+                                          }));
+                                        }
+                                        setActiveTimeField(clockInFieldKey);
+                                      },
+                                      selectText: true,
+                                    },
+                                  );
                                 }}
-                                onClick={() => setActiveTimeField(clockInFieldKey)}
+                                onClick={() => {
+                                  if (!cellLockFeatureAvailableRef.current && !isEditingPeople) {
+                                    setActiveTimeField(clockInFieldKey);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  if (ownedCellLockRef.current?.cellKey === clockInLockState.cellKey) {
+                                    void releaseOwnedCellLock(clockInLockState.cellKey);
+                                  }
+                                }}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
@@ -1620,22 +2115,51 @@ export function ScheduleAssignmentPage() {
                                 type="text"
                                 inputMode="numeric"
                                 maxLength={5}
-                                placeholder="00:00"
+                                placeholder={
+                                  clockOutLockedByOther
+                                    ? getScheduleAssignmentCellLockBlockedMessage(clockOutLockState.lock)
+                                    : "00:00"
+                                }
                                 value={displayClockOut}
-                                style={{ width: 84, minWidth: 84, textAlign: "center", ...(timeColorStyle(clockOutColor) ?? {}) }}
+                                readOnly={clockOutReadOnly}
+                                style={getLockAwareFieldStyle(
+                                  { width: 84, minWidth: 84, textAlign: "center", ...(timeColorStyle(clockOutColor) ?? {}) },
+                                  clockOutLockedByOther,
+                                )}
                                 onFocus={(event) => {
-                                  if (!entry.clockOut && baseTimes?.clockOutText) {
-                                    updateMonthEntry(row.key, (current) => ({
-                                      ...current,
-                                      clockOut: baseTimes.clockOutText,
-                                      clockOutConfirmed: false,
-                                      clockOutColor: "",
-                                    }));
-                                  }
-                                  setActiveTimeField(clockOutFieldKey);
-                                  event.currentTarget.select();
+                                  if (isEditingPeople) return;
+                                  void focusLockableField(
+                                    selectedMonthKey,
+                                    day.dateKey,
+                                    row.key,
+                                    "clockOut",
+                                    event.currentTarget,
+                                    {
+                                      onAcquired: () => {
+                                        if (!entry.clockOut && baseTimes?.clockOutText) {
+                                          updateMonthEntry(row.key, (current) => ({
+                                            ...current,
+                                            clockOut: baseTimes.clockOutText,
+                                            clockOutConfirmed: false,
+                                            clockOutColor: "",
+                                          }));
+                                        }
+                                        setActiveTimeField(clockOutFieldKey);
+                                      },
+                                      selectText: true,
+                                    },
+                                  );
                                 }}
-                                onClick={() => setActiveTimeField(clockOutFieldKey)}
+                                onClick={() => {
+                                  if (!cellLockFeatureAvailableRef.current && !isEditingPeople) {
+                                    setActiveTimeField(clockOutFieldKey);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  if (ownedCellLockRef.current?.cellKey === clockOutLockState.cellKey) {
+                                    void releaseOwnedCellLock(clockOutLockState.cellKey);
+                                  }
+                                }}
                                 onChange={(event) =>
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
@@ -1672,7 +2196,31 @@ export function ScheduleAssignmentPage() {
                                             className="field-input"
                                             value={editingTripTag?.value ?? ""}
                                             disabled={isEditingPeople}
-                                            style={{ minWidth: 0, width: 96, padding: "6px 8px", fontSize: 12, height: 32 }}
+                                            placeholder={
+                                              tripTagLockedByOther
+                                                ? getScheduleAssignmentCellLockBlockedMessage(tripTagLockState.lock)
+                                                : undefined
+                                            }
+                                            readOnly={tripTagReadOnly}
+                                            style={getLockAwareFieldStyle(
+                                              { minWidth: 0, width: 96, padding: "6px 8px", fontSize: 12, height: 32 },
+                                              tripTagLockedByOther,
+                                            )}
+                                            onFocus={(event) => {
+                                              if (isEditingPeople) return;
+                                              void focusLockableField(
+                                                selectedMonthKey,
+                                                day.dateKey,
+                                                row.key,
+                                                "tripTagLabel",
+                                                event.currentTarget,
+                                              );
+                                            }}
+                                            onBlur={() => {
+                                              if (ownedCellLockRef.current?.cellKey === tripTagLockState.cellKey) {
+                                                void releaseOwnedCellLock(tripTagLockState.cellKey);
+                                              }
+                                            }}
                                             onChange={(event) =>
                                               setEditingTripTag((current) =>
                                                 current?.tripTagId === currentTripTagId
@@ -1774,32 +2322,75 @@ export function ScheduleAssignmentPage() {
                                 </div>
                               ) : null}
                               <div style={{ display: "grid", gap: 3 }}>
-                                {safeSchedules.map((schedule, index) => (
-                                  <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
-                                  <div className="schedule-assignment-schedule-row" style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
-                                    <input disabled={isEditingPeople} className="field-input" value={schedule} style={{ flex: 1 }} placeholder="일정 내용 입력" onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item) }))} />
-                                    <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
-                                    <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: isEditingPeople ? "default" : "pointer", overflow: "hidden", opacity: isEditingPeople ? 0.6 : 1 }}>
-                                      <input disabled={isEditingPeople} type="checkbox" checked={safeExclusiveVideo[index]} style={{ appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%", margin: 0, background: "transparent", border: "none", cursor: isEditingPeople ? "default" : "pointer" }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, exclusiveVideo: getSafeExclusiveVideo(current.exclusiveVideo, getSafeSchedules(current.schedules).length).map((item, itemIndex) => itemIndex === index ? event.target.checked : item) }))} />
-                                    </label>
-                                    {!isEditingPeople ? (
-                                      <ScheduleDeleteConfirmButton
-                                        onConfirm={() =>
-                                          updateMonthEntry(row.key, (current) => {
-                                            const currentSchedules = getSafeSchedules(current.schedules);
-                                            const nextSchedules = removeScheduleAt(currentSchedules, index);
-                                            return {
+                                {safeSchedules.map((schedule, index) => {
+                                  const scheduleFieldKey = `schedule:${index}`;
+                                  const scheduleLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, scheduleFieldKey);
+                                  const scheduleLockedByOther =
+                                    Boolean(scheduleLockState.lock?.locked_by) && scheduleLockState.lock?.locked_by !== sessionUserId;
+                                  const scheduleReadOnly =
+                                    !isEditingPeople &&
+                                    cellLockFeatureAvailableRef.current &&
+                                    (!scheduleLockState.lock || scheduleLockedByOther);
+
+                                  return (
+                                    <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
+                                      <div className="schedule-assignment-schedule-row" style={{ display: "flex", gap: 3, alignItems: "center", minHeight: 32 }}>
+                                        <input
+                                          disabled={isEditingPeople}
+                                          className="field-input"
+                                          value={schedule}
+                                          readOnly={scheduleReadOnly}
+                                          style={getLockAwareFieldStyle({ flex: 1 }, scheduleLockedByOther)}
+                                          placeholder={
+                                            scheduleLockedByOther
+                                              ? getScheduleAssignmentCellLockBlockedMessage(scheduleLockState.lock)
+                                              : "일정 내용 입력"
+                                          }
+                                          onFocus={(event) => {
+                                            if (isEditingPeople) return;
+                                            void focusLockableField(
+                                              selectedMonthKey,
+                                              day.dateKey,
+                                              row.key,
+                                              scheduleFieldKey,
+                                              event.currentTarget,
+                                            );
+                                          }}
+                                          onBlur={() => {
+                                            if (ownedCellLockRef.current?.cellKey === scheduleLockState.cellKey) {
+                                              void releaseOwnedCellLock(scheduleLockState.cellKey);
+                                            }
+                                          }}
+                                          onChange={(event) =>
+                                            updateMonthEntry(row.key, (current) => ({
                                               ...current,
-                                              schedules: nextSchedules,
-                                              exclusiveVideo: removeExclusiveVideoAt(getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), index, nextSchedules.length),
-                                            };
-                                          })
-                                        }
-                                      />
-                                    ) : null}
-                                  </div>
-                                  </div>
-                                ))}
+                                              schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item),
+                                            }))
+                                          }
+                                        />
+                                        <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>
+                                        <label style={{ display: "flex", justifyContent: "center", alignItems: "center", width: 32, minWidth: 32, height: 32, borderRadius: 10, border: safeExclusiveVideo[index] ? "1px solid rgba(132,204,22,.72)" : "1px solid rgba(203,213,225,.95)", background: safeExclusiveVideo[index] ? "rgba(217,249,157,.95)" : "#ffffff", transition: "background .18s ease, border-color .18s ease", cursor: isEditingPeople ? "default" : "pointer", overflow: "hidden", opacity: isEditingPeople ? 0.6 : 1 }}>
+                                          <input disabled={isEditingPeople} type="checkbox" checked={safeExclusiveVideo[index]} style={{ appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%", margin: 0, background: "transparent", border: "none", cursor: isEditingPeople ? "default" : "pointer" }} onChange={(event) => updateMonthEntry(row.key, (current) => ({ ...current, exclusiveVideo: getSafeExclusiveVideo(current.exclusiveVideo, getSafeSchedules(current.schedules).length).map((item, itemIndex) => itemIndex === index ? event.target.checked : item) }))} />
+                                        </label>
+                                        {!isEditingPeople ? (
+                                          <ScheduleDeleteConfirmButton
+                                            onConfirm={() =>
+                                              updateMonthEntry(row.key, (current) => {
+                                                const currentSchedules = getSafeSchedules(current.schedules);
+                                                const nextSchedules = removeScheduleAt(currentSchedules, index);
+                                                return {
+                                                  ...current,
+                                                  schedules: nextSchedules,
+                                                  exclusiveVideo: removeExclusiveVideoAt(getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), index, nextSchedules.length),
+                                                };
+                                              })
+                                            }
+                                          />
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                                 {!isEditingPeople ? (
                                   <button type="button" className="btn" style={{ width: "fit-content", padding: "2px 6px", fontSize: 11, lineHeight: 1.1 }} onClick={() => updateMonthEntry(row.key, (current) => { const currentSchedules = getSafeSchedules(current.schedules); return { ...current, schedules: [...currentSchedules, ""], exclusiveVideo: [...getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), false] }; })}>+</button>
                                 ) : null}
