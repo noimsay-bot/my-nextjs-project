@@ -772,6 +772,7 @@ export function ScheduleAssignmentPage() {
   const scheduleInputPresenceChannelRef = useRef<PortalRealtimeChannel | null>(null);
   const ownedScheduleInputClaimRef = useRef<{ cellKey: string; claimedAt: number } | null>(null);
   const scheduleInputPresenceMutationRef = useRef<Promise<void>>(Promise.resolve());
+  const scheduleInputLatestStateRef = useRef<Record<string, ScheduleAssignmentInputBroadcastPayload>>({});
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
   const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
@@ -1077,7 +1078,15 @@ export function ScheduleAssignmentPage() {
     await nextMutation;
   };
 
-  const applyScheduleInputBroadcast = (payload: ScheduleAssignmentInputBroadcastPayload) => {
+  const applyScheduleInputState = (payload: ScheduleAssignmentInputBroadcastPayload) => {
+    const currentState = scheduleInputLatestStateRef.current[payload.userId];
+    if (currentState && currentState.updatedAt > payload.updatedAt) return;
+
+    scheduleInputLatestStateRef.current = {
+      ...scheduleInputLatestStateRef.current,
+      [payload.userId]: payload,
+    };
+
     if (payload.monthKey !== selectedMonthKeyRef.current) return;
 
     setScheduleInputLeaders((current) => {
@@ -1128,16 +1137,21 @@ export function ScheduleAssignmentPage() {
     }
 
     if (!previousClaim || !sessionUserId) return;
+    const payload: ScheduleAssignmentInputBroadcastPayload = {
+      userId: sessionUserId,
+      userName: session?.username ?? "다른 사용자",
+      monthKey: selectedMonthKeyRef.current,
+      cellKey: null,
+      claimedAt: null,
+      updatedAt: Date.now(),
+    };
+    applyScheduleInputState(payload);
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (channel) {
+      void broadcastScheduleInputState(channel, payload).catch(() => undefined);
+    }
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
-        await broadcastScheduleInputState(channel, {
-          userId: sessionUserId,
-          userName: session?.username ?? "다른 사용자",
-          monthKey: selectedMonthKeyRef.current,
-          cellKey: null,
-          claimedAt: null,
-          updatedAt: Date.now(),
-        });
         await syncScheduleInputPresence(channel);
       });
     } catch {
@@ -1177,22 +1191,34 @@ export function ScheduleAssignmentPage() {
       return nextLeaders;
     });
 
+    const payload: ScheduleAssignmentInputBroadcastPayload = {
+      userId: sessionUserId,
+      userName: session?.username ?? "다른 사용자",
+      monthKey: selectedMonthKeyRef.current,
+      cellKey,
+      claimedAt,
+      updatedAt: Date.now(),
+    };
+    applyScheduleInputState(payload);
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (channel) {
+      void broadcastScheduleInputState(channel, payload).catch(() => undefined);
+    }
+
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
-        await broadcastScheduleInputState(channel, {
-          userId: sessionUserId,
-          userName: session?.username ?? "다른 사용자",
-          monthKey: selectedMonthKeyRef.current,
-          cellKey,
-          claimedAt,
-          updatedAt: Date.now(),
-        });
         await syncScheduleInputPresence(channel);
       });
       return true;
     } catch {
       if (ownedScheduleInputClaimRef.current?.cellKey === cellKey) {
         ownedScheduleInputClaimRef.current = null;
+      }
+      const currentState = scheduleInputLatestStateRef.current[sessionUserId];
+      if (currentState?.updatedAt === payload.updatedAt) {
+        const nextStates = { ...scheduleInputLatestStateRef.current };
+        delete nextStates[sessionUserId];
+        scheduleInputLatestStateRef.current = nextStates;
       }
       setScheduleInputLeaders((current) => {
         const leader = current[cellKey];
@@ -1375,6 +1401,7 @@ export function ScheduleAssignmentPage() {
 
     if (!selectedMonthKey || !sessionUserId) {
       setScheduleInputLeaders({});
+      scheduleInputLatestStateRef.current = {};
       ownedScheduleInputClaimRef.current = null;
       return undefined;
     }
@@ -1383,7 +1410,7 @@ export function ScheduleAssignmentPage() {
       const channel = scheduleInputPresenceChannelRef.current;
       if (!channel) return;
       const state = channel.presenceState<ScheduleAssignmentInputPresencePayload>();
-      const nextLeaders: Record<string, ScheduleAssignmentInputLeader> = {};
+      const latestStates = { ...scheduleInputLatestStateRef.current };
 
       Object.values(state).forEach((entries) => {
         const latestEntry = entries.reduce<ScheduleAssignmentInputPresencePayload | null>((latest, entry) => {
@@ -1393,20 +1420,42 @@ export function ScheduleAssignmentPage() {
           return entryTimestamp >= latestTimestamp ? entry : latest;
         }, null);
 
-        const activeCellKey = latestEntry?.activeCellKey;
-        const claimedAt = latestEntry?.claimedAt;
-        if (!latestEntry || !activeCellKey || !claimedAt || latestEntry.monthKey !== selectedMonthKeyRef.current) {
+        if (!latestEntry) return;
+
+        const presencePayload: ScheduleAssignmentInputBroadcastPayload = {
+          userId: latestEntry.userId,
+          userName: latestEntry.userName,
+          monthKey: latestEntry.monthKey,
+          cellKey: latestEntry.activeCellKey,
+          claimedAt: latestEntry.claimedAt,
+          updatedAt: latestEntry.updatedAt,
+        };
+        const currentState = latestStates[presencePayload.userId];
+        if (!currentState || presencePayload.updatedAt >= currentState.updatedAt) {
+          latestStates[presencePayload.userId] = presencePayload;
+        }
+      });
+
+      scheduleInputLatestStateRef.current = latestStates;
+
+      const nextLeaders: Record<string, ScheduleAssignmentInputLeader> = {};
+      Object.values(latestStates).forEach((inputState) => {
+        if (
+          inputState.monthKey !== selectedMonthKeyRef.current ||
+          !inputState.cellKey ||
+          !inputState.claimedAt
+        ) {
           return;
         }
 
         const candidate: ScheduleAssignmentInputLeader = {
-          cellKey: activeCellKey,
-          userId: latestEntry.userId,
-          userName: latestEntry.userName,
-          claimedAt,
-          updatedAt: latestEntry.updatedAt,
+          cellKey: inputState.cellKey,
+          userId: inputState.userId,
+          userName: inputState.userName,
+          claimedAt: inputState.claimedAt,
+          updatedAt: inputState.updatedAt,
         };
-        nextLeaders[activeCellKey] = getPreferredScheduleInputLeader(nextLeaders[activeCellKey], candidate);
+        nextLeaders[inputState.cellKey] = getPreferredScheduleInputLeader(nextLeaders[inputState.cellKey], candidate);
       });
 
       setScheduleInputLeaders(nextLeaders);
@@ -1437,7 +1486,7 @@ export function ScheduleAssignmentPage() {
       channel
         .on("broadcast", { event: "schedule-input-state" }, ({ payload }) => {
           if (!cancelled) {
-            applyScheduleInputBroadcast(payload as ScheduleAssignmentInputBroadcastPayload);
+            applyScheduleInputState(payload as ScheduleAssignmentInputBroadcastPayload);
           }
         })
         .on("presence", { event: "join" }, () => {
@@ -1468,6 +1517,7 @@ export function ScheduleAssignmentPage() {
       const channel = scheduleInputPresenceChannelRef.current;
       scheduleInputPresenceChannelRef.current = null;
       scheduleInputPresenceMutationRef.current = Promise.resolve();
+      scheduleInputLatestStateRef.current = {};
       setScheduleInputLeaders({});
       ownedScheduleInputClaimRef.current = null;
       if (!channel) return;
