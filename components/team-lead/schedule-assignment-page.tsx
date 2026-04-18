@@ -38,6 +38,7 @@ import {
 } from "@/lib/team-lead/storage";
 
 type PortalSupabaseClient = Awaited<ReturnType<typeof getPortalSupabaseClient>>;
+type PortalRealtimeChannel = ReturnType<PortalSupabaseClient["channel"]>;
 
 const dutyOptions = [
   "조근",
@@ -204,6 +205,15 @@ interface ScheduleAssignmentCellLockRpcResult extends ScheduleAssignmentCellLock
   ok: boolean;
 }
 
+interface ScheduleAssignmentInputPresencePayload {
+  userId: string;
+  userName: string;
+  monthKey: string;
+  activeCellKey: string | null;
+  claimedAt: number | null;
+  updatedAt: number;
+}
+
 interface ScheduleAssignmentInputLeader {
   cellKey: string;
   userId: string;
@@ -212,24 +222,13 @@ interface ScheduleAssignmentInputLeader {
   updatedAt: number;
 }
 
-interface ScheduleAssignmentScheduleInputLockRow {
-  cell_key: string;
-  month_key: string;
-  locked_by: string | null;
-  locked_by_name: string | null;
-  claim_token: string;
-  expires_at: string;
-  updated_at?: string;
-}
-
-interface ScheduleAssignmentScheduleInputLockRealtimePayload {
-  eventType: "INSERT" | "UPDATE" | "DELETE";
-  new: Partial<ScheduleAssignmentScheduleInputLockRow>;
-  old: Partial<ScheduleAssignmentScheduleInputLockRow>;
-}
-
-interface ScheduleAssignmentScheduleInputLockRpcResult extends ScheduleAssignmentScheduleInputLockRow {
-  ok: boolean;
+interface ScheduleAssignmentInputBroadcastPayload {
+  userId: string;
+  userName: string;
+  monthKey: string;
+  cellKey: string | null;
+  claimedAt: number | null;
+  updatedAt: number;
 }
 
 interface ImportedWorkbookRow {
@@ -312,6 +311,20 @@ function getLockAwareFieldStyle(
   };
 }
 
+function getPreferredScheduleInputLeader(
+  current: ScheduleAssignmentInputLeader | undefined,
+  candidate: ScheduleAssignmentInputLeader,
+) {
+  if (!current) return candidate;
+  if (candidate.claimedAt !== current.claimedAt) {
+    return candidate.claimedAt < current.claimedAt ? candidate : current;
+  }
+  if (candidate.updatedAt !== current.updatedAt) {
+    return candidate.updatedAt < current.updatedAt ? candidate : current;
+  }
+  return candidate.userId.localeCompare(current.userId) < 0 ? candidate : current;
+}
+
 function areScheduleInputLeadersEqual(
   current: Record<string, ScheduleAssignmentInputLeader>,
   next: Record<string, ScheduleAssignmentInputLeader>,
@@ -333,52 +346,6 @@ function areScheduleInputLeadersEqual(
       currentLeader.updatedAt === nextLeader.updatedAt
     );
   });
-}
-
-function isScheduleAssignmentScheduleInputLockActive(
-  lock: ScheduleAssignmentScheduleInputLockRow | null | undefined,
-  now: number,
-) {
-  if (!lock?.expires_at) return false;
-  const expiresAt = new Date(lock.expires_at).getTime();
-  return Number.isFinite(expiresAt) && expiresAt > now;
-}
-
-function getScheduleAssignmentScheduleInputLockOwnerLabel(
-  lock: ScheduleAssignmentScheduleInputLockRow | null | undefined,
-) {
-  const label = lock?.locked_by_name?.trim();
-  return label || "다른 사용자";
-}
-
-function getScheduleAssignmentScheduleInputLockBlockedMessage(
-  lock: ScheduleAssignmentScheduleInputLockRow | null | undefined,
-) {
-  return `${getScheduleAssignmentScheduleInputLockOwnerLabel(lock)}님이 입력중...`;
-}
-
-function buildScheduleInputLeadersFromLocks(
-  locks: Record<string, ScheduleAssignmentScheduleInputLockRow>,
-  now: number,
-) {
-  const nextLeaders: Record<string, ScheduleAssignmentInputLeader> = {};
-
-  Object.values(locks).forEach((lock) => {
-    if (!isScheduleAssignmentScheduleInputLockActive(lock, now) || !lock.locked_by) {
-      return;
-    }
-
-    const updatedAt = new Date(lock.updated_at ?? lock.expires_at).getTime();
-    nextLeaders[lock.cell_key] = {
-      cellKey: lock.cell_key,
-      userId: lock.locked_by,
-      userName: getScheduleAssignmentScheduleInputLockOwnerLabel(lock),
-      claimedAt: Number.isFinite(updatedAt) ? updatedAt : now,
-      updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
-    };
-  });
-
-  return nextLeaders;
 }
 
 function getCoverageScoreStyle(score: number) {
@@ -802,7 +769,6 @@ export function ScheduleAssignmentPage() {
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const [cellLocks, setCellLocks] = useState<Record<string, ScheduleAssignmentCellLockRow>>({});
   const [cellLockClock, setCellLockClock] = useState(() => Date.now());
-  const [scheduleInputLocks, setScheduleInputLocks] = useState<Record<string, ScheduleAssignmentScheduleInputLockRow>>({});
   const [scheduleInputLeaders, setScheduleInputLeaders] = useState<Record<string, ScheduleAssignmentInputLeader>>({});
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -825,10 +791,11 @@ export function ScheduleAssignmentPage() {
     fieldKey: string;
   } | null>(null);
   const cellLockRenewTimerRef = useRef<number | null>(null);
-  const scheduleInputLocksRef = useRef<Record<string, ScheduleAssignmentScheduleInputLockRow>>({});
-  const scheduleInputLockFeatureAvailableRef = useRef(true);
-  const ownedScheduleInputLockRef = useRef<{ cellKey: string; claimToken: string; monthKey: string } | null>(null);
-  const scheduleInputLockRenewTimerRef = useRef<number | null>(null);
+  const scheduleInputLeadersRef = useRef<Record<string, ScheduleAssignmentInputLeader>>({});
+  const scheduleInputPresenceChannelRef = useRef<PortalRealtimeChannel | null>(null);
+  const ownedScheduleInputClaimRef = useRef<{ cellKey: string; claimedAt: number } | null>(null);
+  const scheduleInputPresenceMutationRef = useRef<Promise<void>>(Promise.resolve());
+  const scheduleInputLatestStateRef = useRef<Record<string, ScheduleAssignmentInputBroadcastPayload>>({});
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
   const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
@@ -868,12 +835,8 @@ export function ScheduleAssignmentPage() {
   }, [cellLocks]);
 
   useEffect(() => {
-    scheduleInputLocksRef.current = scheduleInputLocks;
-    const nextLeaders = buildScheduleInputLeadersFromLocks(scheduleInputLocks, cellLockClock);
-    setScheduleInputLeaders((current) =>
-      areScheduleInputLeadersEqual(current, nextLeaders) ? current : nextLeaders,
-    );
-  }, [cellLockClock, scheduleInputLocks]);
+    scheduleInputLeadersRef.current = scheduleInputLeaders;
+  }, [scheduleInputLeaders]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1109,178 +1072,196 @@ export function ScheduleAssignmentPage() {
     return true;
   };
 
-  const clearScheduleInputLockRenewTimer = () => {
-    if (scheduleInputLockRenewTimerRef.current) {
-      window.clearInterval(scheduleInputLockRenewTimerRef.current);
-      scheduleInputLockRenewTimerRef.current = null;
-    }
+  const syncScheduleInputPresence = async (channel: PortalRealtimeChannel) => {
+    const payload: ScheduleAssignmentInputPresencePayload = {
+      userId: sessionUserId ?? "",
+      userName: session?.username ?? "다른 사용자",
+      monthKey: selectedMonthKeyRef.current,
+      activeCellKey: ownedScheduleInputClaimRef.current?.cellKey ?? null,
+      claimedAt: ownedScheduleInputClaimRef.current?.claimedAt ?? null,
+      updatedAt: Date.now(),
+    };
+    await channel.track(payload);
   };
 
-  const upsertScheduleInputLock = (lock: ScheduleAssignmentScheduleInputLockRow) => {
-    setScheduleInputLocks((current) => ({
-      ...current,
-      [lock.cell_key]: lock,
-    }));
-  };
-
-  const removeScheduleInputLock = (cellKey: string) => {
-    setScheduleInputLocks((current) => {
-      if (!current[cellKey]) return current;
-      const next = { ...current };
-      delete next[cellKey];
-      return next;
-    });
-  };
-
-  const handleScheduleInputLockBlocked = (
-    lock: ScheduleAssignmentScheduleInputLockRow | null | undefined,
+  const runScheduleInputPresenceMutation = async (
+    handler: (channel: PortalRealtimeChannel) => Promise<void>,
   ) => {
-    setImportMessage({
-      tone: "warn",
-      text: getScheduleAssignmentScheduleInputLockBlockedMessage(lock),
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (!channel || !sessionUserId) return;
+
+    const nextMutation = scheduleInputPresenceMutationRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (scheduleInputPresenceChannelRef.current !== channel) return;
+        await handler(channel);
+      });
+
+    scheduleInputPresenceMutationRef.current = nextMutation.catch(() => undefined);
+    await nextMutation;
+  };
+
+  const applyScheduleInputState = (
+    payload: ScheduleAssignmentInputBroadcastPayload,
+    options?: { immediate?: boolean },
+  ) => {
+    const currentState = scheduleInputLatestStateRef.current[payload.userId];
+    if (currentState && currentState.updatedAt > payload.updatedAt) return;
+
+    scheduleInputLatestStateRef.current = {
+      ...scheduleInputLatestStateRef.current,
+      [payload.userId]: payload,
+    };
+
+    if (payload.monthKey !== selectedMonthKeyRef.current) return;
+
+    const apply = () => {
+      setScheduleInputLeaders((current) => {
+        const nextLeaders = Object.fromEntries(
+          Object.entries(current).filter(([, leader]) => leader.userId !== payload.userId),
+        );
+
+        if (payload.cellKey && payload.claimedAt) {
+          nextLeaders[payload.cellKey] = {
+            cellKey: payload.cellKey,
+            userId: payload.userId,
+            userName: payload.userName,
+            claimedAt: payload.claimedAt,
+            updatedAt: payload.updatedAt,
+          };
+        }
+
+        return areScheduleInputLeadersEqual(current, nextLeaders) ? current : nextLeaders;
+      });
+    };
+
+    apply();
+  };
+
+  const broadcastScheduleInputState = async (
+    channel: PortalRealtimeChannel,
+    payload: ScheduleAssignmentInputBroadcastPayload,
+  ) => {
+    await channel.send({
+      type: "broadcast",
+      event: "schedule-input-state",
+      payload,
     });
   };
 
-  const releaseOwnedScheduleInputLock = async (expectedCellKey?: string) => {
-    const currentLock = ownedScheduleInputLockRef.current;
-    if (!currentLock) return;
-    if (expectedCellKey && currentLock.cellKey !== expectedCellKey) return;
+  const clearOwnedScheduleInputClaim = async () => {
+    const previousClaim = ownedScheduleInputClaimRef.current;
+    ownedScheduleInputClaimRef.current = null;
+    if (previousClaim) {
+      setScheduleInputLeaders((current) => {
+        const leader = current[previousClaim.cellKey];
+        if (!leader || leader.userId !== sessionUserId) {
+          return current;
+        }
 
-    ownedScheduleInputLockRef.current = null;
-    clearScheduleInputLockRenewTimer();
-    removeScheduleInputLock(currentLock.cellKey);
+        const nextLeaders = { ...current };
+        delete nextLeaders[previousClaim.cellKey];
+        return nextLeaders;
+      });
+    }
 
-    if (!scheduleInputLockFeatureAvailableRef.current) return;
-
+    if (!previousClaim || !sessionUserId) return;
+    const payload: ScheduleAssignmentInputBroadcastPayload = {
+      userId: sessionUserId,
+      userName: session?.username ?? "다른 사용자",
+      monthKey: selectedMonthKeyRef.current,
+      cellKey: null,
+      claimedAt: null,
+      updatedAt: Date.now(),
+    };
+    applyScheduleInputState(payload);
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (channel) {
+      void broadcastScheduleInputState(channel, payload).catch(() => undefined);
+    }
     try {
-      const supabase = await getPortalSupabaseClient();
-      await supabase.rpc("release_team_lead_schedule_assignment_schedule_input_lock", {
-        p_cell_key: currentLock.cellKey,
-        p_claim_token: currentLock.claimToken,
+      await runScheduleInputPresenceMutation(async (channel) => {
+        await syncScheduleInputPresence(channel);
       });
     } catch {
-      // Stale locks expire automatically, so release failures can be ignored.
+      // Ignore transient presence sync failures.
     }
   };
 
   const claimScheduleInput = async (cellKey: string) => {
-    if (ownedScheduleInputLockRef.current?.cellKey === cellKey) {
+    if (ownedScheduleInputClaimRef.current?.cellKey === cellKey) {
       return true;
     }
 
-    const existingLock = scheduleInputLocksRef.current[cellKey];
-    if (
-      isScheduleAssignmentScheduleInputLockActive(existingLock, Date.now()) &&
-      existingLock?.locked_by &&
-      existingLock.locked_by !== sessionUserId
-    ) {
-      handleScheduleInputLockBlocked(existingLock);
+    const currentLeader = scheduleInputLeadersRef.current[cellKey];
+    if (currentLeader && currentLeader.userId !== sessionUserId) {
       return false;
     }
 
-    if (!scheduleInputLockFeatureAvailableRef.current || !sessionUserId) {
+    const previousClaim = ownedScheduleInputClaimRef.current;
+    const claimedAt = Date.now();
+    ownedScheduleInputClaimRef.current = { cellKey, claimedAt };
+    if (!sessionUserId) {
       return true;
     }
 
-    const currentOwnedLock = ownedScheduleInputLockRef.current;
-    if (currentOwnedLock) {
-      await releaseOwnedScheduleInputLock();
-    }
+    setScheduleInputLeaders((current) => {
+      const nextLeaders = { ...current };
+      if (previousClaim) {
+        const previousLeader = nextLeaders[previousClaim.cellKey];
+        if (previousLeader?.userId === sessionUserId) {
+          delete nextLeaders[previousClaim.cellKey];
+        }
+      }
 
-    const claimToken = `${sessionUserId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      nextLeaders[cellKey] = {
+        cellKey,
+        userId: sessionUserId,
+        userName: session?.username ?? "다른 사용자",
+        claimedAt,
+        updatedAt: claimedAt,
+      };
+      return nextLeaders;
+    });
+
+    const payload: ScheduleAssignmentInputBroadcastPayload = {
+      userId: sessionUserId,
+      userName: session?.username ?? "다른 사용자",
+      monthKey: selectedMonthKeyRef.current,
+      cellKey,
+      claimedAt,
+      updatedAt: Date.now(),
+    };
+    applyScheduleInputState(payload);
+    const channel = scheduleInputPresenceChannelRef.current;
+    if (channel) {
+      void broadcastScheduleInputState(channel, payload).catch(() => undefined);
+    }
 
     try {
-      const supabase = await getPortalSupabaseClient();
-      const { data, error } = await supabase.rpc("acquire_team_lead_schedule_assignment_schedule_input_lock", {
-        p_month_key: selectedMonthKeyRef.current,
-        p_cell_key: cellKey,
-        p_claim_token: claimToken,
-        p_duration_seconds: CELL_LOCK_DURATION_SECONDS,
+      await runScheduleInputPresenceMutation(async (channel) => {
+        await syncScheduleInputPresence(channel);
       });
-
-      if (error) {
-        if (
-          /acquire_team_lead_schedule_assignment_schedule_input_lock|team_lead_schedule_assignment_schedule_input_locks/i.test(
-            error.message,
-          )
-        ) {
-          scheduleInputLockFeatureAvailableRef.current = false;
-          return true;
-        }
-        throw new Error(error.message);
-      }
-
-      const result = Array.isArray(data) ? (data[0] as ScheduleAssignmentScheduleInputLockRpcResult | undefined) : undefined;
-      if (!result) {
-        return true;
-      }
-
-      const nextLock: ScheduleAssignmentScheduleInputLockRow = {
-        cell_key: result.cell_key,
-        month_key: result.month_key,
-        locked_by: result.locked_by,
-        locked_by_name: result.locked_by_name,
-        claim_token: result.claim_token,
-        expires_at: result.expires_at,
-        updated_at: result.updated_at,
-      };
-      upsertScheduleInputLock(nextLock);
-
-      if (!result.ok || (result.locked_by && result.locked_by !== sessionUserId)) {
-        handleScheduleInputLockBlocked(nextLock);
-        return false;
-      }
-
-      ownedScheduleInputLockRef.current = {
-        cellKey,
-        claimToken,
-        monthKey: selectedMonthKeyRef.current,
-      };
-      clearScheduleInputLockRenewTimer();
-      scheduleInputLockRenewTimerRef.current = window.setInterval(() => {
-        const ownedLock = ownedScheduleInputLockRef.current;
-        if (
-          !ownedLock ||
-          ownedLock.cellKey !== cellKey ||
-          !scheduleInputLockFeatureAvailableRef.current
-        ) {
-          return;
-        }
-
-        void getPortalSupabaseClient()
-          .then((supabase) =>
-            supabase.rpc("acquire_team_lead_schedule_assignment_schedule_input_lock", {
-              p_month_key: ownedLock.monthKey,
-              p_cell_key: ownedLock.cellKey,
-              p_claim_token: ownedLock.claimToken,
-              p_duration_seconds: CELL_LOCK_DURATION_SECONDS,
-            }),
-          )
-          .then(({ data, error }) => {
-            if (error) return;
-            const result = Array.isArray(data)
-              ? (data[0] as ScheduleAssignmentScheduleInputLockRpcResult | undefined)
-              : undefined;
-            if (!result) return;
-            upsertScheduleInputLock({
-              cell_key: result.cell_key,
-              month_key: result.month_key,
-              locked_by: result.locked_by,
-              locked_by_name: result.locked_by_name,
-              claim_token: result.claim_token,
-              expires_at: result.expires_at,
-              updated_at: result.updated_at,
-            });
-          })
-          .catch(() => {
-            // Ignore transient heartbeat failures and rely on the next renewal or expiry.
-          });
-      }, CELL_LOCK_RENEW_INTERVAL_MS);
       return true;
-    } catch (error) {
-      setImportMessage({
-        tone: "warn",
-        text: error instanceof Error ? error.message : "일정 입력 잠금 상태를 확인하지 못했습니다.",
+    } catch {
+      if (ownedScheduleInputClaimRef.current?.cellKey === cellKey) {
+        ownedScheduleInputClaimRef.current = null;
+      }
+      const currentState = scheduleInputLatestStateRef.current[sessionUserId];
+      if (currentState?.updatedAt === payload.updatedAt) {
+        const nextStates = { ...scheduleInputLatestStateRef.current };
+        delete nextStates[sessionUserId];
+        scheduleInputLatestStateRef.current = nextStates;
+      }
+      setScheduleInputLeaders((current) => {
+        const leader = current[cellKey];
+        if (!leader || leader.userId !== sessionUserId) {
+          return current;
+        }
+
+        const nextLeaders = { ...current };
+        delete nextLeaders[cellKey];
+        return nextLeaders;
       });
       return false;
     }
@@ -1452,109 +1433,145 @@ export function ScheduleAssignmentPage() {
     let cancelled = false;
     let cleanupRealtime: (() => void) | null = null;
 
-    if (!selectedMonthKey) {
-      setScheduleInputLocks({});
+    if (!selectedMonthKey || !sessionUserId) {
       setScheduleInputLeaders({});
-      ownedScheduleInputLockRef.current = null;
+      ownedScheduleInputClaimRef.current = null;
       return undefined;
     }
 
-    setScheduleInputLocks({});
+    const syncLeadersFromPresence = () => {
+      const channel = scheduleInputPresenceChannelRef.current;
+      if (!channel) return;
 
-    const syncScheduleInputLocks = async () => {
-      if (!scheduleInputLockFeatureAvailableRef.current) {
-        setScheduleInputLocks({});
-        return;
-      }
+      const presenceState = channel.presenceState<ScheduleAssignmentInputPresencePayload>();
+      const latestStates: Record<string, ScheduleAssignmentInputBroadcastPayload> = {
+        ...scheduleInputLatestStateRef.current,
+      };
 
-      try {
-        const supabase = await getPortalSupabaseClient();
-        const { data, error } = await supabase
-          .from("team_lead_schedule_assignment_schedule_input_locks")
-          .select("cell_key, month_key, locked_by, locked_by_name, claim_token, expires_at, updated_at")
-          .eq("month_key", selectedMonthKey)
-          .returns<ScheduleAssignmentScheduleInputLockRow[]>();
+      Object.entries(presenceState).forEach(([userId, entries]) => {
+        const latestEntry = entries.reduce<ScheduleAssignmentInputPresencePayload | null>((current, entry) => {
+          if (!current) return entry;
+          const currentTimestamp = current.updatedAt ?? current.claimedAt;
+          const entryTimestamp = entry.updatedAt ?? entry.claimedAt;
+          if (entryTimestamp > currentTimestamp) return entry;
+          return current;
+        }, null);
 
-        if (cancelled) return;
+        if (!latestEntry) return;
 
-        if (error) {
-          if (/team_lead_schedule_assignment_schedule_input_locks/i.test(error.message)) {
-            scheduleInputLockFeatureAvailableRef.current = false;
-            setScheduleInputLocks({});
-            return;
-          }
-          throw new Error(error.message);
+        const presencePayload: ScheduleAssignmentInputBroadcastPayload = {
+          userId: latestEntry.userId,
+          userName: latestEntry.userName,
+          monthKey: latestEntry.monthKey,
+          cellKey: latestEntry.activeCellKey,
+          claimedAt: latestEntry.claimedAt,
+          updatedAt: latestEntry.updatedAt ?? latestEntry.claimedAt,
+        };
+        const currentLatest = latestStates[userId];
+        if (
+          !currentLatest ||
+          presencePayload.updatedAt >= currentLatest.updatedAt
+        ) {
+          latestStates[userId] = presencePayload;
+        }
+      });
+
+      scheduleInputLatestStateRef.current = latestStates;
+
+      const nextLeaders: Record<string, ScheduleAssignmentInputLeader> = {};
+      Object.values(latestStates).forEach((payload) => {
+        if (payload.monthKey !== selectedMonthKey || !payload.cellKey || !payload.claimedAt) {
+          return;
         }
 
-        setScheduleInputLocks(
-          Object.fromEntries((data ?? []).map((row) => [row.cell_key, row])),
-        );
-
-        const channel = supabase
-          .channel(`team-lead-schedule-assignment-schedule-input-locks-${selectedMonthKey}`)
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "team_lead_schedule_assignment_schedule_input_locks",
-              filter: `month_key=eq.${selectedMonthKey}`,
-            },
-            (payload: ScheduleAssignmentScheduleInputLockRealtimePayload) => {
-              const nextRow = payload.new.cell_key
-                ? (payload.new as ScheduleAssignmentScheduleInputLockRow)
-                : null;
-              const previousRow = payload.old.cell_key
-                ? (payload.old as ScheduleAssignmentScheduleInputLockRow)
-                : null;
-              const targetCellKey = nextRow?.cell_key ?? previousRow?.cell_key;
-              if (!targetCellKey) return;
-
-              if (payload.eventType === "DELETE" || !nextRow) {
-                removeScheduleInputLock(targetCellKey);
-                return;
-              }
-
-              upsertScheduleInputLock(nextRow);
-
-              if (
-                previousRow?.locked_by === sessionUserId &&
-                nextRow.locked_by &&
-                nextRow.locked_by !== sessionUserId &&
-                ownedScheduleInputLockRef.current?.cellKey === nextRow.cell_key
-              ) {
-                ownedScheduleInputLockRef.current = null;
-                clearScheduleInputLockRenewTimer();
-                handleScheduleInputLockBlocked(nextRow);
-                if (document.activeElement instanceof HTMLElement) {
-                  document.activeElement.blur();
-                }
-              }
-            },
-          )
-          .subscribe();
-
-        cleanupRealtime = () => {
-          void supabase.removeChannel(channel);
+        const nextLeader: ScheduleAssignmentInputLeader = {
+          cellKey: payload.cellKey,
+          userId: payload.userId,
+          userName: payload.userName,
+          claimedAt: payload.claimedAt,
+          updatedAt: payload.updatedAt,
         };
-      } catch (error) {
-        if (cancelled) return;
-        setImportMessage({
-          tone: "warn",
-          text: error instanceof Error ? error.message : "일정 입력 잠금 상태를 불러오지 못했습니다.",
-        });
+
+        nextLeaders[payload.cellKey] = getPreferredScheduleInputLeader(
+          nextLeaders[payload.cellKey],
+          nextLeader,
+        ) ?? nextLeader;
+      });
+
+      setScheduleInputLeaders((current) =>
+        areScheduleInputLeadersEqual(current, nextLeaders) ? current : nextLeaders,
+      );
+
+      const ownedClaim = ownedScheduleInputClaimRef.current;
+      if (ownedClaim) {
+        const activeLeader = nextLeaders[ownedClaim.cellKey];
+        if (!activeLeader || activeLeader.userId !== sessionUserId) {
+          ownedScheduleInputClaimRef.current = null;
+          if (
+            document.activeElement instanceof HTMLInputElement &&
+            document.activeElement.dataset.scheduleInputCellKey === ownedClaim.cellKey
+          ) {
+            document.activeElement.blur();
+          }
+        }
       }
     };
 
-    void syncScheduleInputLocks();
+    const setupPresence = async () => {
+      const supabase = await getPortalSupabaseClient();
+      const channel = supabase.channel(`team-lead-schedule-assignment-input-${selectedMonthKey}`, {
+        config: {
+          presence: {
+            key: sessionUserId,
+          },
+        },
+      });
+      scheduleInputPresenceChannelRef.current = channel;
+
+      channel
+        .on("broadcast", { event: "schedule-input-state" }, ({ payload }) => {
+          if (cancelled) return;
+          applyScheduleInputState(payload as ScheduleAssignmentInputBroadcastPayload, { immediate: true });
+        })
+        .on("presence", { event: "join" }, () => {
+          if (cancelled) return;
+          syncLeadersFromPresence();
+        })
+        .on("presence", { event: "leave" }, () => {
+          if (cancelled) return;
+          syncLeadersFromPresence();
+        })
+        .on("presence", { event: "sync" }, () => {
+          if (cancelled) return;
+          syncLeadersFromPresence();
+        })
+        .subscribe(async (status) => {
+          if (status !== "SUBSCRIBED" || cancelled) return;
+          await syncScheduleInputPresence(channel);
+        });
+
+      cleanupRealtime = () => {
+        void supabase.removeChannel(channel);
+      };
+    };
+
+    void setupPresence();
 
     return () => {
       cancelled = true;
-      cleanupRealtime?.();
-      clearScheduleInputLockRenewTimer();
-      void releaseOwnedScheduleInputLock();
+      const channel = scheduleInputPresenceChannelRef.current;
+      scheduleInputPresenceChannelRef.current = null;
+      scheduleInputPresenceMutationRef.current = Promise.resolve();
+      scheduleInputLatestStateRef.current = {};
+      setScheduleInputLeaders({});
+      ownedScheduleInputClaimRef.current = null;
+      if (channel) {
+        void getPortalSupabaseClient().then((supabase) => supabase.removeChannel(channel));
+      } else {
+        cleanupRealtime?.();
+      }
     };
-  }, [selectedMonthKey, sessionUserId]);
+  }, [selectedMonthKey, sessionUserId, session?.username]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1658,7 +1675,7 @@ export function ScheduleAssignmentPage() {
   useEffect(() => {
     const releaseForBlur = () => {
       void releaseOwnedCellLock();
-      void releaseOwnedScheduleInputLock();
+      void clearOwnedScheduleInputClaim();
     };
 
     window.addEventListener("blur", releaseForBlur);
@@ -1669,24 +1686,24 @@ export function ScheduleAssignmentPage() {
 
   useEffect(() => {
     const releaseScheduleInputClaimIfNeeded = (target: EventTarget | null) => {
-      const ownedLock = ownedScheduleInputLockRef.current;
-      if (!ownedLock) return;
+      const ownedClaim = ownedScheduleInputClaimRef.current;
+      if (!ownedClaim) return;
 
       const targetElement = target instanceof Element ? target : null;
       const targetScheduleInput = targetElement?.closest<HTMLInputElement>("[data-schedule-input-cell-key]") ?? null;
-      if (targetScheduleInput?.dataset.scheduleInputCellKey === ownedLock.cellKey) {
+      if (targetScheduleInput?.dataset.scheduleInputCellKey === ownedClaim.cellKey) {
         return;
       }
 
       const activeElement = document.activeElement;
       if (
         activeElement instanceof HTMLInputElement &&
-        activeElement.dataset.scheduleInputCellKey === ownedLock.cellKey
+        activeElement.dataset.scheduleInputCellKey === ownedClaim.cellKey
       ) {
         return;
       }
 
-      void releaseOwnedScheduleInputLock();
+      void clearOwnedScheduleInputClaim();
     };
 
     const onPointerDownCapture = (event: PointerEvent) => {
@@ -2730,8 +2747,8 @@ export function ScheduleAssignmentPage() {
                                             });
                                           }}
                                           onBlur={() => {
-                                            if (ownedScheduleInputLockRef.current?.cellKey === scheduleCellKey) {
-                                              void releaseOwnedScheduleInputLock(scheduleCellKey);
+                                            if (ownedScheduleInputClaimRef.current?.cellKey === scheduleCellKey) {
+                                              void clearOwnedScheduleInputClaim();
                                             }
                                           }}
                                           onChange={(event) =>
