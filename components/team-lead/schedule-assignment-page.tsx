@@ -1087,7 +1087,7 @@ export function ScheduleAssignmentPage() {
     if (!previousClaim || !sessionUserId) return;
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
-        await channel.untrack();
+        await syncScheduleInputPresence(channel);
       });
     } catch {
       // Ignore transient presence sync failures.
@@ -1128,9 +1128,6 @@ export function ScheduleAssignmentPage() {
 
     try {
       await runScheduleInputPresenceMutation(async (channel) => {
-        if (previousClaim) {
-          await channel.untrack();
-        }
         await syncScheduleInputPresence(channel);
       });
       return true;
@@ -1330,22 +1327,27 @@ export function ScheduleAssignmentPage() {
       const nextLeaders: Record<string, ScheduleAssignmentInputLeader> = {};
 
       Object.values(state).forEach((entries) => {
-        entries.forEach((entry) => {
-          const activeCellKey = entry.activeCellKey;
-          const claimedAt = entry.claimedAt;
-          if (!activeCellKey || !claimedAt || entry.monthKey !== selectedMonthKeyRef.current) {
-            return;
-          }
+        const latestEntry = entries.reduce<ScheduleAssignmentInputPresencePayload | null>((latest, entry) => {
+          if (!latest) return entry;
+          const latestTimestamp = latest.updatedAt ?? latest.claimedAt ?? 0;
+          const entryTimestamp = entry.updatedAt ?? entry.claimedAt ?? 0;
+          return entryTimestamp >= latestTimestamp ? entry : latest;
+        }, null);
 
-          const candidate: ScheduleAssignmentInputLeader = {
-            cellKey: activeCellKey,
-            userId: entry.userId,
-            userName: entry.userName,
-            claimedAt,
-            updatedAt: entry.updatedAt,
-          };
-          nextLeaders[activeCellKey] = getPreferredScheduleInputLeader(nextLeaders[activeCellKey], candidate);
-        });
+        const activeCellKey = latestEntry?.activeCellKey;
+        const claimedAt = latestEntry?.claimedAt;
+        if (!latestEntry || !activeCellKey || !claimedAt || latestEntry.monthKey !== selectedMonthKeyRef.current) {
+          return;
+        }
+
+        const candidate: ScheduleAssignmentInputLeader = {
+          cellKey: activeCellKey,
+          userId: latestEntry.userId,
+          userName: latestEntry.userName,
+          claimedAt,
+          updatedAt: latestEntry.updatedAt,
+        };
+        nextLeaders[activeCellKey] = getPreferredScheduleInputLeader(nextLeaders[activeCellKey], candidate);
       });
 
       setScheduleInputLeaders(nextLeaders);
