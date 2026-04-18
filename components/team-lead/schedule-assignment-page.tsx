@@ -762,6 +762,7 @@ export function ScheduleAssignmentPage() {
   const scheduleInputLeadersRef = useRef<Record<string, ScheduleAssignmentInputLeader>>({});
   const scheduleInputPresenceChannelRef = useRef<PortalRealtimeChannel | null>(null);
   const ownedScheduleInputClaimRef = useRef<{ cellKey: string; claimedAt: number } | null>(null);
+  const scheduleInputPresenceMutationRef = useRef<Promise<void>>(Promise.resolve());
   const refreshSchedulesRef = useRef<null | (() => Promise<void>)>(null);
   const refreshAssignmentsRef = useRef<null | (() => Promise<void>)>(null);
   const flushDeferredRefreshRef = useRef<() => void>(() => {});
@@ -1050,12 +1051,44 @@ export function ScheduleAssignmentPage() {
     await channel.track(payload);
   };
 
-  const clearOwnedScheduleInputClaim = async () => {
-    ownedScheduleInputClaimRef.current = null;
+  const runScheduleInputPresenceMutation = async (
+    handler: (channel: PortalRealtimeChannel) => Promise<void>,
+  ) => {
     const channel = scheduleInputPresenceChannelRef.current;
     if (!channel || !sessionUserId) return;
+
+    const nextMutation = scheduleInputPresenceMutationRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (scheduleInputPresenceChannelRef.current !== channel) return;
+        await handler(channel);
+      });
+
+    scheduleInputPresenceMutationRef.current = nextMutation.catch(() => undefined);
+    await nextMutation;
+  };
+
+  const clearOwnedScheduleInputClaim = async () => {
+    const previousClaim = ownedScheduleInputClaimRef.current;
+    ownedScheduleInputClaimRef.current = null;
+    if (previousClaim) {
+      setScheduleInputLeaders((current) => {
+        const leader = current[previousClaim.cellKey];
+        if (!leader || leader.userId !== sessionUserId) {
+          return current;
+        }
+
+        const nextLeaders = { ...current };
+        delete nextLeaders[previousClaim.cellKey];
+        return nextLeaders;
+      });
+    }
+
+    if (!previousClaim || !sessionUserId) return;
     try {
-      await syncScheduleInputPresence(channel);
+      await runScheduleInputPresenceMutation(async (channel) => {
+        await channel.untrack();
+      });
     } catch {
       // Ignore transient presence sync failures.
     }
@@ -1067,16 +1100,42 @@ export function ScheduleAssignmentPage() {
       return false;
     }
 
-    ownedScheduleInputClaimRef.current = { cellKey, claimedAt: Date.now() };
-    const channel = scheduleInputPresenceChannelRef.current;
-    if (!channel || !sessionUserId) {
+    const claimedAt = Date.now();
+    ownedScheduleInputClaimRef.current = { cellKey, claimedAt };
+    if (!sessionUserId) {
       return true;
     }
 
+    setScheduleInputLeaders((current) => ({
+      ...current,
+      [cellKey]: {
+        cellKey,
+        userId: sessionUserId,
+        userName: session?.username ?? "다른 사용자",
+        claimedAt,
+        updatedAt: claimedAt,
+      },
+    }));
+
     try {
-      await syncScheduleInputPresence(channel);
+      await runScheduleInputPresenceMutation(async (channel) => {
+        await syncScheduleInputPresence(channel);
+      });
       return true;
     } catch {
+      if (ownedScheduleInputClaimRef.current?.cellKey === cellKey) {
+        ownedScheduleInputClaimRef.current = null;
+      }
+      setScheduleInputLeaders((current) => {
+        const leader = current[cellKey];
+        if (!leader || leader.userId !== sessionUserId) {
+          return current;
+        }
+
+        const nextLeaders = { ...current };
+        delete nextLeaders[cellKey];
+        return nextLeaders;
+      });
       return false;
     }
   };
@@ -1303,6 +1362,16 @@ export function ScheduleAssignmentPage() {
       scheduleInputPresenceChannelRef.current = channel;
 
       channel
+        .on("presence", { event: "join" }, () => {
+          if (!cancelled) {
+            syncLeadersFromPresence();
+          }
+        })
+        .on("presence", { event: "leave" }, () => {
+          if (!cancelled) {
+            syncLeadersFromPresence();
+          }
+        })
         .on("presence", { event: "sync" }, () => {
           if (!cancelled) {
             syncLeadersFromPresence();
@@ -1320,6 +1389,7 @@ export function ScheduleAssignmentPage() {
       cancelled = true;
       const channel = scheduleInputPresenceChannelRef.current;
       scheduleInputPresenceChannelRef.current = null;
+      scheduleInputPresenceMutationRef.current = Promise.resolve();
       setScheduleInputLeaders({});
       ownedScheduleInputClaimRef.current = null;
       if (!channel) return;
