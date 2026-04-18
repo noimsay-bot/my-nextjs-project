@@ -193,6 +193,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
 
   const adminSession = hasAdminAccess(session?.actualRole) ? session : null;
   const canOpenAdminArea = hasAdminAccess(session?.role);
+  const shouldShowLogoutButton = pathname !== "/";
 
   const cycleExperienceRole = () => {
     setExperienceDraftRole((current) => {
@@ -310,15 +311,17 @@ function PortalHeader({ pathname }: { pathname: string }) {
               <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
             ) : null}
             <span className="muted">{sessionLabel}</span>
-            <button
-              className="btn portal-header-logout"
-              onClick={async () => {
-                await logoutUser();
-                window.location.href = "/login";
-              }}
-            >
-              로그아웃
-            </button>
+            {shouldShowLogoutButton ? (
+              <button
+                className="btn portal-header-logout"
+                onClick={async () => {
+                  await logoutUser();
+                  window.location.href = "/login";
+                }}
+              >
+                로그아웃
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
