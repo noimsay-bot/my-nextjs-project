@@ -1865,31 +1865,19 @@ export function ScheduleAssignmentPage() {
                       const coverageNoteLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "coverageNote");
                       const coverageNoteLockedByOther =
                         Boolean(coverageNoteLockState.lock?.locked_by) && coverageNoteLockState.lock?.locked_by !== sessionUserId;
-                      const coverageNoteReadOnly =
-                        !isEditingPeople &&
-                        cellLockFeatureAvailableRef.current &&
-                        (!coverageNoteLockState.lock || coverageNoteLockedByOther);
+                      const coverageNoteReadOnly = !isEditingPeople && coverageNoteLockedByOther;
                       const tripTagLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "tripTagLabel");
                       const tripTagLockedByOther =
                         Boolean(tripTagLockState.lock?.locked_by) && tripTagLockState.lock?.locked_by !== sessionUserId;
-                      const tripTagReadOnly =
-                        !isEditingPeople &&
-                        cellLockFeatureAvailableRef.current &&
-                        (!tripTagLockState.lock || tripTagLockedByOther);
+                      const tripTagReadOnly = !isEditingPeople && tripTagLockedByOther;
                       const clockInLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockIn");
                       const clockInLockedByOther =
                         Boolean(clockInLockState.lock?.locked_by) && clockInLockState.lock?.locked_by !== sessionUserId;
-                      const clockInReadOnly =
-                        !isEditingPeople &&
-                        cellLockFeatureAvailableRef.current &&
-                        (!clockInLockState.lock || clockInLockedByOther);
+                      const clockInReadOnly = !isEditingPeople && clockInLockedByOther;
                       const clockOutLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockOut");
                       const clockOutLockedByOther =
                         Boolean(clockOutLockState.lock?.locked_by) && clockOutLockState.lock?.locked_by !== sessionUserId;
-                      const clockOutReadOnly =
-                        !isEditingPeople &&
-                        cellLockFeatureAvailableRef.current &&
-                        (!clockOutLockState.lock || clockOutLockedByOther);
+                      const clockOutReadOnly = !isEditingPeople && clockOutLockedByOther;
 
                       return (
                         <tr key={row.key}>
@@ -2327,10 +2315,7 @@ export function ScheduleAssignmentPage() {
                                   const scheduleLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, scheduleFieldKey);
                                   const scheduleLockedByOther =
                                     Boolean(scheduleLockState.lock?.locked_by) && scheduleLockState.lock?.locked_by !== sessionUserId;
-                                  const scheduleReadOnly =
-                                    !isEditingPeople &&
-                                    cellLockFeatureAvailableRef.current &&
-                                    (!scheduleLockState.lock || scheduleLockedByOther);
+                                  const scheduleReadOnly = !isEditingPeople && scheduleLockedByOther;
 
                                   return (
                                     <div key={`${row.key}-schedule-${index}`} style={{ display: "grid", gap: 4 }}>
