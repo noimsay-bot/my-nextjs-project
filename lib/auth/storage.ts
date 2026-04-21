@@ -631,21 +631,72 @@ async function resolveLoginEmail(identifier: string) {
     return normalized;
   }
 
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.rpc("find_email_by_login_id", {
-    input_login_id: normalized,
-  });
+  try {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    const response = await fetch("/api/auth/resolve-login-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ loginId: normalized }),
+      signal: controller.signal,
+    });
+    window.clearTimeout(timeoutId);
 
-  if (error) {
-    throw new Error(error.message);
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; email?: string | null; message?: string }
+      | null;
+
+    if (response.ok && payload?.ok && typeof payload.email === "string" && payload.email.trim()) {
+      return payload.email.trim().toLowerCase();
+    }
+  } catch {
+    // Fall back to the direct RPC lookup below.
   }
 
-  if (typeof data === "string") {
-    return data;
-  }
+  try {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    const supabase = getSupabaseClient();
+    const { data, error } = await Promise.race([
+      supabase.rpc("find_email_by_login_id", {
+        input_login_id: normalized,
+      }),
+      new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => reject(new Error("아이디 조회 시간이 초과되었습니다.")),
+          { once: true },
+        );
+      }),
+    ]);
+    window.clearTimeout(timeoutId);
 
-  if (Array.isArray(data) && typeof data[0] === "string") {
-    return data[0];
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (typeof data === "string") {
+      return data;
+    }
+
+    if (Array.isArray(data) && typeof data[0] === "string") {
+      return data[0];
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (
+      /timeout|abort|fetch|find_email_by_login_id|schema cache|could not find the function|could not find function/i.test(
+        message,
+      )
+    ) {
+      throw new Error(
+        "아이디 조회 시간이 초과되었습니다. Supabase SQL Editor에서 `supabase/schema.sql`을 다시 실행하거나 `SUPABASE_SERVICE_ROLE_KEY`를 설정해 주세요.",
+      );
+    }
+
+    throw error;
   }
 
   return null;
