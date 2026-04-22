@@ -166,6 +166,12 @@ function getTripTagStyle(travelType: AssignmentTravelType, phase: AssignmentTrip
   };
 }
 
+function formatScheduleAssignmentDisplayName(name: string, hasTripTag: boolean) {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  return hasTripTag ? `${trimmed}(출)` : trimmed;
+}
+
 type ImportMessageTone = "ok" | "warn" | "note";
 
 interface ImportMessage {
@@ -2370,6 +2376,7 @@ export function ScheduleAssignmentPage() {
                         row.isCustom &&
                         !storedDayRows.addedRows.some((item) => item.id === getCustomRowIdFromKey(row.key));
                       const visibleTripTag = visibleTripTagMap.get(row.key) ?? null;
+                      const hasTripTag = Boolean(visibleTripTag || entry.travelType || entry.tripTagId);
                       const currentTripTagId = visibleTripTag?.tripTagId || entry.tripTagId;
                       const currentTripTagLabel = visibleTripTag?.tripTagLabel || entry.tripTagLabel;
                       const currentTripTravelType = visibleTripTag?.travelType || entry.travelType;
@@ -2377,6 +2384,7 @@ export function ScheduleAssignmentPage() {
                       const isEditingCurrentTripTag =
                         editingTripTag?.rowKey === row.key &&
                         editingTripTag.tripTagId === currentTripTagId;
+                      const displayName = formatScheduleAssignmentDisplayName(row.name, hasTripTag);
                       const coverageNoteReadOnly = false;
                       const tripTagReadOnly = false;
                       const clockInLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockIn");
@@ -2454,16 +2462,16 @@ export function ScheduleAssignmentPage() {
                                 <div
                                   className="field-input schedule-assignment-name-field"
                                   style={{
-                                    width: "clamp(84px, 9ch, 112px)",
+                                    width: "clamp(84px, 12ch, 132px)",
                                     minWidth: 84,
-                                    maxWidth: 112,
+                                    maxWidth: 132,
                                     textAlign: "center",
                                     justifyContent: "center",
                                     display: "flex",
                                     alignItems: "center",
                                   }}
                                 >
-                                  {row.name || "이름 없음"}
+                                  {displayName || "이름 없음"}
                                 </div>
                               )}
                               {isEditingPeople ? (

@@ -42,6 +42,9 @@ import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/l
 import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, VacationType } from "@/lib/schedule/types";
 import {
   applyScheduleAssignmentNameTagsToSchedule,
+  formatScheduleAssignmentDisplayName,
+  getScheduleAssignmentStore,
+  getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadState,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
@@ -673,6 +676,8 @@ export function PublishedSchedulesPanel() {
   const lastFocusRefreshAtRef = useRef(0);
   const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
+  const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [items, scheduleHistory]);
+  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [items, scheduleHistory]);
 
   useEffect(() => {
     return subscribeToAuth((nextSession) => {
@@ -1655,6 +1660,17 @@ export function PublishedSchedulesPanel() {
                                     !personObject.pending &&
                                     recommendedCandidateKeys.has(getRefKey(ref));
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                  const assignmentDisplayText = formatScheduleAssignmentDisplayName(
+                                    {
+                                      monthKey: day.ownerMonthKey,
+                                      dateKey: day.dateKey,
+                                      category,
+                                      index,
+                                      name: assignmentDisplay.name,
+                                    },
+                                    scheduleAssignmentStore,
+                                    visibleTripTagMap,
+                                  );
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
@@ -1733,7 +1749,7 @@ export function PublishedSchedulesPanel() {
                                       }}
                                       >
                                         <FittedNameText
-                                        text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
+                                        text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                         className="schedule-name-chip__text"
                                         minFontSize={shouldAutoFitSchedule ? 5 : 9}
                                         maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}

@@ -35,6 +35,9 @@ import {
 import { syncVacationMonthSheetFromGeneratedSchedule } from "@/lib/vacation/storage";
 import {
   applyScheduleAssignmentNameTagsToSchedule,
+  formatScheduleAssignmentDisplayName,
+  getScheduleAssignmentStore,
+  getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadState,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
@@ -426,6 +429,8 @@ export function ScheduleApp() {
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
   const activeEditMonthKey = state.editingMonthKey ?? state.generated?.monthKey ?? null;
+  const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [state.generatedHistory, publishedItems]);
+  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [state.generatedHistory, publishedItems]);
 
   const applyNameTagsToState = (input: ScheduleState) => {
     const generated = input.generated ? applyScheduleAssignmentNameTagsToSchedule(input.generated) : null;
@@ -1887,6 +1892,17 @@ export function ScheduleApp() {
                                     currentUser === assignmentDisplay.name &&
                                     (state.showMyWork || (editMode && !isAllDaysEditMode));
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                  const assignmentDisplayText = formatScheduleAssignmentDisplayName(
+                                    {
+                                      monthKey: visibleSchedule?.monthKey ?? "",
+                                      dateKey: day.dateKey,
+                                      category,
+                                      index,
+                                      name: assignmentDisplay.name,
+                                    },
+                                    scheduleAssignmentStore,
+                                    visibleTripTagMap,
+                                  );
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending || duplicated;
@@ -2002,7 +2018,7 @@ export function ScheduleApp() {
                                       }}
                                     >
                                         <FittedNameText
-                                          text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
+                                          text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                           className="schedule-name-chip__text"
                                           minFontSize={9}
                                           maxFontSize={editMode ? 16 : 18}
@@ -2560,6 +2576,17 @@ export function ScheduleApp() {
                                 {names.map((name, index) => {
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                  const assignmentDisplayText = formatScheduleAssignmentDisplayName(
+                                    {
+                                      monthKey: visibleSchedule?.monthKey ?? "",
+                                      dateKey: day.dateKey,
+                                      category,
+                                      index,
+                                      name: assignmentDisplay.name,
+                                    },
+                                    scheduleAssignmentStore,
+                                    visibleTripTagMap,
+                                  );
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const conflicted = conflictSet.has(`${category}-${name}`) || duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
@@ -2601,7 +2628,7 @@ export function ScheduleApp() {
                                       }}
                                     >
                                       <FittedNameText
-                                        text={getAssignmentChipText(assignmentDisplay.name, nameTag)}
+                                        text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                         className="schedule-name-chip__text"
                                         minFontSize={9}
                                         maxFontSize={18}

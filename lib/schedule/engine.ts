@@ -188,8 +188,25 @@ function normalizeExtraHolidaysText(value: unknown) {
   return [...merged].join(", ");
 }
 
+function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
+  const vacationMap = mergeVacationMaps(getDeskPriorityVacationMap(), parseVacationMap(state.vacations));
+
+  days.forEach((day) => {
+    const nextVacations = [...(vacationMap[day.dateKey] ?? [])];
+    day.vacations = nextVacations;
+
+    if (nextVacations.length > 0) {
+      day.assignments["휴가"] = nextVacations;
+      return;
+    }
+
+    delete day.assignments["휴가"];
+  });
+}
+
 function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], generalTeamPeople: string[]) {
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  syncDayVacationsFromState(state, orderedDays);
   let previousNight: string[] = [];
 
   orderedDays.forEach((day) => {

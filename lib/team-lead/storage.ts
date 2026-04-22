@@ -84,6 +84,14 @@ export interface ScheduleAssignmentVisibleTripTag {
   isInherited: boolean;
 }
 
+export interface ScheduleAssignmentDisplayNameInput {
+  monthKey: string;
+  dateKey: string;
+  category: string;
+  index: number;
+  name: string;
+}
+
 export interface ContributionPeriod {
   evaluationYear: number;
   startMonthKey: string;
@@ -1461,6 +1469,22 @@ function buildScheduleAssignmentTripWorkspace(
 
 export function getScheduleAssignmentVisibleTripTagMap() {
   return buildScheduleAssignmentTripWorkspace().visibleTripTagMap;
+}
+
+export function formatScheduleAssignmentDisplayName(
+  input: ScheduleAssignmentDisplayNameInput,
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+  visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag> = getScheduleAssignmentVisibleTripTagMap(),
+) {
+  const trimmedName = input.name.trim();
+  if (!trimmedName || input.category === "휴가") return trimmedName;
+
+  const rowKey = createAssignmentRowKey(input.dateKey, input.category, input.index, input.name);
+  const monthEntries = store.entries[input.monthKey] ?? {};
+  const entry = monthEntries[rowKey] ?? null;
+  const hasTripTag = Boolean(visibleTripTagMap.get(rowKey) || entry?.travelType || entry?.tripTagId);
+
+  return hasTripTag ? `${trimmedName}(출)` : trimmedName;
 }
 
 export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
