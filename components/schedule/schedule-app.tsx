@@ -239,6 +239,8 @@ function getCategoryDisplayLabel(day: DaySchedule, category: string) {
 const weekdayHolidayVisibleAssignmentOrder = ["조근", "일반", "석근", "야근"] as const;
 const weekendVisibleAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 const weekendPersistentCategories = ["청와대", "국회", "청사"] as const;
+const weekdayEditPersistentCategories = ["조근", "연장", "석근", "일반", "야근", "제크", "휴가", "국회", "청사", "청와대"] as const;
+const weekendEditPersistentCategories = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "청사", "야근", "휴가"] as const;
 
 function getDayAssignmentSortRank(day: DaySchedule, category: string) {
   const isWeekendLike = day.isWeekend || day.isHoliday;
@@ -259,19 +261,31 @@ function getDayAssignmentSortRank(day: DaySchedule, category: string) {
   return getVisibleAssignmentDisplayRank(category, isWeekendLike);
 }
 
-function getVisibleDayAssignments(day: DaySchedule) {
+function getVisibleDayAssignments(day: DaySchedule, options?: { editMode?: boolean }) {
   const isWeekendLike = day.isWeekend || day.isHoliday;
   const visibleMap = new Map<string, string[]>();
   const overrideOrder = (day.assignmentOrderOverrides ?? []).filter((category, index, array) => array.indexOf(category) === index);
+  const editMode = Boolean(options?.editMode);
 
   Object.entries(day.assignments).forEach(([category, names]) => {
     if (isWeekendLike) {
-      if (category === "휴가" || category === "제크") return;
+      if (!editMode && (category === "휴가" || category === "제크")) return;
     } else if (["국회", "청사", "청와대"].includes(category)) {
       return;
     }
     visibleMap.set(category, names);
   });
+
+  if (editMode) {
+    const persistentCategories = day.isWeekend
+      ? weekendEditPersistentCategories
+      : weekdayEditPersistentCategories;
+    persistentCategories.forEach((category) => {
+      if (!visibleMap.has(category)) {
+        visibleMap.set(category, day.assignments[category] ?? []);
+      }
+    });
+  }
 
   if (day.isWeekend) {
     weekendPersistentCategories.forEach((category) => {
@@ -722,7 +736,41 @@ export function ScheduleApp() {
   };
 
   const updateEditingState = (recipe: (current: ScheduleState) => ScheduleState) => {
-    setState((current) => sanitizeScheduleState(recipe(current)));
+    setState((current) => {
+      const editingMonthKey = current.editingMonthKey;
+      const preparedState =
+        editingMonthKey && current.generated?.monthKey !== editingMonthKey
+          ? (() => {
+              const editingSchedule = current.generatedHistory.find((item) => item.monthKey === editingMonthKey);
+              if (!editingSchedule) return current;
+              const editingScheduleClone = JSON.parse(JSON.stringify(editingSchedule));
+              return {
+                ...current,
+                generated: editingScheduleClone,
+                generatedHistory: current.generatedHistory.map((item) =>
+                  item.monthKey === editingScheduleClone.monthKey ? editingScheduleClone : item,
+                ),
+              };
+            })()
+          : current;
+
+      return sanitizeScheduleState(recipe(preparedState));
+    });
+  };
+
+  const applyScheduleTargetMonth = (year: number, month: number) => {
+    const monthKey = getMonthKey(year, month);
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        year,
+        month,
+        extraHolidays: "",
+      }),
+    );
+    setVisibleMonthKey((current) =>
+      state.generatedHistory.some((item) => item.monthKey === monthKey) ? monthKey : current,
+    );
   };
 
   const handlePersonSlotActivate = (ref: { dateKey: string; category: string; index: number }) => {
@@ -910,44 +958,62 @@ export function ScheduleApp() {
   };
 
   const startDayEdit = (dateKey: string) => {
-    if (!visibleSchedule || isEditingDate) return;
-    editBackupRef.current = cloneScheduleState(state);
-    const visibleScheduleClone = JSON.parse(JSON.stringify(visibleSchedule));
-    isEditingDateRef.current = true;
     flushSync(() => {
       setState((current) =>
-        sanitizeScheduleState({
-          ...current,
-          generated: visibleScheduleClone,
-          generatedHistory: current.generatedHistory.map((item) =>
-            item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
-          ),
-          editDateKey: dateKey,
-          editingMonthKey: visibleScheduleClone.monthKey,
-          selectedPerson: null,
-        }),
+        {
+          if (current.editDateKey) return current;
+          const sourceSchedule =
+            current.generatedHistory.find((item) => item.monthKey === (visibleMonthKey ?? "")) ??
+            current.generated ??
+            current.generatedHistory[current.generatedHistory.length - 1] ??
+            null;
+          if (!sourceSchedule) return current;
+
+          editBackupRef.current = cloneScheduleState(current);
+          isEditingDateRef.current = true;
+          const visibleScheduleClone = JSON.parse(JSON.stringify(sourceSchedule));
+          return sanitizeScheduleState({
+            ...current,
+            generated: visibleScheduleClone,
+            generatedHistory: current.generatedHistory.map((item) =>
+              item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
+            ),
+            editDateKey: dateKey,
+            editingMonthKey: visibleScheduleClone.monthKey,
+            selectedPerson: null,
+          });
+        },
       );
     });
     closeAddPersonDialog();
   };
 
   const startAllDaysEdit = () => {
-    if (!visibleSchedule || isEditingDate) return;
-    editBackupRef.current = cloneScheduleState(state);
-    const visibleScheduleClone = JSON.parse(JSON.stringify(visibleSchedule));
-    isEditingDateRef.current = true;
     flushSync(() => {
       setState((current) =>
-        sanitizeScheduleState({
-          ...current,
-          generated: visibleScheduleClone,
-          generatedHistory: current.generatedHistory.map((item) =>
-            item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
-          ),
-          editDateKey: ALL_DAYS_EDIT_KEY,
-          editingMonthKey: visibleScheduleClone.monthKey,
-          selectedPerson: null,
-        }),
+        {
+          if (current.editDateKey) return current;
+          const sourceSchedule =
+            current.generatedHistory.find((item) => item.monthKey === (visibleMonthKey ?? "")) ??
+            current.generated ??
+            current.generatedHistory[current.generatedHistory.length - 1] ??
+            null;
+          if (!sourceSchedule) return current;
+
+          editBackupRef.current = cloneScheduleState(current);
+          isEditingDateRef.current = true;
+          const visibleScheduleClone = JSON.parse(JSON.stringify(sourceSchedule));
+          return sanitizeScheduleState({
+            ...current,
+            generated: visibleScheduleClone,
+            generatedHistory: current.generatedHistory.map((item) =>
+              item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
+            ),
+            editDateKey: ALL_DAYS_EDIT_KEY,
+            editingMonthKey: visibleScheduleClone.monthKey,
+            selectedPerson: null,
+          });
+        },
       );
     });
     closeAddPersonDialog();
@@ -1198,7 +1264,12 @@ export function ScheduleApp() {
           <div className="subgrid-2">
             <label>
               <div style={{ marginBottom: 8 }}>연도</div>
-              <select className="field-select" disabled={isEditingDate} value={state.year} onChange={(e) => setState({ ...state, year: Number(e.target.value) })}>
+              <select
+                className="field-select"
+                disabled={isEditingDate}
+                value={state.year}
+                onChange={(e) => applyScheduleTargetMonth(Number(e.target.value), state.month)}
+              >
                 {SCHEDULE_YEARS.map((year) => (
                   <option key={year} value={year}>
                     {year}년
@@ -1208,7 +1279,12 @@ export function ScheduleApp() {
             </label>
             <label>
               <div style={{ marginBottom: 8 }}>월</div>
-              <select className="field-select" disabled={isEditingDate} value={state.month} onChange={(e) => setState({ ...state, month: Number(e.target.value) })}>
+              <select
+                className="field-select"
+                disabled={isEditingDate}
+                value={state.month}
+                onChange={(e) => applyScheduleTargetMonth(state.year, Number(e.target.value))}
+              >
                 {SCHEDULE_MONTHS.map((month) => (
                   <option key={month} value={month}>
                     {month}월
@@ -1219,7 +1295,13 @@ export function ScheduleApp() {
           </div>
           <label>
             <div style={{ marginBottom: 8 }}>평일 휴일</div>
-            <textarea className="field-textarea" disabled={isEditingDate} value={state.extraHolidays} onChange={(e) => setState({ ...state, extraHolidays: e.target.value })} placeholder="2,15,22" />
+            <textarea
+              className="field-textarea"
+              disabled={isEditingDate}
+              value={state.extraHolidays}
+              onChange={(e) => setState((current) => ({ ...current, extraHolidays: e.target.value }))}
+              placeholder="1,2,3 같은 숫자로만 입력."
+            />
           </label>
             <MessageBox message={message} />
           </div>
@@ -1493,15 +1575,15 @@ export function ScheduleApp() {
                 <VacationLegendChips />
               {isAllDaysEditMode ? (
                 <>
-                  <button className="btn white" onClick={confirmDayEdit}>
+                  <button type="button" className="btn white" onClick={confirmDayEdit}>
                     수정 완료
                   </button>
-                  <button className="btn" onClick={cancelDayEdit}>
+                  <button type="button" className="btn" onClick={cancelDayEdit}>
                     수정모드 취소
                   </button>
                 </>
               ) : (
-                <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={startAllDaysEdit}>
+                <button type="button" className="btn" disabled={isEditingDate || !visibleSchedule} onClick={startAllDaysEdit}>
                   수정 모드
                 </button>
               )}
@@ -1546,7 +1628,7 @@ export function ScheduleApp() {
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const duplicateNameSet = getDayDuplicateNameSet(day);
                   const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
-                  const visibleAssignments = getVisibleDayAssignments(day);
+                  const visibleAssignments = getVisibleDayAssignments(day, { editMode });
 
                   return (
                     <article

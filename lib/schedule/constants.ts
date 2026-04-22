@@ -412,7 +412,7 @@ export const defaultScheduleState: ScheduleState = {
   year: defaultYear,
   month: currentMonth,
   jcheckCount: DEFAULT_JCHECK_COUNT,
-  extraHolidays: "2026-05-01",
+  extraHolidays: "",
   vacations: "",
   generalTeamPeople: [...GENERAL_TEAM_DEFAULT_NAMES],
   globalOffPool: [],

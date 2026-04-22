@@ -176,16 +176,37 @@ function normalizeEditableNameList(value: unknown) {
 
 const REQUIRED_EXTRA_HOLIDAYS = ["2026-05-01"];
 
-function normalizeExtraHolidaysText(value: unknown) {
+function getRequiredExtraHolidays(year?: number, month?: number) {
+  if (!year || !month) return [...REQUIRED_EXTRA_HOLIDAYS];
+  const monthKey = getMonthKey(year, month);
+  return REQUIRED_EXTRA_HOLIDAYS.filter((dateKey) => dateKey.startsWith(`${monthKey}-`));
+}
+
+function normalizeHolidayToken(token: string, year?: number, month?: number) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(token)) return token;
+  if (/^\d{1,2}$/.test(token) && year && month) {
+    const day = Number(token);
+    if (day >= 1 && day <= daysInMonth(year, month)) {
+      return fmtDate(year, month, day);
+    }
+  }
+  return token;
+}
+
+function normalizeExtraHolidaysText(value: unknown, year?: number, month?: number) {
   const merged = new Set(
     String(typeof value === "string" ? value : "")
-      .split(",")
+      .split(/[,\n]+/)
       .map((item) => item.trim())
       .filter(Boolean),
   );
+  const normalized = new Set(
+    Array.from(merged)
+      .map((item) => normalizeHolidayToken(item, year, month))
+      .filter(Boolean),
+  );
 
-  REQUIRED_EXTRA_HOLIDAYS.forEach((dateKey) => merged.add(dateKey));
-  return [...merged].join(", ");
+  return [...normalized].join(", ");
 }
 
 function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
@@ -250,7 +271,7 @@ function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], gener
       if (vacationName) assignedNames.add(vacationName);
     });
 
-    const offSet = new Set(getEffectiveOffByCategory(state, "evening"));
+    const offSet = new Set((state.offPeople ?? []).map((name) => name.trim()).filter(Boolean));
     const nextGeneralNames = generalTeamPeople.filter(
       (name) => !assignedNames.has(name) && !previousNight.includes(name) && !offSet.has(name),
     );
@@ -316,6 +337,13 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   const generatedHistory = (input.generatedHistory ?? (generated ? [generated] : [])).map((item) =>
     normalizeGeneratedSchedule(item),
   );
+  const nextYear = clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year);
+  const nextMonth = clampNumber(
+    input.month ?? base.month,
+    SCHEDULE_MONTHS[0],
+    SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1],
+    base.month,
+  );
 
   const normalizedGeneralTeamPeople = normalizeEditableNameList(
     input.generalTeamPeople ?? base.generalTeamPeople ?? GENERAL_TEAM_DEFAULT_NAMES,
@@ -328,10 +356,10 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   const nextState: ScheduleState = {
     ...base,
     ...input,
-    year: clampNumber(input.year ?? base.year, SCHEDULE_YEAR_START, SCHEDULE_YEAR_END, base.year),
-    month: clampNumber(input.month ?? base.month, SCHEDULE_MONTHS[0], SCHEDULE_MONTHS[SCHEDULE_MONTHS.length - 1], base.month),
+    year: nextYear,
+    month: nextMonth,
     jcheckCount: DEFAULT_JCHECK_COUNT,
-    extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays),
+    extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays, nextYear, nextMonth),
     generalTeamPeople: generalTeamPeople,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
@@ -441,19 +469,15 @@ function mergeVacationMaps(...maps: Array<Record<string, string[]>>) {
 }
 
 export function parseHolidaySet(text: string, year?: number, month?: number) {
-  return new Set(
+  const parsed = new Set(
     text
-      .split(",")
+      .split(/[,\n]+/)
       .map((item) => item.trim())
       .filter(Boolean)
-      .map((item) => {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(item)) return item;
-        if (/^\d{1,2}$/.test(item) && year && month) {
-          return fmtDate(year, month, Number(item));
-        }
-        return item;
-      }),
+      .map((item) => normalizeHolidayToken(item, year, month)),
   );
+  getRequiredExtraHolidays(year, month).forEach((dateKey) => parsed.add(dateKey));
+  return parsed;
 }
 
 export function parseVacationMap(text: string) {

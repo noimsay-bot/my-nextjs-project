@@ -84,9 +84,6 @@ function buildSettingsState(state: ScheduleState): Partial<ScheduleState> {
     snapshots: state.snapshots,
     currentUser: state.currentUser,
     showMyWork: state.showMyWork,
-    editDateKey: state.editDateKey,
-    editingMonthKey: state.editingMonthKey,
-    selectedPerson: state.selectedPerson,
   };
 }
 
@@ -117,6 +114,9 @@ function mergeScheduleRows(
     currentUser: currentUser ?? base.currentUser,
     generated,
     generatedHistory,
+    editDateKey: null,
+    editingMonthKey: null,
+    selectedPerson: null,
   });
 }
 
@@ -168,6 +168,18 @@ async function persistScheduleStateNow(state: ScheduleState) {
     updated_by: session.id,
   }));
 
+  const { data: existingMonthRows, error: existingMonthError } = await supabase
+    .from("schedule_months")
+    .select("month_key")
+    .returns<Array<{ month_key: string }>>();
+  if (existingMonthError) {
+    throw new Error(getSupabaseStorageErrorMessage(existingMonthError, "schedule_months"));
+  }
+
+  const monthKeysToDelete = (existingMonthRows ?? [])
+    .map((row) => row.month_key)
+    .filter((monthKey) => !monthKeys.includes(monthKey));
+
   const { error: settingsError } = await supabase.from("schedule_settings").upsert({
     key: SCHEDULE_SETTINGS_KEY,
     state: buildSettingsState(nextState),
@@ -175,6 +187,13 @@ async function persistScheduleStateNow(state: ScheduleState) {
   });
   if (settingsError) {
     throw new Error(getSupabaseStorageErrorMessage(settingsError, "schedule_settings"));
+  }
+
+  if (monthKeysToDelete.length > 0) {
+    const { error: deleteError } = await supabase.from("schedule_months").delete().in("month_key", monthKeysToDelete);
+    if (deleteError) {
+      throw new Error(getSupabaseStorageErrorMessage(deleteError, "schedule_months"));
+    }
   }
 
   if (monthRows.length > 0) {
