@@ -19,6 +19,7 @@ import {
   getPortalSupabaseClient,
   getSupabaseStorageErrorMessage,
   isSupabaseSchemaMissingError,
+  isSupabaseRequestTimeoutError,
 } from "@/lib/supabase/portal";
 
 export const VACATION_STORAGE_KEY = "j-special-force-vacations-v1";
@@ -257,6 +258,27 @@ function rowToVacationMonthState(row: VacationMonthRow) {
   );
 }
 
+function rowsToVacationStore(input: {
+  requestRows?: VacationRequestRow[] | null;
+  monthRows?: VacationMonthRow[] | null;
+  settingsRows?: VacationSettingsRow[] | null;
+  fallbackStore?: VacationStore;
+}) {
+  const fallbackStore = input.fallbackStore ?? createEmptyStore();
+  return sanitizeVacationStore({
+    requests: input.requestRows
+      ? input.requestRows.map((row) => rowToVacationRequest(row))
+      : fallbackStore.requests,
+    months: input.monthRows
+      ? Object.fromEntries(input.monthRows.map((row) => [row.month_key, rowToVacationMonthState(row)]))
+      : fallbackStore.months,
+    requestOpen:
+      typeof input.settingsRows?.[0]?.is_request_open === "boolean"
+        ? Boolean(input.settingsRows[0].is_request_open)
+        : fallbackStore.requestOpen,
+  });
+}
+
 function cloneVacationStore(store: VacationStore) {
   const sanitized = sanitizeVacationStore(store);
   return JSON.parse(JSON.stringify(sanitized)) as VacationStore;
@@ -417,10 +439,11 @@ export async function refreshVacationStore() {
       const settingsSchemaMissing = Boolean(settingsError && isSupabaseSchemaMissingError(settingsError));
       const schemaError = requestOrMonthSchemaError ?? (settingsSchemaMissing ? null : settingsError);
       if (settingsSchemaMissing && !requestOrMonthSchemaError) {
-        vacationStoreCache = sanitizeVacationStore({
-          requests: (requestRows ?? []).map((row) => rowToVacationRequest(row)),
-          months: Object.fromEntries((monthRows ?? []).map((row) => [row.month_key, rowToVacationMonthState(row)])),
-          requestOpen: false,
+        vacationStoreCache = rowsToVacationStore({
+          requestRows,
+          monthRows,
+          settingsRows,
+          fallbackStore: createEmptyStore(),
         });
         emitVacationEvent();
         return cloneVacationStore(vacationStoreCache);
@@ -428,6 +451,18 @@ export async function refreshVacationStore() {
       if (schemaError && isSupabaseSchemaMissingError(schemaError)) {
         console.warn(getSupabaseStorageErrorMessage(schemaError, "vacation_requests / vacation_months / vacation_settings"));
         vacationStoreCache = createEmptyStore();
+        emitVacationEvent();
+        return cloneVacationStore(vacationStoreCache);
+      }
+
+      if ([requestError, monthError, settingsError].some((error) => isSupabaseRequestTimeoutError(error))) {
+        console.warn("휴가 데이터를 불러오는 중 일부 요청이 시간 초과되어 캐시 기준으로 표시합니다.");
+        vacationStoreCache = rowsToVacationStore({
+          requestRows: requestError ? null : requestRows,
+          monthRows: monthError ? null : monthRows,
+          settingsRows: settingsError ? null : settingsRows,
+          fallbackStore: vacationStoreCache,
+        });
         emitVacationEvent();
         return cloneVacationStore(vacationStoreCache);
       }
@@ -441,11 +476,7 @@ export async function refreshVacationStore() {
       throw new Error(settingsError?.message ?? "휴가 데이터를 불러오지 못했습니다.");
     }
 
-    vacationStoreCache = sanitizeVacationStore({
-      requests: (requestRows ?? []).map((row) => rowToVacationRequest(row)),
-      months: Object.fromEntries((monthRows ?? []).map((row) => [row.month_key, rowToVacationMonthState(row)])),
-      requestOpen: Boolean(settingsRows?.[0]?.is_request_open),
-    });
+    vacationStoreCache = rowsToVacationStore({ requestRows, monthRows, settingsRows });
     emitVacationEvent();
     return cloneVacationStore(vacationStoreCache);
   })().finally(() => {

@@ -13,6 +13,8 @@ import {
   getPortalSession,
   getPortalSupabaseClient,
   getSupabaseStorageErrorMessage,
+  isSupabaseRequestFailureError,
+  isSupabaseRequestTimeoutError,
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
 import {
@@ -1921,33 +1923,47 @@ export function isTeamLeadSubmissionAccessOpen() {
 }
 
 export async function refreshTeamLeadSubmissionAccessState() {
-  const session = await getPortalSession();
-  if (!session?.approved) {
-    submissionAccessCache = false;
-    emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
-    return submissionAccessCache;
-  }
-
-  const supabase = await getPortalSupabaseClient();
-  const { data, error } = await supabase
-    .from("team_lead_state")
-    .select("state")
-    .eq("key", TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY)
-    .maybeSingle<{ state: unknown }>();
-
-  if (error) {
-    if (isSupabaseSchemaMissingError(error)) {
-      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+  try {
+    const session = await getPortalSession();
+    if (!session?.approved) {
       submissionAccessCache = false;
       emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
       return submissionAccessCache;
     }
-    throw new Error(error.message);
-  }
 
-  submissionAccessCache = normalizeSubmissionAccessState(data?.state).isOpen;
-  emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
-  return submissionAccessCache;
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_state")
+      .select("state")
+      .eq("key", TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY)
+      .maybeSingle<{ state: unknown }>();
+
+    if (error) {
+      if (isSupabaseSchemaMissingError(error)) {
+        console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+        submissionAccessCache = false;
+        emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+        return submissionAccessCache;
+      }
+      if (isSupabaseRequestFailureError(error)) {
+        console.warn("팀장 제출 접근 상태를 불러오지 못했습니다. 기존 상태를 유지합니다.", error);
+        emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+        return submissionAccessCache;
+      }
+      throw new Error(error.message);
+    }
+
+    submissionAccessCache = normalizeSubmissionAccessState(data?.state).isOpen;
+    emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+    return submissionAccessCache;
+  } catch (error) {
+    if (isSupabaseRequestTimeoutError(error) || isSupabaseRequestFailureError(error)) {
+      console.warn("팀장 제출 접근 상태를 불러오지 못했습니다. 기존 상태를 유지합니다.", error);
+      emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+      return submissionAccessCache;
+    }
+    throw error;
+  }
 }
 
 async function getGrantedReviewerProfiles() {

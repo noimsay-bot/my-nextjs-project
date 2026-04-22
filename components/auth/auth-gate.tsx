@@ -89,11 +89,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [checkingSession, setCheckingSession] = useState(true);
   const [vacationRequestOpen, setVacationRequestOpen] = useState<boolean | null>(() => {
     const accessState = getPortalAccessState();
-    return needsVacationAccessCheck ? null : accessState.vacationRequestOpen;
+    return accessState.vacationRequestOpen;
   });
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState<boolean | null>(() => {
     const accessState = getPortalAccessState();
-    return needsSubmissionAccessCheck ? null : accessState.submissionAccessOpen;
+    return accessState.submissionAccessOpen;
   });
 
   useEffect(() => {
@@ -128,21 +128,36 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    setCheckingSession(true);
-
-    void initializeAuth().then((nextSession) => {
-      if (cancelled) return;
-      setSession(nextSession);
+    const cachedSession = getSession();
+    if (cachedSession) {
+      setSession(cachedSession);
       setCheckingSession(false);
-    });
+    } else {
+      setCheckingSession(true);
+    }
+
+    void initializeAuth()
+      .then((nextSession) => {
+        if (cancelled) return;
+        setSession(nextSession);
+        setCheckingSession(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("인증 게이트 초기화에 실패했습니다.", error);
+        setSession(getSession());
+        setCheckingSession(false);
+      });
 
     return () => {
       cancelled = true;
     };
   }, []);
 
+  const authPending = checkingSession && !session;
+
   useEffect(() => {
-    if (checkingSession) {
+    if (authPending) {
       return;
     }
 
@@ -174,7 +189,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
   }, [
-    checkingSession,
+    authPending,
     needsSubmissionAccessCheck,
     needsVacationAccessCheck,
     pathname,
@@ -185,7 +200,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   ]);
 
   if (
-    checkingSession ||
+    authPending ||
     ((session?.role === "member" || session?.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) ||
     (session?.role === "member" && needsSubmissionAccessCheck && submissionAccessOpen === null)
   ) {

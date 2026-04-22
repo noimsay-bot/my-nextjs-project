@@ -770,6 +770,7 @@ export function PublishedSchedulesPanel() {
       refreshVisibleData();
     };
     const onScheduleStateRefresh = () => {
+      refreshVisibleData();
       syncScheduleHistory();
     };
     const onStatus = (event: Event) => {

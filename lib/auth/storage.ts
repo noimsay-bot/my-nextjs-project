@@ -61,11 +61,14 @@ type BrowserRealtimeChannel = ReturnType<BrowserSupabaseClient["channel"]>;
 const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
 const USERS_CACHE_KEY = "j-special-force-users-cache-v2";
 const ROLE_EXPERIENCE_CACHE_KEY = "j-special-force-role-experience-v1";
+const LOGIN_EMAIL_CACHE_KEY = "j-special-force-login-email-cache-v1";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
 const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 const SESSION_REFRESH_STALE_MS = 60_000;
+const AUTH_REQUEST_TIMEOUT_MS = 10_000;
 const APPROVAL_REQUIRED_MESSAGE = "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.";
 const PROFILE_SYNC_FAILED_MESSAGE = "계정 정보를 확인하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.";
+const AUTH_TIMEOUT = Symbol("auth-timeout");
 
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
 let cachedExperienceRole = readStoredExperienceRole();
@@ -82,6 +85,7 @@ let sessionRefreshListenersInitialized = false;
 let lastSessionRefreshAt = cachedSession ? Date.now() : 0;
 let cachedReviewAccessProfileIds: string[] | null = null;
 let lastAuthBlockReason: "approval" | "profile_sync" | null = null;
+let realtimeChannelSequence = 0;
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -104,6 +108,35 @@ function writeJson<T>(key: string, value: T) {
 function clearJson(key: string) {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(key);
+}
+
+function readLoginEmailCache() {
+  return readJson<Record<string, string>>(LOGIN_EMAIL_CACHE_KEY, {});
+}
+
+function writeLoginEmailCache(cache: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LOGIN_EMAIL_CACHE_KEY, JSON.stringify(cache));
+}
+
+function rememberLoginEmail(loginId: string, email: string) {
+  if (typeof window === "undefined") return;
+
+  const normalizedLoginId = loginId.trim().toLowerCase();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedLoginId || !normalizedEmail) return;
+
+  const cache = readLoginEmailCache();
+  cache[normalizedLoginId] = normalizedEmail;
+  writeLoginEmailCache(cache);
+}
+
+function lookupCachedLoginEmail(loginId: string) {
+  const normalizedLoginId = loginId.trim().toLowerCase();
+  if (!normalizedLoginId) return null;
+
+  const cache = readLoginEmailCache();
+  return cache[normalizedLoginId] ?? null;
 }
 
 function readStoredExperienceRole() {
@@ -131,6 +164,24 @@ function getSupabaseClient() {
   return browserClient;
 }
 
+function promiseWithTimeout<T>(promise: PromiseLike<T>, timeoutMs = AUTH_REQUEST_TIMEOUT_MS) {
+  return new Promise<T | typeof AUTH_TIMEOUT>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      resolve(AUTH_TIMEOUT);
+    }, timeoutMs);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 function clearProfileSubscription() {
   if (!browserClient || !profileChannel) return;
   void browserClient.removeChannel(profileChannel);
@@ -153,54 +204,69 @@ function invalidateReviewAccessCache() {
   cachedReviewAccessProfileIds = null;
 }
 
+function createRealtimeChannelTopic(base: string) {
+  realtimeChannelSequence += 1;
+  return `${base}:${realtimeChannelSequence}`;
+}
+
 function syncProfileSubscription(userId: string) {
   if (typeof window === "undefined") return;
   if (profileSubscriptionUserId === userId && profileChannel) return;
 
   clearProfileSubscription();
 
-  const supabase = getSupabaseClient();
-  profileChannel = supabase
-    .channel(`profile-watch:${userId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "profiles",
-        filter: `id=eq.${userId}`,
-      },
-      () => {
-        void refreshSession({ force: true });
-      },
-    )
-    .subscribe();
+  try {
+    const supabase = getSupabaseClient();
+    profileChannel = supabase
+      .channel(createRealtimeChannelTopic(`profile-watch:${userId}`))
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${userId}`,
+        },
+        () => {
+          void refreshSession({ force: true });
+        },
+      )
+      .subscribe();
 
-  profileSubscriptionUserId = userId;
+    profileSubscriptionUserId = userId;
+  } catch (error) {
+    console.warn("프로필 실시간 구독을 시작하지 못했습니다.", error);
+    clearProfileSubscription();
+  }
 }
 
 function syncReviewAccessSubscription() {
   if (typeof window === "undefined") return;
   if (reviewAccessChannel) return;
 
-  const supabase = getSupabaseClient();
-  reviewAccessChannel = supabase
-    .channel("review-access-watch")
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "team_lead_state",
-        filter: `key=eq.${REVIEW_ACCESS_STATE_KEY}`,
-      },
-      () => {
-        invalidateReviewAccessCache();
-        if (!cachedSession) return;
-        void refreshSession({ force: true });
-      },
-    )
-    .subscribe();
+  try {
+    const supabase = getSupabaseClient();
+    reviewAccessChannel = supabase
+      .channel(createRealtimeChannelTopic("review-access-watch"))
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "team_lead_state",
+          filter: `key=eq.${REVIEW_ACCESS_STATE_KEY}`,
+        },
+        () => {
+          invalidateReviewAccessCache();
+          if (!cachedSession) return;
+          void refreshSession({ force: true });
+        },
+      )
+      .subscribe();
+  } catch (error) {
+    console.warn("평가 권한 실시간 구독을 시작하지 못했습니다.", error);
+    clearReviewAccessSubscription();
+  }
 }
 
 function initSessionRefreshListeners() {
@@ -229,7 +295,27 @@ function isNetworkError(error: unknown) {
   return error instanceof TypeError && error.message.includes("fetch");
 }
 
-function getFriendlyAuthError(error: unknown) {
+function normalizeAuthMessage(message: unknown, fallback: string) {
+  if (typeof message !== "string") {
+    return fallback;
+  }
+
+  const trimmed = message.trim();
+  if (
+    !trimmed ||
+    trimmed === "{}" ||
+    trimmed === "[]" ||
+    trimmed === "[object Object]" ||
+    trimmed === "null" ||
+    trimmed === "undefined"
+  ) {
+    return fallback;
+  }
+
+  return trimmed;
+}
+
+function getFriendlyAuthError(error: unknown, fallback = "인증 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.") {
   if (isSupabaseEnvError(error)) {
     return getSupabaseSetupMessage();
   }
@@ -239,10 +325,10 @@ function getFriendlyAuthError(error: unknown) {
   }
 
   if (error instanceof Error) {
-    return error.message;
+    return normalizeAuthMessage(error.message, fallback);
   }
 
-  return SUPABASE_ENV_ERROR_MESSAGE;
+  return fallback;
 }
 
 export function getSupabaseSetupMessage() {
@@ -448,11 +534,11 @@ function getSiteUrl() {
 
 async function fetchProfile(userId: string) {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_COLUMNS)
-    .eq("id", userId)
-    .maybeSingle<ProfileRow>();
+  const result = await promiseWithTimeout(
+    supabase.from("profiles").select(PROFILE_COLUMNS).eq("id", userId).maybeSingle<ProfileRow>(),
+  );
+  if (result === AUTH_TIMEOUT) return null;
+  const { data, error } = result;
 
   if (error) {
     return null;
@@ -477,11 +563,11 @@ function buildProfileInsertPayload(user: User) {
 
 async function insertOwnProfile(user: User) {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .insert(buildProfileInsertPayload(user))
-    .select(PROFILE_COLUMNS)
-    .single<ProfileRow>();
+  const result = await promiseWithTimeout(
+    supabase.from("profiles").insert(buildProfileInsertPayload(user)).select(PROFILE_COLUMNS).single<ProfileRow>(),
+  );
+  if (result === AUTH_TIMEOUT) return null;
+  const { data, error } = result;
 
   if (error) {
     return null;
@@ -496,12 +582,16 @@ async function repairProfileViaApi() {
   }
 
   try {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
     const response = await window.fetch("/api/auth/repair-profile", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
     });
+    window.clearTimeout(timeoutId);
 
     if (!response.ok) {
       return false;
@@ -602,10 +692,12 @@ function initAuthListener() {
 
   const supabase = getSupabaseClient();
   initSessionRefreshListeners();
-  syncReviewAccessSubscription();
   supabase.auth.onAuthStateChange((event, session) => {
     if (!session?.user) {
       if (event === "INITIAL_SESSION" && cachedSession) {
+        return;
+      }
+      if (event !== "SIGNED_OUT" && cachedSession) {
         return;
       }
 
@@ -631,6 +723,22 @@ async function resolveLoginEmail(identifier: string) {
     return normalized;
   }
 
+  const cachedEmail = lookupCachedLoginEmail(normalized);
+  if (cachedEmail) {
+    return cachedEmail;
+  }
+
+  const cachedAccount = cachedUsers.find((user) => {
+    const loginId = user.loginId.trim().toLowerCase();
+    const email = user.email.trim().toLowerCase();
+    return loginId === normalized || email === normalized;
+  });
+  if (cachedAccount?.email) {
+    const nextEmail = cachedAccount.email.trim().toLowerCase();
+    rememberLoginEmail(normalized, nextEmail);
+    return nextEmail;
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 8000);
@@ -649,54 +757,22 @@ async function resolveLoginEmail(identifier: string) {
       | null;
 
     if (response.ok && payload?.ok && typeof payload.email === "string" && payload.email.trim()) {
-      return payload.email.trim().toLowerCase();
-    }
-  } catch {
-    // Fall back to the direct RPC lookup below.
-  }
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-    const supabase = getSupabaseClient();
-    const { data, error } = await Promise.race([
-      supabase.rpc("find_email_by_login_id", {
-        input_login_id: normalized,
-      }),
-      new Promise<never>((_, reject) => {
-        controller.signal.addEventListener(
-          "abort",
-          () => reject(new Error("아이디 조회 시간이 초과되었습니다.")),
-          { once: true },
-        );
-      }),
-    ]);
-    window.clearTimeout(timeoutId);
-
-    if (error) {
-      throw new Error(error.message);
+      const nextEmail = payload.email.trim().toLowerCase();
+      rememberLoginEmail(normalized, nextEmail);
+      return nextEmail;
     }
 
-    if (typeof data === "string") {
-      return data;
-    }
-
-    if (Array.isArray(data) && typeof data[0] === "string") {
-      return data[0];
+    const payloadMessage = normalizeAuthMessage(payload?.message, "");
+    if (payloadMessage) {
+      throw new Error(payloadMessage);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error ?? "");
-    if (
-      /timeout|abort|fetch|find_email_by_login_id|schema cache|could not find the function|could not find function/i.test(
-        message,
-      )
-    ) {
-      throw new Error(
-        "아이디 조회 시간이 초과되었습니다. Supabase SQL Editor에서 `supabase/schema.sql`을 다시 실행하거나 `SUPABASE_SERVICE_ROLE_KEY`를 설정해 주세요.",
-      );
+    const message = getFriendlyAuthError(error, "");
+    if (/timeout|abort|fetch/i.test(message)) {
+      throw new Error("로그인 아이디 조회를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
 
-    throw error;
+    throw new Error(message || "로그인 아이디를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
   }
 
   return null;
@@ -724,12 +800,12 @@ export async function initializeAuth() {
 
     return await initializePromise;
   } catch (error) {
+    console.warn("인증 초기화에 실패했습니다.", error);
     if (isSupabaseEnvError(error)) {
       setCachedSession(null);
       return null;
     }
-
-    throw error;
+    return cachedSession;
   }
 }
 
@@ -740,25 +816,31 @@ export async function refreshSession(options?: { force?: boolean }) {
   refreshPromise = (async () => {
     try {
       const supabase = getSupabaseClient();
+      const sessionResult = await promiseWithTimeout(supabase.auth.getSession());
+      if (sessionResult === AUTH_TIMEOUT) {
+        return cachedSession;
+      }
       const {
         data: { session },
         error,
-      } = await supabase.auth.getSession();
+      } = sessionResult;
 
       const user = session?.user ?? null;
       if (error || !user) {
-        setCachedSession(null);
-        return null;
+        return cachedSession;
       }
 
-      return syncSessionFromUser(user, { force: options?.force ?? true });
+      const syncedSession = await promiseWithTimeout(syncSessionFromUser(user, { force: options?.force ?? true }));
+      if (syncedSession === AUTH_TIMEOUT) {
+        return cachedSession;
+      }
+      return syncedSession;
     } catch (error) {
+      console.warn("세션 확인에 실패했습니다.", error);
       if (isSupabaseEnvError(error)) {
         setCachedSession(null);
-        return null;
       }
-
-      throw error;
+      return cachedSession;
     }
   })().finally(() => {
     refreshPromise = null;
@@ -885,11 +967,12 @@ export async function registerUser(input: {
     if (error) {
       return {
         ok: false as const,
-        message: error.message,
+        message: normalizeAuthMessage(error.message, "회원가입에 실패했습니다. 입력값을 다시 확인해 주세요."),
       };
     }
 
     if (data.user) {
+      rememberLoginEmail(loginId, data.user.email ?? email);
       const nextSession = await syncSessionFromUser(data.user);
       if (!nextSession) {
         return {
@@ -930,15 +1013,29 @@ export async function loginUser(input: { loginId: string; password: string }) {
       };
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: loginEmail,
-      password: input.password,
-    });
+    const signInResult = await promiseWithTimeout(
+      supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: input.password,
+      }),
+    );
+
+    if (signInResult === AUTH_TIMEOUT) {
+      return {
+        ok: false as const,
+        message: "Supabase 로그인 응답이 지연되고 있습니다. 네트워크, VPN, 방화벽 또는 Supabase 프로젝트 상태를 확인한 뒤 다시 시도해 주세요.",
+      };
+    }
+
+    const { data, error } = signInResult;
 
     if (error || !data.user) {
       return {
         ok: false as const,
-        message: error?.message ?? "로그인에 실패했습니다.",
+        message: normalizeAuthMessage(
+          error?.message,
+          "로그인에 실패했습니다. 아이디 또는 비밀번호를 다시 확인해 주세요.",
+        ),
       };
     }
 
@@ -949,6 +1046,8 @@ export async function loginUser(input: { loginId: string; password: string }) {
         message: await buildBlockedAuthMessage(data.user.id),
       };
     }
+
+    rememberLoginEmail(input.loginId, data.user.email ?? session.email);
 
     return {
       ok: true as const,

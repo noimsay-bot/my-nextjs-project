@@ -26,6 +26,10 @@ interface ScheduleMonthRow {
   draft_state: GeneratedSchedule | null;
 }
 
+interface ScheduleMonthKeyRow {
+  month_key: string;
+}
+
 let scheduleStateCache = sanitizeScheduleState(defaultScheduleState);
 let scheduleRefreshPromise: Promise<ScheduleState> | null = null;
 let scheduledPersistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -161,12 +165,22 @@ async function persistScheduleStateNow(state: ScheduleState) {
 
   const supabase = await getPortalSupabaseClient();
   const nextState = cloneScheduleStateValue(state);
-  const monthKeys = nextState.generatedHistory.map((item) => item.monthKey);
+  const nextMonthKeySet = new Set(nextState.generatedHistory.map((item) => item.monthKey));
   const monthRows = nextState.generatedHistory.map((item) => ({
     month_key: item.monthKey,
     draft_state: item,
     updated_by: session.id,
   }));
+  const { data: existingMonthRows, error: existingMonthError } = await supabase
+    .from("schedule_months")
+    .select("month_key")
+    .returns<ScheduleMonthKeyRow[]>();
+  if (existingMonthError) {
+    throw new Error(getSupabaseStorageErrorMessage(existingMonthError, "schedule_months"));
+  }
+  const removedMonthKeys = (existingMonthRows ?? [])
+    .map((row) => row.month_key)
+    .filter((monthKey) => !nextMonthKeySet.has(monthKey));
 
   const { error: settingsError } = await supabase.from("schedule_settings").upsert({
     key: SCHEDULE_SETTINGS_KEY,
@@ -181,6 +195,13 @@ async function persistScheduleStateNow(state: ScheduleState) {
     const { error: upsertError } = await supabase.from("schedule_months").upsert(monthRows);
     if (upsertError) {
       throw new Error(getSupabaseStorageErrorMessage(upsertError, "schedule_months"));
+    }
+  }
+
+  if (removedMonthKeys.length > 0) {
+    const { error: deleteError } = await supabase.from("schedule_months").delete().in("month_key", removedMonthKeys);
+    if (deleteError) {
+      throw new Error(getSupabaseStorageErrorMessage(deleteError, "schedule_months"));
     }
   }
 

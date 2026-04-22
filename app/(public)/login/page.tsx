@@ -110,6 +110,11 @@ export default function LoginPage() {
 
     if (approvalReason === "approval") {
       setMessage("계정이 아직 승인되지 않았습니다. 관리자 승인 후 다시 이용해 주세요.");
+      return;
+    }
+
+    if (approvalReason === "supabase-unavailable") {
+      setMessage("현재 인증 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
     }
   }, [approvalReason, forcedMode, session?.mustChangePassword]);
 
