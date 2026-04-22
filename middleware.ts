@@ -24,6 +24,30 @@ export const config = {
       ],
     },
     {
+      source: "/community/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/notices/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
+      source: "/restaurants/:path*",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+        { type: "header", key: "x-middleware-prefetch" },
+      ],
+    },
+    {
       source: "/review/:path*",
       missing: [
         { type: "header", key: "next-router-prefetch" },

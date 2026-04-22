@@ -507,16 +507,24 @@ export function HomeNewsPortal() {
   }, []);
 
   useEffect(() => {
-    const syncManagePermission = async () => {
-      const session = getSession() ?? (await getSessionAsync());
-      setCanDeleteNotice(Boolean(session?.approved && hasDeskAccess(session.role)));
-      setCanManageDdays(Boolean(session?.approved && hasDeskAccess(session.role)));
+    const syncSessionWorkspace = async (nextSessionParam?: Awaited<ReturnType<typeof getSessionAsync>> | null) => {
+      const nextSession = nextSessionParam ?? getSession() ?? (await getSessionAsync());
+      setCanDeleteNotice(Boolean(nextSession?.approved && hasDeskAccess(nextSession.role)));
+      setCanManageDdays(Boolean(nextSession?.approved && hasDeskAccess(nextSession.role)));
+
+      if (!nextSession?.approved) return;
+
+      try {
+        await refreshHomePopupNoticeWorkspace();
+        syncNotices();
+      } catch (error) {
+        console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
+      }
     };
 
-    void syncManagePermission();
-    return subscribeToAuth((session) => {
-      setCanDeleteNotice(Boolean(session?.approved && hasDeskAccess(session.role)));
-      setCanManageDdays(Boolean(session?.approved && hasDeskAccess(session.role)));
+    void syncSessionWorkspace();
+    return subscribeToAuth((nextSession) => {
+      void syncSessionWorkspace(nextSession);
     });
   }, []);
 
