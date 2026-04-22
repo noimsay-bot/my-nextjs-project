@@ -1,3 +1,2 @@
-2026/04/05-13:52:22.428 1abc Reusing MANIFEST C:\Users\Jnote\Desktop\코딩\.tmp-chrome-profile\Default\Local Storage\leveldb/MANIFEST-000001
-2026/04/05-13:52:22.461 1abc Recovering log #2686
-2026/04/05-13:52:22.502 1abc Reusing old log C:\Users\Jnote\Desktop\코딩\.tmp-chrome-profile\Default\Local Storage\leveldb/002686.log 
+2026/04/22-22:23:40.768 6fe4 Creating DB C:/Users/noims/my-nextjs-project/.tmp-chrome-profile\Default\Local Storage\leveldb since it was missing.
+2026/04/22-22:23:40.784 6fe4 Reusing MANIFEST C:/Users/noims/my-nextjs-project/.tmp-chrome-profile\Default\Local Storage\leveldb/MANIFEST-000001

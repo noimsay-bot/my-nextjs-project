@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 
+const LOGIN_EMAIL_LOOKUP_TIMEOUT_MS = 8000;
+const LOGIN_EMAIL_LOOKUP_TIMEOUT_MESSAGE = "로그인 아이디 조회 시간이 초과되었습니다.";
+
 function normalizeLoginId(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -25,30 +28,54 @@ function normalizeMessage(value: unknown, fallback: string) {
   return trimmed;
 }
 
+function logResolveLoginEmail(
+  stage: string,
+  details: {
+    elapsedMs?: number;
+    reason?: "missing_env" | "invalid_input" | "timeout" | "query_error" | "not_found" | "ok" | "unexpected_error";
+    status?: number;
+    message?: string;
+  },
+) {
+  const method = stage === "failed" ? console.warn : console.info;
+  method("[auth] resolve-login-email", details);
+}
+
 async function queryLoginEmail(loginId: string) {
   const supabase = createAdminClient();
   const lookupPromise = supabase
     .from("profiles")
     .select("email")
-    .ilike("login_id", loginId)
+    .eq("login_id", loginId)
     .maybeSingle<{ email: string }>();
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    const timeoutId = setTimeout(() => {
-      clearTimeout(timeoutId);
-      reject(new Error("로그인 아이디 조회 시간이 초과되었습니다."));
-    }, 8000);
-  });
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  return Promise.race([lookupPromise, timeoutPromise]) as Promise<{
-    data: { email: string } | null;
-    error: { message: string } | null;
-  }>;
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(LOGIN_EMAIL_LOOKUP_TIMEOUT_MESSAGE));
+      }, LOGIN_EMAIL_LOOKUP_TIMEOUT_MS);
+    });
+
+    return (await Promise.race([lookupPromise, timeoutPromise])) as {
+      data: { email: string } | null;
+      error: { message: string } | null;
+    };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 export async function POST(request: Request) {
   try {
     if (!hasSupabaseAdminEnv()) {
+      logResolveLoginEmail("failed", {
+        reason: "missing_env",
+        status: 500,
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -62,6 +89,10 @@ export async function POST(request: Request) {
     const loginId = normalizeLoginId(body?.loginId);
 
     if (!loginId) {
+      logResolveLoginEmail("failed", {
+        reason: "invalid_input",
+        status: 400,
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -71,9 +102,17 @@ export async function POST(request: Request) {
       );
     }
 
+    const startedAt = Date.now();
     const { data, error } = await queryLoginEmail(loginId);
+    const elapsedMs = Date.now() - startedAt;
 
     if (error) {
+      logResolveLoginEmail("failed", {
+        reason: "query_error",
+        status: 500,
+        elapsedMs,
+        message: normalizeMessage(error.message, "아이디 조회에 실패했습니다."),
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -85,6 +124,11 @@ export async function POST(request: Request) {
 
     const email = data?.email?.trim().toLowerCase() ?? null;
     if (!email) {
+      logResolveLoginEmail("complete", {
+        reason: "not_found",
+        status: 404,
+        elapsedMs,
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -94,15 +138,26 @@ export async function POST(request: Request) {
       );
     }
 
+    logResolveLoginEmail("complete", {
+      reason: "ok",
+      status: 200,
+      elapsedMs,
+    });
     return NextResponse.json({
       ok: true,
       email,
     });
   } catch (error) {
+    const message = normalizeMessage(error instanceof Error ? error.message : error, "아이디 조회에 실패했습니다.");
+    logResolveLoginEmail("failed", {
+      reason: message === LOGIN_EMAIL_LOOKUP_TIMEOUT_MESSAGE ? "timeout" : "unexpected_error",
+      status: 500,
+      message,
+    });
     return NextResponse.json(
       {
         ok: false,
-        message: normalizeMessage(error instanceof Error ? error.message : error, "아이디 조회에 실패했습니다."),
+        message,
       },
       { status: 500 },
     );
