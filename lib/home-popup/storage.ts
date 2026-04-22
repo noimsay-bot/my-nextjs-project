@@ -125,7 +125,12 @@ type HomePublicWorkspaceResponse = {
   communityComments: CommunityBoardComment[];
   applications: HomePopupNoticeApplication[];
   ownApplied: boolean;
-  tripCards: TeamLeadTripPersonCard[];
+  tripCards?: TeamLeadTripPersonCard[];
+};
+
+type RefreshHomePopupNoticeWorkspaceOptions = {
+  force?: boolean;
+  includeTrips?: boolean;
 };
 
 let noticeCache: HomePopupNotice | null = null;
@@ -137,9 +142,22 @@ let applicationCache: HomePopupNoticeApplication[] = [];
 let tripCardCache: TeamLeadTripPersonCard[] = [];
 let currentUserAppliedCache = false;
 let refreshPromise: Promise<RefreshResult> | null = null;
+let homeWorkspaceLoaded = false;
+let homeWorkspaceTripCardsLoaded = false;
+let homeWorkspaceLastFetchedAt = 0;
+let homeWorkspaceSessionKey: string | null = null;
+
+const HOME_POPUP_WORKSPACE_TTL_MS = 30_000;
 
 function isManagerRole(role: string | null | undefined) {
   return role === "desk" || role === "admin" || role === "team_lead";
+}
+
+function getHomeWorkspaceSessionKey(
+  session: Awaited<ReturnType<typeof getPortalSession>> | null,
+) {
+  if (!session?.approved) return "guest";
+  return `${session.id}:${session.role}`;
 }
 
 function canWriteCommunityCategory(
@@ -634,6 +652,32 @@ function syncCaches(
   currentUserAppliedCache = ownApplied;
 }
 
+function hasFreshHomePopupWorkspace(
+  session: Awaited<ReturnType<typeof getPortalSession>> | null,
+  options: RefreshHomePopupNoticeWorkspaceOptions,
+) {
+  if (!homeWorkspaceLoaded) return false;
+  if (homeWorkspaceSessionKey !== getHomeWorkspaceSessionKey(session)) return false;
+  if (Date.now() - homeWorkspaceLastFetchedAt >= HOME_POPUP_WORKSPACE_TTL_MS) return false;
+  if (options.includeTrips && !homeWorkspaceTripCardsLoaded) return false;
+  return true;
+}
+
+function markHomePopupWorkspaceFresh(
+  session: Awaited<ReturnType<typeof getPortalSession>> | null,
+  options: RefreshHomePopupNoticeWorkspaceOptions,
+) {
+  homeWorkspaceLoaded = true;
+  homeWorkspaceTripCardsLoaded = homeWorkspaceTripCardsLoaded || Boolean(options.includeTrips);
+  homeWorkspaceLastFetchedAt = Date.now();
+  homeWorkspaceSessionKey = getHomeWorkspaceSessionKey(session);
+}
+
+function resetSessionScopedWorkspaceState() {
+  applicationCache = [];
+  currentUserAppliedCache = false;
+}
+
 export function getHomePopupNotice() {
   return clonePopupNotice(noticeCache);
 }
@@ -666,8 +710,17 @@ export function hasAppliedToCurrentHomePopupNotice() {
   return currentUserAppliedCache;
 }
 
-async function fetchHomePublicWorkspace() {
-  const response = await fetch("/api/home/public-workspace", {
+async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspaceOptions = {}) {
+  const searchParams = new URLSearchParams();
+  if (options.includeTrips === false) {
+    searchParams.set("includeTrips", "0");
+  }
+
+  const requestUrl = searchParams.size > 0
+    ? `/api/home/public-workspace?${searchParams.toString()}`
+    : "/api/home/public-workspace";
+
+  const response = await fetch(requestUrl, {
     method: "GET",
     cache: "no-store",
     credentials: "same-origin",
@@ -742,13 +795,24 @@ async function persistNotices(
   return parseStorePayload(data ?? null);
 }
 
-export async function refreshHomePopupNoticeWorkspace() {
+export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupNoticeWorkspaceOptions = {}) {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
     const session = await getPortalSession();
+    const sessionKey = getHomeWorkspaceSessionKey(session);
+
+    if (homeWorkspaceSessionKey && homeWorkspaceSessionKey !== sessionKey) {
+      homeWorkspaceTripCardsLoaded = false;
+      resetSessionScopedWorkspaceState();
+    }
+
     if (!session?.approved) {
       syncCaches([], [], [], [], [], false, []);
+      homeWorkspaceLoaded = true;
+      homeWorkspaceTripCardsLoaded = true;
+      homeWorkspaceLastFetchedAt = Date.now();
+      homeWorkspaceSessionKey = sessionKey;
       emitHomePopupNoticeEvent();
       return {
         notice: null,
@@ -761,7 +825,19 @@ export async function refreshHomePopupNoticeWorkspace() {
       };
     }
 
-    const workspace = await fetchHomePublicWorkspace();
+    if (!options.force && hasFreshHomePopupWorkspace(session, options)) {
+      return {
+        notice: getHomePopupNotice(),
+        notices: getHomeNotices(),
+        ddays: getHomeDdays(),
+        communityPosts: getCommunityBoardPosts(),
+        communityComments: getCommunityBoardComments(),
+        applications: getHomePopupNoticeApplications(),
+        tripCards: getHomePublicTripCards(),
+      };
+    }
+
+    const workspace = await fetchHomePublicWorkspace(options);
 
     syncCaches(
       workspace.notices,
@@ -772,6 +848,7 @@ export async function refreshHomePopupNoticeWorkspace() {
       workspace.ownApplied,
       workspace.tripCards,
     );
+    markHomePopupWorkspaceFresh(session, options);
     emitHomePopupNoticeEvent();
     return {
       notice: getHomePopupNotice(),

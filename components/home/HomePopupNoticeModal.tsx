@@ -53,7 +53,7 @@ export function HomePopupNoticeModal() {
 
   const loadNotice = async () => {
     try {
-      await refreshHomePopupNoticeWorkspace();
+      await refreshHomePopupNoticeWorkspace({ includeTrips: false });
       syncFromCache();
     } catch (error) {
       setMessage({
@@ -88,7 +88,7 @@ export function HomePopupNoticeModal() {
   }, []);
 
   useEffect(() => {
-    const onRefresh = () => {
+    const onFocusRefresh = () => {
       void loadNotice();
     };
     const onStatus = (event: Event) => {
@@ -97,12 +97,12 @@ export function HomePopupNoticeModal() {
       setMessage({ tone: detail.ok ? "ok" : "warn", text: detail.message });
     };
 
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(HOME_POPUP_NOTICE_EVENT, onRefresh);
+    window.addEventListener("focus", onFocusRefresh);
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncFromCache);
     window.addEventListener(HOME_POPUP_NOTICE_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, onRefresh);
+      window.removeEventListener("focus", onFocusRefresh);
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncFromCache);
       window.removeEventListener(HOME_POPUP_NOTICE_STATUS_EVENT, onStatus);
     };
   }, []);

@@ -742,11 +742,14 @@ function getMonthKeysAroundToday(now = new Date()) {
   });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     if (!hasSupabaseAdminEnv()) {
       return NextResponse.json({ message: "Supabase 관리자 환경변수가 없습니다." }, { status: 500 });
     }
+
+    const { searchParams } = new URL(request.url);
+    const includeTrips = searchParams.get("includeTrips") !== "0";
 
     const supabase = await createServerClient();
     const {
@@ -775,16 +778,20 @@ export async function GET() {
         .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
         .eq("key", "active")
         .maybeSingle<HomePopupNoticeStateRow>(),
-      admin
-        .from("schedule_months")
-        .select("month_key, draft_state, published_state")
-        .in("month_key", getMonthKeysAroundToday())
-        .returns<ScheduleMonthRow[]>(),
-      admin
-        .from("team_lead_schedule_assignments")
-        .select("month_key, entries, rows")
-        .in("month_key", getMonthKeysAroundToday())
-        .returns<TeamLeadScheduleAssignmentRow[]>(),
+      includeTrips
+        ? admin
+          .from("schedule_months")
+          .select("month_key, draft_state, published_state")
+          .in("month_key", getMonthKeysAroundToday())
+          .returns<ScheduleMonthRow[]>()
+        : Promise.resolve({ data: [] as ScheduleMonthRow[] }),
+      includeTrips
+        ? admin
+          .from("team_lead_schedule_assignments")
+          .select("month_key, entries, rows")
+          .in("month_key", getMonthKeysAroundToday())
+          .returns<TeamLeadScheduleAssignmentRow[]>()
+        : Promise.resolve({ data: [] as TeamLeadScheduleAssignmentRow[] }),
     ]);
 
     const workspace = parseStorePayload(noticeRow ?? null);
@@ -820,7 +827,7 @@ export async function GET() {
       communityComments: workspace.communityComments,
       applications,
       ownApplied,
-      tripCards: buildTripCards(scheduleRows ?? [], assignmentRows ?? []),
+      ...(includeTrips ? { tripCards: buildTripCards(scheduleRows ?? [], assignmentRows ?? []) } : {}),
     });
   } catch (error) {
     return NextResponse.json(

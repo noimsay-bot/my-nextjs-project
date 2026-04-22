@@ -92,7 +92,7 @@ export function DeskPopupNoticeManager({
 
   const loadWorkspace = async () => {
     try {
-      await refreshHomePopupNoticeWorkspace();
+      await refreshHomePopupNoticeWorkspace({ includeTrips: false });
       syncFromCache();
     } catch (error) {
       setMessage({
@@ -113,7 +113,7 @@ export function DeskPopupNoticeManager({
   }, []);
 
   useEffect(() => {
-    const onRefresh = () => {
+    const onFocusRefresh = () => {
       void loadWorkspace();
     };
     const onStatus = (event: Event) => {
@@ -123,12 +123,12 @@ export function DeskPopupNoticeManager({
       syncFromCache();
     };
 
-    window.addEventListener("focus", onRefresh);
-    window.addEventListener(HOME_POPUP_NOTICE_EVENT, onRefresh);
+    window.addEventListener("focus", onFocusRefresh);
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncFromCache);
     window.addEventListener(HOME_POPUP_NOTICE_STATUS_EVENT, onStatus);
     return () => {
-      window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, onRefresh);
+      window.removeEventListener("focus", onFocusRefresh);
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncFromCache);
       window.removeEventListener(HOME_POPUP_NOTICE_STATUS_EVENT, onStatus);
     };
   }, []);

@@ -208,7 +208,7 @@ export default function HomeNoticeBoardPage() {
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
     try {
-      await refreshHomePopupNoticeWorkspace();
+      await refreshHomePopupNoticeWorkspace({ includeTrips: false });
       syncFromCache();
       setMessage(null);
     } catch (error) {

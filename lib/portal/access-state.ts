@@ -22,7 +22,10 @@ let portalAccessState: PortalAccessState = {
 };
 let portalAccessListenersInitialized = false;
 let portalAccessRefreshPromise: Promise<PortalAccessState> | null = null;
+let portalAccessLastRefreshedAt = 0;
+let portalAccessLoaded = false;
 const portalAccessListeners = new Set<PortalAccessListener>();
+const PORTAL_ACCESS_REFRESH_TTL_MS = 60_000;
 
 function readPortalAccessState(): PortalAccessState {
   return {
@@ -67,14 +70,26 @@ export function getPortalAccessState() {
   return portalAccessState;
 }
 
-export async function refreshPortalAccessState() {
+function shouldRefreshPortalAccessState() {
+  if (!portalAccessLoaded) return true;
+  return Date.now() - portalAccessLastRefreshedAt >= PORTAL_ACCESS_REFRESH_TTL_MS;
+}
+
+export async function refreshPortalAccessState(options?: { force?: boolean }) {
   if (portalAccessRefreshPromise) return portalAccessRefreshPromise;
+  if (!options?.force && !shouldRefreshPortalAccessState()) {
+    return syncPortalAccessState();
+  }
 
   portalAccessRefreshPromise = Promise.all([
     refreshVacationStore(),
     refreshTeamLeadSubmissionAccessState(),
   ])
-    .then(() => syncPortalAccessState())
+    .then(() => {
+      portalAccessLoaded = true;
+      portalAccessLastRefreshedAt = Date.now();
+      return syncPortalAccessState();
+    })
     .finally(() => {
       portalAccessRefreshPromise = null;
     });
@@ -87,7 +102,7 @@ export function subscribeToPortalAccessState(listener: PortalAccessListener) {
   portalAccessListeners.add(listener);
   listener(portalAccessState);
 
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && shouldRefreshPortalAccessState()) {
     void refreshPortalAccessState();
   }
 
