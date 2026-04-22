@@ -36,12 +36,9 @@ export function ScrollToTop({ className = "" }: { className?: string }) {
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
       style={{
         padding: "16px 8px",
-        backgroundColor: "rgba(15, 23, 42, 0.8)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
-        border: "1px solid rgba(255, 255, 255, 0.15)",
         borderRadius: "12px",
-        color: "#f8fbff",
         fontSize: "13px",
         fontWeight: 800,
         cursor: "pointer",
@@ -52,11 +49,9 @@ export function ScrollToTop({ className = "" }: { className?: string }) {
         boxShadow: "0 10px 30px rgba(0, 0, 0, 0.5)",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = "rgba(30, 41, 59, 0.95)";
         e.currentTarget.style.left = "16px";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = "rgba(15, 23, 42, 0.8)";
         e.currentTarget.style.left = "12px";
       }}
     >

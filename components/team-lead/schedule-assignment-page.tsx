@@ -30,6 +30,9 @@ import {
   getTeamLeadSchedules,
   refreshTeamLeadState,
   saveScheduleAssignmentStore,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
   ScheduleAssignmentDataStore,
   ScheduleAssignmentDayRows,
@@ -2469,6 +2472,9 @@ export function ScheduleAssignmentPage() {
                                     justifyContent: "center",
                                     display: "flex",
                                     alignItems: "center",
+                                    background: hasTripTag ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND : undefined,
+                                    border: hasTripTag ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER : undefined,
+                                    color: hasTripTag ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR : undefined,
                                   }}
                                 >
                                   {displayName || "이름 없음"}

@@ -43,9 +43,12 @@ import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonR
 import {
   applyScheduleAssignmentNameTagsToSchedule,
   formatScheduleAssignmentDisplayName,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentStore,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadState,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
 
@@ -1671,6 +1674,7 @@ export function PublishedSchedulesPanel() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
@@ -1703,15 +1707,17 @@ export function PublishedSchedulesPanel() {
                                               : "rgba(56,189,248,.22)"
                                             : recommendedHighlighted
                                               ? "rgba(124,58,237,.32)"
+                                            : mineHighlighted
+                                              ? "rgba(148,163,184,.38)"
                                             : dimOtherNames
                                                 ? "rgba(255,255,255,.06)"
+                                                : hasTaggedDisplayName
+                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
                                                 : nameTagColors
                                                   ? nameTagColors.background
                                                 : assignmentDisplay.chipStyle?.background
                                                   ? assignmentDisplay.chipStyle.background
-                                                  : mineHighlighted
-                                                    ? "rgba(148,163,184,.38)"
-                                                    : "rgba(255,255,255,.16)",
+                                                  : "rgba(255,255,255,.16)",
                                         border: personObject.pending
                                           ? "1px solid rgba(245,158,11,.35)"
                                           : duplicated
@@ -1726,6 +1732,8 @@ export function PublishedSchedulesPanel() {
                                               ? "2px solid rgba(226,232,240,.82)"
                                             : dimOtherNames
                                                 ? "1px solid rgba(255,255,255,.08)"
+                                                : hasTaggedDisplayName
+                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
                                                 : nameTagColors
                                                   ? nameTagColors.border
                                               : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
@@ -1735,10 +1743,12 @@ export function PublishedSchedulesPanel() {
                                             ? "#ffe4e6"
                                           : recommendedHighlighted || mineHighlighted
                                             ? "#ffffff"
-                                            : dimOtherNames
+                                          : dimOtherNames
                                               ? "rgba(248,251,255,.48)"
-                                              : nameTagColors
-                                                ? nameTagColors.color
+                                              : hasTaggedDisplayName
+                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
+                                                : nameTagColors
+                                                  ? nameTagColors.color
                                                 : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: mineHighlighted ? 800 : 700,
                                         lineHeight: 1.3,

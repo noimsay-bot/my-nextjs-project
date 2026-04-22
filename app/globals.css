@@ -2664,6 +2664,9 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   left: 12px;
   top: calc(50vh - 16px);
   z-index: 30;
+  background: rgba(15, 23, 42, 0.8);
+  color: #f8fbff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 html[data-theme="light"] .schedule-assignment-today-button {

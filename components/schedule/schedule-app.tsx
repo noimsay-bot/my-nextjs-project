@@ -36,9 +36,12 @@ import { syncVacationMonthSheetFromGeneratedSchedule } from "@/lib/vacation/stor
 import {
   applyScheduleAssignmentNameTagsToSchedule,
   formatScheduleAssignmentDisplayName,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentStore,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadState,
+  SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
 import {
@@ -1903,6 +1906,7 @@ export function ScheduleApp() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const conflicted = conflictSet.has(`${category}-${name}`) || selected || personObject.pending || duplicated;
@@ -1987,6 +1991,8 @@ export function ScheduleApp() {
                                                 ? weekendConflict
                                                   ? "rgba(34,211,238,.28)"
                                                   : "rgba(239,68,68,.22)"
+                                                : hasTaggedDisplayName
+                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
                                                 : nameTagColors
                                                   ? nameTagColors.background
                                                 : assignmentDisplay.chipStyle?.background
@@ -2000,6 +2006,8 @@ export function ScheduleApp() {
                                               ? weekendConflict
                                                 ? "1px solid rgba(103,232,249,.65)"
                                                 : "1px solid rgba(239,68,68,.28)"
+                                              : hasTaggedDisplayName
+                                                ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
                                               : nameTagColors
                                                 ? nameTagColors.border
                                               : highlighted
@@ -2007,6 +2015,8 @@ export function ScheduleApp() {
                                                 : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict
                                           ? "#d8fbff"
+                                          : hasTaggedDisplayName
+                                              ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
                                           : nameTagColors
                                             ? nameTagColors.color
                                           : editMode
@@ -2587,6 +2597,7 @@ export function ScheduleApp() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const conflicted = conflictSet.has(`${category}-${name}`) || duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
@@ -2607,6 +2618,8 @@ export function ScheduleApp() {
                                           ? weekendConflict
                                             ? "rgba(34,211,238,.28)"
                                             : "rgba(239,68,68,.22)"
+                                          : hasTaggedDisplayName
+                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
                                           : nameTagColors
                                             ? nameTagColors.background
                                           : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.16)",
@@ -2614,13 +2627,17 @@ export function ScheduleApp() {
                                           ? weekendConflict
                                             ? "1px solid rgba(103,232,249,.65)"
                                             : "1px solid rgba(239,68,68,.28)"
+                                          : hasTaggedDisplayName
+                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
                                           : nameTagColors
                                             ? nameTagColors.border
                                           : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
                                         color: weekendConflict
                                           ? "#d8fbff"
-                                          : nameTagColors
-                                            ? nameTagColors.color
+                                          : hasTaggedDisplayName
+                                              ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
+                                            : nameTagColors
+                                              ? nameTagColors.color
                                             : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                         fontWeight: 700,
                                         lineHeight: 1.3,
