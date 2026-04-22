@@ -504,6 +504,39 @@ function getCustomRowIdFromKey(rowKey: string) {
   return rowKey.split("::custom::")[1] ?? "";
 }
 
+function getDateKeyFromRowKey(rowKey: string) {
+  return rowKey.split("::")[0] ?? "";
+}
+
+function getNameFromRowKey(
+  rowKey: string,
+  monthRows: Record<string, ScheduleAssignmentDayRows>,
+) {
+  const parts = rowKey.split("::");
+  const dateKey = parts[0] ?? "";
+  const category = parts[1] ?? "";
+  if (!dateKey || !category) return "";
+
+  if (category === "custom") {
+    const customId = parts[2] ?? "";
+    const customRow = monthRows[dateKey]?.addedRows.find((item) => item.id === customId);
+    return customRow?.name.trim() ?? "";
+  }
+
+  return parts.slice(3).join("::").trim();
+}
+
+function isSameTripFlowEntry(
+  entry: ScheduleAssignmentEntry,
+  visibleTripTag: Pick<ScheduleAssignmentVisibleTripTag, "tripTagId" | "tripTagLabel" | "travelType">,
+) {
+  if (entry.tripTagId && entry.tripTagId === visibleTripTag.tripTagId) return true;
+  const entryLabel = entry.tripTagLabel.trim();
+  const visibleLabel = visibleTripTag.tripTagLabel.trim();
+  if (!entryLabel || !visibleLabel) return false;
+  return entryLabel === visibleLabel && entry.travelType === visibleTripTag.travelType;
+}
+
 function buildMonthDays(schedule: GeneratedSchedule | null) {
   if (!schedule) return [] as DaySchedule[];
   const dayMap = new Map(
@@ -2025,13 +2058,49 @@ export function ScheduleAssignmentPage() {
       entry.tripTagId === visibleTripTag.tripTagId ? entry.tripTagPhase : "";
     const nextPhase = cycleTripTagPhase(currentPhase);
 
-    updateMonthEntry(row.key, (current) => ({
-      ...current,
-      travelType: visibleTripTag.travelType || current.travelType,
-      tripTagId: visibleTripTag.tripTagId,
-      tripTagLabel: visibleTripTag.tripTagLabel,
-      tripTagPhase: nextPhase,
-    }));
+    updateStore((current) => {
+      const currentMonthEntries = current.entries[selectedMonthKey] ?? {};
+      const currentMonthRows = current.rows[selectedMonthKey] ?? {};
+      const nextMonthEntries: Record<string, ScheduleAssignmentEntry> = {
+        ...currentMonthEntries,
+        [row.key]: {
+          ...(currentMonthEntries[row.key] ?? createDefaultScheduleAssignmentEntry()),
+          travelType: visibleTripTag.travelType || entry.travelType,
+          tripTagId: visibleTripTag.tripTagId,
+          tripTagLabel: visibleTripTag.tripTagLabel,
+          tripTagPhase: nextPhase,
+        },
+      };
+
+      if (nextPhase === "return") {
+        const targetName = row.name.trim();
+        const targetDateKey = getDateKeyFromRowKey(row.key);
+
+        Object.entries(currentMonthEntries).forEach(([entryRowKey, candidateEntry]) => {
+          if (entryRowKey === row.key) return;
+          const candidateDateKey = getDateKeyFromRowKey(entryRowKey);
+          if (!candidateDateKey || candidateDateKey <= targetDateKey) return;
+          if (getNameFromRowKey(entryRowKey, currentMonthRows) !== targetName) return;
+          if (!isSameTripFlowEntry(candidateEntry, visibleTripTag)) return;
+
+          nextMonthEntries[entryRowKey] = {
+            ...candidateEntry,
+            travelType: "",
+            tripTagId: "",
+            tripTagLabel: "",
+            tripTagPhase: "",
+          };
+        });
+      }
+
+      return {
+        ...current,
+        entries: {
+          ...current.entries,
+          [selectedMonthKey]: nextMonthEntries,
+        },
+      };
+    });
   };
 
   const saveTripTagLabel = (tripTagId: string, nextLabel: string) => {

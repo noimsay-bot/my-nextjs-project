@@ -1280,6 +1280,15 @@ interface ActiveTripState {
   travelType: AssignmentTravelType;
 }
 
+function getTripFlowKey(
+  trip: Pick<ActiveTripState, "tripTagLabel" | "travelType"> | null,
+) {
+  const label = trip?.tripTagLabel.trim() ?? "";
+  const travelType = trip?.travelType ?? "";
+  if (!label || !travelType || travelType === "당일출장") return "";
+  return `${travelType}::${label}`;
+}
+
 function isSameTripFlow(
   activeTrip: ActiveTripState | null,
   explicitTrip: Pick<ScheduleAssignmentVisibleTripTag, "tripTagId" | "tripTagLabel" | "travelType"> | null,
@@ -1390,6 +1399,7 @@ function buildScheduleAssignmentTripWorkspace(
 
   timelineMap.forEach((rows, personName) => {
     let activeTrip: ActiveTripState | null = null;
+    const closedTripFlowKeys = new Set<string>();
 
     rows.forEach((row) => {
       const explicitTrip: ScheduleAssignmentVisibleTripTag | null =
@@ -1400,8 +1410,9 @@ function buildScheduleAssignmentTripWorkspace(
               travelType: (row.entry.travelType || activeTrip?.travelType || "") as AssignmentTravelType,
               phase: row.entry.tripTagPhase,
               isInherited: false,
-            }
-          : null;
+          }
+        : null;
+      const explicitTripFlowKey = getTripFlowKey(explicitTrip);
 
       const visibleTrip: ScheduleAssignmentVisibleTripTag | null = explicitTrip ?? (activeTrip
         ? {
@@ -1417,7 +1428,16 @@ function buildScheduleAssignmentTripWorkspace(
         visibleTripTagMap.set(row.rowKey, visibleTrip);
       }
 
-      if (explicitTrip?.phase === "departure" || (explicitTrip?.phase === "ongoing" && !activeTrip)) {
+      if (explicitTrip?.phase === "departure") {
+        if (explicitTripFlowKey) {
+          closedTripFlowKeys.delete(explicitTripFlowKey);
+        }
+        activeTrip = {
+          tripTagId: explicitTrip.tripTagId,
+          tripTagLabel: explicitTrip.tripTagLabel,
+          travelType: explicitTrip.travelType,
+        };
+      } else if (explicitTrip?.phase === "ongoing" && !activeTrip && !closedTripFlowKeys.has(explicitTripFlowKey)) {
         activeTrip = {
           tripTagId: explicitTrip.tripTagId,
           tripTagLabel: explicitTrip.tripTagLabel,
@@ -1464,7 +1484,13 @@ function buildScheduleAssignmentTripWorkspace(
       }
 
       if (explicitTrip?.phase === "return" && activeTrip && isSameTripFlow(activeTrip, explicitTrip)) {
+        const activeTripFlowKey = getTripFlowKey(activeTrip);
+        if (activeTripFlowKey) {
+          closedTripFlowKeys.add(activeTripFlowKey);
+        }
         activeTrip = null;
+      } else if (explicitTrip?.phase === "return" && explicitTripFlowKey) {
+        closedTripFlowKeys.add(explicitTripFlowKey);
       }
     });
   });
