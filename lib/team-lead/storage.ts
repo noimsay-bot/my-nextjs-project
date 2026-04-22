@@ -1280,6 +1280,20 @@ interface ActiveTripState {
   travelType: AssignmentTravelType;
 }
 
+function isSameTripFlow(
+  activeTrip: ActiveTripState | null,
+  explicitTrip: Pick<ScheduleAssignmentVisibleTripTag, "tripTagId" | "tripTagLabel" | "travelType"> | null,
+) {
+  if (!activeTrip || !explicitTrip) return false;
+  if (explicitTrip.tripTagId && explicitTrip.tripTagId === activeTrip.tripTagId) return true;
+
+  const activeLabel = activeTrip.tripTagLabel.trim();
+  const explicitLabel = explicitTrip.tripTagLabel.trim();
+  if (!activeLabel || !explicitLabel) return false;
+
+  return activeLabel === explicitLabel && explicitTrip.travelType === activeTrip.travelType;
+}
+
 interface TripAggregateBuilder {
   tripTagId: string;
   tripTagLabel: string;
@@ -1409,9 +1423,9 @@ function buildScheduleAssignmentTripWorkspace(
           tripTagLabel: explicitTrip.tripTagLabel,
           travelType: explicitTrip.travelType,
         };
-      } else if (activeTrip && explicitTrip && explicitTrip.tripTagId === activeTrip.tripTagId) {
+      } else if (activeTrip && explicitTrip && isSameTripFlow(activeTrip, explicitTrip)) {
         activeTrip = {
-          tripTagId: activeTrip.tripTagId,
+          tripTagId: explicitTrip.tripTagId || activeTrip.tripTagId,
           tripTagLabel: explicitTrip.tripTagLabel,
           travelType: explicitTrip.travelType || activeTrip.travelType,
         };
@@ -1422,7 +1436,7 @@ function buildScheduleAssignmentTripWorkspace(
           ? explicitTrip
           : explicitTrip?.phase === "departure" || explicitTrip?.phase === "ongoing"
           ? activeTrip
-          : activeTrip && visibleTrip && visibleTrip.tripTagId === activeTrip.tripTagId
+          : activeTrip && visibleTrip && isSameTripFlow(activeTrip, visibleTrip)
             ? activeTrip
             : null;
 
@@ -1449,7 +1463,7 @@ function buildScheduleAssignmentTripWorkspace(
         personTripBuilderMap.set(personName, personTrips);
       }
 
-      if (explicitTrip?.phase === "return" && activeTrip && explicitTrip.tripTagId === activeTrip.tripTagId) {
+      if (explicitTrip?.phase === "return" && activeTrip && isSameTripFlow(activeTrip, explicitTrip)) {
         activeTrip = null;
       }
     });

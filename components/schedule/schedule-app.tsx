@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
 import { getSession } from "@/lib/auth/storage";
@@ -912,18 +913,21 @@ export function ScheduleApp() {
     if (!visibleSchedule || isEditingDate) return;
     editBackupRef.current = cloneScheduleState(state);
     const visibleScheduleClone = JSON.parse(JSON.stringify(visibleSchedule));
-    setState((current) =>
-      sanitizeScheduleState({
-        ...current,
-        generated: visibleScheduleClone,
-        generatedHistory: current.generatedHistory.map((item) =>
-          item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
-        ),
-        editDateKey: dateKey,
-        editingMonthKey: visibleScheduleClone.monthKey,
-        selectedPerson: null,
-      }),
-    );
+    isEditingDateRef.current = true;
+    flushSync(() => {
+      setState((current) =>
+        sanitizeScheduleState({
+          ...current,
+          generated: visibleScheduleClone,
+          generatedHistory: current.generatedHistory.map((item) =>
+            item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
+          ),
+          editDateKey: dateKey,
+          editingMonthKey: visibleScheduleClone.monthKey,
+          selectedPerson: null,
+        }),
+      );
+    });
     closeAddPersonDialog();
   };
 
@@ -931,33 +935,39 @@ export function ScheduleApp() {
     if (!visibleSchedule || isEditingDate) return;
     editBackupRef.current = cloneScheduleState(state);
     const visibleScheduleClone = JSON.parse(JSON.stringify(visibleSchedule));
-    setState((current) =>
-      sanitizeScheduleState({
-        ...current,
-        generated: visibleScheduleClone,
-        generatedHistory: current.generatedHistory.map((item) =>
-          item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
-        ),
-        editDateKey: ALL_DAYS_EDIT_KEY,
-        editingMonthKey: visibleScheduleClone.monthKey,
-        selectedPerson: null,
-      }),
-    );
+    isEditingDateRef.current = true;
+    flushSync(() => {
+      setState((current) =>
+        sanitizeScheduleState({
+          ...current,
+          generated: visibleScheduleClone,
+          generatedHistory: current.generatedHistory.map((item) =>
+            item.monthKey === visibleScheduleClone.monthKey ? visibleScheduleClone : item,
+          ),
+          editDateKey: ALL_DAYS_EDIT_KEY,
+          editingMonthKey: visibleScheduleClone.monthKey,
+          selectedPerson: null,
+        }),
+      );
+    });
     closeAddPersonDialog();
   };
 
   const cancelDayEdit = () => {
     const backup = editBackupRef.current ? cloneScheduleState(editBackupRef.current) : null;
-    setState((current) =>
-      sanitizeScheduleState(
-        backup ?? {
-          ...current,
-          editDateKey: null,
-          editingMonthKey: null,
-          selectedPerson: null,
-        },
-      ),
-    );
+    isEditingDateRef.current = false;
+    flushSync(() => {
+      setState((current) =>
+        sanitizeScheduleState(
+          backup ?? {
+            ...current,
+            editDateKey: null,
+            editingMonthKey: null,
+            selectedPerson: null,
+          },
+        ),
+      );
+    });
     editBackupRef.current = null;
     closeAddPersonDialog();
   };
@@ -965,14 +975,17 @@ export function ScheduleApp() {
   const confirmDayEdit = () => {
     if (!isEditingDate) return;
     const messageText = isAllDaysEditMode ? "근무표 수정 내용이 반영되었습니다." : "날짜 수정 내용이 반영되었습니다.";
-    setState((current) =>
-      sanitizeScheduleState({
-        ...compactGeneratedAssignments(current),
-        editDateKey: null,
-        editingMonthKey: null,
-        selectedPerson: null,
-      }),
-    );
+    isEditingDateRef.current = false;
+    flushSync(() => {
+      setState((current) =>
+        sanitizeScheduleState({
+          ...compactGeneratedAssignments(current),
+          editDateKey: null,
+          editingMonthKey: null,
+          selectedPerson: null,
+        }),
+      );
+    });
     editBackupRef.current = null;
     closeAddPersonDialog();
     setMessage({ tone: "ok", text: messageText });

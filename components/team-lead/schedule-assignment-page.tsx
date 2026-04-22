@@ -1944,7 +1944,52 @@ export function ScheduleAssignmentPage() {
     }));
   };
 
+  const findReusableTripTag = (
+    targetDateKey: string,
+    row: ScheduleAssignmentRow,
+    travelType: AssignmentTravelType,
+  ): { tripTagId: string; tripTagLabel: string } | null => {
+    const targetName = row.name.trim();
+    if (!targetName || !travelType || travelType === "당일출장") return null;
+
+    let bestMatch: { tripTagId: string; tripTagLabel: string; distance: number } | null = null;
+    const targetTime = new Date(`${targetDateKey}T00:00:00`).getTime();
+
+    schedules.forEach((schedule) => {
+      const monthRows = store.rows[schedule.monthKey] ?? {};
+      schedule.days
+        .filter((dayItem) => dayItem.month === schedule.month)
+        .forEach((dayItem) => {
+          const candidateRows = getScheduleAssignmentRows(
+            dayItem,
+            monthRows[dayItem.dateKey] ?? createDefaultScheduleAssignmentDayRows(),
+          );
+          candidateRows.forEach((candidateRow) => {
+            if (schedule.monthKey === selectedMonthKey && candidateRow.key === row.key) return;
+            if (candidateRow.name.trim() !== targetName) return;
+            const candidateTrip = visibleTripTagMap.get(candidateRow.key);
+            if (!candidateTrip || candidateTrip.travelType !== travelType) return;
+            if (!candidateTrip.tripTagId || !candidateTrip.tripTagLabel.trim()) return;
+
+            const candidateTime = new Date(`${dayItem.dateKey}T00:00:00`).getTime();
+            const distance = Math.abs(candidateTime - targetTime);
+            if (!bestMatch || distance < bestMatch.distance) {
+              bestMatch = {
+                tripTagId: candidateTrip.tripTagId,
+                tripTagLabel: candidateTrip.tripTagLabel,
+                distance,
+              };
+            }
+          });
+        });
+    });
+
+    return bestMatch;
+  };
+
   const createTripTag = (
+    dateKey: string,
+    row: ScheduleAssignmentRow,
     rowKey: string,
     travelType: AssignmentTravelType,
     options?: { initialLabel?: string; startEditing?: boolean },
@@ -1953,15 +1998,16 @@ export function ScheduleAssignmentPage() {
       setImportMessage({ tone: "warn", text: "출장 태그를 만들려면 먼저 출장 종류를 선택해 주세요." });
       return;
     }
-    const tripTagId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const initialLabel = options?.initialLabel?.trim() ?? "";
+    const reusableTrip = findReusableTripTag(dateKey, row, travelType);
+    const tripTagId = reusableTrip?.tripTagId ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const initialLabel = reusableTrip?.tripTagLabel ?? options?.initialLabel?.trim() ?? "";
 
     updateMonthEntry(rowKey, (current) => ({
       ...current,
       travelType,
       tripTagId,
       tripTagLabel: initialLabel,
-      tripTagPhase: "",
+      tripTagPhase: reusableTrip ? "ongoing" : "",
     }));
     if (options?.startEditing ?? true) {
       setEditingTripTag({ tripTagId, rowKey, value: initialLabel });
@@ -2750,7 +2796,7 @@ export function ScheduleAssignmentPage() {
                                         ...getTripTagStyle(entry.travelType),
                                       }}
                                       onClick={() =>
-                                        createTripTag(row.key, entry.travelType, {
+                                        createTripTag(day.dateKey, row, row.key, entry.travelType, {
                                           initialLabel: "",
                                           startEditing: true,
                                         })
@@ -2882,7 +2928,14 @@ export function ScheduleAssignmentPage() {
                                   createSingleDayTripTag(row.key, entry.tripTagId);
                                   return;
                                 }
-                                updateMonthEntry(row.key, (current) => ({ ...current, travelType: nextTravelType }));
+                                const reusableTrip = findReusableTripTag(day.dateKey, row, nextTravelType);
+                                updateMonthEntry(row.key, (current) => ({
+                                  ...current,
+                                  travelType: nextTravelType,
+                                  tripTagId: reusableTrip?.tripTagId ?? current.tripTagId,
+                                  tripTagLabel: reusableTrip?.tripTagLabel ?? current.tripTagLabel,
+                                  tripTagPhase: reusableTrip ? "ongoing" : current.tripTagPhase,
+                                }));
                               }}
                             >
                               {travelOptions.map((option) => <option key={`${row.key}-${option.value || "default"}`} value={option.value}>{option.label}</option>)}
