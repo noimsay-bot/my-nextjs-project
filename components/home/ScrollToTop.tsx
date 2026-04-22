@@ -4,17 +4,30 @@ import { useEffect, useState } from "react";
 
 export function ScrollToTop({ className = "" }: { className?: string }) {
   const [visible, setVisible] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
       // 스크롤이 150px 이상 내려가면 버튼을 보여줍니다.
       setVisible(window.scrollY > 150);
     };
+
+    const syncViewport = () => {
+      const mobileViewport = window.matchMedia("(max-width: 820px)").matches;
+      const coarsePointer = window.matchMedia("(any-pointer: coarse)").matches;
+      setIsMobile(mobileViewport || coarsePointer);
+    };
+
+    syncViewport();
     window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    window.addEventListener("resize", syncViewport);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", syncViewport);
+    };
   }, []);
 
-  if (!visible) return null;
+  if (!visible || isMobile) return null;
 
   return (
     <button

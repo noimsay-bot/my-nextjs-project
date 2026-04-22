@@ -1,5 +1,6 @@
 "use client";
 
+import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -113,6 +114,18 @@ type RefreshResult = {
   communityPosts: CommunityBoardPost[];
   communityComments: CommunityBoardComment[];
   applications: HomePopupNoticeApplication[];
+  tripCards: TeamLeadTripPersonCard[];
+};
+
+type HomePublicWorkspaceResponse = {
+  notice: HomePopupNotice | null;
+  notices: HomeNotice[];
+  ddays: HomeDdayItem[];
+  communityPosts: CommunityBoardPost[];
+  communityComments: CommunityBoardComment[];
+  applications: HomePopupNoticeApplication[];
+  ownApplied: boolean;
+  tripCards: TeamLeadTripPersonCard[];
 };
 
 let noticeCache: HomePopupNotice | null = null;
@@ -121,6 +134,7 @@ let homeDdayCache: HomeDdayItem[] = [];
 let communityPostCache: CommunityBoardPost[] = [];
 let communityCommentCache: CommunityBoardComment[] = [];
 let applicationCache: HomePopupNoticeApplication[] = [];
+let tripCardCache: TeamLeadTripPersonCard[] = [];
 let currentUserAppliedCache = false;
 let refreshPromise: Promise<RefreshResult> | null = null;
 
@@ -280,6 +294,23 @@ function cloneCommunityCommentList(comments: CommunityBoardComment[]) {
 
 function cloneApplications(applications: HomePopupNoticeApplication[]) {
   return applications.map((application) => ({ ...application }));
+}
+
+function cloneTripCards(cards: TeamLeadTripPersonCard[]) {
+  return cards.map((card) => ({
+    name: card.name,
+    items: card.items.map((item) => ({
+      tripTagId: item.tripTagId,
+      tripTagLabel: item.tripTagLabel,
+      travelType: item.travelType,
+      startDateKey: item.startDateKey,
+      endDateKey: item.endDateKey,
+      dayCount: item.dayCount,
+      dateKeys: [...item.dateKeys],
+      duties: [...item.duties],
+      schedules: [...item.schedules],
+    })),
+  }));
 }
 
 function normalizeTone(value: unknown): HomeNoticeTone {
@@ -591,6 +622,7 @@ function syncCaches(
   communityComments: CommunityBoardComment[],
   applications: HomePopupNoticeApplication[],
   ownApplied = false,
+  tripCards: TeamLeadTripPersonCard[] = tripCardCache,
 ) {
   noticeListCache = cloneNoticeList(sortNotices(notices));
   homeDdayCache = cloneDdayList(sortHomeDdays(ddays).slice(0, 3));
@@ -598,6 +630,7 @@ function syncCaches(
   communityCommentCache = cloneCommunityCommentList(sortCommunityComments(communityComments));
   noticeCache = clonePopupNotice(getActivePopupNotice(noticeListCache));
   applicationCache = cloneApplications(applications);
+  tripCardCache = cloneTripCards(tripCards);
   currentUserAppliedCache = ownApplied;
 }
 
@@ -625,8 +658,29 @@ export function getHomePopupNoticeApplications() {
   return cloneApplications(applicationCache);
 }
 
+export function getHomePublicTripCards() {
+  return cloneTripCards(tripCardCache);
+}
+
 export function hasAppliedToCurrentHomePopupNotice() {
   return currentUserAppliedCache;
+}
+
+async function fetchHomePublicWorkspace() {
+  const response = await fetch("/api/home/public-workspace", {
+    method: "GET",
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+
+  const payload = (await response.json().catch(() => null)) as { message?: string } | HomePublicWorkspaceResponse | null;
+  if (!response.ok) {
+    throw new Error(payload && "message" in payload && typeof payload.message === "string"
+      ? payload.message
+      : "홈 데이터를 불러오지 못했습니다.");
+  }
+
+  return payload as HomePublicWorkspaceResponse;
 }
 
 async function selectHomePopupNoticeRow(supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>) {
@@ -694,7 +748,7 @@ export async function refreshHomePopupNoticeWorkspace() {
   refreshPromise = (async () => {
     const session = await getPortalSession();
     if (!session?.approved) {
-      syncCaches([], [], [], [], [], false);
+      syncCaches([], [], [], [], [], false, []);
       emitHomePopupNoticeEvent();
       return {
         notice: null,
@@ -703,90 +757,21 @@ export async function refreshHomePopupNoticeWorkspace() {
         communityPosts: [],
         communityComments: [],
         applications: [],
+        tripCards: [],
       };
     }
 
-    const supabase = await getPortalSupabaseClient();
-    const { data: noticeRow, error: noticeError } = await selectHomePopupNoticeRow(supabase);
+    const workspace = await fetchHomePublicWorkspace();
 
-    if (noticeError) {
-      if (isSupabaseSchemaMissingError(noticeError)) {
-        console.warn(getSupabaseStorageErrorMessage(noticeError, "home_popup_notice_state"));
-        syncCaches([], [], [], [], [], false);
-        emitHomePopupNoticeEvent();
-        return {
-          notice: null,
-          notices: [],
-          ddays: [],
-          communityPosts: [],
-          communityComments: [],
-          applications: [],
-        };
-      }
-
-      throw new Error(getSupabaseStorageErrorMessage(noticeError, "home_popup_notice_state"));
-    }
-
-    let workspace = parseStorePayload(noticeRow ?? null);
-    const activeDdays = getActiveHomeDdays(workspace.ddays);
-    if (activeDdays.length !== workspace.ddays.length) {
-      workspace = await persistNotices(
-        workspace.notices,
-        activeDdays,
-        workspace.communityPosts,
-        workspace.communityComments,
-        session.id,
-        supabase,
-      );
-    }
-
-    const notices = workspace.notices;
-    const ddays = workspace.ddays;
-    const communityPosts = workspace.communityPosts;
-    const communityComments = workspace.communityComments;
-    const activePopup = getActivePopupNotice(notices);
-    let ownApplied = false;
-    let applications: HomePopupNoticeApplication[] = [];
-
-    if (activePopup?.applicationEnabled) {
-      const { data: ownApplicationRow, error: ownApplicationError } = await supabase
-        .from("home_popup_notice_applications")
-        .select("id")
-        .eq("notice_id", activePopup.id)
-        .eq("applicant_id", session.id)
-        .maybeSingle<{ id: string }>();
-
-      if (ownApplicationError) {
-        if (isSupabaseSchemaMissingError(ownApplicationError)) {
-          console.warn(getSupabaseStorageErrorMessage(ownApplicationError, "home_popup_notice_applications"));
-        } else {
-          throw new Error(getSupabaseStorageErrorMessage(ownApplicationError, "home_popup_notice_applications"));
-        }
-      } else {
-        ownApplied = Boolean(ownApplicationRow?.id);
-      }
-
-      if (isManagerRole(session.role)) {
-        const { data: applicationRows, error: applicationError } = await supabase
-          .from("home_popup_notice_applications")
-          .select("id, notice_id, applicant_id, applicant_name, created_at")
-          .eq("notice_id", activePopup.id)
-          .order("created_at", { ascending: false })
-          .returns<HomePopupNoticeApplicationRow[]>();
-
-        if (applicationError) {
-          if (isSupabaseSchemaMissingError(applicationError)) {
-            console.warn(getSupabaseStorageErrorMessage(applicationError, "home_popup_notice_applications"));
-          } else {
-            throw new Error(getSupabaseStorageErrorMessage(applicationError, "home_popup_notice_applications"));
-          }
-        } else {
-          applications = (applicationRows ?? []).map(rowToApplication);
-        }
-      }
-    }
-
-    syncCaches(notices, ddays, communityPosts, communityComments, applications, ownApplied);
+    syncCaches(
+      workspace.notices,
+      workspace.ddays,
+      workspace.communityPosts,
+      workspace.communityComments,
+      workspace.applications,
+      workspace.ownApplied,
+      workspace.tripCards,
+    );
     emitHomePopupNoticeEvent();
     return {
       notice: getHomePopupNotice(),
@@ -795,6 +780,7 @@ export async function refreshHomePopupNoticeWorkspace() {
       communityPosts: getCommunityBoardPosts(),
       communityComments: getCommunityBoardComments(),
       applications: getHomePopupNoticeApplications(),
+      tripCards: getHomePublicTripCards(),
     };
   })().finally(() => {
     refreshPromise = null;

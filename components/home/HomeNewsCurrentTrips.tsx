@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  getTeamLeadTripCards,
-  refreshTeamLeadState,
-  TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
-  TeamLeadTripPersonCard,
-} from "@/lib/team-lead/storage";
+  getHomePublicTripCards,
+  HOME_POPUP_NOTICE_EVENT,
+  refreshHomePopupNoticeWorkspace,
+} from "@/lib/home-popup/storage";
+import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
+const CURRENT_TRIP_TRAVEL_TYPES = new Set(["국내출장", "해외출장"]);
 
 function toDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -38,17 +39,17 @@ export function HomeNewsCurrentTrips({
   hideToggle = false,
   onCountChange,
 }: HomeNewsCurrentTripsProps) {
-  const [tripCards, setTripCards] = useState<TeamLeadTripPersonCard[]>(() => getTeamLeadTripCards(["국내출장", "해외출장"]));
+  const [tripCards, setTripCards] = useState<TeamLeadTripPersonCard[]>(() => getHomePublicTripCards());
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const lastFocusRefreshAtRef = useRef(0);
   const todayKey = useMemo(() => getTodayDateKey(), []);
 
   const syncTripCards = () => {
-    setTripCards(getTeamLeadTripCards(["국내출장", "해외출장"]));
+    setTripCards(getHomePublicTripCards());
   };
 
   const loadTripCards = async () => {
-    await refreshTeamLeadState();
+    await refreshHomePopupNoticeWorkspace();
     syncTripCards();
   };
 
@@ -73,11 +74,11 @@ export function HomeNewsCurrentTrips({
     };
     window.addEventListener("focus", onFocusRefresh);
     window.addEventListener("storage", onStorageRefresh);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, onTripRefresh);
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, onTripRefresh);
     return () => {
       window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener("storage", onStorageRefresh);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, onTripRefresh);
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, onTripRefresh);
     };
   }, []);
 
@@ -85,7 +86,11 @@ export function HomeNewsCurrentTrips({
     () => tripCards
       .map((card) => ({
         ...card,
-        items: card.items.filter((item) => item.startDateKey <= todayKey && item.endDateKey >= todayKey),
+        items: card.items.filter((item) =>
+          CURRENT_TRIP_TRAVEL_TYPES.has(item.travelType) &&
+          item.startDateKey <= todayKey &&
+          item.endDateKey >= todayKey,
+        ),
       }))
       .filter((card) => card.items.length > 0),
     [todayKey, tripCards],

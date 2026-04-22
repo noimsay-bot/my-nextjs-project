@@ -13,12 +13,13 @@ import {
   HomeNewsTemporarySectionId,
 } from "@/components/home/home-news.types";
 import {
-  getTeamLeadTripCards,
-  refreshTeamLeadState,
-  TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
-} from "@/lib/team-lead/storage";
+  getHomePublicTripCards,
+  HOME_POPUP_NOTICE_EVENT,
+  refreshHomePopupNoticeWorkspace,
+} from "@/lib/home-popup/storage";
 
 const CURRENT_TRIPS_TAB_KEY = "current_trips";
+const CURRENT_TRIP_TRAVEL_TYPES = new Set(["국내출장", "해외출장"]);
 
 function toDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -26,10 +27,14 @@ function toDateKey(date: Date) {
 
 function getCurrentTripCount() {
   const todayKey = toDateKey(new Date());
-  return getTeamLeadTripCards(["국내출장", "해외출장"])
+  return getHomePublicTripCards()
     .map((card) => ({
       ...card,
-      items: card.items.filter((item) => item.startDateKey <= todayKey && item.endDateKey >= todayKey),
+      items: card.items.filter((item) =>
+        CURRENT_TRIP_TRAVEL_TYPES.has(item.travelType) &&
+        item.startDateKey <= todayKey &&
+        item.endDateKey >= todayKey,
+      ),
     }))
     .filter((card) => card.items.length > 0).length;
 }
@@ -130,14 +135,14 @@ export function HomeNewsTabs({
       setCurrentTripCount(getCurrentTripCount());
     };
 
-    void refreshTeamLeadState().then(syncCurrentTripCount);
+    void refreshHomePopupNoticeWorkspace().then(syncCurrentTripCount);
     window.addEventListener("storage", syncCurrentTripCount);
     window.addEventListener("focus", syncCurrentTripCount);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCurrentTripCount);
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncCurrentTripCount);
     return () => {
       window.removeEventListener("storage", syncCurrentTripCount);
       window.removeEventListener("focus", syncCurrentTripCount);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCurrentTripCount);
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncCurrentTripCount);
     };
   }, []);
 
