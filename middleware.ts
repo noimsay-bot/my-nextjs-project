@@ -8,39 +8,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: "/",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-        { type: "header", key: "x-middleware-prefetch" },
-      ],
-    },
-    {
       source: "/admin/:path*",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-        { type: "header", key: "x-middleware-prefetch" },
-      ],
-    },
-    {
-      source: "/community/:path*",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-        { type: "header", key: "x-middleware-prefetch" },
-      ],
-    },
-    {
-      source: "/notices/:path*",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-        { type: "header", key: "x-middleware-prefetch" },
-      ],
-    },
-    {
-      source: "/restaurants/:path*",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

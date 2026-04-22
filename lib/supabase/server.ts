@@ -1,8 +1,23 @@
+import "server-only";
+
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+const SUPABASE_AUTH_COOKIE_SUFFIX = "-auth-token";
+
+async function getCookieStore() {
+  return cookies();
+}
+
+export async function hasSupabaseAuthCookie() {
+  const cookieStore = await getCookieStore();
+  return cookieStore
+    .getAll()
+    .some(({ name }) => name.startsWith("sb-") && name.includes(SUPABASE_AUTH_COOKIE_SUFFIX));
+}
+
 export async function createClient() {
-  const cookieStore = await cookies();
+  const cookieStore = await getCookieStore();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 

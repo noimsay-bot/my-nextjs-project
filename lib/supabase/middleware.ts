@@ -1,7 +1,7 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const SUPABASE_AUTH_COOKIE_SUFFIX = "-auth-token";
+const PROTECTED_ROUTE_PREFIXES = ["/admin", "/review", "/schedule", "/submissions", "/team-lead", "/vacation"] as const;
 
 function hasSupabaseAuthCookie(request: NextRequest) {
   return request.cookies
@@ -9,52 +9,51 @@ function hasSupabaseAuthCookie(request: NextRequest) {
     .some(({ name }) => name.startsWith("sb-") && name.includes(SUPABASE_AUTH_COOKIE_SUFFIX));
 }
 
+function authLog(stage: string, details: Record<string, unknown>) {
+  console.info(`[auth] ${stage}`, details);
+}
+
+function isProtectedRoute(pathname: string) {
+  return PROTECTED_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function buildLoginRedirect(request: NextRequest, pathname: string, reason?: string) {
+  const loginUrl = new URL("/login", request.url);
+  loginUrl.searchParams.set("next", pathname);
+  if (reason) {
+    loginUrl.searchParams.set("reason", reason);
+  }
+  return NextResponse.redirect(loginUrl);
+}
+
 export async function updateSession(request: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const pathname = request.nextUrl.pathname;
+  const hasAuthCookie = hasSupabaseAuthCookie(request);
 
-  if (!url || !publishableKey) {
-    return NextResponse.next({
-      request,
-    });
-  }
-
-  if (!hasSupabaseAuthCookie(request)) {
-    return NextResponse.next({
-      request,
-    });
-  }
-
-  let response = NextResponse.next({
-    request,
+  authLog("middleware.entry", {
+    pathname,
+    hasAuthCookie,
   });
 
-  const supabase = createServerClient(url, publishableKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => {
-          request.cookies.set(name, value);
-        });
+  if (!isProtectedRoute(pathname)) {
+    authLog("middleware.next", {
+      pathname,
+      reason: "unprotected-route",
+    });
+    return NextResponse.next({ request });
+  }
 
-        response = NextResponse.next({
-          request,
-        });
+  if (!hasAuthCookie) {
+    authLog("middleware.redirect", {
+      pathname,
+      reason: "missing-session-cookie",
+    });
+    return buildLoginRedirect(request, pathname);
+  }
 
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
-        });
-      },
-    },
+  authLog("middleware.next", {
+    pathname,
+    reason: "session-cookie-present",
   });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  void user;
-
-  return response;
+  return NextResponse.next({ request });
 }

@@ -486,7 +486,6 @@ export function ScheduleApp() {
 
   const loadPublishedItems = async () => {
     try {
-      await refreshTeamLeadState();
       await refreshPublishedSchedules();
     } finally {
       setPublishedItems(
@@ -1102,6 +1101,17 @@ export function ScheduleApp() {
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
   };
 
+  const handleScheduleMonthContextChange = (nextYear: number, nextMonth: number) => {
+    const nextMonthKey = getMonthKey(nextYear, nextMonth);
+    setState((current) => ({
+      ...current,
+      year: nextYear,
+      month: nextMonth,
+      extraHolidays: "",
+    }));
+    setVisibleMonthKey(nextMonthKey);
+  };
+
   const onRebalance = () => {
     if (!visibleSchedule) return;
     if (
@@ -1268,7 +1278,7 @@ export function ScheduleApp() {
                 className="field-select"
                 disabled={isEditingDate}
                 value={state.year}
-                onChange={(e) => applyScheduleTargetMonth(Number(e.target.value), state.month)}
+                onChange={(e) => handleScheduleMonthContextChange(Number(e.target.value), state.month)}
               >
                 {SCHEDULE_YEARS.map((year) => (
                   <option key={year} value={year}>
@@ -1283,7 +1293,7 @@ export function ScheduleApp() {
                 className="field-select"
                 disabled={isEditingDate}
                 value={state.month}
-                onChange={(e) => applyScheduleTargetMonth(state.year, Number(e.target.value))}
+                onChange={(e) => handleScheduleMonthContextChange(state.year, Number(e.target.value))}
               >
                 {SCHEDULE_MONTHS.map((month) => (
                   <option key={month} value={month}>

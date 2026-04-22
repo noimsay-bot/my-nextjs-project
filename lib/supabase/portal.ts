@@ -1,15 +1,18 @@
-import type { SessionUser } from "@/lib/auth/storage";
+import {
+  getSession,
+  getSessionAsync,
+  type SessionUser,
+} from "@/lib/auth/storage";
+import { createClient as createPortalBrowserClient } from "@/lib/supabase/client";
 
 const SUPABASE_SCHEMA_GUIDE = "Supabase SQL Editor에서 최신 supabase/schema.sql을 다시 실행해 주세요.";
 
 export async function getPortalSession(): Promise<SessionUser | null> {
-  const authModule = await import("@/lib/auth/storage");
-  return authModule.getSession() ?? authModule.getSessionAsync();
+  return getSession() ?? getSessionAsync();
 }
 
 export async function getPortalSupabaseClient() {
-  const supabaseModule = await import("@/lib/supabase/client");
-  return supabaseModule.createClient();
+  return createPortalBrowserClient();
 }
 
 export async function requireApprovedPortalSession() {
@@ -48,6 +51,30 @@ export function isSupabaseSchemaMissingError(error: unknown) {
     combined.includes("schema cache") ||
     (combined.includes('relation "public.') && combined.includes("does not exist")) ||
     (combined.includes("could not find the table") && combined.includes("public."))
+  );
+}
+
+export function isSupabaseRequestTimeoutError(error: unknown) {
+  const { code, message, details, hint } = readSupabaseErrorParts(error);
+  const combined = `${code}\n${message}\n${details}\n${hint}`.toLowerCase();
+
+  return (
+    combined.includes("upstream request timeout") ||
+    combined.includes("request timeout") ||
+    combined.includes("statement timeout")
+  );
+}
+
+export function isSupabaseRequestFailureError(error: unknown) {
+  const { code, message, details, hint } = readSupabaseErrorParts(error);
+  const combined = `${code}\n${message}\n${details}\n${hint}`.toLowerCase();
+
+  return (
+    combined.includes("failed to fetch") ||
+    combined.includes("fetch failed") ||
+    combined.includes("network error") ||
+    combined.includes("load failed") ||
+    combined.includes("fetch error")
   );
 }
 

@@ -225,7 +225,7 @@ function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
   });
 }
 
-function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], generalTeamPeople: string[]) {
+export function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], generalTeamPeople: string[]) {
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   syncDayVacationsFromState(state, orderedDays);
   let previousNight: string[] = [];
@@ -271,9 +271,9 @@ function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], gener
       if (vacationName) assignedNames.add(vacationName);
     });
 
-    const offSet = new Set((state.offPeople ?? []).map((name) => name.trim()).filter(Boolean));
+    const globalOffSet = new Set((state.offPeople ?? []).map((name) => name.trim()).filter(Boolean));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !offSet.has(name),
+      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !globalOffSet.has(name),
     );
 
     if (nextGeneralNames.length > 0) {
@@ -967,6 +967,8 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
   const nextMonthKey = getMonthKey(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1);
   const nextMonthStartNames = buildMonthStartNamesFromPointers(nextState, pointers);
 
+  syncGeneralAssignments(nextState, days, nextState.generalTeamPeople);
+
   const generated: GeneratedSchedule = {
     year: nextState.year,
     month: nextState.month,
@@ -1608,6 +1610,7 @@ export function openSnapshot(state: ScheduleState, snapshotId: string) {
 
 function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule) {
   const normalizedGenerated = normalizeGeneratedSchedule(generated);
+  syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople);
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
   normalizedGenerated.days.forEach((day) => {

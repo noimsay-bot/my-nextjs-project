@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  getLastAuthCheckStatus,
   getSession,
   hasAdminAccess,
+  hasSupabaseSessionCookie,
   initializeAuth,
+  primeSession,
   subscribeToAuth,
   type SessionUser,
 } from "@/lib/auth/storage";
@@ -14,6 +17,10 @@ import {
   subscribeToPortalAccessState,
 } from "@/lib/portal/access-state";
 import { hasSubmittedReviewLock } from "@/lib/portal/data";
+
+function authLog(stage: string, details: Record<string, unknown>) {
+  console.info(`[auth] ${stage}`, details);
+}
 
 function hasAccess(
   pathname: string,
@@ -85,15 +92,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const needsVacationAccessCheck = pathname === "/vacation";
   const needsSubmissionAccessCheck = pathname.startsWith("/submissions");
-  const [session, setSession] = useState<SessionUser | null>(null);
-  const [checkingSession, setCheckingSession] = useState(true);
+  const initialSession = getSession();
+  const initialCookieHint = hasSupabaseSessionCookie();
+  const [session, setSession] = useState<SessionUser | null>(initialSession);
+  const [checkingSession, setCheckingSession] = useState(!initialSession && initialCookieHint);
+  const [hadSessionCookie, setHadSessionCookie] = useState(initialCookieHint);
+  const [recoveryAttempted, setRecoveryAttempted] = useState(false);
   const [vacationRequestOpen, setVacationRequestOpen] = useState<boolean | null>(() => {
     const accessState = getPortalAccessState();
-    return needsVacationAccessCheck ? null : accessState.vacationRequestOpen;
+    return accessState.vacationRequestOpen;
   });
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState<boolean | null>(() => {
     const accessState = getPortalAccessState();
-    return needsSubmissionAccessCheck ? null : accessState.submissionAccessOpen;
+    return accessState.submissionAccessOpen;
   });
 
   useEffect(() => {
@@ -128,35 +139,101 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    setCheckingSession(true);
+    const cachedSession = getSession();
+    const cookieHint = hasSupabaseSessionCookie();
 
-    void initializeAuth().then((nextSession) => {
-      if (cancelled) return;
-      setSession(nextSession);
+    setHadSessionCookie(cookieHint);
+
+    if (cachedSession) {
+      primeSession(cachedSession);
+      setSession(cachedSession);
       setCheckingSession(false);
+      setRecoveryAttempted(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!cookieHint) {
+      setSession(null);
+      setCheckingSession(false);
+      setRecoveryAttempted(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setCheckingSession(true);
+    setRecoveryAttempted(true);
+    authLog("session.check.start", {
+      source: "auth-gate",
+      pathname,
+      hasSessionCookie: cookieHint,
     });
+
+    void initializeAuth()
+      .then((nextSession) => {
+        if (cancelled) return;
+        setSession(nextSession);
+        setCheckingSession(false);
+        authLog("session.check.complete", {
+          source: "auth-gate",
+          pathname,
+          status: nextSession ? "ok" : getLastAuthCheckStatus(),
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("인증 게이트 초기화에 실패했습니다.", error);
+        setSession(getSession());
+        setCheckingSession(false);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pathname]);
+
+  const authPending = checkingSession && !session;
 
   useEffect(() => {
-    if (checkingSession) {
+    if (authPending) {
       return;
     }
 
     if (!session) {
-      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+      const authStatus = getLastAuthCheckStatus();
+      const reason =
+        hadSessionCookie && recoveryAttempted && (authStatus === "timeout" || authStatus === "error")
+          ? "supabase-unavailable"
+          : null;
+
+      authLog("redirect", {
+        pathname,
+        reason: reason ?? "missing-session",
+      });
+
+      const loginUrl = reason
+        ? `/login?reason=${reason}&next=${encodeURIComponent(pathname)}`
+        : `/login?next=${encodeURIComponent(pathname)}`;
+      router.replace(loginUrl);
       return;
     }
 
     if (!session.approved) {
+      authLog("redirect", {
+        pathname,
+        reason: "approval",
+      });
       router.replace("/login?reason=approval");
       return;
     }
 
     if (session.mustChangePassword) {
+      authLog("redirect", {
+        pathname,
+        reason: "reset-password",
+      });
       router.replace(`/login?mode=reset-password&next=${encodeURIComponent(pathname)}`);
       return;
     }
@@ -170,14 +247,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)) {
+      authLog("redirect", {
+        pathname,
+        reason: "forbidden",
+      });
       router.replace("/");
-      return;
     }
   }, [
-    checkingSession,
+    authPending,
+    hadSessionCookie,
     needsSubmissionAccessCheck,
     needsVacationAccessCheck,
     pathname,
+    recoveryAttempted,
     router,
     session,
     submissionAccessOpen,
@@ -185,12 +267,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   ]);
 
   if (
-    checkingSession ||
+    authPending ||
     ((session?.role === "member" || session?.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) ||
     (session?.role === "member" && needsSubmissionAccessCheck && submissionAccessOpen === null)
   ) {
     return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   }
+
   if (
     !session ||
     !session.approved ||
@@ -199,5 +282,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   ) {
     return null;
   }
+
   return <>{children}</>;
 }

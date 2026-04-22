@@ -9,11 +9,13 @@ import {
   ScheduleState,
 } from "@/lib/schedule/types";
 import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
-import { sanitizeScheduleState } from "@/lib/schedule/engine";
+import { sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import {
   getPortalSession,
   getPortalSupabaseClient,
   getSupabaseStorageErrorMessage,
+  isSupabaseRequestFailureError,
+  isSupabaseRequestTimeoutError,
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
 
@@ -244,12 +246,11 @@ function syncGeneralAssignmentsForSchedules(
   currentState: ScheduleState,
   schedules: GeneratedSchedule[],
 ) {
-  const syncedState = sanitizeScheduleState({
-    ...currentState,
-    generated: null,
-    generatedHistory: schedules.map((schedule) => cloneValue(schedule)),
+  return schedules.map((schedule) => {
+    const syncedSchedule = cloneValue(schedule);
+    syncGeneralAssignments(currentState, syncedSchedule.days, currentState.generalTeamPeople);
+    return syncedSchedule;
   });
-  return syncedState.generatedHistory;
 }
 
 function rotateAssignmentsAcrossSchedules(
@@ -315,10 +316,12 @@ async function applyRequestToScheduleState(request: ScheduleChangeRequest) {
 
   const generatedHistory = current.generatedHistory.map((item) => scheduleMap.get(item.monthKey) ?? item);
   const generated = current.generated ? scheduleMap.get(current.generated.monthKey) ?? current.generated : null;
+  const syncedGeneratedHistory = syncGeneralAssignmentsForSchedules(current, generatedHistory);
+  const syncedGenerated = generated ? syncGeneralAssignmentsForSchedules(current, [generated])[0] : null;
   const nextState = {
     ...current,
-    generated,
-    generatedHistory,
+    generated: syncedGenerated,
+    generatedHistory: syncedGeneratedHistory,
   } satisfies ScheduleState;
   try {
     await saveScheduleState(nextState);
@@ -451,6 +454,12 @@ export async function refreshScheduleChangeRequests() {
         requestCache = [];
         emitChangeRequestEvent();
         return [];
+      }
+
+      if (isSupabaseRequestTimeoutError(error) || isSupabaseRequestFailureError(error)) {
+        console.warn("근무 변경 요청을 불러오지 못했습니다. 기존 캐시를 유지합니다.", error);
+        emitChangeRequestEvent();
+        return getScheduleChangeRequests();
       }
 
       throw new Error(error.message);
