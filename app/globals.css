@@ -3227,9 +3227,11 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     top: 65px;
     left: 0;
     right: auto;
-    width: 25px;
-    min-width: 25px;
-    min-height: 40px;
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 100px !important;
+    min-height: 100px !important;
+    padding: 0 !important;
     background: linear-gradient(180deg, var(--bg-start), var(--bg-mid));
     border: 1px solid var(--line);
     color: var(--text);
