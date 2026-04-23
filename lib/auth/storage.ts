@@ -58,6 +58,7 @@ type AuthListener = (session: SessionUser | null) => void;
 type BrowserSupabaseClient = ReturnType<typeof createSupabaseBrowserClient>;
 type BrowserRealtimeChannel = ReturnType<BrowserSupabaseClient["channel"]>;
 type AuthCheckStatus = "idle" | "ok" | "missing_session" | "timeout" | "error";
+type ProfileFetchStatus = "ok" | "empty" | "timeout" | "error";
 
 const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
 const USERS_CACHE_KEY = "j-special-force-users-cache-v2";
@@ -66,6 +67,7 @@ const LOGIN_EMAIL_CACHE_KEY = "j-special-force-login-email-cache-v1";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
 const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 const AUTH_REQUEST_TIMEOUT_MS = 4_000;
+const AUTH_FAILURE_COOLDOWN_MS = 10_000;
 const APPROVAL_REQUIRED_MESSAGE = "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.";
 const PROFILE_SYNC_FAILED_MESSAGE = "계정 정보를 확인하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.";
 const AUTH_TIMEOUT = Symbol("auth-timeout");
@@ -85,8 +87,14 @@ let cachedReviewAccessProfileIds: string[] | null = null;
 let lastAuthBlockReason: "approval" | "profile_sync" | null = null;
 let realtimeChannelSequence = 0;
 let lastAuthCheckStatus: AuthCheckStatus = cachedSession ? "ok" : "idle";
+let lastAuthFailureAt = 0;
+let sessionSyncPromise: Promise<SessionUser | null> | null = null;
+let sessionSyncPromiseUserId: string | null = null;
 
 function authLog(stage: string, details?: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
   if (details) {
     console.info(`[auth] ${stage}`, details);
     return;
@@ -97,6 +105,21 @@ function authLog(stage: string, details?: Record<string, unknown>) {
 
 function setLastAuthCheckStatus(status: AuthCheckStatus) {
   lastAuthCheckStatus = status;
+}
+
+function markAuthCheckHealthy() {
+  lastAuthFailureAt = 0;
+  setLastAuthCheckStatus("ok");
+}
+
+function markAuthCheckFailure(status: Exclude<AuthCheckStatus, "idle" | "ok">) {
+  lastAuthFailureAt = Date.now();
+  setLastAuthCheckStatus(status);
+}
+
+function shouldShortCircuitAuthRetry() {
+  if (!lastAuthFailureAt) return false;
+  return Date.now() - lastAuthFailureAt < AUTH_FAILURE_COOLDOWN_MS;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -440,20 +463,28 @@ async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean })
 
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from("team_lead_state")
-      .select("state")
-      .eq("key", REVIEW_ACCESS_STATE_KEY)
-      .maybeSingle<{ state: unknown }>();
+    const result = await promiseWithTimeout(
+      supabase
+        .from("team_lead_state")
+        .select("state")
+        .eq("key", REVIEW_ACCESS_STATE_KEY)
+        .maybeSingle<{ state: unknown }>(),
+    );
+
+    if (result === AUTH_TIMEOUT) {
+      return cachedReviewAccessProfileIds ?? [];
+    }
+
+    const { data, error } = result;
 
     if (error || !data) {
-      return [] as string[];
+      return cachedReviewAccessProfileIds ?? [];
     }
 
     cachedReviewAccessProfileIds = normalizeReviewAccessState(data.state);
     return cachedReviewAccessProfileIds;
   } catch {
-    return [] as string[];
+    return cachedReviewAccessProfileIds ?? [];
   }
 }
 
@@ -533,7 +564,7 @@ function getSiteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 }
 
-async function fetchProfile(userId: string) {
+async function fetchProfileResult(userId: string): Promise<{ profile: ProfileRow | null; status: ProfileFetchStatus }> {
   authLog("profile.fetch.start", { userId });
   const supabase = getSupabaseClient();
   const result = await promiseWithTimeout(
@@ -541,17 +572,22 @@ async function fetchProfile(userId: string) {
   );
   if (result === AUTH_TIMEOUT) {
     authLog("profile.fetch.complete", { userId, status: "timeout" });
-    return null;
+    return { profile: null, status: "timeout" };
   }
   const { data, error } = result;
 
   if (error) {
     authLog("profile.fetch.complete", { userId, status: "error", message: error.message });
-    return null;
+    return { profile: null, status: "error" };
   }
 
   authLog("profile.fetch.complete", { userId, status: data ? "ok" : "empty" });
-  return data;
+  return { profile: data ?? null, status: data ? "ok" : "empty" };
+}
+
+async function fetchProfile(userId: string) {
+  const result = await fetchProfileResult(userId);
+  return result.profile;
 }
 
 function buildProfileInsertPayload(user: User) {
@@ -612,15 +648,21 @@ async function repairProfileViaApi() {
 }
 
 async function ensureProfile(user: User) {
-  const existing = await fetchProfile(user.id);
-  if (existing) return existing;
+  const existing = await fetchProfileResult(user.id);
+  if (existing.profile) return existing.profile;
+  if (existing.status !== "empty") {
+    return null;
+  }
 
   const inserted = await insertOwnProfile(user);
   if (inserted) return inserted;
 
-  const afterInsert = await fetchProfile(user.id);
-  if (afterInsert) {
-    return afterInsert;
+  const afterInsert = await fetchProfileResult(user.id);
+  if (afterInsert.profile) {
+    return afterInsert.profile;
+  }
+  if (afterInsert.status !== "empty") {
+    return null;
   }
 
   const repaired = await repairProfileViaApi();
@@ -641,6 +683,10 @@ async function syncSessionFromUser(user: User, options?: { force?: boolean }) {
     userId: user.id,
     force,
   });
+  if (sessionSyncPromise && sessionSyncPromiseUserId === user.id) {
+    return sessionSyncPromise;
+  }
+
   if (canReuseCachedSession(user, force)) {
     syncReviewAccessSubscription();
     syncProfileSubscription(user.id);
@@ -651,54 +697,63 @@ async function syncSessionFromUser(user: User, options?: { force?: boolean }) {
     return cachedSession;
   }
 
-  const profile = await ensureProfile(user);
-  if (profile && !profile.approved) {
-    lastAuthBlockReason = "approval";
-    authLog("session.sync.complete", {
-      userId: user.id,
-      status: "approval_required",
-    });
-    await forceLogoutForUnapprovedUser();
-    return null;
-  }
-  if (!profile) {
-    if (cachedSession?.id === user.id) {
-      syncReviewAccessSubscription();
-      syncProfileSubscription(user.id);
+  sessionSyncPromiseUserId = user.id;
+  sessionSyncPromise = (async () => {
+    const profile = await ensureProfile(user);
+    if (profile && !profile.approved) {
+      lastAuthBlockReason = "approval";
       authLog("session.sync.complete", {
         userId: user.id,
-        status: "kept-cached-session",
+        status: "approval_required",
       });
-      return cachedSession;
+      await forceLogoutForUnapprovedUser();
+      return null;
+    }
+    if (!profile) {
+      if (cachedSession?.id === user.id) {
+        syncReviewAccessSubscription();
+        syncProfileSubscription(user.id);
+        authLog("session.sync.complete", {
+          userId: user.id,
+          status: "kept-cached-session",
+        });
+        return cachedSession;
+      }
+
+      lastAuthBlockReason = "profile_sync";
+      authLog("session.sync.complete", {
+        userId: user.id,
+        status: "profile_sync_failed",
+      });
+      await forceLogoutForUnapprovedUser();
+      return null;
     }
 
-    lastAuthBlockReason = "profile_sync";
+    const grantedProfileIds = await fetchGrantedReviewAccessProfileIds({ force });
+    const mustChangePassword = readMustChangePassword(user);
+    const nextSession = profileToSession(
+      profile,
+      hasIntrinsicReviewAccess(profile.role) || grantedProfileIds.includes(profile.id),
+      mustChangePassword,
+    );
+    lastAuthBlockReason = null;
+    setCachedSession(nextSession);
+    markAuthCheckHealthy();
+    syncReviewAccessSubscription();
+    syncProfileSubscription(user.id);
     authLog("session.sync.complete", {
       userId: user.id,
-      status: "profile_sync_failed",
+      status: "ok",
+      approved: nextSession.approved,
+      role: nextSession.role,
     });
-    await forceLogoutForUnapprovedUser();
-    return null;
-  }
-
-  const grantedProfileIds = await fetchGrantedReviewAccessProfileIds({ force });
-  const mustChangePassword = readMustChangePassword(user);
-  const nextSession = profileToSession(
-    profile,
-    hasIntrinsicReviewAccess(profile.role) || grantedProfileIds.includes(profile.id),
-    mustChangePassword,
-  );
-  lastAuthBlockReason = null;
-  setCachedSession(nextSession);
-  syncReviewAccessSubscription();
-  syncProfileSubscription(user.id);
-  authLog("session.sync.complete", {
-    userId: user.id,
-    status: "ok",
-    approved: nextSession.approved,
-    role: nextSession.role,
+    return nextSession;
+  })().finally(() => {
+    sessionSyncPromise = null;
+    sessionSyncPromiseUserId = null;
   });
-  return nextSession;
+
+  return sessionSyncPromise;
 }
 
 async function buildBlockedAuthMessage(userId: string) {
@@ -828,7 +883,7 @@ export async function initializeAuth() {
     });
     initAuthListener();
     if (cachedSession) {
-      setLastAuthCheckStatus("ok");
+      markAuthCheckHealthy();
       authLog("session.check.complete", {
         source: "initializeAuth",
         status: "cached-session",
@@ -837,12 +892,21 @@ export async function initializeAuth() {
     }
 
     if (!hasSupabaseSessionCookie()) {
-      setLastAuthCheckStatus("missing_session");
+      markAuthCheckFailure("missing_session");
       authLog("session.check.complete", {
         source: "initializeAuth",
         status: "missing-session-cookie",
       });
       return null;
+    }
+
+    if (shouldShortCircuitAuthRetry()) {
+      authLog("session.check.complete", {
+        source: "initializeAuth",
+        status: lastAuthCheckStatus,
+        reason: "recent-failure-cooldown",
+      });
+      return cachedSession;
     }
 
     if (initializePromise) {
@@ -861,7 +925,7 @@ export async function initializeAuth() {
     return nextSession;
   } catch (error) {
     console.warn("인증 초기화에 실패했습니다.", error);
-    setLastAuthCheckStatus("error");
+    markAuthCheckFailure("error");
     if (isSupabaseEnvError(error)) {
       setCachedSession(null);
       return null;
@@ -873,6 +937,14 @@ export async function initializeAuth() {
 export async function refreshSession(options?: { force?: boolean }) {
   if (typeof window === "undefined") return null;
   if (refreshPromise) return refreshPromise;
+  if (shouldShortCircuitAuthRetry()) {
+    authLog("session.check.complete", {
+      source: "refreshSession",
+      status: lastAuthCheckStatus,
+      reason: "recent-failure-cooldown",
+    });
+    return cachedSession;
+  }
 
   refreshPromise = (async () => {
     try {
@@ -884,7 +956,7 @@ export async function refreshSession(options?: { force?: boolean }) {
       const supabase = getSupabaseClient();
       const sessionResult = await promiseWithTimeout(supabase.auth.getSession());
       if (sessionResult === AUTH_TIMEOUT) {
-        setLastAuthCheckStatus("timeout");
+        markAuthCheckFailure("timeout");
         authLog("session.check.complete", {
           source: "refreshSession",
           status: "timeout",
@@ -897,19 +969,28 @@ export async function refreshSession(options?: { force?: boolean }) {
       } = sessionResult;
 
       const user = session?.user ?? null;
-      if (error || !user) {
-        setLastAuthCheckStatus("missing_session");
+      if (error) {
+        markAuthCheckFailure("error");
+        authLog("session.check.complete", {
+          source: "refreshSession",
+          status: "error",
+          message: error.message,
+        });
+        return cachedSession;
+      }
+
+      if (!user) {
+        markAuthCheckFailure("missing_session");
         authLog("session.check.complete", {
           source: "refreshSession",
           status: "missing_session",
-          hasError: Boolean(error),
         });
         return cachedSession;
       }
 
       const syncedSession = await promiseWithTimeout(syncSessionFromUser(user, { force: options?.force ?? true }));
       if (syncedSession === AUTH_TIMEOUT) {
-        setLastAuthCheckStatus("timeout");
+        markAuthCheckFailure("timeout");
         authLog("session.check.complete", {
           source: "refreshSession",
           status: "timeout",
@@ -917,7 +998,11 @@ export async function refreshSession(options?: { force?: boolean }) {
         });
         return cachedSession;
       }
-      setLastAuthCheckStatus(syncedSession ? "ok" : "error");
+      if (syncedSession) {
+        markAuthCheckHealthy();
+      } else {
+        markAuthCheckFailure("error");
+      }
       authLog("session.check.complete", {
         source: "refreshSession",
         status: syncedSession ? "ok" : "error",
@@ -925,7 +1010,7 @@ export async function refreshSession(options?: { force?: boolean }) {
       return syncedSession;
     } catch (error) {
       console.warn("세션 확인에 실패했습니다.", error);
-      setLastAuthCheckStatus("error");
+      markAuthCheckFailure("error");
       authLog("session.check.complete", {
         source: "refreshSession",
         status: "error",
@@ -960,7 +1045,11 @@ export function getLastAuthCheckStatus() {
 
 export function primeSession(session: SessionUser | null) {
   setCachedSession(session);
-  setLastAuthCheckStatus(session ? "ok" : "missing_session");
+  if (session) {
+    markAuthCheckHealthy();
+    return;
+  }
+  markAuthCheckFailure("missing_session");
 }
 
 export function setRoleExperience(role: UserRole | null) {

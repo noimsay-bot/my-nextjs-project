@@ -23,9 +23,11 @@ let portalAccessState: PortalAccessState = {
 let portalAccessListenersInitialized = false;
 let portalAccessRefreshPromise: Promise<PortalAccessState> | null = null;
 let portalAccessLastRefreshedAt = 0;
+let portalAccessLastFailureAt = 0;
 let portalAccessLoaded = false;
 const portalAccessListeners = new Set<PortalAccessListener>();
 const PORTAL_ACCESS_REFRESH_TTL_MS = 60_000;
+const PORTAL_ACCESS_FAILURE_COOLDOWN_MS = 10_000;
 
 function readPortalAccessState(): PortalAccessState {
   return {
@@ -56,6 +58,9 @@ function initPortalAccessListeners() {
   if (portalAccessListenersInitialized || typeof window === "undefined") return;
 
   const handleFocus = () => {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return;
+    }
     void refreshPortalAccessState();
   };
 
@@ -71,6 +76,9 @@ export function getPortalAccessState() {
 }
 
 function shouldRefreshPortalAccessState() {
+  if (portalAccessLastFailureAt && Date.now() - portalAccessLastFailureAt < PORTAL_ACCESS_FAILURE_COOLDOWN_MS) {
+    return false;
+  }
   if (!portalAccessLoaded) return true;
   return Date.now() - portalAccessLastRefreshedAt >= PORTAL_ACCESS_REFRESH_TTL_MS;
 }
@@ -88,6 +96,15 @@ export async function refreshPortalAccessState(options?: { force?: boolean }) {
     .then(() => {
       portalAccessLoaded = true;
       portalAccessLastRefreshedAt = Date.now();
+      portalAccessLastFailureAt = 0;
+      return syncPortalAccessState();
+    })
+    .catch((error) => {
+      portalAccessLastFailureAt = Date.now();
+      console.warn(
+        "포털 접근 상태를 새로고침하지 못했습니다.",
+        error instanceof Error ? error.message : String(error),
+      );
       return syncPortalAccessState();
     })
     .finally(() => {

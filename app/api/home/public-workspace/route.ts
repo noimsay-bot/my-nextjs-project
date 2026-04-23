@@ -4,6 +4,8 @@ import type { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 
+const HOME_PUBLIC_WORKSPACE_TIMEOUT_MS = 4_000;
+
 type AppRole = "member" | "reviewer" | "team_lead" | "admin" | "desk";
 type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
 type AssignmentTripTagPhase = "" | "departure" | "ongoing" | "return";
@@ -181,6 +183,24 @@ interface TripAggregateBuilder {
   dateKeySet: Set<string>;
   schedules: string[];
   scheduleSet: Set<string>;
+}
+
+function withTimeout<T>(promise: PromiseLike<T>, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, HOME_PUBLIC_WORKSPACE_TIMEOUT_MS);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
 }
 
 function isManagerRole(role: AppRole) {
@@ -755,44 +775,51 @@ export async function GET(request: Request) {
     const {
       data: { user },
       error: userError,
-    } = await supabase.auth.getUser();
+    } = await withTimeout(supabase.auth.getUser(), "로그인 세션 확인이 지연되고 있습니다.");
 
     if (userError || !user) {
       return NextResponse.json({ message: "로그인 세션을 확인하지 못했습니다." }, { status: 401 });
     }
 
     const admin = createAdminClient();
-    const { data: profile, error: profileError } = await admin
-      .from("profiles")
-      .select("id, role, approved")
-      .eq("id", user.id)
-      .maybeSingle<ProfileRow>();
+    const monthKeys = includeTrips ? getMonthKeysAroundToday() : [];
+    const { data: profile, error: profileError } = await withTimeout(
+      admin
+        .from("profiles")
+        .select("id, role, approved")
+        .eq("id", user.id)
+        .maybeSingle<ProfileRow>(),
+      "프로필 확인이 지연되고 있습니다.",
+    );
 
     if (profileError || !profile || !profile.approved) {
       return NextResponse.json({ message: "승인된 계정이 필요합니다." }, { status: 403 });
     }
 
-    const [{ data: noticeRow }, { data: scheduleRows }, { data: assignmentRows }] = await Promise.all([
-      admin
-        .from("home_popup_notice_state")
-        .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
-        .eq("key", "active")
-        .maybeSingle<HomePopupNoticeStateRow>(),
-      includeTrips
-        ? admin
-          .from("schedule_months")
-          .select("month_key, draft_state, published_state")
-          .in("month_key", getMonthKeysAroundToday())
-          .returns<ScheduleMonthRow[]>()
-        : Promise.resolve({ data: [] as ScheduleMonthRow[] }),
-      includeTrips
-        ? admin
-          .from("team_lead_schedule_assignments")
-          .select("month_key, entries, rows")
-          .in("month_key", getMonthKeysAroundToday())
-          .returns<TeamLeadScheduleAssignmentRow[]>()
-        : Promise.resolve({ data: [] as TeamLeadScheduleAssignmentRow[] }),
-    ]);
+    const [{ data: noticeRow }, { data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
+      Promise.all([
+        admin
+          .from("home_popup_notice_state")
+          .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
+          .eq("key", "active")
+          .maybeSingle<HomePopupNoticeStateRow>(),
+        includeTrips
+          ? admin
+            .from("schedule_months")
+            .select("month_key, draft_state, published_state")
+            .in("month_key", monthKeys)
+            .returns<ScheduleMonthRow[]>()
+          : Promise.resolve({ data: [] as ScheduleMonthRow[] }),
+        includeTrips
+          ? admin
+            .from("team_lead_schedule_assignments")
+            .select("month_key, entries, rows")
+            .in("month_key", monthKeys)
+            .returns<TeamLeadScheduleAssignmentRow[]>()
+          : Promise.resolve({ data: [] as TeamLeadScheduleAssignmentRow[] }),
+      ]),
+      "홈 워크스페이스 조회가 지연되고 있습니다.",
+    );
 
     const workspace = parseStorePayload(noticeRow ?? null);
     const activePopup = getActivePopupNotice(workspace.notices);
@@ -800,21 +827,27 @@ export async function GET(request: Request) {
     let applications: HomePopupNoticeApplication[] = [];
 
     if (activePopup?.applicationEnabled) {
-      const { data: ownApplicationRow } = await admin
-        .from("home_popup_notice_applications")
-        .select("id")
-        .eq("notice_id", activePopup.id)
-        .eq("applicant_id", profile.id)
-        .maybeSingle<{ id: string }>();
+      const { data: ownApplicationRow } = await withTimeout(
+        admin
+          .from("home_popup_notice_applications")
+          .select("id")
+          .eq("notice_id", activePopup.id)
+          .eq("applicant_id", profile.id)
+          .maybeSingle<{ id: string }>(),
+        "홈 신청 상태 확인이 지연되고 있습니다.",
+      );
       ownApplied = Boolean(ownApplicationRow?.id);
 
       if (isManagerRole(profile.role)) {
-        const { data: applicationRows } = await admin
-          .from("home_popup_notice_applications")
-          .select("id, notice_id, applicant_id, applicant_name, created_at")
-          .eq("notice_id", activePopup.id)
-          .order("created_at", { ascending: false })
-          .returns<HomePopupNoticeApplicationRow[]>();
+        const { data: applicationRows } = await withTimeout(
+          admin
+            .from("home_popup_notice_applications")
+            .select("id, notice_id, applicant_id, applicant_name, created_at")
+            .eq("notice_id", activePopup.id)
+            .order("created_at", { ascending: false })
+            .returns<HomePopupNoticeApplicationRow[]>(),
+          "홈 신청 목록 조회가 지연되고 있습니다.",
+        );
         applications = (applicationRows ?? []).map(rowToApplication);
       }
     }
@@ -834,7 +867,7 @@ export async function GET(request: Request) {
       {
         message: error instanceof Error ? error.message : "공개 홈 데이터를 불러오지 못했습니다.",
       },
-      { status: 500 },
+      { status: error instanceof Error && error.message.includes("지연") ? 503 : 500 },
     );
   }
 }

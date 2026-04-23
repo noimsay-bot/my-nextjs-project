@@ -19,6 +19,9 @@ import {
 import { hasSubmittedReviewLock } from "@/lib/portal/data";
 
 function authLog(stage: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
   console.info(`[auth] ${stage}`, details);
 }
 

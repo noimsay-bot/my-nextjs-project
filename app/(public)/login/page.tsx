@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  getLastAuthCheckStatus,
   getSession,
   hasSupabaseSessionCookie,
   getSupabaseSetupMessage,
@@ -53,6 +54,7 @@ export default function LoginPage() {
   const [forgotLoginId, setForgotLoginId] = useState("");
   const [passwordForm, setPasswordForm] = useState({ password: "", confirm: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [recoveringSession, setRecoveringSession] = useState(false);
 
   const forcedMode = useMemo(() => {
     return queryState.mode === "reset-password" ? "reset-password" : null;
@@ -60,6 +62,10 @@ export default function LoginPage() {
   const nextPath = useMemo(() => normalizeNextPath(queryState.next), [queryState.next]);
   const approvalReason = queryState.reason;
   const passwordResetLocked = forcedMode === "reset-password" || Boolean(session?.mustChangePassword);
+  const shouldShowSessionRecoveryButton =
+    !session &&
+    supabaseConfigured &&
+    (recoveringSession || approvalReason === "supabase-unavailable" || hasSupabaseSessionCookie());
 
   useEffect(() => {
     let mounted = true;
@@ -85,10 +91,26 @@ export default function LoginPage() {
     const shouldRecoverSession = Boolean(cachedSession) || hasSupabaseSessionCookie();
 
     if (shouldRecoverSession) {
-      void initializeAuth().then((nextSession) => {
-        if (!mounted) return;
-        setSession(nextSession);
-      });
+      setRecoveringSession(true);
+      void initializeAuth()
+        .then((nextSession) => {
+          if (!mounted) return;
+          setSession(nextSession);
+          if (!nextSession) {
+            const authStatus = getLastAuthCheckStatus();
+            if (authStatus === "timeout" || authStatus === "error") {
+              setMessage("현재 인증 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도하거나 아래 버튼으로 세션을 다시 확인해 주세요.");
+            }
+          }
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setMessage("세션을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        })
+        .finally(() => {
+          if (!mounted) return;
+          setRecoveringSession(false);
+        });
     }
 
     const unsubscribe = subscribeToAuth((nextSession) => {
@@ -229,6 +251,26 @@ export default function LoginPage() {
     if (result.ok) {
       router.replace(nextPath);
     }
+  }
+
+  async function handleRetrySessionRecovery() {
+    setRecoveringSession(true);
+    const nextSession = await initializeAuth().catch(() => null);
+    setRecoveringSession(false);
+    setSession(nextSession);
+
+    if (nextSession) {
+      setMessage("");
+      return;
+    }
+
+    const authStatus = getLastAuthCheckStatus();
+    if (authStatus === "timeout" || authStatus === "error") {
+      setMessage("현재 인증 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+
+    setMessage("로그인 세션이 없습니다. 다시 로그인해 주세요.");
   }
 
   return (
@@ -397,6 +439,16 @@ export default function LoginPage() {
         ) : null}
 
         {message ? <div className={`status ${getMessageTone(message)}`}>{message}</div> : null}
+        {shouldShowSessionRecoveryButton ? (
+          <button
+            type="button"
+            className="btn"
+            onClick={handleRetrySessionRecovery}
+            disabled={submitting || recoveringSession}
+          >
+            {recoveringSession ? "세션 확인 중..." : "세션 다시 확인"}
+          </button>
+        ) : null}
       </div>
     </section>
   );

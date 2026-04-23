@@ -146,8 +146,11 @@ let homeWorkspaceLoaded = false;
 let homeWorkspaceTripCardsLoaded = false;
 let homeWorkspaceLastFetchedAt = 0;
 let homeWorkspaceSessionKey: string | null = null;
+let homeWorkspaceLastFailureAt = 0;
 
 const HOME_POPUP_WORKSPACE_TTL_MS = 30_000;
+const HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS = 4_000;
+const HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS = 10_000;
 
 function isManagerRole(role: string | null | undefined) {
   return role === "desk" || role === "admin" || role === "team_lead";
@@ -678,6 +681,23 @@ function resetSessionScopedWorkspaceState() {
   currentUserAppliedCache = false;
 }
 
+function hasRecentHomePopupWorkspaceFailure() {
+  if (!homeWorkspaceLastFailureAt) return false;
+  return Date.now() - homeWorkspaceLastFailureAt < HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS;
+}
+
+function buildCachedWorkspaceResult(): RefreshResult {
+  return {
+    notice: getHomePopupNotice(),
+    notices: getHomeNotices(),
+    ddays: getHomeDdays(),
+    communityPosts: getCommunityBoardPosts(),
+    communityComments: getCommunityBoardComments(),
+    applications: getHomePopupNoticeApplications(),
+    tripCards: getHomePublicTripCards(),
+  };
+}
+
 export function getHomePopupNotice() {
   return clonePopupNotice(noticeCache);
 }
@@ -720,20 +740,33 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
     ? `/api/home/public-workspace?${searchParams.toString()}`
     : "/api/home/public-workspace";
 
-  const response = await fetch(requestUrl, {
-    method: "GET",
-    cache: "no-store",
-    credentials: "same-origin",
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS);
 
-  const payload = (await response.json().catch(() => null)) as { message?: string } | HomePublicWorkspaceResponse | null;
-  if (!response.ok) {
-    throw new Error(payload && "message" in payload && typeof payload.message === "string"
-      ? payload.message
-      : "홈 데이터를 불러오지 못했습니다.");
+  try {
+    const response = await fetch(requestUrl, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+
+    const payload = (await response.json().catch(() => null)) as { message?: string } | HomePublicWorkspaceResponse | null;
+    if (!response.ok) {
+      throw new Error(payload && "message" in payload && typeof payload.message === "string"
+        ? payload.message
+        : "홈 데이터를 불러오지 못했습니다.");
+    }
+
+    return payload as HomePublicWorkspaceResponse;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("홈 데이터 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-
-  return payload as HomePublicWorkspaceResponse;
 }
 
 async function selectHomePopupNoticeRow(supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>) {
@@ -826,39 +859,37 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
     }
 
     if (!options.force && hasFreshHomePopupWorkspace(session, options)) {
-      return {
-        notice: getHomePopupNotice(),
-        notices: getHomeNotices(),
-        ddays: getHomeDdays(),
-        communityPosts: getCommunityBoardPosts(),
-        communityComments: getCommunityBoardComments(),
-        applications: getHomePopupNoticeApplications(),
-        tripCards: getHomePublicTripCards(),
-      };
+      return buildCachedWorkspaceResult();
     }
 
-    const workspace = await fetchHomePublicWorkspace(options);
+    if (!options.force && hasRecentHomePopupWorkspaceFailure()) {
+      return buildCachedWorkspaceResult();
+    }
 
-    syncCaches(
-      workspace.notices,
-      workspace.ddays,
-      workspace.communityPosts,
-      workspace.communityComments,
-      workspace.applications,
-      workspace.ownApplied,
-      workspace.tripCards,
-    );
-    markHomePopupWorkspaceFresh(session, options);
-    emitHomePopupNoticeEvent();
-    return {
-      notice: getHomePopupNotice(),
-      notices: getHomeNotices(),
-      ddays: getHomeDdays(),
-      communityPosts: getCommunityBoardPosts(),
-      communityComments: getCommunityBoardComments(),
-      applications: getHomePopupNoticeApplications(),
-      tripCards: getHomePublicTripCards(),
-    };
+    try {
+      const workspace = await fetchHomePublicWorkspace(options);
+
+      syncCaches(
+        workspace.notices,
+        workspace.ddays,
+        workspace.communityPosts,
+        workspace.communityComments,
+        workspace.applications,
+        workspace.ownApplied,
+        workspace.tripCards,
+      );
+      homeWorkspaceLastFailureAt = 0;
+      markHomePopupWorkspaceFresh(session, options);
+      emitHomePopupNoticeEvent();
+      return buildCachedWorkspaceResult();
+    } catch (error) {
+      homeWorkspaceLastFailureAt = Date.now();
+      if (homeWorkspaceLoaded) {
+        console.warn(error instanceof Error ? error.message : "홈 데이터를 불러오지 못했습니다.");
+        return buildCachedWorkspaceResult();
+      }
+      throw error;
+    }
   })().finally(() => {
     refreshPromise = null;
   });

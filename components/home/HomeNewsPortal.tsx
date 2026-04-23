@@ -263,7 +263,7 @@ export function HomeNewsPortal() {
             void (async () => {
               try {
                 await deleteHomeDday(item.id);
-                await refreshHomePopupNoticeWorkspace();
+                await refreshHomePopupNoticeWorkspace({ includeTrips: false });
                 syncNotices();
               } catch (error) {
                 const message = error instanceof Error ? error.message : "디데이를 삭제하지 못했습니다.";
@@ -286,7 +286,7 @@ export function HomeNewsPortal() {
           void (async () => {
             try {
               await updateHomeDday({ ddayId: item.id, title: nextTitle, targetDate: nextTargetDate });
-              await refreshHomePopupNoticeWorkspace();
+              await refreshHomePopupNoticeWorkspace({ includeTrips: false });
               syncNotices();
             } catch (error) {
               const message = error instanceof Error ? error.message : "디데이를 수정하지 못했습니다.";
@@ -313,7 +313,7 @@ export function HomeNewsPortal() {
           void (async () => {
             try {
               await deleteHomeNotice(noticeId);
-              await refreshHomePopupNoticeWorkspace();
+              await refreshHomePopupNoticeWorkspace({ includeTrips: false });
               syncNotices();
             } catch (error) {
               const message = error instanceof Error ? error.message : "공지를 삭제하지 못했습니다.";
