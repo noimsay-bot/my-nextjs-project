@@ -961,6 +961,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     () => (isHomePreview ? getWeeklyPreviewDays(displayDays, todayKey) : displayDays),
     [displayDays, isHomePreview, todayKey],
   );
+  const homePreviewTitle = selectedItem
+    ? `${String(selectedItem.schedule.year).slice(-2)}년 ${selectedItem.schedule.month}월 이번주 근무표`
+    : "이번주 근무표";
+  const homePreviewRangeLabel =
+    visibleDisplayDays.length > 0
+      ? `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
+      : null;
   const firstSelectedRef = selectedRoute[0] ?? null;
   const hasConflictWarning = useMemo(
     () => routeWouldCreateConflict(activeItems, selectedRoute),
@@ -1317,29 +1324,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     return (
       <section className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}>
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-          {isHomePreview ? (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-                alignItems: "center",
-              }}
-            >
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <div className="chip">근무표</div>
-                  <span className="muted">해당일 기준 주간 미리보기</span>
-                </div>
-                <strong style={{ fontSize: 24, lineHeight: 1.2 }}>이번 주 근무표</strong>
-                <span className="muted">전체 월별 게시 근무표와 수정 기능은 전용 페이지에서 확인합니다.</span>
-              </div>
-              <Link href="/work-schedule" className="btn primary">
-                근무표 전체 보기
-              </Link>
-            </div>
-          ) : (
+          {!isHomePreview ? (
             <div className="schedule-published-hero">
               <div className="schedule-published-hero__left">
                 <div className="muted schedule-published-hero__published">숨김 처리된 게시 근무표만 있습니다.</div>
@@ -1354,9 +1339,28 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
           {!isHomePreview && requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
-          <div className="status note">{isHomePreview ? "현재 홈에 표시할 주간 근무표가 없습니다." : "현재 홈에 보이는 게시 근무표가 없습니다."}</div>
+          {isHomePreview ? (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <div className="status note" style={{ margin: 0, flex: "1 1 280px" }}>
+                현재 홈에 표시할 주간 근무표가 없습니다.
+              </div>
+              <Link href="/work-schedule" className="btn primary">
+                근무표 전체 보기
+              </Link>
+            </div>
+          ) : (
+            <div className="status note">현재 홈에 보이는 게시 근무표가 없습니다.</div>
+          )}
         </div>
       </section>
     );
@@ -1367,32 +1371,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-        {isHomePreview ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ display: "grid", gap: 6 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <div className="chip">근무표</div>
-                <span className="muted">해당일 기준 주간 미리보기</span>
-              </div>
-              <strong style={{ fontSize: 24, lineHeight: 1.2 }}>
-                {selectedItem ? `${selectedItem.schedule.year}년 ${selectedItem.schedule.month}월 이번 주 근무표` : "이번 주 근무표"}
-              </strong>
-              <span className="muted">홈에는 현재 주간만 표시하고, 월별 이동과 수정 기능은 전용 페이지에서 유지합니다.</span>
-            </div>
-            <Link href="/work-schedule" className="btn primary">
-              근무표 전체 보기
-            </Link>
-          </div>
-        ) : null}
-
         {!isHomePreview && editMode && username ? (
           <div
             style={{
@@ -1494,12 +1472,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                     <div style={{ display: "grid", gap: 4 }}>
-                      <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{selectedItem.title}</strong>
+                      <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{homePreviewTitle}</strong>
                       <span className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</span>
                     </div>
-                    <span className="chip">
-                      {visibleDisplayDays[0]?.month}/{visibleDisplayDays[0]?.day} - {visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/{visibleDisplayDays[visibleDisplayDays.length - 1]?.day}
-                    </span>
+                    <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+                      {homePreviewRangeLabel ? <span className="chip">{homePreviewRangeLabel}</span> : null}
+                      <Link href="/work-schedule" className="btn primary">
+                        근무표 전체 보기
+                      </Link>
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <VacationLegendChips />
