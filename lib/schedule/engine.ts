@@ -498,6 +498,13 @@ export function parseVacationMap(text: string) {
   return map;
 }
 
+function serializeVacationMap(map: Record<string, string[]>) {
+  return Object.entries(map)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([dateKey, entries]) => `${dateKey}: ${entries.join(", ")}`)
+    .join("\n");
+}
+
 export function fmtDate(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
@@ -1610,6 +1617,18 @@ export function openSnapshot(state: ScheduleState, snapshotId: string) {
 
 function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule) {
   const normalizedGenerated = normalizeGeneratedSchedule(generated);
+  const nextVacationMap = parseVacationMap(next.vacations);
+
+  // Keep the vacation source-of-truth aligned with manual edits in schedule edit mode.
+  normalizedGenerated.days.forEach((day) => {
+    delete nextVacationMap[day.dateKey];
+    const nextEntries = (day.assignments["휴가"] ?? day.vacations ?? []).map((name) => name.trim()).filter(Boolean);
+    if (nextEntries.length > 0) {
+      nextVacationMap[day.dateKey] = nextEntries;
+    }
+  });
+
+  next.vacations = serializeVacationMap(nextVacationMap);
   syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople);
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
