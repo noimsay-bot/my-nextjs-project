@@ -200,7 +200,7 @@ function PortalHeader({ pathname }: { pathname: string }) {
 
   const adminSession = hasAdminAccess(session?.actualRole) ? session : null;
   const canOpenAdminArea = hasAdminAccess(session?.role);
-  const shouldShowLogoutButton = pathname !== "/";
+  const shouldShowLogoutButton = Boolean(session);
 
   const cycleExperienceRole = () => {
     setExperienceDraftRole((current) => {

@@ -51,6 +51,10 @@ function hasAccess(
     return true;
   }
 
+  if (pathname.startsWith("/work-schedule")) {
+    return true;
+  }
+
   if (pathname.startsWith("/schedule/vacations")) {
     return session.role === "desk" || session.role === "admin" || session.role === "team_lead";
   }
