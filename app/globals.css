@@ -338,9 +338,17 @@ button {
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   font-weight: 800;
   padding: 11px 15px;
+  width: fit-content;
+  min-width: fit-content;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
   touch-action: manipulation;
   user-select: none;
 }
@@ -3214,12 +3222,19 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   }
 
   .portal-sidebar-trigger--rail {
+    position: fixed;
     display: inline-flex;
-    top: 0;
+    top: 65px;
+    left: 0;
+    right: auto;
+    width: 25px;
+    min-width: 25px;
+    min-height: 40px;
     background: linear-gradient(180deg, var(--bg-start), var(--bg-mid));
     border: 1px solid var(--line);
     color: var(--text);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    border-radius: 14px;
   }
 
   .portal-sidebar-backdrop.is-open {

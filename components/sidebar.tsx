@@ -186,7 +186,7 @@ type SidebarProps = HTMLAttributes<HTMLDivElement> & {
 };
 
 export function Sidebar({ children, className, ...props }: SidebarProps) {
-  const { open, openMobile, closeMobileSidebar } = useSidebar();
+  const { open, openMobile, closeMobileSidebar, isMobile } = useSidebar();
 
   return (
     <>
@@ -206,11 +206,16 @@ export function Sidebar({ children, className, ...props }: SidebarProps) {
         {...props}
       >
         <div className="portal-sidebar__spacer" aria-hidden="true" />
+        {isMobile ? (
+          <SidebarTrigger className="portal-sidebar-trigger--rail" aria-label="사이드바 열기" />
+        ) : null}
         <aside
           className={joinClassNames("portal-sidebar__panel", openMobile && "is-open")}
           aria-label="포털 사이드바"
         >
-          <SidebarTrigger className="portal-sidebar-trigger--rail" aria-label="사이드바 열기" />
+          {!isMobile ? (
+            <SidebarTrigger className="portal-sidebar-trigger--rail" aria-label="사이드바 열기" />
+          ) : null}
           <div className="portal-sidebar__inner">{children}</div>
         </aside>
       </div>

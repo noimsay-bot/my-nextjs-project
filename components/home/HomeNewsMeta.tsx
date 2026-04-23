@@ -139,6 +139,7 @@ export function HomeNewsMeta({ data, ddayItems = [], canManageDdays = false, onM
   const itemCount = countUniqueItems(data);
   let title = "";
   let detail = "";
+  const hideBriefingMetaText = Boolean(data.runtimeBriefing || data.issueSet);
 
   if (data.runtimeBriefing && data.sourceKind === "timed_live_preview") {
     const slotLabel = getIssueSlotLabel(data.runtimeBriefing.briefingSlot);
@@ -162,12 +163,14 @@ export function HomeNewsMeta({ data, ddayItems = [], canManageDdays = false, onM
 
   return (
     <div className={styles.metaBar} aria-live="polite">
-      <div className={styles.metaBarInfo}>
-        <div className={styles.metaBarTitle}>{title}</div>
-        <div className={styles.metaBarDetail} data-portal-news-meta-detail="true">
-          {detail}
+      {hideBriefingMetaText ? null : (
+        <div className={styles.metaBarInfo}>
+          <div className={styles.metaBarTitle}>{title}</div>
+          <div className={styles.metaBarDetail} data-portal-news-meta-detail="true">
+            {detail}
+          </div>
         </div>
-      </div>
+      )}
       {renderDdayItems(ddayItems, canManageDdays, onManageDday)}
     </div>
   );
