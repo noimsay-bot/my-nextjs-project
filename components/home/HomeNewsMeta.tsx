@@ -164,7 +164,9 @@ export function HomeNewsMeta({ data, ddayItems = [], canManageDdays = false, onM
     <div className={styles.metaBar} aria-live="polite">
       <div className={styles.metaBarInfo}>
         <div className={styles.metaBarTitle}>{title}</div>
-        <div className={styles.metaBarDetail}>{detail}</div>
+        <div className={styles.metaBarDetail} data-portal-news-meta-detail="true">
+          {detail}
+        </div>
       </div>
       {renderDdayItems(ddayItems, canManageDdays, onManageDday)}
     </div>

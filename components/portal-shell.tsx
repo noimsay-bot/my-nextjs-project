@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, SidebarTrigger, useSidebar } from "@/components/sidebar";
 import { ScrollToTop } from "@/components/home/ScrollToTop";
 import {
   getSession,
@@ -11,6 +12,7 @@ import {
   logoutUser,
   setRoleExperience,
   subscribeToAuth,
+  type SessionUser,
   type UserRole,
 } from "@/lib/auth/storage";
 import {
@@ -32,6 +34,7 @@ const links = [
 ];
 
 type PortalTheme = "dark" | "light" | "pink" | "green";
+
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
 const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
 const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "reviewer", "desk", "team_lead", "admin"];
@@ -42,6 +45,12 @@ const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
   team_lead: "팀장",
   admin: "관리자",
 };
+const THEME_LABELS: Record<PortalTheme, string> = {
+  light: "라이트",
+  dark: "다크",
+  pink: "핑크",
+  green: "그린",
+};
 
 function readStoredTheme(): PortalTheme {
   if (typeof window === "undefined") return "dark";
@@ -49,18 +58,285 @@ function readStoredTheme(): PortalTheme {
   return PORTAL_THEMES.includes(storedTheme as PortalTheme) ? (storedTheme as PortalTheme) : "dark";
 }
 
-function PortalHeader({ pathname }: { pathname: string }) {
-  const router = useRouter();
-  const initialSession = getSession();
-  const [session, setSession] = useState(initialSession);
-  const [theme, setTheme] = useState<PortalTheme>(() => readStoredTheme());
-  const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>(
-    () => initialSession?.experienceRole ?? initialSession?.actualRole ?? "admin",
+function getVisibleLinks(
+  session: SessionUser | null,
+  vacationRequestOpen: boolean,
+  submissionAccessOpen: boolean,
+  reviewLocked: boolean,
+) {
+  switch (session?.role) {
+    case "member":
+    case "reviewer":
+      return links.filter(
+        (link) =>
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
+          (link.href === "/review" && session.canReview && !reviewLocked),
+      );
+    case "desk":
+      return links.filter(
+        (link) =>
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
+          link.href === "/schedule" ||
+          (link.href === "/review" && session.canReview),
+      );
+    case "team_lead":
+      return links.filter(
+        (link) =>
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
+          (link.href === "/review" && session.canReview && !reviewLocked) ||
+          link.href === "/schedule" ||
+          link.href === "/team-lead" ||
+          link.href === "/admin",
+      );
+    case "admin":
+      return links.filter(
+        (link) =>
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
+          link.href === "/schedule" ||
+          (link.href === "/review" && session.canReview && !reviewLocked) ||
+          link.href === "/team-lead" ||
+          link.href === "/admin",
+      );
+    default:
+      return links.filter(
+        (link) =>
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen),
+      );
+  }
+}
+
+function isLinkActive(pathname: string, href: string) {
+  return (
+    pathname === href ||
+    (href === "/community" && (pathname.startsWith("/community") || pathname.startsWith("/notices"))) ||
+    (href === "/work-schedule" && pathname.startsWith("/work-schedule")) ||
+    (href === "/restaurants" && pathname.startsWith("/restaurants")) ||
+    (href === "/schedule" && pathname.startsWith("/schedule")) ||
+    (href === "/team-lead" && pathname.startsWith("/team-lead")) ||
+    (href === "/admin" && pathname.startsWith("/admin"))
   );
+}
+
+function formatRoleSummary(session: SessionUser | null) {
+  if (!session) {
+    return "";
+  }
+
+  if (!session.experienceRole) {
+    return `권한: ${ROLE_EXPERIENCE_LABELS[session.role]}`;
+  }
+
+  return `체험 권한: ${ROLE_EXPERIENCE_LABELS[session.role]} · 실권한: ${ROLE_EXPERIENCE_LABELS[session.actualRole]}`;
+}
+
+function PortalSidebar({
+  pathname,
+  session,
+  theme,
+  visibleLinks,
+  experienceDraftRole,
+  adminSession,
+  canOpenAdminArea,
+  onCycleTheme,
+  onCycleExperienceRole,
+  onConfirmRoleExperience,
+}: {
+  pathname: string;
+  session: SessionUser | null;
+  theme: PortalTheme;
+  visibleLinks: typeof links;
+  experienceDraftRole: UserRole;
+  adminSession: SessionUser | null;
+  canOpenAdminArea: boolean;
+  onCycleTheme: () => void;
+  onCycleExperienceRole: () => void;
+  onConfirmRoleExperience: () => void;
+}) {
+  const { closeMobileSidebar } = useSidebar();
+  const shouldShowLogoutButton = Boolean(session);
+
+  return (
+    <Sidebar>
+      <SidebarContent>
+        <nav aria-label="주요 메뉴">
+          <SidebarMenu>
+            {visibleLinks.map((link) => {
+              const active = isLinkActive(pathname, link.href);
+
+              return (
+                <SidebarMenuItem key={link.href}>
+                  <Link
+                    href={link.href}
+                    className={`portal-sidebar-link ${active ? "is-active" : ""}`.trim()}
+                    aria-current={active ? "page" : undefined}
+                    onClick={closeMobileSidebar}
+                  >
+                    <span>{link.label}</span>
+                  </Link>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </nav>
+      </SidebarContent>
+      <SidebarSeparator />
+      <SidebarFooter>
+        <div className="portal-sidebar-footer-stack">
+          {shouldShowLogoutButton ? (
+            <button
+              className="btn portal-sidebar-action"
+              onClick={async () => {
+                closeMobileSidebar();
+                await logoutUser();
+                window.location.href = "/login";
+              }}
+            >
+              로그아웃
+            </button>
+          ) : null}
+          {adminSession ? (
+            <>
+              <button type="button" className="btn primary portal-sidebar-action" onClick={onConfirmRoleExperience}>
+                확인
+              </button>
+              <button type="button" className="btn portal-sidebar-action" onClick={onCycleExperienceRole}>
+                권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
+              </button>
+            </>
+          ) : null}
+          {session ? (
+            <div className="portal-sidebar-usercard">
+              <strong className="portal-sidebar-usercard__name">{session.username}</strong>
+              <span className="muted portal-sidebar-usercard__meta">{formatRoleSummary(session)}</span>
+              {!adminSession && canOpenAdminArea ? (
+                <span className="muted portal-sidebar-usercard__meta">팀장 권한으로 관리자 메뉴 사용 가능</span>
+              ) : null}
+            </div>
+          ) : null}
+          <button type="button" className="btn portal-sidebar-action" onClick={onCycleTheme}>
+            <span>모드변경</span>
+          </button>
+        </div>
+      </SidebarFooter>
+    </Sidebar>
+  );
+}
+
+function PortalChrome({ children, pathname }: { children: React.ReactNode; pathname: string }) {
+  const router = useRouter();
+  const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [session, setSession] = useState<SessionUser | null>(null);
+  const [theme, setTheme] = useState<PortalTheme>("dark");
+  const [sidebarTopOffset, setSidebarTopOffset] = useState(0);
+  const [sidebarTriggerTopOffset, setSidebarTriggerTopOffset] = useState(12);
+  const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>("member");
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
-  const [reviewLocked, setReviewLocked] = useState(() => hasSubmittedReviewLock(initialSession?.id));
+  const [reviewLocked, setReviewLocked] = useState(false);
   const shouldTrackReviewLock = Boolean(session?.canReview);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    setSession(getSession());
+    setTheme(readStoredTheme());
+  }, []);
+
+  useEffect(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+      return;
+    }
+
+    setOpen(false);
+  }, [isMobile, pathname, setOpen, setOpenMobile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const syncSidebarTopOffset = () => {
+      const headerElement = headerRef.current;
+      if (!headerElement) {
+        setSidebarTopOffset(0);
+        return;
+      }
+
+      const rect = headerElement.getBoundingClientRect();
+      const nextOffset = Math.max(0, Math.round(rect.bottom));
+      setSidebarTopOffset(nextOffset);
+    };
+
+    syncSidebarTopOffset();
+
+    const headerElement = headerRef.current;
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && headerElement
+        ? new ResizeObserver(() => syncSidebarTopOffset())
+        : null;
+
+    if (resizeObserver && headerElement) {
+      resizeObserver.observe(headerElement);
+    }
+    window.addEventListener("resize", syncSidebarTopOffset);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", syncSidebarTopOffset);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const isSidebarOpen = isMobile ? openMobile : open;
+    const syncSidebarTriggerTopOffset = () => {
+      if (!isSidebarOpen) {
+        setSidebarTriggerTopOffset(Math.max(12, sidebarTopOffset || 12));
+        return;
+      }
+
+      const detailElement = document.querySelector<HTMLElement>('[data-portal-news-meta-detail="true"]');
+      if (detailElement) {
+        const rect = detailElement.getBoundingClientRect();
+        setSidebarTriggerTopOffset(Math.max(12, Math.round(rect.top + rect.height / 2 - 23)));
+        return;
+      }
+
+      setSidebarTriggerTopOffset(Math.max(12, sidebarTopOffset || 12));
+    };
+
+    syncSidebarTriggerTopOffset();
+    const raf = window.requestAnimationFrame(syncSidebarTriggerTopOffset);
+    window.addEventListener("resize", syncSidebarTriggerTopOffset);
+    window.addEventListener("scroll", syncSidebarTriggerTopOffset, { passive: true });
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", syncSidebarTriggerTopOffset);
+      window.removeEventListener("scroll", syncSidebarTriggerTopOffset);
+    };
+  }, [isMobile, open, openMobile, sidebarTopOffset]);
 
   useEffect(() => {
     let mounted = true;
@@ -113,94 +389,24 @@ function PortalHeader({ pathname }: { pathname: string }) {
     };
   }, [shouldTrackReviewLock, session?.id]);
 
-  const visibleLinks = useMemo(() => {
-    switch (session?.role) {
-      case "member":
-        return links.filter(
-          (link) =>
-            link.href === "/" ||
-            link.href === "/community" ||
-            link.href === "/work-schedule" ||
-            link.href === "/restaurants" ||
-            (link.href === "/vacation" && vacationRequestOpen) ||
-            (link.href === "/submissions" && submissionAccessOpen) ||
-            (link.href === "/review" && session.canReview && !reviewLocked),
-        );
-      case "reviewer":
-        return links.filter(
-          (link) =>
-            link.href === "/" ||
-            link.href === "/community" ||
-            link.href === "/work-schedule" ||
-            link.href === "/restaurants" ||
-            (link.href === "/vacation" && vacationRequestOpen) ||
-            (link.href === "/submissions" && submissionAccessOpen) ||
-            (link.href === "/review" && session.canReview && !reviewLocked),
-        );
-      case "desk":
-        return links.filter(
-          (link) =>
-            link.href === "/" ||
-            link.href === "/community" ||
-            link.href === "/work-schedule" ||
-            link.href === "/restaurants" ||
-            (link.href === "/vacation" && vacationRequestOpen) ||
-            (link.href === "/submissions" && submissionAccessOpen) ||
-            link.href === "/schedule" ||
-            (link.href === "/review" && session.canReview),
-        );
-      case "team_lead":
-        return links.filter(
-          (link) =>
-            link.href === "/" ||
-            link.href === "/community" ||
-            link.href === "/work-schedule" ||
-            link.href === "/restaurants" ||
-            (link.href === "/vacation" && vacationRequestOpen) ||
-            (link.href === "/submissions" && submissionAccessOpen) ||
-            (link.href === "/review" && session.canReview && !reviewLocked) ||
-            link.href === "/schedule" ||
-            link.href === "/team-lead" ||
-            link.href === "/admin",
-        );
-      case "admin":
-        return links.filter(
-          (link) =>
-            link.href === "/" ||
-            link.href === "/community" ||
-            link.href === "/work-schedule" ||
-            link.href === "/restaurants" ||
-            (link.href === "/vacation" && vacationRequestOpen) ||
-            (link.href === "/submissions" && submissionAccessOpen) ||
-            link.href === "/schedule" ||
-            (link.href === "/review" && session.canReview && !reviewLocked) ||
-            link.href === "/team-lead" ||
-            link.href === "/admin",
-        );
-      default:
-        return links.filter(
-          (link) =>
-            link.href === "/" ||
-            link.href === "/community" ||
-            link.href === "/work-schedule" ||
-            link.href === "/restaurants" ||
-            (link.href === "/vacation" && vacationRequestOpen) ||
-            (link.href === "/submissions" && submissionAccessOpen),
-        );
-    }
-  }, [reviewLocked, session?.canReview, session?.role, submissionAccessOpen, vacationRequestOpen]);
-
-  const sessionLabel = useMemo(() => {
-    if (!session) return "";
-    if (!session.experienceRole) {
-      return `${session.username} / ${session.role}`;
-    }
-    return `${session.username} / ${session.role} 체험중 · 실권한 ${session.actualRole}`;
-  }, [session]);
+  const visibleLinks = useMemo(
+    () => getVisibleLinks(session, vacationRequestOpen, submissionAccessOpen, reviewLocked),
+    [reviewLocked, session, submissionAccessOpen, vacationRequestOpen],
+  );
 
   const adminSession = hasAdminAccess(session?.actualRole) ? session : null;
   const canOpenAdminArea = hasAdminAccess(session?.role);
-  const shouldShowLogoutButton = Boolean(session);
+
+  const cycleTheme = () => {
+    setTheme((current) => {
+      const currentIndex = PORTAL_THEMES.indexOf(current);
+      if (currentIndex < 0) {
+        return PORTAL_THEMES[0];
+      }
+
+      return PORTAL_THEMES[(currentIndex + 1) % PORTAL_THEMES.length] ?? PORTAL_THEMES[0];
+    });
+  };
 
   const cycleExperienceRole = () => {
     setExperienceDraftRole((current) => {
@@ -224,116 +430,59 @@ function PortalHeader({ pathname }: { pathname: string }) {
     setRoleExperience(nextExperienceRole);
     router.refresh();
   };
-
   return (
-    <section className="panel portal-header-shell">
-      <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
-        <div style={{ display: "flex", justifyContent: "stretch" }}>
-          <Link href="/" className="brand-logo" aria-label="홈으로 이동">
-            <span
-              className="brand-logo-text"
-              style={{
-                fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-                fontWeight: 600,
-                letterSpacing: "0.1em",
-              }}
-            >
-              JTBC NEWS CAMERA HUB
-            </span>
-          </Link>
-        </div>
-        <div
-          className="portal-header-main"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <nav className="nav" aria-label="주요 메뉴" style={{ marginBottom: 0 }}>
-            {visibleLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={
-                  pathname === link.href ||
-                  (link.href === "/community" && pathname.startsWith("/community")) ||
-                  (link.href === "/community" && pathname.startsWith("/notices")) ||
-                  (link.href === "/work-schedule" && pathname.startsWith("/work-schedule")) ||
-                  (link.href === "/restaurants" && pathname.startsWith("/restaurants")) ||
-                  (link.href === "/schedule" && pathname.startsWith("/schedule")) ||
-                  (link.href === "/team-lead" && pathname.startsWith("/team-lead")) ||
-                  (link.href === "/admin" && pathname.startsWith("/admin"))
-                    ? "active"
-                    : ""
-                }
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
-          <div className="portal-header-utility" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div className="theme-toggle" role="group" aria-label="화면 테마 선택">
-              <button
-                type="button"
-                className={`theme-toggle__button ${theme === "light" ? "theme-toggle__button--active" : ""}`}
-                onClick={() => setTheme("light")}
-              >
-                라이트
-              </button>
-              <button
-                type="button"
-                className={`theme-toggle__button ${theme === "dark" ? "theme-toggle__button--active" : ""}`}
-                onClick={() => setTheme("dark")}
-              >
-                다크
-              </button>
-              <button
-                type="button"
-                className={`theme-toggle__button ${theme === "pink" ? "theme-toggle__button--active" : ""}`}
-                onClick={() => setTheme("pink")}
-              >
-                핑크
-              </button>
-              <button
-                type="button"
-                className={`theme-toggle__button ${theme === "green" ? "theme-toggle__button--active" : ""}`}
-                onClick={() => setTheme("green")}
-              >
-                그린
-              </button>
+    <div
+      className="portal-sidebar-layout"
+      style={
+        {
+          "--portal-sidebar-top-offset": `${sidebarTopOffset}px`,
+          "--portal-sidebar-rail-top": `${sidebarTriggerTopOffset}px`,
+          "--portal-sidebar-width": "232px",
+          "--portal-sidebar-mobile-width": "288px",
+        } as CSSProperties
+      }
+    >
+      <PortalSidebar
+        pathname={pathname}
+        session={session}
+        theme={theme}
+        visibleLinks={visibleLinks}
+        experienceDraftRole={experienceDraftRole}
+        adminSession={adminSession}
+        canOpenAdminArea={canOpenAdminArea}
+        onCycleTheme={cycleTheme}
+        onCycleExperienceRole={cycleExperienceRole}
+        onConfirmRoleExperience={confirmRoleExperience}
+      />
+      <SidebarInset>
+        <div className="shell portal-shell-main">
+          <section ref={headerRef} className="panel portal-header-shell">
+            <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
+            <div style={{ display: "flex", justifyContent: "stretch" }}>
+              <Link href="/" className="brand-logo" aria-label="홈으로 이동">
+                  <span
+                    className="brand-logo-text"
+                    style={{
+                      fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+                      fontWeight: 600,
+                      letterSpacing: "0.1em",
+                    }}
+                  >
+                    JTBC NEWS CAMERA HUB
+                  </span>
+                </Link>
+              </div>
+              <div className="portal-header-shell__trigger-row">
+                <SidebarTrigger aria-label="사이드바 토글" />
+              </div>
             </div>
-            {adminSession ? (
-              <>
-                <button type="button" className="btn" onClick={cycleExperienceRole}>
-                  권한 바꾸기: {ROLE_EXPERIENCE_LABELS[experienceDraftRole]}
-                </button>
-                <button type="button" className="btn primary" onClick={confirmRoleExperience}>
-                  확인
-                </button>
-              </>
-            ) : null}
-            {!adminSession && canOpenAdminArea ? (
-              <span className="muted">팀장 권한으로 관리자 메뉴 사용 가능</span>
-            ) : null}
-            <span className="muted">{sessionLabel}</span>
-            {shouldShowLogoutButton ? (
-              <button
-                className="btn portal-header-logout"
-                onClick={async () => {
-                  await logoutUser();
-                  window.location.href = "/login";
-                }}
-              >
-                로그아웃
-              </button>
-            ) : null}
-          </div>
+          </section>
+          <main style={{ marginTop: 20 }}>
+            <AppRouteBoundary resetKey={pathname}>{children}</AppRouteBoundary>
+          </main>
         </div>
-      </div>
-    </section>
+      </SidebarInset>
+    </div>
   );
 }
 
@@ -343,14 +492,9 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const shouldShowGlobalScrollTop = !normalizedPathname.endsWith("/schedule-assignment");
 
   return (
-    <div className="shell">
-      <PortalHeader pathname={pathname} />
-      <main style={{ marginTop: 20 }}>
-        <AppRouteBoundary resetKey={pathname}>
-          {children}
-        </AppRouteBoundary>
-      </main>
+    <SidebarProvider defaultOpen>
+      <PortalChrome pathname={pathname}>{children}</PortalChrome>
       {shouldShowGlobalScrollTop ? <ScrollToTop /> : null}
-    </div>
+    </SidebarProvider>
   );
 }

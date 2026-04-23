@@ -92,6 +92,7 @@ export function HomeNewsTabs({
   const [currentTripCount, setCurrentTripCount] = useState(0);
   const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isMobileNewsMenuOpen, setIsMobileNewsMenuOpen] = useState(false);
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
   const [hasUserSelectedCategory, setHasUserSelectedCategory] = useState(false);
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
@@ -121,10 +122,17 @@ export function HomeNewsTabs({
     ...otherTemporaryTabs,
     ...categoryTabs,
   ];
+  const mobileNewsTabs = [
+    ...(noticeTab ? [noticeTab] : []),
+    ...otherTemporaryTabs,
+    ...categoryTabs,
+  ];
+  const mobileNewsItemCount = mobileNewsTabs.reduce((sum, tab) => sum + tab.items.length, 0);
   const hasNoticeTab = tabs.some((tab) => tab.key === "notice");
   const items = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
   const isNoticeActive = activeCategory === "notice";
   const isCurrentTripsActive = activeCategory === CURRENT_TRIPS_TAB_KEY;
+  const isMobileNewsActive = mobileNewsTabs.some((tab) => tab.key === activeCategory);
 
   const handleCurrentTripCountChange = useCallback((count: number) => {
     setCurrentTripCount(count);
@@ -199,9 +207,15 @@ export function HomeNewsTabs({
     setIsPanelOpen(true);
   }, [cardsByCategory, hasNoticeTab, hasUserSelectedCategory, recommendedCategory]);
 
+  useEffect(() => {
+    if (!isMobileNewsMenuOpen) return;
+    if (isMobileNewsActive) return;
+    setIsMobileNewsMenuOpen(false);
+  }, [isMobileNewsActive, isMobileNewsMenuOpen]);
+
   return (
     <div className={styles.tabs}>
-      <div className={styles.tabList} role="tablist" aria-label="뉴스 카테고리">
+      <div className={styles.desktopTabList} role="tablist" aria-label="뉴스 카테고리">
         {tabs.map((tab) => {
           const isActive = tab.key === activeCategory;
           const isSelected = isActive && isPanelOpen;
@@ -233,9 +247,86 @@ export function HomeNewsTabs({
           );
         })}
       </div>
+      <div className={styles.mobileTabList} aria-label="뉴스 카테고리">
+        <button
+          type="button"
+          className={`${styles.tabButton} ${styles.mobileNewsToggle} ${isMobileNewsActive ? styles.tabButtonActive : ""}`}
+          aria-expanded={isMobileNewsMenuOpen}
+          aria-controls={`${groupId}-mobile-news-menu`}
+          onClick={() => setIsMobileNewsMenuOpen((current) => !current)}
+        >
+          <span>뉴스</span>
+          <span className={styles.tabCount}>{mobileNewsItemCount}</span>
+          <span className={styles.mobileNewsChevron} aria-hidden="true">
+            ˅
+          </span>
+        </button>
+        {isMobileNewsMenuOpen ? (
+          <div id={`${groupId}-mobile-news-menu`} className={styles.mobileNewsMenu}>
+            {mobileNewsTabs.map((tab) => {
+              const isActive = tab.key === activeCategory;
+              const isSelected = isActive && isPanelOpen;
+              return (
+                <button
+                  key={tab.key}
+                  id={`${groupId}-mobile-${tab.key}-tab`}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  aria-controls={isSelected ? `${groupId}-panel` : undefined}
+                  tabIndex={isSelected ? 0 : -1}
+                  className={`${styles.tabButton} ${tab.key === "notice" ? styles.tabButtonNotice : ""} ${isSelected ? styles.tabButtonActive : ""} ${tab.key === "notice" && isSelected ? styles.tabButtonNoticeActive : ""}`}
+                  onClick={() => {
+                    setHasUserSelectedCategory(true);
+                    setActiveCategory(tab.key);
+                    setIsPanelOpen(true);
+                    setExpandedCardId(null);
+                    setIsMobileNewsMenuOpen(false);
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span className={styles.tabCount}>{tab.items.length}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {currentTripsTab.length > 0 ? (
+          currentTripsTab.map((tab) => {
+            const isActive = tab.key === activeCategory;
+            const isSelected = isActive && isPanelOpen;
+            return (
+              <button
+                key={tab.key}
+                id={`${groupId}-mobile-${tab.key}-tab`}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                aria-controls={isSelected ? `${groupId}-panel` : undefined}
+                tabIndex={isSelected ? 0 : -1}
+                className={`${styles.tabButton} ${isSelected ? styles.tabButtonActive : ""}`}
+                onClick={() => {
+                  setHasUserSelectedCategory(true);
+                  if (isActive && isPanelOpen) {
+                    setIsPanelOpen(false);
+                    setExpandedCardId(null);
+                    return;
+                  }
+                  setActiveCategory(tab.key);
+                  setIsPanelOpen(true);
+                  setExpandedCardId(null);
+                }}
+              >
+                <span>{tab.label}</span>
+                <span className={styles.tabCount}>{currentTripCount}</span>
+              </button>
+            );
+          })
+        ) : null}
+      </div>
       {isPanelOpen ? (
         <div
-          id={`${groupId}-${activeCategory}-panel`}
+          id={`${groupId}-panel`}
           role="tabpanel"
           aria-labelledby={`${groupId}-${activeCategory}-tab`}
           className={styles.panel}

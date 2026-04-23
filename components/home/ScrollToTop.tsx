@@ -1,10 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useOptionalSidebar } from "@/components/sidebar";
 
 export function ScrollToTop({ className = "" }: { className?: string }) {
   const [visible, setVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const sidebar = useOptionalSidebar();
+  const defaultLeft = !isMobile && sidebar?.open ? "272px" : "12px";
+  const hoverLeft = !isMobile && sidebar?.open ? "276px" : "16px";
 
   useEffect(() => {
     const handleScroll = () => {
@@ -35,6 +39,7 @@ export function ScrollToTop({ className = "" }: { className?: string }) {
       className={`portal-scroll-top-button ${className}`.trim()}
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
       style={{
+        left: defaultLeft,
         padding: "16px 8px",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
@@ -49,10 +54,10 @@ export function ScrollToTop({ className = "" }: { className?: string }) {
         boxShadow: "0 10px 30px rgba(0, 0, 0, 0.5)",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.left = "16px";
+        e.currentTarget.style.left = hoverLeft;
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.left = "12px";
+        e.currentTarget.style.left = defaultLeft;
       }}
     >
       상단가기

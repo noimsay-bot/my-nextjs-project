@@ -577,6 +577,29 @@ function getWeeklyPreviewDays(days: DisplayDay[], todayKey: string) {
   return previewDays.length > 0 ? previewDays : days;
 }
 
+function getHomeMobilePreviewDays(days: DisplayDay[], todayKey: string) {
+  if (days.length === 0) return [];
+
+  const anchorIndex = days.findIndex(
+    (day) => day.dateKey === todayKey && !day.isOverflowMonth,
+  );
+  const resolvedAnchorIndex =
+    anchorIndex >= 0
+      ? anchorIndex
+      : days.findIndex((day) => day.dateKey === todayKey) >= 0
+        ? days.findIndex((day) => day.dateKey === todayKey)
+        : days.findIndex((day) => !day.isOverflowMonth) >= 0
+          ? days.findIndex((day) => !day.isOverflowMonth)
+          : 0;
+
+  const rotatedDays = [
+    ...days.slice(resolvedAnchorIndex),
+    ...days.slice(0, resolvedAnchorIndex),
+  ];
+
+  return rotatedDays.slice(0, 6);
+}
+
 function getPreviousDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(year, month - 1, day);
@@ -951,6 +974,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
+  const isHomeMobileThreeDayView = isHomePreview && scheduleLayoutMode === "mobile";
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
@@ -958,15 +982,31 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     [previousDisplaySource, selectedItem],
   );
   const visibleDisplayDays = useMemo(
-    () => (isHomePreview ? getWeeklyPreviewDays(displayDays, todayKey) : displayDays),
-    [displayDays, isHomePreview, todayKey],
+    () =>
+      isHomePreview
+        ? isHomeMobileThreeDayView
+          ? getHomeMobilePreviewDays(displayDays, todayKey)
+          : getWeeklyPreviewDays(displayDays, todayKey)
+        : displayDays,
+    [displayDays, isHomeMobileThreeDayView, isHomePreview, todayKey],
   );
+  const homeMobilePreviewDayRows = useMemo(() => {
+    if (!isHomeMobileThreeDayView) return [];
+
+    const rows: DisplayDay[][] = [];
+    for (let index = 0; index < visibleDisplayDays.length; index += 3) {
+      rows.push(visibleDisplayDays.slice(index, index + 3));
+    }
+    return rows;
+  }, [isHomeMobileThreeDayView, visibleDisplayDays]);
   const homePreviewTitle = selectedItem
     ? `${String(selectedItem.schedule.year).slice(-2)}년 ${selectedItem.schedule.month}월 이번주 근무표`
     : "이번주 근무표";
   const homePreviewRangeLabel =
     visibleDisplayDays.length > 0
-      ? `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
+      ? isHomeMobileThreeDayView
+        ? `오늘 기준 ${visibleDisplayDays.length}일`
+        : `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
       : null;
   const firstSelectedRef = selectedRoute[0] ?? null;
   const hasConflictWarning = useMemo(
@@ -1463,27 +1503,29 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                 <div
                   style={{
                     display: "grid",
-                    gap: 10,
+                    gap: 4,
                     borderRadius: 20,
                     border: "1px solid rgba(255,255,255,.08)",
                     background: "rgba(255,255,255,.03)",
-                    padding: 18,
+                    padding: "14px 18px 10px",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                    <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                    <div style={{ display: "grid", gap: 2 }}>
                       <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{homePreviewTitle}</strong>
                       <span className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</span>
                     </div>
-                    <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+                    <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
                       {homePreviewRangeLabel ? <span className="chip">{homePreviewRangeLabel}</span> : null}
-                      <Link href="/work-schedule" className="btn primary">
-                        근무표 전체 보기
-                      </Link>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <VacationLegendChips />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "flex-start" }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <VacationLegendChips />
+                    </div>
+                    <Link href="/work-schedule" className="btn primary" style={{ marginLeft: "auto" }}>
+                      근무표 전체 보기
+                    </Link>
                   </div>
                 </div>
               ) : (
@@ -1597,15 +1639,368 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                   left: shouldAutoFitSchedule ? 0 : undefined,
                 }}
               >
-              <div className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"}`}>
-                {weekdayLabels.map((label) => {
-                  const isWeekendLabel = label === "토" || label === "일";
-                  return (
-                  <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
-                    {label}
+              <div
+                className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"} ${isHomeMobileThreeDayView ? "schedule-calendar-grid--home-mobile-three-day" : ""}`}
+              >
+                {isHomeMobileThreeDayView ? (
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 6,
+                      width: "100%",
+                    }}
+                  >
+                    {homeMobilePreviewDayRows.map((row, rowIndex) => (
+                      <div
+                        key={`home-mobile-row-${rowIndex}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                          gap: 6,
+                          alignItems: "start",
+                        }}
+                      >
+                        {row.map((day) => {
+                          const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
+                          const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
+                          const centeredDayLabel = getCenteredDayLabel(day);
+                          const isWeekendLike = day.isWeekend || day.isHoliday;
+                          const highlightDayHead = showMine && dayContainsUser(day, username);
+                          const highlightHeaderName = showMine && Boolean(username) && day.headerName?.trim() === username;
+                          const duplicateNameSet = getDayDuplicateNameSet(day);
+                          const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
+                          const visibleAssignments = Object.entries(day.assignments)
+                            .filter(([category, names]) => {
+                              if (!Array.isArray(names) || names.length === 0) return false;
+                              if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
+                              return !["국회", "청사", "청와대"].includes(category);
+                            })
+                            .sort(
+                              ([leftCategory], [rightCategory]) =>
+                                getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
+                                getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                            );
+                          return (
+                            <article
+                              key={`${day.ownerMonthKey}-${day.dateKey}`}
+                              ref={(node) => {
+                                compactMonthCardRefs.current[`${day.ownerMonthKey}-${day.dateKey}`] = node;
+                              }}
+                              className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
+                              style={{
+                                padding: 6,
+                                minHeight: 0,
+                                opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
+                                background: dayCardStyle.background,
+                                border: dayCardStyle.border,
+                              }}
+                            >
+                              <div
+                                className={`schedule-day-head ${isCompactMonthlyView ? "schedule-day-head--monthly" : ""}`}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "auto minmax(0, 1fr)",
+                                  alignItems: "center",
+                                  gap: 6,
+                                  marginBottom: 6,
+                                  padding: highlightDayHead ? (isCompactMonthlyView ? "4px 6px" : "6px 8px") : 0,
+                                  borderRadius: 16,
+                                  background: highlightDayHead ? "rgba(125,211,252,.14)" : "transparent",
+                                  boxShadow: highlightDayHead ? "0 0 0 1px rgba(125,211,252,.18) inset" : undefined,
+                                }}
+                              >
+                                <div className="schedule-day-date" style={{ fontSize: 19, fontWeight: 900 }}>
+                                  <span>{day.month}/{day.day}</span>
+                                </div>
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gap: centeredDayLabel ? 4 : 0,
+                                    justifyItems: "center",
+                                    alignContent: "center",
+                                    alignSelf: "stretch",
+                                    minHeight: 42,
+                                    textAlign: "center",
+                                  }}
+                                >
+                                  {centeredDayLabel ? (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "center",
+                                        alignItems: "center",
+                                        minHeight: 24,
+                                        textAlign: "center",
+                                        color: "#ffd7d7",
+                                        fontWeight: 900,
+                                        fontSize: 13,
+                                      }}
+                                    >
+                                      {centeredDayLabel}
+                                    </div>
+                                  ) : null}
+                                  <div
+                                    style={{
+                                      minHeight: 24,
+                                      textAlign: "center",
+                                      color: headerNameDuplicated ? "#ffe4e6" : "#f8fbff",
+                                      fontSize: 18,
+                                      fontWeight: 900,
+                                      lineHeight: 1.1,
+                                      whiteSpace: "normal",
+                                      overflow: "visible",
+                                      textOverflow: "clip",
+                                      wordBreak: "keep-all",
+                                      justifySelf: "center",
+                                      padding: headerNameDuplicated
+                                        ? (isCompactMonthlyView ? "4px 10px" : "5px 12px")
+                                        : highlightHeaderName
+                                          ? (isCompactMonthlyView ? "4px 10px" : "5px 12px")
+                                          : 0,
+                                      borderRadius: headerNameDuplicated || highlightHeaderName ? 999 : 0,
+                                      background: headerNameDuplicated
+                                        ? "rgba(239,68,68,.22)"
+                                        : highlightHeaderName
+                                          ? "rgba(125,211,252,.2)"
+                                          : "transparent",
+                                      border: headerNameDuplicated
+                                        ? "1px solid rgba(248,113,113,.55)"
+                                        : highlightHeaderName
+                                          ? "6px solid rgba(255,255,255,.95)"
+                                          : undefined,
+                                    }}
+                                  >
+                                    {day.headerName ?? ""}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="schedule-day-body" style={{ display: "grid", gap: 1 }}>
+                                {visibleAssignments.map(([category, names]) => (
+                                  <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
+                                    <div
+                                      style={{
+                                        display: "grid",
+                                        gridTemplateColumns: "44px minmax(0, 1fr)",
+                                        columnGap: 8,
+                                        alignItems: "stretch",
+                                      }}
+                                    >
+                                      <strong
+                                        className="schedule-assignment-label"
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          alignSelf: "stretch",
+                                          marginBottom: 0,
+                                          fontSize: 14,
+                                          lineHeight: 1.1,
+                                          minHeight: 38,
+                                          textAlign: "center",
+                                          whiteSpace: "pre-line",
+                                        }}
+                                      >
+                                          {getCategoryDisplayLabel(day, category)}
+                                      </strong>
+                                      <div
+                                        className={`schedule-name-grid ${isCompactMonthlyView ? "schedule-name-grid--monthly" : ""}`}
+                                        style={{
+                                          display: "grid",
+                                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                                          justifyContent: "stretch",
+                                          justifyItems: "stretch",
+                                          alignItems: "center",
+                                          gap: 0,
+                                          minHeight: 38,
+                                          width: "100%",
+                                        }}
+                                      >
+                                      {names.length > 0 ? (
+                                        names.map((name, index) => {
+                                          const assignmentDisplay = getAssignmentDisplay(category, name);
+                                          const ref: SchedulePersonRef = {
+                                            monthKey: day.ownerMonthKey,
+                                            dateKey: day.dateKey,
+                                            category,
+                                            index,
+                                            name,
+                                          };
+                                          const personObject: ScheduleNameObject = {
+                                            key: `${day.ownerMonthKey}-${category}-${name}-${index}`,
+                                            name: assignmentDisplay.name,
+                                            ref,
+                                            pending: isPendingRef(allPendingRequests, ref),
+                                          };
+                                          const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
+                                          const isMine = Boolean(username) && username === assignmentDisplay.name;
+                                          const mineHighlighted =
+                                            isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
+                                          const routeSelected = routeIncludes(selectedRoute, ref);
+                                          const firstSelected = sameRef(firstSelectedRef, ref);
+                                          const recommendedHighlighted =
+                                            Boolean(firstSelectedRef) &&
+                                            !routeSelected &&
+                                            !personObject.pending &&
+                                            recommendedCandidateKeys.has(getRefKey(ref));
+                                          const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
+                                          const assignmentDisplayText = formatScheduleAssignmentDisplayName(
+                                            {
+                                              monthKey: day.ownerMonthKey,
+                                              dateKey: day.dateKey,
+                                              category,
+                                              index,
+                                              name: assignmentDisplay.name,
+                                            },
+                                            scheduleAssignmentStore,
+                                            visibleTripTagMap,
+                                          );
+                                          const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
+                                          const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
+                                          const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
+                                          const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
+                                          const isInteractiveChip =
+                                            !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
+                                          return (
+                                            <button
+                                              key={personObject.key}
+                                              type="button"
+                                              className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                              disabled={!isInteractiveChip}
+                                              onClick={() => void handleNameClick(personObject)}
+                                              style={{
+                                                display: "flex",
+                                                flexDirection: "column",
+                                                gridColumn: "auto",
+                                                justifySelf: "stretch",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                width: "100%",
+                                                maxWidth: "100%",
+                                                gap: personObject.pending ? 0 : 5,
+                                                minHeight: 28,
+                                                padding: "3px 4px",
+                                                borderRadius: 0,
+                                                background: personObject.pending
+                                                  ? "rgba(245,158,11,.18)"
+                                                  : duplicated
+                                                    ? "rgba(239,68,68,.22)"
+                                                  : routeSelected
+                                                    ? firstSelected
+                                                      ? "rgba(168,85,247,.28)"
+                                                      : "rgba(56,189,248,.22)"
+                                                    : recommendedHighlighted
+                                                      ? "rgba(124,58,237,.32)"
+                                                      : mineHighlighted
+                                                        ? "rgba(148,163,184,.38)"
+                                                        : dimOtherNames
+                                                          ? "rgba(255,255,255,.06)"
+                                                          : hasTaggedDisplayName
+                                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
+                                                          : nameTagColors
+                                                            ? nameTagColors.background
+                                                            : assignmentDisplay.chipStyle?.background
+                                                              ? assignmentDisplay.chipStyle.background
+                                                              : "rgba(255,255,255,.16)",
+                                                border: personObject.pending
+                                                  ? "1px solid rgba(245,158,11,.35)"
+                                                  : duplicated
+                                                    ? "1px solid rgba(239,68,68,.28)"
+                                                    : routeSelected
+                                                      ? firstSelected
+                                                        ? "1px solid rgba(192,132,252,.78)"
+                                                        : "1px solid rgba(56,189,248,.75)"
+                                                      : recommendedHighlighted
+                                                        ? "3px solid rgba(255,255,255,.95)"
+                                                      : mineHighlighted
+                                                        ? "2px solid rgba(226,232,240,.82)"
+                                                        : dimOtherNames
+                                                          ? "1px solid rgba(255,255,255,.08)"
+                                                          : hasTaggedDisplayName
+                                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
+                                                          : nameTagColors
+                                                            ? nameTagColors.border
+                                                          : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                                color: routeSelected && firstSelected
+                                                  ? "#f5eaff"
+                                                  : duplicated
+                                                    ? "#ffe4e6"
+                                                    : recommendedHighlighted || mineHighlighted
+                                                      ? "#ffffff"
+                                                      : dimOtherNames
+                                                        ? "rgba(248,251,255,.48)"
+                                                        : hasTaggedDisplayName
+                                                          ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
+                                                          : nameTagColors
+                                                            ? nameTagColors.color
+                                                            : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                                fontWeight: mineHighlighted ? 800 : 700,
+                                                lineHeight: 1.3,
+                                                boxShadow: "none",
+                                                textShadow: undefined,
+                                                opacity: dimOtherNames ? 0.42 : 1,
+                                                cursor: isInteractiveChip ? "pointer" : "default",
+                                              }}
+                                            >
+                                              <FittedNameText
+                                                text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                                className="schedule-name-chip__text"
+                                                minFontSize={shouldAutoFitSchedule ? 5 : 9}
+                                                maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                                style={{
+                                                  display: "inline-block",
+                                                  flex: "0 1 auto",
+                                                  width: "100%",
+                                                  margin: "0 auto",
+                                                  overflow: "visible",
+                                                  textOverflow: "clip",
+                                                }}
+                                              />
+                                              {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
+                                            </button>
+                                          );
+                                        })
+                                      ) : (
+                                        <span style={{ display: "inline-block", minHeight: 22 }} />
+                                      )}
+                                      {names.length > 0 && names.length % 2 === 1 ? (
+                                        <span
+                                          aria-hidden="true"
+                                          style={{
+                                            display: "block",
+                                            minHeight: 28,
+                                            border: "1px solid rgba(255,255,255,.08)",
+                                            background: "rgba(255,255,255,.03)",
+                                          }}
+                                        />
+                                      ) : null}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </article>
+                          );
+                        })}
+                        {row.length < 3 ? Array.from({ length: 3 - row.length }).map((_, fillerIndex) => (
+                          <div
+                            key={`home-mobile-row-${rowIndex}-filler-${fillerIndex}`}
+                            aria-hidden="true"
+                            style={{ minHeight: 0 }}
+                          />
+                        )) : null}
+                      </div>
+                    ))}
                   </div>
-                )})}
-                {visibleDisplayDays.map((day) => {
+                ) : (
+                  <>
+                    {weekdayLabels.map((label) => {
+                      const isWeekendLabel = label === "토" || label === "일";
+                      return (
+                      <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
+                        {label}
+                      </div>
+                    )})}
+                    {visibleDisplayDays.map((day) => {
                   const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const centeredDayLabel = getCenteredDayLabel(day);
@@ -1634,7 +2029,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
                       style={{
                         padding: 6,
-                        minHeight: isCompactMonthlyView ? 148 : 216,
+                        minHeight: isHomeMobileThreeDayView ? 160 : isCompactMonthlyView ? 148 : 216,
                         height: isCompactMonthlyView && compactMonthCardHeight ? compactMonthCardHeight : undefined,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
@@ -1927,6 +2322,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                     </article>
                   );
                 })}
+                  </>
+                )}
               </div>
               </div>
               </div>

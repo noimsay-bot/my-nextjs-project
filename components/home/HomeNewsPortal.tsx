@@ -30,6 +30,10 @@ const DEFERRED_NEWS_TASK_DELAY_MS = 120;
 const LIVE_PREVIEW_CACHE_KEY = "jtbc-home-news-live-preview-v1";
 
 function findPortalTargets() {
+  if (typeof window !== "undefined" && window.location.pathname === "/") {
+    return null;
+  }
+
   const panel = document.querySelector<HTMLElement>(".schedule-published-panel > .panel-pad");
   const hero = panel?.querySelector<HTMLElement>(".schedule-published-hero");
   if (!panel || !hero) return null;
@@ -37,18 +41,22 @@ function findPortalTargets() {
 }
 
 function ensurePortalHost(targets: ReturnType<typeof findPortalTargets>) {
-  if (!targets) return null;
+  if (!targets) {
+    return document.querySelector<HTMLElement>(HOST_SELECTOR);
+  }
 
   const { panel, hero } = targets;
 
-  const duplicatedHosts = panel.querySelectorAll<HTMLElement>(HOST_SELECTOR);
-  if (duplicatedHosts.length > 1) {
-    duplicatedHosts.forEach((node, index) => {
-      if (index > 0) node.remove();
+  const allHosts = Array.from(document.querySelectorAll<HTMLElement>(HOST_SELECTOR));
+  if (allHosts.length > 1) {
+    allHosts.forEach((node, index) => {
+      if (index > 0 && node.dataset.homeNewsOwner === "HomeNewsPortal") {
+        node.remove();
+      }
     });
   }
 
-  let host = panel.querySelector<HTMLElement>(HOST_SELECTOR);
+  let host = panel.querySelector<HTMLElement>(HOST_SELECTOR) ?? allHosts[0] ?? null;
   if (!host) {
     host = document.createElement("div");
     host.dataset.homeNewsSlot = "true";
@@ -58,6 +66,7 @@ function ensurePortalHost(targets: ReturnType<typeof findPortalTargets>) {
     host.style.padding = "0";
   }
 
+  host.dataset.homeNewsOwner = "HomeNewsPortal";
   if (hero.previousSibling !== host) {
     hero.insertAdjacentElement("beforebegin", host);
   }
