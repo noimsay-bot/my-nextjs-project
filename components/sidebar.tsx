@@ -38,7 +38,7 @@ function joinClassNames(...values: Array<string | undefined | false | null>) {
 
 function readSidebarCookie() {
   if (typeof document === "undefined") {
-    return true;
+    return false;
   }
 
   const match = document.cookie
@@ -46,7 +46,7 @@ function readSidebarCookie() {
     .find((cookie) => cookie.startsWith(`${SIDEBAR_COOKIE_NAME}=`));
 
   if (!match) {
-    return true;
+    return false;
   }
 
   return match.split("=")[1] !== "false";
@@ -97,7 +97,7 @@ type SidebarProviderProps = {
 
 export function SidebarProvider({
   children,
-  defaultOpen = true,
+  defaultOpen = false,
   ..._props
 }: SidebarProviderProps) {
   const isMobile = useIsMobile();

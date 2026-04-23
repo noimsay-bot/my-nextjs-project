@@ -492,7 +492,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const shouldShowGlobalScrollTop = !normalizedPathname.endsWith("/schedule-assignment");
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen={false}>
       <PortalChrome pathname={pathname}>{children}</PortalChrome>
       {shouldShowGlobalScrollTop ? <ScrollToTop /> : null}
     </SidebarProvider>

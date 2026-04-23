@@ -3209,8 +3209,17 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     transform: translateX(0);
   }
 
+  .portal-sidebar.is-collapsed .portal-sidebar__panel.is-open {
+    transform: translateX(0);
+  }
+
   .portal-sidebar-trigger--rail {
     display: inline-flex;
+    top: 0;
+    background: linear-gradient(180deg, var(--bg-start), var(--bg-mid));
+    border: 1px solid var(--line);
+    color: var(--text);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   }
 
   .portal-sidebar-backdrop.is-open {

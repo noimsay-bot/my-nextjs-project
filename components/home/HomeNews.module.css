@@ -271,6 +271,10 @@ html[data-theme="light"] .metaBarDdayDate {
   width: min(100%, 420px);
 }
 
+.mobileCurrentTripsNotice {
+  display: none;
+}
+
 .desktopTabList {
   display: flex;
   gap: 10px;
@@ -369,6 +373,12 @@ html[data-theme="light"] .metaBarDdayDate {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+  }
+
+  .mobileCurrentTripsNotice {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 12px;
   }
 
   .tabButton {

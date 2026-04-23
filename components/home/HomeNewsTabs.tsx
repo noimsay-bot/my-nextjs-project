@@ -129,6 +129,7 @@ export function HomeNewsTabs({
   ];
   const mobileNewsItemCount = mobileNewsTabs.reduce((sum, tab) => sum + tab.items.length, 0);
   const hasNoticeTab = tabs.some((tab) => tab.key === "notice");
+  const noticeItems = noticeTab?.items ?? [];
   const items = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
   const isNoticeActive = activeCategory === "notice";
   const isCurrentTripsActive = activeCategory === CURRENT_TRIPS_TAB_KEY;
@@ -212,6 +213,41 @@ export function HomeNewsTabs({
     if (isMobileNewsActive) return;
     setIsMobileNewsMenuOpen(false);
   }, [isMobileNewsActive, isMobileNewsMenuOpen]);
+
+  const renderCardGrid = (
+    cards: typeof items,
+    categoryKey: HomeNewsTabKey,
+  ) => (
+    <div className={styles.grid}>
+      {cards.map((item) => (
+        <div
+          key={item.id}
+          ref={(node) => {
+            if (node) {
+              cardRefs.current.set(item.id, node);
+              return;
+            }
+            cardRefs.current.delete(item.id);
+          }}
+        >
+          <HomeNewsCard
+            item={item}
+            expanded={expandedCardId === item.id}
+            onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
+            togglingPreference={togglingPreferenceId === item.id}
+            canDeleteNotice={canDeleteNotice && categoryKey === "notice" && Boolean(item.noticeId)}
+            deletingNotice={deletingNoticeId === item.id}
+            onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
+            onSetPreference={
+              onSetPreference
+                ? (nextPreference) => onSetPreference(item.id, nextPreference)
+                : undefined
+            }
+          />
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className={styles.tabs}>
@@ -332,12 +368,19 @@ export function HomeNewsTabs({
           className={styles.panel}
         >
           {isCurrentTripsActive ? (
-            <HomeNewsCurrentTrips
-              className={styles.currentTripsTabCard}
-              defaultExpanded
-              hideToggle
-              onCountChange={handleCurrentTripCountChange}
-            />
+            <>
+              {noticeItems.length > 0 ? (
+                <div className={styles.mobileCurrentTripsNotice}>
+                  {renderCardGrid(noticeItems, "notice")}
+                </div>
+              ) : null}
+              <HomeNewsCurrentTrips
+                className={styles.currentTripsTabCard}
+                defaultExpanded
+                hideToggle
+                onCountChange={handleCurrentTripCountChange}
+              />
+            </>
           ) : loading && !(isNoticeActive && items.length > 0) ? (
             <div className={styles.grid}>
               {[0, 1].map((item) => (
@@ -345,35 +388,7 @@ export function HomeNewsTabs({
               ))}
             </div>
           ) : items.length > 0 ? (
-            <div className={styles.grid}>
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  ref={(node) => {
-                    if (node) {
-                      cardRefs.current.set(item.id, node);
-                      return;
-                    }
-                    cardRefs.current.delete(item.id);
-                  }}
-                >
-                  <HomeNewsCard
-                    item={item}
-                    expanded={expandedCardId === item.id}
-                    onToggle={() => setExpandedCardId((current) => (current === item.id ? null : item.id))}
-                    togglingPreference={togglingPreferenceId === item.id}
-                    canDeleteNotice={canDeleteNotice && activeCategory === "notice" && Boolean(item.noticeId)}
-                    deletingNotice={deletingNoticeId === item.id}
-                    onDeleteNotice={onDeleteNotice ? () => onDeleteNotice(item.id) : undefined}
-                    onSetPreference={
-                      onSetPreference
-                        ? (nextPreference) => onSetPreference(item.id, nextPreference)
-                        : undefined
-                    }
-                  />
-                </div>
-              ))}
-            </div>
+            renderCardGrid(items, activeCategory)
           ) : (
             <div className={styles.empty} role="status" aria-live="polite">
               <strong>아직 들어온 브리핑이 없습니다.</strong>
