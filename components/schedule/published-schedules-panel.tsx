@@ -1,5 +1,6 @@
 ﻿﻿﻿﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
@@ -132,6 +133,12 @@ type ScheduleDisplaySource = {
   schedule: {
     days: DaySchedule[];
   };
+};
+
+type PublishedSchedulesPanelMode = "home" | "page";
+
+type PublishedSchedulesPanelProps = {
+  mode?: PublishedSchedulesPanelMode;
 };
 
 function getAssignmentDisplay(category: string, value: string) {
@@ -542,6 +549,34 @@ function getTodayDateKey() {
   return toDateKey(new Date());
 }
 
+function getWeekDateRange(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const weekday = date.getDay();
+  const mondayOffset = weekday === 0 ? 6 : weekday - 1;
+  const monday = new Date(date);
+  monday.setDate(date.getDate() - mondayOffset);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    startDateKey: toDateKey(monday),
+    endDateKey: toDateKey(sunday),
+  };
+}
+
+function getWeeklyPreviewDays(days: DisplayDay[], todayKey: string) {
+  if (days.length === 0) return [];
+  const anchorDay =
+    days.find((day) => day.dateKey === todayKey && !day.isOverflowMonth) ??
+    days.find((day) => day.dateKey === todayKey) ??
+    days.find((day) => !day.isOverflowMonth) ??
+    days[0];
+  if (!anchorDay) return [];
+  const { startDateKey, endDateKey } = getWeekDateRange(anchorDay.dateKey);
+  const previewDays = days.filter((day) => day.dateKey >= startDateKey && day.dateKey <= endDateKey);
+  return previewDays.length > 0 ? previewDays : days;
+}
+
 function getPreviousDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(year, month - 1, day);
@@ -646,7 +681,8 @@ function isSwapCandidateValid(
   return true;
 }
 
-export function PublishedSchedulesPanel() {
+export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPanelProps) {
+  const isHomePreview = mode === "home";
   const [items, setItems] = useState<PublishedScheduleItem[]>(() =>
     getPublishedSchedules().map((item) => ({
       ...item,
@@ -880,10 +916,11 @@ export function PublishedSchedulesPanel() {
 
   const activeHiddenMonthKeys = hideMode ? draftHiddenPublishedMonthKeys : hiddenPublishedMonthKeys;
   const activeItems = useMemo(() => {
+    if (isHomePreview) return items;
     if (hideMode) return items;
     const hiddenMonthKeySet = new Set(hiddenPublishedMonthKeys);
     return items.filter((item) => !hiddenMonthKeySet.has(item.monthKey));
-  }, [hiddenPublishedMonthKeys, hideMode, items]);
+  }, [hiddenPublishedMonthKeys, hideMode, isHomePreview, items]);
 
   useEffect(() => {
     setSelectedMonthKey((current) => {
@@ -919,6 +956,10 @@ export function PublishedSchedulesPanel() {
   const displayDays = useMemo(
     () => (selectedItem ? buildDisplayDays(selectedItem, previousDisplaySource) : []),
     [previousDisplaySource, selectedItem],
+  );
+  const visibleDisplayDays = useMemo(
+    () => (isHomePreview ? getWeeklyPreviewDays(displayDays, todayKey) : displayDays),
+    [displayDays, isHomePreview, todayKey],
   );
   const firstSelectedRef = selectedRoute[0] ?? null;
   const hasConflictWarning = useMemo(
@@ -1053,7 +1094,7 @@ export function PublishedSchedulesPanel() {
     };
   }, [
     compactMonthCardHeight,
-    displayDays,
+    visibleDisplayDays,
     editMode,
     requests,
     selectedItem,
@@ -1062,6 +1103,7 @@ export function PublishedSchedulesPanel() {
     showMine,
     username,
     isCompactMonthlyView,
+    isHomePreview,
   ]);
 
   useEffect(() => {
@@ -1097,7 +1139,7 @@ export function PublishedSchedulesPanel() {
       window.removeEventListener("resize", scheduleMeasure);
       window.removeEventListener("orientationchange", scheduleMeasure);
     };
-  }, [displayDays, editMode, isCompactMonthlyView, requests, selectedRoute, showMine]);
+  }, [editMode, isCompactMonthlyView, requests, selectedRoute, showMine, visibleDisplayDays]);
 
   const printSelectedSchedule = () => {
     if (!selectedItem) return;
@@ -1106,7 +1148,7 @@ export function PublishedSchedulesPanel() {
       title: printTitle,
       bodyHtml: renderSchedulePrintHtml({
         title: printTitle,
-        days: displayDays,
+        days: visibleDisplayDays,
         highlightedName: showMine ? username : null,
       }),
     });
@@ -1275,22 +1317,46 @@ export function PublishedSchedulesPanel() {
     return (
       <section className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}>
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-          <div className="schedule-published-hero">
-            <div className="schedule-published-hero__left">
-              <div className="muted schedule-published-hero__published">숨김 처리된 게시 근무표만 있습니다.</div>
+          {isHomePreview ? (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <div className="chip">근무표</div>
+                  <span className="muted">해당일 기준 주간 미리보기</span>
+                </div>
+                <strong style={{ fontSize: 24, lineHeight: 1.2 }}>이번 주 근무표</strong>
+                <span className="muted">전체 월별 게시 근무표와 수정 기능은 전용 페이지에서 확인합니다.</span>
+              </div>
+              <Link href="/work-schedule" className="btn primary">
+                근무표 전체 보기
+              </Link>
             </div>
-            <div className="schedule-published-hero__right">
-              <div className="schedule-toolbar-actions schedule-published-hero__user">
-                {canHidePublishedSchedules ? (
-                  <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
-                    {hideMode ? "숨김 완료" : "근무표 숨김"}
-                  </button>
-                ) : null}
+          ) : (
+            <div className="schedule-published-hero">
+              <div className="schedule-published-hero__left">
+                <div className="muted schedule-published-hero__published">숨김 처리된 게시 근무표만 있습니다.</div>
+              </div>
+              <div className="schedule-published-hero__right">
+                <div className="schedule-toolbar-actions schedule-published-hero__user">
+                  {canHidePublishedSchedules ? (
+                    <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
+                      {hideMode ? "숨김 완료" : "근무표 숨김"}
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </div>
-          </div>
-          {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
-          <div className="status note">현재 홈에 보이는 게시 근무표가 없습니다.</div>
+          )}
+          {!isHomePreview && requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
+          <div className="status note">{isHomePreview ? "현재 홈에 표시할 주간 근무표가 없습니다." : "현재 홈에 보이는 게시 근무표가 없습니다."}</div>
         </div>
       </section>
     );
@@ -1301,7 +1367,33 @@ export function PublishedSchedulesPanel() {
       className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-        {editMode && username ? (
+        {isHomePreview ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div className="chip">근무표</div>
+                <span className="muted">해당일 기준 주간 미리보기</span>
+              </div>
+              <strong style={{ fontSize: 24, lineHeight: 1.2 }}>
+                {selectedItem ? `${selectedItem.schedule.year}년 ${selectedItem.schedule.month}월 이번 주 근무표` : "이번 주 근무표"}
+              </strong>
+              <span className="muted">홈에는 현재 주간만 표시하고, 월별 이동과 수정 기능은 전용 페이지에서 유지합니다.</span>
+            </div>
+            <Link href="/work-schedule" className="btn primary">
+              근무표 전체 보기
+            </Link>
+          </div>
+        ) : null}
+
+        {!isHomePreview && editMode && username ? (
           <div
             style={{
               border: "1px solid var(--line)",
@@ -1372,10 +1464,10 @@ export function PublishedSchedulesPanel() {
           </div>
         ) : null}
 
-        {editMode && username ? (
+        {!isHomePreview && editMode && username ? (
           <div className="status note">처음 시작은 로그인한 본인 이름으로만 가능합니다. 이후에는 {routeScopeLabel} 전체에서 미래 날짜 근무를 요청 경로에 넣을 수 있습니다.</div>
         ) : null}
-        {requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
+        {!isHomePreview && requestMessage ? <div className={`status ${requestMessageTone}`}>{requestMessage}</div> : null}
 
         {selectedItem ? (
           <>
@@ -1389,75 +1481,101 @@ export function PublishedSchedulesPanel() {
                   <div className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
                 </div>
               </div>
-              <div className="schedule-published-hero">
-                <div className="schedule-published-hero__left">
-                  <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
-                  <div className="schedule-toolbar-actions schedule-published-hero__months">
-                    {activeItems.map((item) => {
-                      const isHiddenTarget = activeHiddenMonthKeys.includes(item.monthKey);
-                      const isSelected = selectedItem?.monthKey === item.monthKey;
-                      return (
-                        <button
-                          key={item.monthKey}
-                          className={`btn ${isSelected ? "white" : ""}`}
-                          onClick={() => {
-                            if (hideMode) {
-                              toggleHideTarget(item.monthKey);
-                              return;
+              {isHomePreview ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 10,
+                    borderRadius: 20,
+                    border: "1px solid rgba(255,255,255,.08)",
+                    background: "rgba(255,255,255,.03)",
+                    padding: 18,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{selectedItem.title}</strong>
+                      <span className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</span>
+                    </div>
+                    <span className="chip">
+                      {visibleDisplayDays[0]?.month}/{visibleDisplayDays[0]?.day} - {visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/{visibleDisplayDays[visibleDisplayDays.length - 1]?.day}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <VacationLegendChips />
+                  </div>
+                </div>
+              ) : (
+                <div className="schedule-published-hero">
+                  <div className="schedule-published-hero__left">
+                    <div className="muted schedule-published-hero__published">게시 {formatPublishedAt(selectedItem.publishedAt)}</div>
+                    <div className="schedule-toolbar-actions schedule-published-hero__months">
+                      {activeItems.map((item) => {
+                        const isHiddenTarget = activeHiddenMonthKeys.includes(item.monthKey);
+                        const isSelected = selectedItem?.monthKey === item.monthKey;
+                        return (
+                          <button
+                            key={item.monthKey}
+                            className={`btn ${isSelected ? "white" : ""}`}
+                            onClick={() => {
+                              if (hideMode) {
+                                toggleHideTarget(item.monthKey);
+                                return;
+                              }
+                              setSelectedMonthKey(item.monthKey);
+                            }}
+                            style={
+                              hideMode && isHiddenTarget
+                                ? {
+                                    borderColor: "rgba(248, 113, 113, 0.8)",
+                                    background: isSelected ? "#fff" : "rgba(248, 113, 113, 0.18)",
+                                  }
+                                : undefined
                             }
-                            setSelectedMonthKey(item.monthKey);
-                          }}
-                          style={
-                            hideMode && isHiddenTarget
-                              ? {
-                                  borderColor: "rgba(248, 113, 113, 0.8)",
-                                  background: isSelected ? "#fff" : "rgba(248, 113, 113, 0.18)",
-                                }
-                              : undefined
-                          }
-                        >
-                          {item.schedule.year}년 {item.schedule.month}월
-                          {hideMode && isHiddenTarget ? " 숨김" : ""}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="schedule-published-hero__center">
-                  <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
-                </div>
-                <div className="schedule-published-hero__right">
-                  <div className="schedule-toolbar-actions schedule-published-hero__user">
-                    <div className="schedule-published-hero__user-actions">
-                      <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
-                        {showMine ? "전체 보기" : "내 근무 보기"}
-                      </button>
-                      <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
-                        {editMode ? "근무 수정 완료" : "근무 수정"}
-                      </button>
-                      {scheduleLayoutMode !== "mobile" ? (
-                        <button className="btn" onClick={printSelectedSchedule}>
-                          출력
-                        </button>
-                      ) : null}
-                      {canHidePublishedSchedules ? (
-                        <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
-                          {hideMode ? "숨김 완료" : "근무표 숨김"}
-                        </button>
-                      ) : null}
+                          >
+                            {item.schedule.year}년 {item.schedule.month}월
+                            {hideMode && isHiddenTarget ? " 숨김" : ""}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                  {hideMode ? (
-                    <div className="status note">숨길 월을 선택한 뒤 `숨김 완료`를 누르세요. 숨김 모드에서는 게시된 모든 근무표가 보입니다.</div>
-                  ) : null}
-                  <div className="schedule-published-hero__footer">
-                    <div className="schedule-calendar-top-legend">
-                      <VacationLegendChips />
+                  <div className="schedule-published-hero__center">
+                    <strong className="schedule-current-title schedule-published-hero__title">{selectedItem.title}</strong>
+                  </div>
+                  <div className="schedule-published-hero__right">
+                    <div className="schedule-toolbar-actions schedule-published-hero__user">
+                      <div className="schedule-published-hero__user-actions">
+                        <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
+                          {showMine ? "전체 보기" : "내 근무 보기"}
+                        </button>
+                        <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
+                          {editMode ? "근무 수정 완료" : "근무 수정"}
+                        </button>
+                        {scheduleLayoutMode !== "mobile" ? (
+                          <button className="btn" onClick={printSelectedSchedule}>
+                            출력
+                          </button>
+                        ) : null}
+                        {canHidePublishedSchedules ? (
+                          <button className={`btn ${hideMode ? "white" : ""}`} onClick={() => void toggleHideMode()}>
+                            {hideMode ? "숨김 완료" : "근무표 숨김"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="schedule-calendar-top-actions" />
+                    {hideMode ? (
+                      <div className="status note">숨길 월을 선택한 뒤 `숨김 완료`를 누르세요. 숨김 모드에서는 게시된 모든 근무표가 보입니다.</div>
+                    ) : null}
+                    <div className="schedule-published-hero__footer">
+                      <div className="schedule-calendar-top-legend">
+                        <VacationLegendChips />
+                      </div>
+                      <div className="schedule-calendar-top-actions" />
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {canControlScheduleZoom ? (
                 <div className="schedule-published-zoom-controls">
@@ -1506,7 +1624,7 @@ export function PublishedSchedulesPanel() {
                     {label}
                   </div>
                 )})}
-                {displayDays.map((day) => {
+                {visibleDisplayDays.map((day) => {
                   const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const centeredDayLabel = getCenteredDayLabel(day);
@@ -1705,11 +1823,14 @@ export function PublishedSchedulesPanel() {
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
+                                  const isInteractiveChip =
+                                    !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
                                   return (
                                     <button
                                       key={personObject.key}
                                       type="button"
                                       className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                      disabled={!isInteractiveChip}
                                       onClick={() => void handleNameClick(personObject)}
                                       style={{
                                         display: "flex",
@@ -1782,7 +1903,7 @@ export function PublishedSchedulesPanel() {
                                         boxShadow: "none",
                                         textShadow: undefined,
                                         opacity: dimOtherNames ? 0.42 : 1,
-                                        cursor: editMode && (!personObject.pending || ownPendingRequest) ? "pointer" : "default",
+                                        cursor: isInteractiveChip ? "pointer" : "default",
                                       }}
                                       >
                                         <FittedNameText

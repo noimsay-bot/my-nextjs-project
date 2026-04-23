@@ -94,7 +94,7 @@ export function HomeDeferredWidgets() {
 
   return (
     <>
-      {showSchedules ? <PublishedSchedulesPanel /> : null}
+      {showSchedules ? <PublishedSchedulesPanel mode="home" /> : null}
       {showPopup ? <HomePopupNoticeModal /> : null}
       {showNews ? <HomeNewsPortal /> : null}
     </>
