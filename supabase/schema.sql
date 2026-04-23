@@ -18,6 +18,7 @@ where login_id is not null;
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = timezone('utc', now());
@@ -1009,6 +1010,7 @@ returns table (
   updated_at timestamptz
 )
 language plpgsql
+set search_path = public
 as $$
 declare
   v_cell_key text := concat_ws('::', p_month_key, p_date_key, p_row_key, p_field_key);
@@ -1110,6 +1112,7 @@ create or replace function public.release_team_lead_schedule_assignment_cell_loc
 )
 returns boolean
 language plpgsql
+set search_path = public
 as $$
 declare
   v_user_id uuid := auth.uid();
@@ -1119,9 +1122,9 @@ begin
   end if;
 
   delete from public.team_lead_schedule_assignment_cell_locks
-  where cell_key = p_cell_key
-    and locked_by = v_user_id
-    and claim_token = p_claim_token;
+  where public.team_lead_schedule_assignment_cell_locks.cell_key = p_cell_key
+    and public.team_lead_schedule_assignment_cell_locks.locked_by = v_user_id
+    and public.team_lead_schedule_assignment_cell_locks.claim_token = p_claim_token;
 
   return found;
 end;

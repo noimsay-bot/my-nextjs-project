@@ -1,58 +1,16 @@
--- Purpose: Add cell-level edit locks for schedule assignment inputs so the first editor keeps priority.
--- Impact: Creates public.team_lead_schedule_assignment_cell_locks, lock acquire/release RPCs, and RLS for desk/team_lead/admin.
--- Rollback:
---   drop function if exists public.release_team_lead_schedule_assignment_cell_lock(text, text);
---   drop function if exists public.acquire_team_lead_schedule_assignment_cell_lock(text, text, text, text, text, integer);
---   drop table if exists public.team_lead_schedule_assignment_cell_locks;
+-- Purpose: Lock function search_path to public to address mutable search_path warnings.
+-- Impact: Replaces existing function definitions without changing behavior.
 
-create table if not exists public.team_lead_schedule_assignment_cell_locks (
-  cell_key text primary key,
-  month_key text not null,
-  date_key text not null,
-  row_key text not null,
-  field_key text not null,
-  locked_by uuid references public.profiles (id) on delete cascade,
-  locked_by_name text not null default '',
-  claim_token text not null,
-  expires_at timestamptz not null default timezone('utc', now()),
-  updated_at timestamptz not null default timezone('utc', now())
-);
-
-create index if not exists team_lead_schedule_assignment_cell_locks_month_idx
-  on public.team_lead_schedule_assignment_cell_locks (month_key, expires_at);
-
-drop trigger if exists set_team_lead_schedule_assignment_cell_locks_updated_at on public.team_lead_schedule_assignment_cell_locks;
-
-create trigger set_team_lead_schedule_assignment_cell_locks_updated_at
-before update on public.team_lead_schedule_assignment_cell_locks
-for each row
-execute function public.set_updated_at();
-
-alter table public.team_lead_schedule_assignment_cell_locks enable row level security;
-
-drop policy if exists "team_lead_schedule_assignment_cell_locks_select_managers" on public.team_lead_schedule_assignment_cell_locks;
-create policy "team_lead_schedule_assignment_cell_locks_select_managers"
-on public.team_lead_schedule_assignment_cell_locks
-for select
-to authenticated
-using (
-  public.current_profile_role() in ('team_lead', 'admin', 'desk')
-  and public.current_profile_approved() = true
-);
-
-drop policy if exists "team_lead_schedule_assignment_cell_locks_manage_privileged" on public.team_lead_schedule_assignment_cell_locks;
-create policy "team_lead_schedule_assignment_cell_locks_manage_privileged"
-on public.team_lead_schedule_assignment_cell_locks
-for all
-to authenticated
-using (
-  public.current_profile_role() in ('team_lead', 'admin', 'desk')
-  and public.current_profile_approved() = true
-)
-with check (
-  public.current_profile_role() in ('team_lead', 'admin', 'desk')
-  and public.current_profile_approved() = true
-);
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$;
 
 create or replace function public.acquire_team_lead_schedule_assignment_cell_lock(
   p_month_key text,

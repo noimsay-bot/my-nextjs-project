@@ -205,11 +205,20 @@ let contributionManualCache = {} as ContributionManualStore;
 let finalCutCache = {} as Record<string, FinalCutDecision>;
 let submissionAccessCache = false;
 let teamLeadRefreshPromise: Promise<void> | null = null;
+let teamLeadMetaRefreshPromise: Promise<void> | null = null;
+const assignmentMonthRefreshPromises = new Map<string, Promise<void>>();
+const assignmentMonthsRefreshPromises = new Map<string, Promise<void>>();
+let assignmentPersistedSnapshotCache: Record<string, string> = {};
 let assignmentPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let assignmentPersistDelayMs: number | null = null;
 let assignmentPersistResolvers: Array<() => void> = [];
 let assignmentPersistMonthKeys = new Set<string>();
 let finalCutPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let finalCutPersistResolvers: Array<() => void> = [];
+
+interface SaveScheduleAssignmentStoreOptions {
+  debounceMs?: number;
+}
 
 class ScheduleAssignmentConflictError extends Error {
   monthKeys: string[];
@@ -420,6 +429,43 @@ function applyAssignmentRowsToCache(rows: TeamLeadScheduleAssignmentRow[]) {
       .filter((row) => Boolean(row.updated_at))
       .map((row) => [row.month_key, row.updated_at as string]),
   );
+  assignmentPersistedSnapshotCache = Object.fromEntries(
+    rows.map((row) => [row.month_key, JSON.stringify({
+      entries: normalizeMonthEntries(row.entries ?? {}),
+      rows: normalizeMonthRows(row.rows ?? {}),
+    })]),
+  );
+}
+
+function applyAssignmentMonthToCache(monthKey: string, row: TeamLeadScheduleAssignmentRow | null) {
+  const nextEntries = { ...assignmentStoreCache.entries };
+  const nextRows = { ...assignmentStoreCache.rows };
+
+  if (row) {
+    nextEntries[monthKey] = normalizeMonthEntries(row.entries ?? {});
+    nextRows[monthKey] = normalizeMonthRows(row.rows ?? {});
+    setAssignmentMonthUpdatedAt(monthKey, row.updated_at);
+    assignmentPersistedSnapshotCache[monthKey] = JSON.stringify({
+      entries: nextEntries[monthKey],
+      rows: nextRows[monthKey],
+    });
+  } else {
+    delete nextEntries[monthKey];
+    delete nextRows[monthKey];
+    setAssignmentMonthUpdatedAt(monthKey, null);
+    delete assignmentPersistedSnapshotCache[monthKey];
+  }
+
+  assignmentStoreCache = {
+    entries: nextEntries,
+    rows: nextRows,
+  };
+}
+
+function applyTeamLeadMetaStateRows(rows: TeamLeadStateRow[]) {
+  const stateMap = new Map(rows.map((row) => [row.key, row.state] as const));
+  contributionManualCache = normalizeContributionManualStore(stateMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY));
+  finalCutCache = normalizeFinalCutStore(stateMap.get(TEAM_LEAD_FINAL_CUT_STATE_KEY));
 }
 
 export function getScheduleAssignmentStore(): ScheduleAssignmentDataStore {
@@ -549,6 +595,175 @@ async function persistTeamLeadState(key: string, state: unknown) {
   }
 }
 
+function normalizeAssignmentPersistDelayMs(value?: number) {
+  if (!Number.isFinite(value)) {
+    return 250;
+  }
+
+  return Math.max(200, Math.round(value as number));
+}
+
+function normalizeAssignmentMonthKeys(monthKeys: string[]) {
+  return Array.from(new Set(monthKeys.map((monthKey) => monthKey.trim()).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function getAssignmentMonthSnapshot(store: ScheduleAssignmentDataStore, monthKey: string) {
+  return JSON.stringify({
+    entries: normalizeMonthEntries(store.entries[monthKey] ?? {}),
+    rows: normalizeMonthRows(store.rows[monthKey] ?? {}),
+  });
+}
+
+export async function refreshTeamLeadAssignmentMonth(monthKey: string) {
+  const normalizedMonthKey = monthKey.trim();
+  if (!normalizedMonthKey) {
+    return;
+  }
+
+  const existingPromise = assignmentMonthRefreshPromises.get(normalizedMonthKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const refreshPromise = (async () => {
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      applyAssignmentMonthToCache(normalizedMonthKey, null);
+      emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+      return;
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_schedule_assignments")
+      .select("month_key, entries, rows, updated_at")
+      .eq("month_key", normalizedMonthKey)
+      .maybeSingle<TeamLeadScheduleAssignmentRow>();
+
+    if (error) {
+      if (isSupabaseSchemaMissingError(error)) {
+        console.warn(getSupabaseStorageErrorMessage(error, "team_lead_schedule_assignments"));
+        applyAssignmentMonthToCache(normalizedMonthKey, null);
+        emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+        return;
+      }
+
+      throw new Error(error.message);
+    }
+
+    // Keep large assignment JSONB reads scoped to the selected month.
+    applyAssignmentMonthToCache(normalizedMonthKey, data ?? null);
+    emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+  })().finally(() => {
+    assignmentMonthRefreshPromises.delete(normalizedMonthKey);
+  });
+
+  assignmentMonthRefreshPromises.set(normalizedMonthKey, refreshPromise);
+  return refreshPromise;
+}
+
+export async function refreshTeamLeadAssignmentMonths(monthKeys: string[]) {
+  const normalizedMonthKeys = normalizeAssignmentMonthKeys(monthKeys);
+  if (normalizedMonthKeys.length === 0) {
+    return;
+  }
+
+  if (normalizedMonthKeys.length === 1) {
+    return refreshTeamLeadAssignmentMonth(normalizedMonthKeys[0]);
+  }
+
+  const refreshKey = normalizedMonthKeys.join(",");
+  const existingPromise = assignmentMonthsRefreshPromises.get(refreshKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const refreshPromise = (async () => {
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      normalizedMonthKeys.forEach((monthKey) => applyAssignmentMonthToCache(monthKey, null));
+      emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+      return;
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_schedule_assignments")
+      .select("month_key, entries, rows, updated_at")
+      .in("month_key", normalizedMonthKeys)
+      .returns<TeamLeadScheduleAssignmentRow[]>();
+
+    if (error) {
+      if (isSupabaseSchemaMissingError(error)) {
+        console.warn(getSupabaseStorageErrorMessage(error, "team_lead_schedule_assignments"));
+        normalizedMonthKeys.forEach((monthKey) => applyAssignmentMonthToCache(monthKey, null));
+        emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+        return;
+      }
+
+      throw new Error(error.message);
+    }
+
+    const rowMap = new Map((data ?? []).map((row) => [row.month_key, row] as const));
+    normalizedMonthKeys.forEach((monthKey) => {
+      applyAssignmentMonthToCache(monthKey, rowMap.get(monthKey) ?? null);
+    });
+    emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+  })().finally(() => {
+    assignmentMonthsRefreshPromises.delete(refreshKey);
+  });
+
+  assignmentMonthsRefreshPromises.set(refreshKey, refreshPromise);
+  return refreshPromise;
+}
+
+export async function refreshTeamLeadMetaState() {
+  if (teamLeadMetaRefreshPromise) {
+    return teamLeadMetaRefreshPromise;
+  }
+
+  teamLeadMetaRefreshPromise = (async () => {
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      contributionManualCache = {};
+      finalCutCache = {};
+      emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+      emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+      return;
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_state")
+      .select("key, state")
+      .in("key", [TEAM_LEAD_CONTRIBUTION_STATE_KEY, TEAM_LEAD_FINAL_CUT_STATE_KEY])
+      .returns<TeamLeadStateRow[]>();
+
+    if (error) {
+      if (isSupabaseSchemaMissingError(error)) {
+        console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+        contributionManualCache = {};
+        finalCutCache = {};
+        emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+        emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+        return;
+      }
+
+      throw new Error(error.message);
+    }
+
+    applyTeamLeadMetaStateRows(data ?? []);
+    emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
+    emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+  })().finally(() => {
+    teamLeadMetaRefreshPromise = null;
+  });
+
+  return teamLeadMetaRefreshPromise;
+}
+
 export async function refreshTeamLeadState() {
   if (teamLeadRefreshPromise) {
     return teamLeadRefreshPromise;
@@ -559,55 +774,35 @@ export async function refreshTeamLeadState() {
     if (!session?.approved) {
       assignmentStoreCache = { entries: {}, rows: {} };
       assignmentMonthUpdatedAtCache = {};
-      contributionManualCache = {};
-      finalCutCache = {};
+      assignmentPersistedSnapshotCache = {};
       emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
-      emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
-      emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+      await refreshTeamLeadMetaState();
       return;
     }
 
     const supabase = await getPortalSupabaseClient();
-    const [{ data: assignmentRows, error: assignmentError }, { data: stateRows, error: stateError }] = await Promise.all([
-      supabase
-        .from("team_lead_schedule_assignments")
-        .select("month_key, entries, rows, updated_at")
-        .returns<TeamLeadScheduleAssignmentRow[]>(),
-      supabase
-        .from("team_lead_state")
-        .select("key, state")
-        .in("key", [TEAM_LEAD_CONTRIBUTION_STATE_KEY, TEAM_LEAD_FINAL_CUT_STATE_KEY])
-        .returns<TeamLeadStateRow[]>(),
-    ]);
+    const { data: assignmentRows, error: assignmentError } = await supabase
+      .from("team_lead_schedule_assignments")
+      .select("month_key, entries, rows, updated_at")
+      .returns<TeamLeadScheduleAssignmentRow[]>();
 
-    if (assignmentError || stateError) {
-      const schemaError = assignmentError ?? stateError;
-      if (isSupabaseSchemaMissingError(schemaError)) {
-        console.warn(getSupabaseStorageErrorMessage(schemaError, "team_lead_schedule_assignments / team_lead_state"));
+    if (assignmentError) {
+      if (isSupabaseSchemaMissingError(assignmentError)) {
+        console.warn(getSupabaseStorageErrorMessage(assignmentError, "team_lead_schedule_assignments"));
         assignmentStoreCache = { entries: {}, rows: {} };
         assignmentMonthUpdatedAtCache = {};
-        contributionManualCache = {};
-        finalCutCache = {};
+        assignmentPersistedSnapshotCache = {};
         emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
-        emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
-        emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+        await refreshTeamLeadMetaState();
         return;
       }
 
-      if (assignmentError) {
-        throw new Error(assignmentError.message);
-      }
-      throw new Error(stateError?.message ?? "팀장 데이터를 불러오지 못했습니다.");
+      throw new Error(assignmentError.message);
     }
 
     applyAssignmentRowsToCache(assignmentRows ?? []);
-
-    const stateMap = new Map((stateRows ?? []).map((row) => [row.key, row.state] as const));
-    contributionManualCache = normalizeContributionManualStore(stateMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY));
-    finalCutCache = normalizeFinalCutStore(stateMap.get(TEAM_LEAD_FINAL_CUT_STATE_KEY));
     emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
-    emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
-    emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+    await refreshTeamLeadMetaState();
   })().finally(() => {
     teamLeadRefreshPromise = null;
   });
@@ -618,22 +813,55 @@ export async function refreshTeamLeadState() {
 export function saveScheduleAssignmentStore(
   store: ScheduleAssignmentDataStore,
   monthKeys: string[] = Object.keys({ ...store.entries, ...store.rows }),
+  options: SaveScheduleAssignmentStoreOptions = {},
 ) {
-  assignmentStoreCache = normalizeScheduleAssignmentDataStore(store);
+  const normalizedStore = normalizeScheduleAssignmentDataStore(store);
+  const changedMonthKeys = Array.from(new Set(monthKeys.filter(Boolean))).filter(
+    (monthKey) => getAssignmentMonthSnapshot(normalizedStore, monthKey) !== assignmentPersistedSnapshotCache[monthKey],
+  );
+
+  assignmentStoreCache = normalizedStore;
+
+  if (changedMonthKeys.length === 0) {
+    return Promise.resolve();
+  }
+
   emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
-  monthKeys.filter(Boolean).forEach((monthKey) => assignmentPersistMonthKeys.add(monthKey));
+  changedMonthKeys.forEach((monthKey) => assignmentPersistMonthKeys.add(monthKey));
 
   if (assignmentPersistTimer) {
     clearTimeout(assignmentPersistTimer);
   }
 
+  const requestedDelayMs = normalizeAssignmentPersistDelayMs(options.debounceMs);
+  assignmentPersistDelayMs =
+    assignmentPersistDelayMs === null ? requestedDelayMs : Math.min(assignmentPersistDelayMs, requestedDelayMs);
+
   return new Promise<void>((resolve) => {
     assignmentPersistResolvers.push(resolve);
     assignmentPersistTimer = setTimeout(() => {
       const pendingMonthKeys = Array.from(assignmentPersistMonthKeys);
+      const pendingStore = normalizeScheduleAssignmentDataStore(assignmentStoreCache);
+      const persistableMonthKeys = pendingMonthKeys.filter(
+        (monthKey) => getAssignmentMonthSnapshot(pendingStore, monthKey) !== assignmentPersistedSnapshotCache[monthKey],
+      );
       assignmentPersistMonthKeys.clear();
       assignmentPersistTimer = null;
-      persistScheduleAssignmentStore(assignmentStoreCache, pendingMonthKeys)
+      assignmentPersistDelayMs = null;
+
+      if (persistableMonthKeys.length === 0) {
+        const resolvers = [...assignmentPersistResolvers];
+        assignmentPersistResolvers = [];
+        resolvers.forEach((item) => item());
+        return;
+      }
+
+      persistScheduleAssignmentStore(pendingStore, persistableMonthKeys)
+        .then(() => {
+          persistableMonthKeys.forEach((monthKey) => {
+            assignmentPersistedSnapshotCache[monthKey] = getAssignmentMonthSnapshot(pendingStore, monthKey);
+          });
+        })
         .catch(async (error) => {
           emitTeamLeadStorageStatus({
             ok: false,
@@ -644,6 +872,10 @@ export function saveScheduleAssignmentStore(
                   ? error.message
                   : "일정배정 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
           });
+          if (persistableMonthKeys.length > 0) {
+            await Promise.all(persistableMonthKeys.map((monthKey) => refreshTeamLeadAssignmentMonth(monthKey)));
+            return;
+          }
           await refreshTeamLeadState();
         })
         .finally(() => {
@@ -651,7 +883,7 @@ export function saveScheduleAssignmentStore(
           assignmentPersistResolvers = [];
           resolvers.forEach((item) => item());
         });
-    }, 250);
+    }, assignmentPersistDelayMs ?? requestedDelayMs);
   });
 }
 
@@ -847,7 +1079,7 @@ export function saveContributionManualStore(
     });
     contributionManualCache = previous;
     emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
-    await refreshTeamLeadState();
+    await refreshTeamLeadMetaState();
   });
 }
 
@@ -904,7 +1136,7 @@ export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
         });
         finalCutCache = previous;
         emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
-        await refreshTeamLeadState();
+        await refreshTeamLeadMetaState();
       }).finally(() => {
         const resolvers = [...finalCutPersistResolvers];
         finalCutPersistResolvers = [];

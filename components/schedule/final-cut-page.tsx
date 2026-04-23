@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   FinalCutDecision,
@@ -10,9 +9,11 @@ import {
   TEAM_LEAD_STORAGE_STATUS_EVENT,
   getFinalCutCards,
   getTeamLeadSchedules,
-  refreshTeamLeadState,
+  refreshTeamLeadAssignmentMonths,
   updateFinalCutDecision,
 } from "@/lib/team-lead/storage";
+
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
 const decisionButtons: Array<{
   value: Exclude<FinalCutDecision, "">;
@@ -212,9 +213,11 @@ export function FinalCutPage() {
   const [decisionDrafts, setDecisionDrafts] = useState<Record<string, FinalCutDecision>>({});
   const [expandedNames, setExpandedNames] = useState<string[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+  const lastFocusRefreshAtRef = useRef(0);
 
   const refreshCards = useCallback(async () => {
-    await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
+    await refreshScheduleState();
+    await refreshTeamLeadAssignmentMonths(getTeamLeadSchedules().map((schedule) => schedule.monthKey));
     const schedules = getTeamLeadSchedules();
     const generatedState = readStoredScheduleState();
     const generatedMonthKeys = generatedState.generatedHistory.map((schedule) => schedule.monthKey);
@@ -244,16 +247,23 @@ export function FinalCutPage() {
       void refreshCards();
     };
 
-    void refreshCards();
-    window.addEventListener("focus", refreshCards);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refreshCards);
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refreshCards();
+    };
+
+    void refreshCards().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, refreshCards);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshCards);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("focus", refreshCards);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refreshCards);
+      window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, refreshCards);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshCards);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);

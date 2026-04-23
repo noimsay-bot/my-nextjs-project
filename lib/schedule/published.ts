@@ -27,6 +27,10 @@ export const PUBLISHED_SCHEDULES_STATUS_EVENT = "j-special-force-published-sched
 let publishedSchedulesCache: PublishedScheduleItem[] = [];
 let publishedRefreshPromise: Promise<PublishedScheduleItem[]> | null = null;
 
+interface RefreshPublishedSchedulesOptions {
+  monthKeys?: string[];
+}
+
 function cloneItems(items: PublishedScheduleItem[]) {
   return items.map((item) => ({
     ...item,
@@ -83,6 +87,35 @@ function rowsToItems(rows: ScheduleMonthPublishRow[]) {
     .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
 }
 
+function normalizePublishedMonthKeys(monthKeys?: string[]) {
+  return Array.from(new Set((monthKeys ?? []).map((item) => item.trim()).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function applyPublishedItemsToCache(items: PublishedScheduleItem[], monthKeys?: string[]) {
+  const normalizedMonthKeys = normalizePublishedMonthKeys(monthKeys);
+  if (normalizedMonthKeys.length === 0) {
+    publishedSchedulesCache = cloneItems(items);
+    return;
+  }
+
+  const monthKeySet = new Set(normalizedMonthKeys);
+  const nextMap = new Map(
+    publishedSchedulesCache
+      .filter((item) => !monthKeySet.has(item.monthKey))
+      .map((item) => [item.monthKey, item] as const),
+  );
+
+  items.forEach((item) => {
+    nextMap.set(item.monthKey, item);
+  });
+
+  publishedSchedulesCache = cloneItems(
+    Array.from(nextMap.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
+  );
+}
+
 function normalizeComparableAssignments(assignments: Record<string, string[]>) {
   return Object.fromEntries(
     Object.entries(assignments ?? {})
@@ -135,11 +168,13 @@ async function repairPublishedItems(items: PublishedScheduleItem[]) {
   return { items: nextItems, changed, changedMonthKeys };
 }
 
-export function getPublishedSchedules(): PublishedScheduleItem[] {
-  return cloneItems(publishedSchedulesCache);
+export function getPublishedSchedules(monthKeys?: string[]): PublishedScheduleItem[] {
+  const normalizedMonthKeys = normalizePublishedMonthKeys(monthKeys);
+  const monthKeySet = normalizedMonthKeys.length > 0 ? new Set(normalizedMonthKeys) : null;
+  return cloneItems(publishedSchedulesCache).filter((item) => !monthKeySet || monthKeySet.has(item.monthKey));
 }
 
-export async function refreshPublishedSchedules() {
+export async function refreshPublishedSchedules(options: RefreshPublishedSchedulesOptions = {}) {
   if (publishedRefreshPromise) {
     return publishedRefreshPromise;
   }
@@ -153,12 +188,20 @@ export async function refreshPublishedSchedules() {
     }
 
     const supabase = await getPortalSupabaseClient();
-    const { data, error } = await supabase
+    const monthKeys = normalizePublishedMonthKeys(options.monthKeys);
+    let query = supabase
       .from("schedule_months")
       .select("month_key, published_state, published_at")
       .not("published_state", "is", null)
-      .order("month_key", { ascending: true })
-      .returns<ScheduleMonthPublishRow[]>();
+      .order("month_key", { ascending: true });
+
+    if (monthKeys.length === 1) {
+      query = query.eq("month_key", monthKeys[0]);
+    } else if (monthKeys.length > 1) {
+      query = query.in("month_key", monthKeys);
+    }
+
+    const { data, error } = await query.returns<ScheduleMonthPublishRow[]>();
 
     if (error) {
       if (isSupabaseSchemaMissingError(error)) {
@@ -172,7 +215,7 @@ export async function refreshPublishedSchedules() {
     }
 
     const repaired = await repairPublishedItems(rowsToItems(data ?? []));
-    publishedSchedulesCache = cloneItems(repaired.items);
+    applyPublishedItemsToCache(repaired.items, monthKeys);
     emitPublishedSchedulesEvent();
     if (repaired.changed) {
       await Promise.all(
@@ -186,7 +229,7 @@ export async function refreshPublishedSchedules() {
         ),
       );
     }
-    return getPublishedSchedules();
+    return getPublishedSchedules(monthKeys);
   })().finally(() => {
     publishedRefreshPromise = null;
   });

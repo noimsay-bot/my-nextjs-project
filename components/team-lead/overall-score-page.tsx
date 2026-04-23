@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
-import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   getContributionSummaryRows,
@@ -22,7 +21,9 @@ import {
   TEAM_LEAD_FINAL_CUT_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
-  refreshTeamLeadState,
+  getContributionPeriod,
+  getTeamLeadSchedules,
+  refreshTeamLeadAssignmentMonths,
 } from "@/lib/team-lead/storage";
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
@@ -396,13 +397,13 @@ export function OverallScorePage() {
 
   useEffect(() => {
     const refresh = async () => {
-      await Promise.all([
-        refreshUsers(),
-        refreshScheduleState(),
-        refreshPublishedSchedules(),
-        refreshTeamLeadState(),
-        refreshScoreboardState(),
-      ]);
+      await Promise.all([refreshUsers(), refreshScheduleState(), refreshScoreboardState()]);
+      const period = getContributionPeriod(evaluationYear);
+      await refreshTeamLeadAssignmentMonths(
+        getTeamLeadSchedules()
+          .map((schedule) => schedule.monthKey)
+          .filter((monthKey) => monthKey >= period.startMonthKey && monthKey <= period.endMonthKey),
+      );
       syncFromCache();
     };
     const onFocusRefresh = () => {
@@ -421,7 +422,6 @@ export function OverallScorePage() {
       lastFocusRefreshAtRef.current = Date.now();
     });
     window.addEventListener("focus", onFocusRefresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
@@ -431,7 +431,6 @@ export function OverallScorePage() {
 
     return () => {
       window.removeEventListener("focus", onFocusRefresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
@@ -439,7 +438,7 @@ export function OverallScorePage() {
       window.removeEventListener(TEAM_LEAD_SCOREBOARD_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, [syncFromCache]);
+  }, [evaluationYear, syncFromCache]);
 
   const toggleExpanded = (name: string) => {
     setExpandedNames((current) =>

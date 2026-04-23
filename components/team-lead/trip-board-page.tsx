@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getUsers, refreshUsers } from "@/lib/auth/storage";
-import { PUBLISHED_SCHEDULES_EVENT } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   AssignmentTravelType,
   getTeamLeadTripCards,
+  getTeamLeadSchedules,
+  refreshTeamLeadAssignmentMonths,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
-  refreshTeamLeadState,
   TeamLeadTripPersonCard,
 } from "@/lib/team-lead/storage";
+
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
 function travelTypeLabel(value: AssignmentTravelType) {
   if (value === "국내출장") return "국내출장";
@@ -32,6 +34,7 @@ export function TripBoardPage({
 }) {
   const [cards, setCards] = useState<Array<TeamLeadTripPersonCard & { cardKey: string }>>([]);
   const [expandedCardKeys, setExpandedCardKeys] = useState<string[]>([]);
+  const lastFocusRefreshAtRef = useRef(0);
 
   useEffect(() => {
     const syncCards = () => {
@@ -67,21 +70,28 @@ export function TripBoardPage({
       setCards(merged);
     };
     const refresh = async () => {
-      await Promise.all([refreshUsers(), refreshScheduleState(), refreshTeamLeadState()]);
+      await Promise.all([refreshUsers(), refreshScheduleState()]);
+      await refreshTeamLeadAssignmentMonths(getTeamLeadSchedules().map((schedule) => schedule.monthKey));
       syncCards();
+    };
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refresh();
     };
 
     syncCards();
-    void refresh();
-    window.addEventListener("focus", refresh);
+    void refresh().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCards);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncCards);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncCards);
     return () => {
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCards);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncCards);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncCards);
     };
   }, [showAllUsers, travelTypes]);
 

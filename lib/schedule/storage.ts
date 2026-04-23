@@ -26,14 +26,12 @@ interface ScheduleMonthRow {
   draft_state: GeneratedSchedule | null;
 }
 
-interface ScheduleMonthKeyRow {
-  month_key: string;
-}
-
 let scheduleStateCache = sanitizeScheduleState(defaultScheduleState);
+let scheduleMonthKeyCache = new Set<string>();
 let scheduleRefreshPromise: Promise<ScheduleState> | null = null;
 let scheduledPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let scheduledPersistState: ScheduleState | null = null;
+let scheduledPersistMonthKeys = new Set<string>();
 let scheduledPersistPromise: Promise<ScheduleState> | null = null;
 let scheduledPersistResolve: ((state: ScheduleState) => void) | null = null;
 let scheduledPersistReject: ((error: unknown) => void) | null = null;
@@ -124,14 +122,32 @@ function mergeScheduleRows(
   });
 }
 
+function collectDirtyScheduleMonthKeys(previous: ScheduleState, next: ScheduleState) {
+  const previousMap = new Map(previous.generatedHistory.map((item) => [item.monthKey, item] as const));
+  const nextMap = new Map(next.generatedHistory.map((item) => [item.monthKey, item] as const));
+  const dirtyMonthKeys = new Set<string>();
+
+  for (const monthKey of new Set([...previousMap.keys(), ...nextMap.keys()])) {
+    const previousMonth = previousMap.get(monthKey) ?? null;
+    const nextMonth = nextMap.get(monthKey) ?? null;
+    if (JSON.stringify(previousMonth) !== JSON.stringify(nextMonth)) {
+      dirtyMonthKeys.add(monthKey);
+    }
+  }
+
+  return Array.from(dirtyMonthKeys);
+}
+
 async function loadScheduleStateFromDb() {
   const seededState = readE2eScheduleStateSeed();
   if (seededState) {
+    scheduleMonthKeyCache = new Set(seededState.generatedHistory.map((item) => item.monthKey));
     return cloneScheduleStateValue(seededState);
   }
 
   const session = await getPortalSession();
   if (!session?.approved) {
+    scheduleMonthKeyCache = new Set();
     return sanitizeScheduleState(defaultScheduleState);
   }
 
@@ -145,6 +161,7 @@ async function loadScheduleStateFromDb() {
     const schemaError = settingsError ?? monthError;
     if (isSupabaseSchemaMissingError(schemaError)) {
       console.warn(getSupabaseStorageErrorMessage(schemaError, "schedule_settings / schedule_months"));
+      scheduleMonthKeyCache = new Set();
       return sanitizeScheduleState({
         ...defaultScheduleState,
         currentUser: session.username,
@@ -154,10 +171,11 @@ async function loadScheduleStateFromDb() {
     throw new Error((settingsError ?? monthError)?.message ?? "근무표 데이터를 불러오지 못했습니다.");
   }
 
+  scheduleMonthKeyCache = new Set((monthRows ?? []).map((row) => row.month_key));
   return mergeScheduleRows(settingsRow ?? null, monthRows ?? [], session.username);
 }
 
-async function persistScheduleStateNow(state: ScheduleState) {
+async function persistScheduleStateNow(state: ScheduleState, dirtyMonthKeys: string[] = []) {
   const session = await getPortalSession();
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
@@ -166,21 +184,16 @@ async function persistScheduleStateNow(state: ScheduleState) {
   const supabase = await getPortalSupabaseClient();
   const nextState = cloneScheduleStateValue(state);
   const nextMonthKeySet = new Set(nextState.generatedHistory.map((item) => item.monthKey));
-  const monthRows = nextState.generatedHistory.map((item) => ({
-    month_key: item.monthKey,
-    draft_state: item,
-    updated_by: session.id,
-  }));
-  const { data: existingMonthRows, error: existingMonthError } = await supabase
-    .from("schedule_months")
-    .select("month_key")
-    .returns<ScheduleMonthKeyRow[]>();
-  if (existingMonthError) {
-    throw new Error(getSupabaseStorageErrorMessage(existingMonthError, "schedule_months"));
-  }
-  const removedMonthKeys = (existingMonthRows ?? [])
-    .map((row) => row.month_key)
-    .filter((monthKey) => !nextMonthKeySet.has(monthKey));
+  const nextMonthMap = new Map(nextState.generatedHistory.map((item) => [item.monthKey, item] as const));
+  const monthRows = Array.from(new Set(dirtyMonthKeys.filter((monthKey) => nextMonthKeySet.has(monthKey))))
+    .map((monthKey) => nextMonthMap.get(monthKey))
+    .filter((item): item is GeneratedSchedule => Boolean(item))
+    .map((item) => ({
+      month_key: item.monthKey,
+      draft_state: item,
+      updated_by: session.id,
+    }));
+  const removedMonthKeys = Array.from(scheduleMonthKeyCache).filter((monthKey) => !nextMonthKeySet.has(monthKey));
 
   const { error: settingsError } = await supabase.from("schedule_settings").upsert({
     key: SCHEDULE_SETTINGS_KEY,
@@ -205,11 +218,13 @@ async function persistScheduleStateNow(state: ScheduleState) {
     }
   }
 
+  scheduleMonthKeyCache = nextMonthKeySet;
   return nextState;
 }
 
-function schedulePersist(state: ScheduleState) {
+function schedulePersist(state: ScheduleState, dirtyMonthKeys: string[] = []) {
   scheduledPersistState = cloneScheduleStateValue(state);
+  dirtyMonthKeys.filter(Boolean).forEach((monthKey) => scheduledPersistMonthKeys.add(monthKey));
 
   if (!scheduledPersistPromise) {
     scheduledPersistPromise = new Promise<ScheduleState>((resolve, reject) => {
@@ -224,10 +239,13 @@ function schedulePersist(state: ScheduleState) {
 
   scheduledPersistTimer = setTimeout(() => {
     const nextState = scheduledPersistState ? cloneScheduleStateValue(scheduledPersistState) : cloneScheduleStateValue(scheduleStateCache);
+    const nextDirtyMonthKeys = Array.from(scheduledPersistMonthKeys);
     scheduledPersistTimer = null;
     scheduledPersistState = null;
+    scheduledPersistMonthKeys.clear();
 
-    void persistScheduleStateNow(nextState)
+    // Persist only months that actually changed so draft_state JSONB is not rewritten on every keystroke.
+    void persistScheduleStateNow(nextState, nextDirtyMonthKeys)
       .then((persisted) => {
         scheduleStateCache = cloneScheduleStateValue(persisted);
         emitScheduleStateEvent();
@@ -285,11 +303,12 @@ export async function refreshScheduleState() {
 }
 
 export function saveScheduleState(state: ScheduleState) {
+  const previousState = readStoredScheduleState();
   scheduleStateCache = cloneScheduleStateValue(state);
   emitScheduleStateEvent();
   if (E2E_SCHEDULE_STATE_SEED_ENABLED) {
     writeE2eScheduleStateSeed(scheduleStateCache);
     return Promise.resolve(readStoredScheduleState());
   }
-  return schedulePersist(scheduleStateCache);
+  return schedulePersist(scheduleStateCache, collectDirtyScheduleMonthKeys(previousState, scheduleStateCache));
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
-import { refreshTeamLeadState } from "@/lib/team-lead/storage";
+import { refreshScheduleState } from "@/lib/schedule/storage";
+import { getTeamLeadSchedules, refreshTeamLeadAssignmentMonths } from "@/lib/team-lead/storage";
 import {
   getPressSupportPeriods,
   getPressSupportRows,
@@ -16,18 +17,22 @@ const columns: Array<{ key: PressSupportCategory; label: string }> = [
   { key: "prosecution", label: "검찰" },
 ];
 
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
+
 export function PressSupportPage() {
   const [rows, setRows] = useState<PressSupportRow[]>([]);
   const [periods, setPeriods] = useState<PressSupportPeriod[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastFocusRefreshAtRef = useRef(0);
 
   useEffect(() => {
     let active = true;
 
     const refresh = async () => {
       setLoading(true);
-      await Promise.all([refreshUsers(), refreshTeamLeadState()]);
+      await Promise.all([refreshUsers(), refreshScheduleState()]);
+      await refreshTeamLeadAssignmentMonths(getTeamLeadSchedules().map((schedule) => schedule.monthKey));
       if (!active) return;
       const nextPeriods = getPressSupportPeriods();
       setPeriods(nextPeriods);
@@ -38,13 +43,21 @@ export function PressSupportPage() {
       );
       setLoading(false);
     };
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refresh();
+    };
 
-    void refresh();
-    window.addEventListener("focus", refresh);
+    void refresh().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", onFocusRefresh);
 
     return () => {
       active = false;
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", onFocusRefresh);
     };
   }, []);
 

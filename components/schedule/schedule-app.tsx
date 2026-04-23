@@ -41,7 +41,7 @@ import {
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentStore,
   getScheduleAssignmentVisibleTripTagMap,
-  refreshTeamLeadState,
+  refreshTeamLeadAssignmentMonth,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
@@ -82,6 +82,7 @@ import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, Schedule
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
+const REQUEST_VISIBLE_STATUSES: ScheduleChangeRequest["status"][] = ["pending", "accepted", "rejected", "rolledBack"];
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -443,6 +444,7 @@ export function ScheduleApp() {
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const isEditingDateRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
+  const lastLoadedAssignmentMonthRef = useRef("");
   const session = getSession();
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
@@ -460,46 +462,96 @@ export function ScheduleApp() {
     };
   };
 
-  const loadState = async () => {
+  const resolveRouteMonthKey = (nextState: ScheduleState, preferredMonthKey?: string | null) =>
+    preferredMonthKey ??
+    visibleMonthKey ??
+    nextState.editingMonthKey ??
+    nextState.generated?.monthKey ??
+    nextState.generatedHistory[nextState.generatedHistory.length - 1]?.monthKey ??
+    getMonthKey(nextState.year, nextState.month);
+
+  const syncPublishedItemsFromCache = () => {
+    const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
+    setPublishedItems(
+      getPublishedSchedules(routeMonthKey ? [routeMonthKey] : undefined).map((item) => ({
+        ...item,
+        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+      })),
+    );
+  };
+
+  const syncRequestsFromCache = () => {
+    const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
+    setRequests(getScheduleChangeRequests(routeMonthKey ? [routeMonthKey] : undefined));
+  };
+
+  const syncAssignmentDecorationsFromCache = (nextState: ScheduleState) => {
+    setState(applyNameTagsToState(nextState));
+    syncPublishedItemsFromCache();
+  };
+
+  const refreshRouteData = async ({
+    includeRequests = true,
+    preferredMonthKey,
+  }: {
+    includeRequests?: boolean;
+    preferredMonthKey?: string | null;
+  } = {}) => {
     try {
-      await refreshTeamLeadState();
       const nextState = await refreshScheduleState();
+      const routeMonthKey = resolveRouteMonthKey(nextState, preferredMonthKey);
+      await Promise.all([
+        routeMonthKey ? refreshTeamLeadAssignmentMonth(routeMonthKey) : Promise.resolve(),
+        refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey] } : undefined),
+        includeRequests
+          ? refreshScheduleChangeRequests({
+              monthKeys: routeMonthKey ? [routeMonthKey] : undefined,
+              statuses: REQUEST_VISIBLE_STATUSES,
+            })
+          : Promise.resolve(),
+      ]);
+      if (routeMonthKey) {
+        // The schedule screen only needs assignment data for the visible month.
+        lastLoadedAssignmentMonthRef.current = routeMonthKey;
+      }
       editBackupRef.current = null;
       preGenerateBackupRef.current = null;
       setHasPreGenerateBackup(false);
-      setState(applyNameTagsToState(nextState));
+      syncAssignmentDecorationsFromCache(nextState);
+      if (includeRequests) {
+        syncRequestsFromCache();
+      }
+      return nextState;
     } catch {
       editBackupRef.current = null;
       preGenerateBackupRef.current = null;
       setHasPreGenerateBackup(false);
-      setState(applyNameTagsToState(readStoredScheduleState() ?? defaultScheduleState));
+      syncAssignmentDecorationsFromCache(readStoredScheduleState() ?? defaultScheduleState);
+      if (includeRequests) {
+        syncRequestsFromCache();
+      }
+      return readStoredScheduleState() ?? defaultScheduleState;
     }
   };
 
   const loadRequests = async () => {
-    try {
-      await refreshScheduleChangeRequests();
-    } finally {
-      setRequests(getScheduleChangeRequests());
-    }
+    const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
+    await refreshScheduleChangeRequests({
+      monthKeys: routeMonthKey ? [routeMonthKey] : undefined,
+      statuses: REQUEST_VISIBLE_STATUSES,
+    });
+    syncRequestsFromCache();
   };
 
   const loadPublishedItems = async () => {
-    try {
-      await refreshPublishedSchedules();
-    } finally {
-      setPublishedItems(
-        getPublishedSchedules().map((item) => ({
-          ...item,
-          schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
-        })),
-      );
-    }
+    const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
+    await refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey] } : undefined);
+    syncPublishedItemsFromCache();
   };
 
   useEffect(() => {
     let active = true;
-    void Promise.all([loadState(), loadRequests(), loadPublishedItems()]).finally(() => {
+    void refreshRouteData({ includeRequests: true }).finally(() => {
       lastFocusRefreshAtRef.current = Date.now();
       if (active) {
         setLoaded(true);
@@ -553,7 +605,16 @@ export function ScheduleApp() {
         void Promise.all([loadRequests(), loadPublishedItems()]);
         return;
       }
-      void Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+      void refreshRouteData({ includeRequests: true });
+    };
+
+    const syncAssignmentState = () => {
+      syncAssignmentDecorationsFromCache(readStoredScheduleState() ?? defaultScheduleState);
+    };
+
+    const syncRequestState = () => {
+      syncRequestsFromCache();
+      syncAssignmentDecorationsFromCache(readStoredScheduleState() ?? defaultScheduleState);
     };
 
     const onFocusRefresh = () => {
@@ -564,14 +625,26 @@ export function ScheduleApp() {
     };
 
     window.addEventListener("focus", onFocusRefresh);
-    window.addEventListener(CHANGE_REQUESTS_EVENT, refreshForRouteState);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshForRouteState);
+    window.addEventListener(CHANGE_REQUESTS_EVENT, syncRequestState);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncAssignmentState);
     return () => {
       window.removeEventListener("focus", onFocusRefresh);
-      window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshForRouteState);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshForRouteState);
+      window.removeEventListener(CHANGE_REQUESTS_EVENT, syncRequestState);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncAssignmentState);
     };
   }, []);
+
+  useEffect(() => {
+    if (!loaded || !visibleMonthKey || lastLoadedAssignmentMonthRef.current === visibleMonthKey) {
+      return;
+    }
+
+    void refreshRouteData({ includeRequests: true, preferredMonthKey: visibleMonthKey })
+      .then(() => {
+        lastLoadedAssignmentMonthRef.current = visibleMonthKey;
+      })
+      .catch(() => undefined);
+  }, [loaded, visibleMonthKey]);
 
   useEffect(() => {
     const hasVisibleMonth = visibleMonthKey
@@ -1351,7 +1424,7 @@ export function ScheduleApp() {
                             onClick={() => {
                               void (async () => {
                                 const result = await resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
-                                await Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+                                await refreshRouteData({ includeRequests: true });
                                 if (!result.ok) {
                                   setMessage({ tone: "warn", text: "근무 변경 요청 승인에 실패했습니다." });
                                   return;
@@ -1452,7 +1525,7 @@ export function ScheduleApp() {
                               onClick={() => {
                                 void (async () => {
                                   const result = await resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
-                                  await Promise.all([loadRequests(), loadState(), loadPublishedItems()]);
+                                  await refreshRouteData({ includeRequests: true });
                                   if (!result.ok) {
                                     setMessage({ tone: "warn", text: "근무 변경 수락 취소에 실패했습니다." });
                                     return;

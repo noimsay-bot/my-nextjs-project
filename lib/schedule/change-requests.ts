@@ -44,6 +44,16 @@ export const CHANGE_REQUESTS_STATUS_EVENT = "j-special-force-schedule-change-req
 let requestCache: ScheduleChangeRequest[] = [];
 let requestRefreshPromise: Promise<ScheduleChangeRequest[]> | null = null;
 
+const CHANGE_REQUEST_SUMMARY_SELECT =
+  "id, month_key, requester_id, requester_name, source_ref, target_ref, route, status, has_conflict_warning, resolved_by, rolled_back_by, created_at, resolved_at, rolled_back_at";
+const CHANGE_REQUEST_DETAIL_SELECT = `${CHANGE_REQUEST_SUMMARY_SELECT}, applied_state, history`;
+
+interface RefreshScheduleChangeRequestsOptions {
+  monthKeys?: string[];
+  statuses?: ScheduleChangeRequest["status"][];
+  includeDetails?: boolean;
+}
+
 function emitChangeRequestEvent() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(CHANGE_REQUESTS_EVENT));
@@ -151,6 +161,36 @@ function rowToRequest(row: ChangeRequestRow) {
     rolledBackAt: row.rolled_back_at ?? undefined,
     rolledBackBy: row.rolled_back_by ?? undefined,
   });
+}
+
+function normalizeRequestMonthKeys(monthKeys?: string[]) {
+  return Array.from(new Set((monthKeys ?? []).map((item) => item.trim()).filter(Boolean))).sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function normalizeRequestStatuses(statuses?: ScheduleChangeRequest["status"][]) {
+  return Array.from(new Set((statuses ?? []).filter(Boolean)));
+}
+
+async function fetchScheduleChangeRequestDetail(requestId: string) {
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("schedule_change_requests")
+    .select(CHANGE_REQUEST_DETAIL_SELECT)
+    .eq("id", requestId)
+    .maybeSingle<ChangeRequestRow>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "schedule_change_requests"));
+      return null;
+    }
+
+    throw new Error(error.message);
+  }
+
+  return data ? rowToRequest(data) : null;
 }
 
 function requestToRow(request: ScheduleChangeRequest) {
@@ -416,8 +456,12 @@ export function getRequestRoute(request: ScheduleChangeRequest) {
   return request.route?.length >= 2 ? request.route : [request.source, request.target];
 }
 
-export function getScheduleChangeRequests() {
-  return requestCache.map((item) => cloneValue(item));
+export function getScheduleChangeRequests(monthKeys?: string[]) {
+  const normalizedMonthKeys = normalizeRequestMonthKeys(monthKeys);
+  const monthKeySet = normalizedMonthKeys.length > 0 ? new Set(normalizedMonthKeys) : null;
+  return requestCache
+    .filter((item) => !monthKeySet || monthKeySet.has(item.monthKey))
+    .map((item) => cloneValue(item));
 }
 
 export function getPendingScheduleChangeRequests(monthKey?: string) {
@@ -426,12 +470,14 @@ export function getPendingScheduleChangeRequests(monthKey?: string) {
   );
 }
 
-export async function refreshScheduleChangeRequests() {
+export async function refreshScheduleChangeRequests(options: RefreshScheduleChangeRequestsOptions = {}) {
   if (requestRefreshPromise) {
     return requestRefreshPromise;
   }
 
   requestRefreshPromise = (async () => {
+    const monthKeys = normalizeRequestMonthKeys(options.monthKeys);
+    const statuses = normalizeRequestStatuses(options.statuses);
     const session = await getPortalSession();
     if (!session?.approved) {
       requestCache = [];
@@ -440,13 +486,24 @@ export async function refreshScheduleChangeRequests() {
     }
 
     const supabase = await getPortalSupabaseClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from("schedule_change_requests")
-      .select(
-        "id, month_key, requester_id, requester_name, source_ref, target_ref, route, status, has_conflict_warning, applied_state, history, resolved_by, rolled_back_by, created_at, resolved_at, rolled_back_at",
-      )
-      .order("created_at", { ascending: false })
-      .returns<ChangeRequestRow[]>();
+      .select(options.includeDetails ? CHANGE_REQUEST_DETAIL_SELECT : CHANGE_REQUEST_SUMMARY_SELECT)
+      .order("created_at", { ascending: false });
+
+    if (monthKeys.length === 1) {
+      query = query.eq("month_key", monthKeys[0]);
+    } else if (monthKeys.length > 1) {
+      query = query.in("month_key", monthKeys);
+    }
+
+    if (statuses.length === 1) {
+      query = query.eq("status", statuses[0]);
+    } else if (statuses.length > 1) {
+      query = query.in("status", statuses);
+    }
+
+    const { data, error } = await query.returns<ChangeRequestRow[]>();
 
     if (error) {
       if (isSupabaseSchemaMissingError(error)) {
@@ -459,7 +516,7 @@ export async function refreshScheduleChangeRequests() {
       if (isSupabaseRequestTimeoutError(error) || isSupabaseRequestFailureError(error)) {
         console.warn("근무 변경 요청을 불러오지 못했습니다. 기존 캐시를 유지합니다.", error);
         emitChangeRequestEvent();
-        return getScheduleChangeRequests();
+        return getScheduleChangeRequests(monthKeys);
       }
 
       throw new Error(error.message);
@@ -469,7 +526,7 @@ export async function refreshScheduleChangeRequests() {
       .map((row) => rowToRequest(row))
       .filter((item): item is ScheduleChangeRequest => Boolean(item));
     emitChangeRequestEvent();
-    return getScheduleChangeRequests();
+    return getScheduleChangeRequests(monthKeys);
   })().finally(() => {
     requestRefreshPromise = null;
   });
@@ -563,7 +620,8 @@ export async function resolveScheduleChangeRequest(
   const resolverLabel = resolverName?.trim() || session.username || "관리자";
 
   const items = getScheduleChangeRequests();
-  const target = items.find((item) => item.id === requestId);
+  const cachedTarget = items.find((item) => item.id === requestId);
+  const target = (await fetchScheduleChangeRequestDetail(requestId)) ?? cachedTarget;
   if (!target) {
     return { ok: false as const, applied: false };
   }

@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument, TeamLeadPrintPage } from "@/lib/team-lead/print";
-import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   getContributionSummaryRows,
@@ -18,12 +17,16 @@ import {
   TeamLeadWeightedQuarterSummaryRow,
 } from "@/lib/team-lead/scoreboard";
 import {
-  refreshTeamLeadState,
+  getContributionPeriod,
+  getTeamLeadSchedules,
+  refreshTeamLeadAssignmentMonths,
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_FINAL_CUT_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
 } from "@/lib/team-lead/storage";
+
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
 function formatScore(score: number) {
   return score.toFixed(1);
@@ -345,6 +348,7 @@ export function OverallScoreSummaryPage() {
   const [contributionRows, setContributionRows] = useState<TeamLeadWeightedQuarterSummaryRow[]>([]);
   const [finalCutRows, setFinalCutRows] = useState<TeamLeadFinalCutSummaryRow[]>([]);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
+  const lastFocusRefreshAtRef = useRef(0);
 
   const syncFromCache = useCallback(() => {
     setCards(getOverallScoreCards(evaluationYear));
@@ -355,14 +359,20 @@ export function OverallScoreSummaryPage() {
 
   useEffect(() => {
     const refresh = async () => {
-      await Promise.all([
-        refreshUsers(),
-        refreshScheduleState(),
-        refreshPublishedSchedules(),
-        refreshTeamLeadState(),
-        refreshScoreboardState(),
-      ]);
+      await Promise.all([refreshUsers(), refreshScheduleState(), refreshScoreboardState()]);
+      const period = getContributionPeriod(evaluationYear);
+      await refreshTeamLeadAssignmentMonths(
+        getTeamLeadSchedules()
+          .map((schedule) => schedule.monthKey)
+          .filter((monthKey) => monthKey >= period.startMonthKey && monthKey <= period.endMonthKey),
+      );
       syncFromCache();
+    };
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refresh();
     };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
@@ -370,9 +380,10 @@ export function OverallScoreSummaryPage() {
       setMessage({ tone: "warn", text: detail.message });
     };
 
-    void refresh();
-    window.addEventListener("focus", refresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+    void refresh().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
@@ -381,8 +392,7 @@ export function OverallScoreSummaryPage() {
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+      window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
@@ -390,7 +400,7 @@ export function OverallScoreSummaryPage() {
       window.removeEventListener(TEAM_LEAD_SCOREBOARD_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, [syncFromCache]);
+  }, [evaluationYear, syncFromCache]);
 
   const ranking = useMemo(
     () => [...cards].sort((left, right) => right.totalScore - left.totalScore || left.name.localeCompare(right.name, "ko")),

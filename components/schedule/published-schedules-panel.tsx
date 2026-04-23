@@ -47,7 +47,7 @@ import {
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentStore,
   getScheduleAssignmentVisibleTripTagMap,
-  refreshTeamLeadState,
+  refreshTeamLeadAssignmentMonths,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
@@ -694,24 +694,41 @@ export function PublishedSchedulesPanel() {
     setDraftHiddenPublishedMonthKeys(nextHidden);
   }, [session?.id, session?.username]);
 
+  const getRequestScopeMonthKeys = () => {
+    const monthKeys = (items.length > 0 ? items : getPublishedSchedules()).map((item) => item.monthKey);
+    return Array.from(new Set(monthKeys)).sort((left, right) => left.localeCompare(right));
+  };
+
+  const syncItemsFromCache = () => {
+    setItems(
+      getPublishedSchedules().map((item) => ({
+        ...item,
+        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+      })),
+    );
+  };
+
+  const syncRequestsFromCache = () => {
+    setRequests(getScheduleChangeRequests(getRequestScopeMonthKeys()));
+  };
+
   const loadItems = async () => {
     setItemsLoading(true);
     try {
-      await refreshTeamLeadState();
-      await refreshPublishedSchedules();
-      const nextItems = getPublishedSchedules().map((item) => ({
-        ...item,
-        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
-      }));
-      setItems(nextItems);
+      const publishedItems = await refreshPublishedSchedules();
+      await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));
+      syncItemsFromCache();
     } finally {
       setItemsLoading(false);
     }
   };
 
   const loadRequests = async () => {
-    await refreshScheduleChangeRequests();
-    setRequests(getScheduleChangeRequests());
+    await refreshScheduleChangeRequests({
+      monthKeys: getRequestScopeMonthKeys(),
+      statuses: ["pending"],
+    });
+    syncRequestsFromCache();
   };
 
   const syncScheduleHistory = () => {
@@ -723,8 +740,8 @@ export function PublishedSchedulesPanel() {
   };
 
   const loadScheduleHistory = async () => {
-    await refreshTeamLeadState();
-    await refreshScheduleState();
+    const nextState = await refreshScheduleState();
+    await refreshTeamLeadAssignmentMonths(nextState.generatedHistory.map((schedule) => schedule.monthKey));
     syncScheduleHistory();
   };
 
@@ -738,7 +755,6 @@ export function PublishedSchedulesPanel() {
 
     const runDeferredLoads = () => {
       if (cancelled) return;
-      void loadRequests();
       void loadScheduleHistory();
     };
 
@@ -778,7 +794,17 @@ export function PublishedSchedulesPanel() {
       refreshVisibleData();
     };
     const onScheduleStateRefresh = () => {
-      refreshVisibleData();
+      syncItemsFromCache();
+      syncScheduleHistory();
+    };
+    const onPublishedRefresh = () => {
+      syncItemsFromCache();
+    };
+    const onRequestRefresh = () => {
+      syncRequestsFromCache();
+    };
+    const onAssignmentRefresh = () => {
+      syncItemsFromCache();
       syncScheduleHistory();
     };
     const onStatus = (event: Event) => {
@@ -789,18 +815,18 @@ export function PublishedSchedulesPanel() {
     };
     window.addEventListener("storage", refreshVisibleData);
     window.addEventListener("focus", onFocusRefresh);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
-    window.addEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
-    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshVisibleData);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onPublishedRefresh);
+    window.addEventListener(CHANGE_REQUESTS_EVENT, onRequestRefresh);
+    window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, onAssignmentRefresh);
     window.addEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
     window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
     window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     return () => {
       window.removeEventListener("storage", refreshVisibleData);
       window.removeEventListener("focus", onFocusRefresh);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, refreshVisibleData);
-      window.removeEventListener(CHANGE_REQUESTS_EVENT, refreshVisibleData);
-      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, refreshVisibleData);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onPublishedRefresh);
+      window.removeEventListener(CHANGE_REQUESTS_EVENT, onRequestRefresh);
+      window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, onAssignmentRefresh);
       window.removeEventListener(SCHEDULE_STATE_EVENT, onScheduleStateRefresh);
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);

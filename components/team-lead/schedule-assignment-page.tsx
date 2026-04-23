@@ -28,7 +28,7 @@ import {
   getScheduleAssignmentTimeColor,
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
-  refreshTeamLeadState,
+  refreshTeamLeadAssignmentMonth,
   saveScheduleAssignmentStore,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
@@ -43,6 +43,7 @@ import {
 
 type PortalSupabaseClient = Awaited<ReturnType<typeof getPortalSupabaseClient>>;
 type PortalRealtimeChannel = ReturnType<PortalSupabaseClient["channel"]>;
+type AssignmentSaveMode = "immediate" | "deferred";
 
 const dutyOptions = [
   "조근",
@@ -89,6 +90,8 @@ const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const CELL_LOCK_DURATION_SECONDS = 8;
 const CELL_LOCK_RENEW_INTERVAL_MS = 3_000;
 const CELL_LOCK_CLOCK_INTERVAL_MS = 1_000;
+const ASSIGNMENT_SAVE_IMMEDIATE_DEBOUNCE_MS = 250;
+const ASSIGNMENT_SAVE_DEFERRED_DEBOUNCE_MS = 1_000;
 const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
   "": "",
   departure: "출장출발",
@@ -1044,17 +1047,29 @@ export function ScheduleAssignmentPage() {
           return;
         }
         void getPortalSupabaseClient()
-          .then((supabase) =>
-            supabase.rpc("acquire_team_lead_schedule_assignment_cell_lock", {
-              p_month_key: ownedLock.monthKey,
-              p_date_key: ownedLock.dateKey,
-              p_row_key: ownedLock.rowKey,
-              p_field_key: ownedLock.fieldKey,
-              p_claim_token: ownedLock.claimToken,
+          .then((supabase) => {
+            const activeOwnedLock = ownedCellLockRef.current;
+            if (
+              !activeOwnedLock ||
+              activeOwnedLock.cellKey !== cellKey ||
+              activeOwnedLock.claimToken !== ownedLock.claimToken ||
+              !cellLockFeatureAvailableRef.current
+            ) {
+              return null;
+            }
+
+            return supabase.rpc("acquire_team_lead_schedule_assignment_cell_lock", {
+              p_month_key: activeOwnedLock.monthKey,
+              p_date_key: activeOwnedLock.dateKey,
+              p_row_key: activeOwnedLock.rowKey,
+              p_field_key: activeOwnedLock.fieldKey,
+              p_claim_token: activeOwnedLock.claimToken,
               p_duration_seconds: CELL_LOCK_DURATION_SECONDS,
-            }),
-          )
-          .then(({ data, error }) => {
+            });
+          })
+          .then((response) => {
+            if (!response) return;
+            const { data, error } = response;
             if (error) return;
             const result = Array.isArray(data) ? (data[0] as ScheduleAssignmentCellLockRpcResult | undefined) : undefined;
             if (!result) return;
@@ -1376,16 +1391,6 @@ export function ScheduleAssignmentPage() {
   };
 
   useEffect(() => {
-    const buildRealtimeActorLabel = (actorId: string | null | undefined) => {
-      if (!actorId) return "다른 데스크 사용자";
-      const session = getSession();
-      if (session?.id === actorId) {
-        return `${session.username}`;
-      }
-      const matchedUser = getUsers().find((user) => user.id === actorId);
-      return matchedUser?.username || "다른 데스크 사용자";
-    };
-
     const syncFromCache = () => {
       const nextSchedules = getTeamLeadSchedules();
       setSchedules(nextSchedules);
@@ -1396,15 +1401,31 @@ export function ScheduleAssignmentPage() {
           : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
             ? todayMonthKey
             : nextSchedules[0]?.monthKey || "",
-        );
+      );
       setEditingDayRows({});
     };
     const refreshAssignmentStore = async () => {
-      await refreshTeamLeadState();
+      const monthKey = selectedMonthKeyRef.current;
+      if (!monthKey) {
+        syncFromCache();
+        return;
+      }
+      await refreshTeamLeadAssignmentMonth(monthKey);
       syncFromCache();
     };
     const refreshSchedules = async () => {
-      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
+      await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
+      const nextSchedules = getTeamLeadSchedules();
+      const targetMonthKey =
+        nextSchedules.some((schedule) => schedule.monthKey === selectedMonthKeyRef.current)
+          ? selectedMonthKeyRef.current
+          : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
+            ? todayMonthKey
+            : nextSchedules[0]?.monthKey || "";
+      if (targetMonthKey) {
+        // Keep assignment refresh scoped to the active month instead of reloading every month row.
+        await refreshTeamLeadAssignmentMonth(targetMonthKey);
+      }
       syncFromCache();
     };
     refreshSchedulesRef.current = refreshSchedules;
@@ -1423,6 +1444,56 @@ export function ScheduleAssignmentPage() {
       }
       void refreshSchedules();
     };
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setImportMessage({ tone: "warn", text: detail.message });
+    };
+    syncFromCache();
+    void refreshSchedules().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+    window.addEventListener("focus", refreshSchedulesOnFocus);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+    window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
+    window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
+    return () => {
+      if (refreshSchedulesRef.current === refreshSchedules) {
+        refreshSchedulesRef.current = null;
+      }
+      if (refreshAssignmentsRef.current === refreshAssignmentStore) {
+        refreshAssignmentsRef.current = null;
+      }
+      window.removeEventListener("focus", refreshSchedulesOnFocus);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
+      window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
+    };
+  }, [todayMonthKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanupRealtime: (() => void) | null = null;
+
+    if (!selectedMonthKey) {
+      return undefined;
+    }
+
+    const hasBlockingDrafts = () =>
+      pendingAssignmentWritesRef.current > 0 ||
+      Object.keys(editingDayRowsRef.current).length > 0 ||
+      Boolean(editingTripTagRef.current);
+
+    const buildRealtimeActorLabel = (actorId: string | null) => {
+      if (!actorId) return "다른 사용자";
+      const currentSession = getSession();
+      if (currentSession?.id === actorId) {
+        return `${currentSession.username}`;
+      }
+      const matchedUser = getUsers().find((user) => user.id === actorId);
+      return matchedUser?.username || "다른 데스크 사용자";
+    };
+
     const onRealtimeAssignmentChange = (payload: ScheduleAssignmentRealtimePayload) => {
       const monthKey = payload.new.month_key || payload.old.month_key || "";
       const actorId = payload.new.updated_by ?? payload.old.updated_by ?? null;
@@ -1453,30 +1524,21 @@ export function ScheduleAssignmentPage() {
           text: `${actorLabel}님이 ${monthKey} 일정배정을 수정해 최신 내용으로 자동 반영했습니다.`,
         });
       }
-      void refreshAssignmentStore();
+      void refreshAssignmentsRef.current?.();
     };
-    const onStatus = (event: Event) => {
-      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
-      if (!detail || detail.ok) return;
-      setImportMessage({ tone: "warn", text: detail.message });
-    };
-    let cancelled = false;
-    let cleanupRealtime: (() => void) | null = null;
-    syncFromCache();
-    void refreshSchedules().finally(() => {
-      lastFocusRefreshAtRef.current = Date.now();
-    });
+
     void getPortalSupabaseClient()
       .then((supabase) => {
         if (cancelled) return;
         const channel = supabase
-          .channel("team-lead-schedule-assignment-watch")
+          .channel(`team-lead-schedule-assignment-watch-${selectedMonthKey}`)
           .on(
             "postgres_changes",
             {
               event: "*",
               schema: "public",
               table: "team_lead_schedule_assignments",
+              filter: `month_key=eq.${selectedMonthKey}`,
             },
             onRealtimeAssignmentChange,
           )
@@ -1488,25 +1550,12 @@ export function ScheduleAssignmentPage() {
       .catch(() => {
         cleanupRealtime = null;
       });
-    window.addEventListener("focus", refreshSchedulesOnFocus);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
-    window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
-    window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
+
     return () => {
       cancelled = true;
-        if (refreshSchedulesRef.current === refreshSchedules) {
-          refreshSchedulesRef.current = null;
-        }
-        if (refreshAssignmentsRef.current === refreshAssignmentStore) {
-          refreshAssignmentsRef.current = null;
-        }
-        cleanupRealtime?.();
-        window.removeEventListener("focus", refreshSchedulesOnFocus);
-        window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
-      window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
-      window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
+      cleanupRealtime?.();
     };
-  }, [todayMonthKey]);
+  }, [selectedMonthKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1582,6 +1631,7 @@ export function ScheduleAssignmentPage() {
 
     const setupPresence = async () => {
       const supabase = await getPortalSupabaseClient();
+      if (cancelled) return;
       const channel = supabase.channel(`team-lead-schedule-assignment-input-${selectedMonthKey}`, {
         config: {
           presence: {
@@ -1664,6 +1714,7 @@ export function ScheduleAssignmentPage() {
       }
 
       const supabase = await getPortalSupabaseClient();
+      if (cancelled) return;
       try {
         const { data, error } = await supabase
           .from("team_lead_schedule_assignment_cell_locks")
@@ -1847,11 +1898,18 @@ export function ScheduleAssignmentPage() {
     scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
   };
 
+  const getStoreMonthSnapshot = (targetStore: ScheduleAssignmentDataStore, monthKey: string) =>
+    JSON.stringify({
+      entries: targetStore.entries[monthKey] ?? {},
+      rows: targetStore.rows[monthKey] ?? {},
+    });
+
   const updateStore = (
     recipe: (current: ScheduleAssignmentDataStore) => ScheduleAssignmentDataStore,
     monthKeys:
       | string[]
       | ((next: ScheduleAssignmentDataStore) => string[]) = [selectedMonthKey],
+    options?: { saveMode?: AssignmentSaveMode },
   ) => {
     setStore((current) => {
       const next = recipe(current);
@@ -1860,8 +1918,22 @@ export function ScheduleAssignmentPage() {
           (typeof monthKeys === "function" ? monthKeys(next) : monthKeys).filter(Boolean),
         ),
       );
+
+      const hasChanges = touchedMonthKeys.some(
+        (monthKey) => getStoreMonthSnapshot(current, monthKey) !== getStoreMonthSnapshot(next, monthKey),
+      );
+
+      if (!hasChanges) {
+        return current;
+      }
+
+      const debounceMs =
+        options?.saveMode === "deferred"
+          ? ASSIGNMENT_SAVE_DEFERRED_DEBOUNCE_MS
+          : ASSIGNMENT_SAVE_IMMEDIATE_DEBOUNCE_MS;
+
       pendingAssignmentWritesRef.current += 1;
-      saveScheduleAssignmentStore(next, touchedMonthKeys).finally(() => {
+      saveScheduleAssignmentStore(next, touchedMonthKeys, { debounceMs }).finally(() => {
         pendingAssignmentWritesRef.current = Math.max(0, pendingAssignmentWritesRef.current - 1);
         flushDeferredRefreshRef.current();
       });
@@ -1869,7 +1941,11 @@ export function ScheduleAssignmentPage() {
     });
   };
 
-  const updateMonthEntry = (rowKey: string, recipe: (entry: ScheduleAssignmentEntry) => ScheduleAssignmentEntry) => {
+  const updateMonthEntry = (
+    rowKey: string,
+    recipe: (entry: ScheduleAssignmentEntry) => ScheduleAssignmentEntry,
+    options?: { saveMode?: AssignmentSaveMode },
+  ) => {
     updateStore((current) => {
       const currentMonth = current.entries[selectedMonthKey] ?? {};
       const currentEntry = currentMonth[rowKey] ?? createDefaultScheduleAssignmentEntry();
@@ -1883,7 +1959,7 @@ export function ScheduleAssignmentPage() {
           },
         },
       };
-    });
+    }, [selectedMonthKey], options);
   };
 
   const updateDayRows = (dateKey: string, recipe: (dayRows: ScheduleAssignmentDayRows) => ScheduleAssignmentDayRows) => {
@@ -2622,7 +2698,7 @@ export function ScheduleAssignmentPage() {
                                   updateMonthEntry(row.key, (current) => ({
                                     ...current,
                                     coverageNote: event.target.value,
-                                  }))
+                                  }), { saveMode: "deferred" })
                                 }
                               />
                             ) : null}
@@ -2688,7 +2764,7 @@ export function ScheduleAssignmentPage() {
                                     clockIn: event.target.value,
                                     clockInConfirmed: false,
                                     clockInColor: "",
-                                  }))
+                                  }), { saveMode: "deferred" })
                                 }
                               />
                               {showClockInActions ? <div style={{ display: "flex", gap: 2 }}>
@@ -2741,7 +2817,7 @@ export function ScheduleAssignmentPage() {
                                     clockOut: event.target.value,
                                     clockOutConfirmed: false,
                                     clockOutColor: "",
-                                  }))
+                                  }), { saveMode: "deferred" })
                                 }
                               />
                               {showClockOutActions ? <div style={{ display: "flex", gap: 2 }}>
@@ -2934,7 +3010,7 @@ export function ScheduleAssignmentPage() {
                                             updateMonthEntry(row.key, (current) => ({
                                               ...current,
                                               schedules: getSafeSchedules(current.schedules).map((item, itemIndex) => itemIndex === index ? event.target.value : item),
-                                            }))
+                                            }), { saveMode: "deferred" })
                                           }
                                         />
                                         <span style={{ minWidth: 30, textAlign: "center", fontSize: 11, color: "#94a3b8", letterSpacing: "-0.02em" }}>단독</span>

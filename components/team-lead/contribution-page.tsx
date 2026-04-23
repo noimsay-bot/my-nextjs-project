@@ -1,22 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
-import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   ContributionManualItem,
   ContributionPersonCard,
   getContributionCards,
   getContributionPeriod,
+  getTeamLeadSchedules,
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
-  refreshTeamLeadState,
+  refreshTeamLeadAssignmentMonths,
   updateContributionManualItems,
 } from "@/lib/team-lead/storage";
+
+const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
 interface ManualDraftItem {
   id: string;
@@ -130,6 +132,7 @@ export function ContributionPage() {
   const [manualDrafts, setManualDrafts] = useState<ManualEditorState>({});
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
   const [period, setPeriod] = useState(() => getContributionPeriod(evaluationYear));
+  const lastFocusRefreshAtRef = useRef(0);
 
   const syncFromCache = useCallback(() => {
     const users = getUsers();
@@ -165,32 +168,44 @@ export function ContributionPage() {
 
   useEffect(() => {
     const refresh = async () => {
-      await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshTeamLeadState()]);
+      await refreshScheduleState();
+      const nextPeriod = getContributionPeriod(evaluationYear);
+      await refreshTeamLeadAssignmentMonths(
+        getTeamLeadSchedules()
+          .map((schedule) => schedule.monthKey)
+          .filter((monthKey) => monthKey >= nextPeriod.startMonthKey && monthKey <= nextPeriod.endMonthKey),
+      );
       syncFromCache();
     };
+    const onFocusRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAtRef.current < FOCUS_REFRESH_THROTTLE_MS) return;
+      lastFocusRefreshAtRef.current = now;
+      void refresh();
+    };
 
-    void refresh();
+    void refresh().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setMessage({ tone: "warn", text: detail.message });
     };
-    window.addEventListener("focus", refresh);
+    window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
 
     return () => {
-      window.removeEventListener("focus", refresh);
+      window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_CONTRIBUTION_EVENT, syncFromCache);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
-  }, [syncFromCache]);
+  }, [evaluationYear, syncFromCache]);
 
   const toggleExpanded = (name: string) => {
     setExpandedNames((current) =>

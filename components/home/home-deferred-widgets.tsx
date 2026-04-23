@@ -12,7 +12,14 @@ const HomeNewsPortal = dynamic(
   () => import("@/components/home/HomeNewsPortal").then((module) => module.HomeNewsPortal),
   { ssr: false },
 );
+
+const PublishedSchedulesPanel = dynamic(
+  () => import("@/components/schedule/published-schedules-panel").then((module) => module.PublishedSchedulesPanel),
+  { ssr: false },
+);
+
 export function HomeDeferredWidgets() {
+  const [showSchedules, setShowSchedules] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
   const [showNews, setShowNews] = useState(false);
 
@@ -20,10 +27,15 @@ export function HomeDeferredWidgets() {
     if (typeof window === "undefined") return;
 
     const isMobileLike = window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth <= 820;
+    const scheduleDelay = isMobileLike ? 420 : 120;
     const popupDelay = isMobileLike ? 280 : 80;
     const newsDelay = isMobileLike ? 1400 : 180;
     const newsIdleTimeout = isMobileLike ? 2600 : newsDelay + 1200;
     let newsScheduled = false;
+
+    const scheduleTimer = window.setTimeout(() => {
+      setShowSchedules(true);
+    }, scheduleDelay);
 
     const popupTimer = window.setTimeout(() => {
       setShowPopup(true);
@@ -70,6 +82,7 @@ export function HomeDeferredWidgets() {
     }
 
     return () => {
+      window.clearTimeout(scheduleTimer);
       window.clearTimeout(popupTimer);
       window.clearTimeout(newsTimer);
       window.clearTimeout(loadFallbackTimer);
@@ -81,6 +94,7 @@ export function HomeDeferredWidgets() {
 
   return (
     <>
+      {showSchedules ? <PublishedSchedulesPanel /> : null}
       {showPopup ? <HomePopupNoticeModal /> : null}
       {showNews ? <HomeNewsPortal /> : null}
     </>
