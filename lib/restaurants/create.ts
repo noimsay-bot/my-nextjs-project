@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { getSessionAsync, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import type { RestaurantCreateInput } from "@/lib/restaurants/types";
 
 function parseCoordinate(value: string) {
@@ -56,6 +57,21 @@ export async function createRestaurant(authorId: string, input: RestaurantCreate
   const validated = validateRestaurantInput(input);
   if (!validated.ok) {
     return validated;
+  }
+
+  const session = await getSessionAsync();
+  if (!session?.approved || session.id !== authorId.trim()) {
+    return {
+      ok: false as const,
+      message: "로그인 정보를 확인하지 못했습니다. 다시 로그인해 주세요.",
+    };
+  }
+
+  if (isReadOnlyPortalRole(session.role)) {
+    return {
+      ok: false as const,
+      message: "Advisor와 Observer 등급은 맛집을 등록할 수 없습니다.",
+    };
   }
 
   if (!authorId.trim()) {

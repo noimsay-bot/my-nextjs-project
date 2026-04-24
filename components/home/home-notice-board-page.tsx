@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getSession, hasDeskAccess, subscribeToAuth } from "@/lib/auth/storage";
+import { getSession, hasDeskAccess, isReadOnlyPortalRole, subscribeToAuth } from "@/lib/auth/storage";
 import {
   CommunityBoardCategory,
   CommunityBoardAttachment,
@@ -196,7 +196,8 @@ export default function HomeNoticeBoardPage() {
   const [commentSavingTargetKey, setCommentSavingTargetKey] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
   const canManageNotices = Boolean(session?.approved && hasDeskAccess(session.role));
-  const canWrite = Boolean(session?.approved);
+  const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
+  const canWrite = Boolean(session?.approved && !isReadOnlyUser);
 
   const syncFromCache = useCallback(() => {
     setNotices(getHomeNotices());
@@ -359,18 +360,20 @@ export default function HomeNoticeBoardPage() {
   }, []);
 
   const canEditItem = useCallback((item: CommunityListItem) => {
+    if (isReadOnlyUser) return false;
     if (item.source === "notice" || item.category === "notice") {
       return canManageNotices;
     }
     return Boolean(session?.approved && (hasDeskAccess(session.role) || item.authorId === session.id));
-  }, [canManageNotices, session]);
+  }, [canManageNotices, isReadOnlyUser, session]);
 
   const canDeleteItem = useCallback((item: CommunityListItem) => {
+    if (isReadOnlyUser) return false;
     if (item.source === "notice" || item.category === "notice") {
       return canManageNotices;
     }
     return Boolean(session?.approved && (hasDeskAccess(session.role) || item.authorId === session.id));
-  }, [canManageNotices, session]);
+  }, [canManageNotices, isReadOnlyUser, session]);
 
   const canCreateInCategory = useCallback((category: CommunityBoardCategory) => {
     return category === "notice" ? canManageNotices : canWrite;
@@ -379,8 +382,10 @@ export default function HomeNoticeBoardPage() {
   const getBoardHelpText = useCallback((category: CommunityBoardCategory) => {
     return category === "notice"
       ? "공지 게시판의 쓰기, 수정, 삭제는 DESK와 팀장 권한자만 가능합니다."
-      : "승인된 멤버는 글을 쓰고 자기 글을 수정하거나 삭제할 수 있습니다.";
-  }, []);
+      : isReadOnlyUser
+        ? "Advisor와 Observer는 게시글과 댓글을 조회만 할 수 있습니다."
+        : "승인된 멤버는 글을 쓰고 자기 글을 수정하거나 삭제할 수 있습니다.";
+  }, [isReadOnlyUser]);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -405,6 +410,7 @@ export default function HomeNoticeBoardPage() {
           </div>
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+          {isReadOnlyUser ? <div className="status note">현재 계정은 조회 전용입니다. 글 작성, 수정, 삭제, 댓글 등록은 할 수 없습니다.</div> : null}
         </div>
       </section>
 
@@ -923,6 +929,8 @@ export default function HomeNoticeBoardPage() {
                                     <strong style={{ fontSize: 15 }}>댓글 {comments.length}</strong>
                                     {!session?.approved ? (
                                       <span className="muted" style={{ fontSize: 12 }}>승인된 사용자만 댓글을 작성할 수 있습니다.</span>
+                                    ) : isReadOnlyUser ? (
+                                      <span className="muted" style={{ fontSize: 12 }}>현재 계정은 댓글 조회만 가능합니다.</span>
                                     ) : null}
                                   </div>
 
@@ -952,7 +960,7 @@ export default function HomeNoticeBoardPage() {
                                     <div className="muted" style={{ fontSize: 13 }}>아직 댓글이 없습니다.</div>
                                   )}
 
-                                  {session?.approved ? (
+                                  {session?.approved && !isReadOnlyUser ? (
                                     <div style={{ display: "grid", gap: 10 }}>
                                       <textarea
                                         className="field-textarea"

@@ -9,6 +9,7 @@ import { ScrollToTop } from "@/components/home/ScrollToTop";
 import {
   getSession,
   hasAdminAccess,
+  isReadOnlyPortalRole,
   logoutUser,
   setRoleExperience,
   subscribeToAuth,
@@ -77,10 +78,12 @@ type PortalTheme = "dark" | "light" | "pink" | "green";
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
 const MOBILE_SIDEBAR_TRIGGER_STORAGE_KEY = "jtbc-mobile-sidebar-trigger-top";
 const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
-const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "reviewer", "desk", "team_lead", "admin"];
+const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "reviewer", "advisor", "observer", "desk", "team_lead", "admin"];
 const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
   member: "일반",
   reviewer: "평가자",
+  advisor: "Advisor",
+  observer: "Observer",
   desk: "DESK",
   team_lead: "팀장",
   admin: "관리자",
@@ -126,7 +129,8 @@ function getVisibleLinks(
 ) {
   switch (session?.role) {
     case "member":
-    case "reviewer":
+    case "advisor":
+    case "observer":
       return links.filter(
         (link) =>
           link.href === "/community" ||
@@ -134,6 +138,16 @@ function getVisibleLinks(
           link.href === "/restaurants" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
+          (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
+      );
+    case "reviewer":
+      return links.filter(
+        (link) =>
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          link.href === "/submissions" ||
           (link.href === "/review" && session.canReview && !reviewLocked),
       );
     case "desk":

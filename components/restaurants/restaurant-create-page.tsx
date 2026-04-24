@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSession, initializeAuth, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
+import { getSession, initializeAuth, isReadOnlyPortalRole, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
 import { RestaurantCreateForm } from "@/components/restaurants/restaurant-create-form";
 
 export function RestaurantCreatePage() {
   const [session, setSession] = useState<SessionUser | null>(() => getSession());
   const [checkingSession, setCheckingSession] = useState(true);
+  const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +52,10 @@ export function RestaurantCreatePage() {
         {!checkingSession && session && !session.approved ? (
           <div className="status warn">권한이 없습니다. 관리자 승인 후 이용해 주세요.</div>
         ) : null}
-        {!checkingSession && session?.approved ? <RestaurantCreateForm authorId={session.id} /> : null}
+        {!checkingSession && isReadOnlyUser ? (
+          <div className="status note">현재 계정은 조회 전용이라 맛집을 등록할 수 없습니다.</div>
+        ) : null}
+        {!checkingSession && session?.approved && !isReadOnlyUser ? <RestaurantCreateForm authorId={session.id} /> : null}
       </div>
     </section>
   );

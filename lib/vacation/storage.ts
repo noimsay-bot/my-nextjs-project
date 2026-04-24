@@ -1,5 +1,6 @@
 "use client";
 
+import { getSession, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import {
   getAssignmentDisplayRank,
   getScheduleCategoryLabel,
@@ -1218,6 +1219,11 @@ export function submitVacationRequests(input: {
   annualRawDates?: string;
   compensatoryRawDates?: string;
 }) {
+  const session = getSession();
+  if (session && isReadOnlyPortalRole(session.role)) {
+    return { ok: false as const, message: "Advisor와 Observer 등급은 휴가 신청을 제출할 수 없습니다." };
+  }
+
   const requesterName = input.requesterName.trim();
   if (!requesterName) {
     return { ok: false as const, message: "로그인한 사용자 이름을 확인할 수 없습니다." };

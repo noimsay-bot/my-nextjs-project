@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getSession } from "@/lib/auth/storage";
+import { getSession, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS } from "@/lib/schedule/constants";
 import { VacationType } from "@/lib/schedule/types";
 import {
@@ -81,6 +81,7 @@ function buildVacationCalendarCells(dateItems: VacationCalendarDateItem[]) {
 
 export default function VacationPage() {
   const session = getSession();
+  const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
   const defaultTarget = getDefaultVacationTargetMonth();
   const [year, setYear] = useState(defaultTarget.year);
   const [month, setMonth] = useState(defaultTarget.month);
@@ -165,6 +166,10 @@ export default function VacationPage() {
   const compensatorySelectedDateSummary = useMemo(() => formatDateList(compensatorySelectedDateKeys), [compensatorySelectedDateKeys]);
 
   const handleSubmit = () => {
+    if (isReadOnlyUser) {
+      setMessage({ tone: "warn", text: "현재 계정은 조회 전용이라 휴가 신청을 제출할 수 없습니다." });
+      return;
+    }
     if (!hasManagedSchedule) {
       setMessage({ tone: "warn", text: `${year}년 ${month}월 홈 게시 근무표가 아직 없어 휴가를 신청할 수 없습니다.` });
       return;
@@ -210,6 +215,7 @@ export default function VacationPage() {
               <strong style={{ fontSize: 22 }}>달력으로 휴가 신청</strong>
             </div>
           </div>
+          {isReadOnlyUser ? <div className="status note">현재 계정은 조회 전용이라 날짜 선택과 신청 제출을 할 수 없습니다.</div> : null}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
             <label style={{ display: "grid", gap: 8 }}>
@@ -271,6 +277,7 @@ export default function VacationPage() {
                     key={type}
                     type="button"
                     className="btn"
+                    disabled={isReadOnlyUser}
                     onClick={() => setActiveType(type)}
                     style={toneStyle}
                   >
@@ -333,8 +340,9 @@ export default function VacationPage() {
                     <button
                       key={`selector-${cell.dateKey}`}
                       type="button"
-                      disabled={cell.blocked}
+                      disabled={cell.blocked || isReadOnlyUser}
                       onClick={() => {
+                        if (isReadOnlyUser) return;
                         const dateKey = cell.dateKey as string;
                         if (annualSelected || compensatorySelected) {
                           setAnnualSelectedDateKeys((current) => current.filter((item) => item !== dateKey));
@@ -412,7 +420,7 @@ export default function VacationPage() {
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <button className="btn primary" onClick={handleSubmit} disabled={!hasManagedSchedule}>
+            <button className="btn primary" onClick={handleSubmit} disabled={isReadOnlyUser || !hasManagedSchedule}>
               신청
             </button>
           </div>

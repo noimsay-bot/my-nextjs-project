@@ -1,6 +1,6 @@
 "use client";
 
-import { getUsers } from "@/lib/auth/storage";
+import { getUsers, isReadOnlyPortalRole, isTeamLeadEvaluationExcludedRole, type UserRole } from "@/lib/auth/storage";
 import {
   buildScheduleAssignmentNameTagKey,
   defaultPointers,
@@ -1778,6 +1778,12 @@ export function getFinalCutCards(monthKey?: string) {
   const schedules = getTeamLeadSchedules().filter((schedule) => !monthKey || schedule.monthKey === monthKey);
   const store = getScheduleAssignmentStore();
   const finalCutStore = getFinalCutStore();
+  const hiddenNames = new Set(
+    getUsers()
+      .filter((user) => isTeamLeadEvaluationExcludedRole(user.role))
+      .map((user) => user.username.trim())
+      .filter(Boolean),
+  );
   const personMap = new Map<string, FinalCutScheduleItem[]>();
 
   schedules.forEach((monthSchedule) => {
@@ -1791,6 +1797,7 @@ export function getFinalCutCards(monthKey?: string) {
         rows.forEach((row) => {
           const personName = row.name.trim();
           if (!personName) return;
+          if (hiddenNames.has(personName)) return;
           if (!shouldIncludeFinalCutDuty(row.duty)) return;
           const entry = monthEntries[row.key];
           if (!entry) return;
@@ -1831,7 +1838,7 @@ export function getContributionCards(baseDateOrYear: Date | number = new Date())
   const manualStore = getContributionManualStore(evaluationYear);
   const hiddenNames = new Set(
     getUsers()
-      .filter((user) => user.role === "team_lead" || user.role === "desk")
+      .filter((user) => isTeamLeadEvaluationExcludedRole(user.role))
       .map((user) => user.username.trim())
       .filter(Boolean),
   );
@@ -1900,7 +1907,7 @@ interface ReviewManagementProfileRow {
   email: string;
   login_id?: string | null;
   name: string;
-  role: "member" | "reviewer" | "desk" | "team_lead" | "admin";
+  role: UserRole;
   approved: boolean;
   created_at: string;
   updated_at: string;
@@ -1986,7 +1993,7 @@ export interface AdminProfileItem {
   email: string;
   loginId: string;
   name: string;
-  role: "member" | "reviewer" | "desk" | "team_lead" | "admin";
+  role: UserRole;
   approved: boolean;
   createdAt: string;
   updatedAt: string;
@@ -2002,7 +2009,7 @@ export interface ReviewerRoleProfileItem {
   name: string;
   email: string;
   loginId: string;
-  role: "member" | "reviewer" | "desk" | "admin";
+  role: UserRole;
   approved: boolean;
 }
 
@@ -2019,7 +2026,7 @@ export interface TeamLeadReferenceNoteItem {
 export interface TeamLeadReferenceNoteCard {
   profileId: string;
   name: string;
-  role: "member" | "reviewer" | "desk" | "admin";
+  role: UserRole;
   items: TeamLeadReferenceNoteItem[];
 }
 
@@ -2453,6 +2460,7 @@ async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementW
   if (candidateError) {
     throw new Error(candidateError.message);
   }
+  const visibleCandidates = (candidates ?? []).filter((candidate) => !isReadOnlyPortalRole(candidate.role));
 
   const { data: submissionRows, error: submissionError } = await supabase
     .from("submissions")
@@ -2515,6 +2523,10 @@ async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementW
     (assignmentRows ?? []).map((row) => [row.submission_id, row] as const),
   );
   const reviewMap = new Map<string, ReviewManagementReviewItem[]>();
+  const visibleSubmissionRows = (submissionRows ?? []).filter((row) => {
+    const authorRole = profileMap.get(row.author_id)?.role;
+    return !isTeamLeadEvaluationExcludedRole(authorRole);
+  });
 
   (reviewRows ?? []).forEach((row) => {
     const current = reviewMap.get(row.submission_id) ?? [];
@@ -2531,8 +2543,8 @@ async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementW
   });
 
   return {
-    candidates: (candidates ?? []).map(formatReviewCandidate),
-    items: (submissionRows ?? []).map((row) => {
+    candidates: visibleCandidates.map(formatReviewCandidate),
+    items: visibleSubmissionRows.map((row) => {
       const assignment = activeAssignmentMap.get(row.id);
       return {
         submissionId: row.id,
@@ -2625,9 +2637,10 @@ export async function getTeamLeadReferenceNotesWorkspace(
   }
 
   const noteMap = normalizeReferenceNotesState(stateRow?.state)[String(evaluationYear)] ?? {};
+  const visibleProfiles = (profiles ?? []).filter((profile) => !isTeamLeadEvaluationExcludedRole(profile.role));
 
   return {
-    cards: (profiles ?? []).map((profile) => ({
+    cards: visibleProfiles.map((profile) => ({
       profileId: profile.id,
       name: profile.name,
       role:
@@ -2722,7 +2735,6 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   const currentSubmissionRows = (submissionRows ?? []).filter((row) =>
     currentResetAt ? row.updated_at > currentResetAt : true,
   );
-  const submissionIds = currentSubmissionRows.map((row) => row.id);
   const authorIds = Array.from(new Set(currentSubmissionRows.map((row) => row.author_id)));
 
   const { data: authorProfiles, error: authorProfileError } =
@@ -2741,6 +2753,14 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   if (authorProfileError) {
     throw new Error(authorProfileError.message);
   }
+  const excludedAuthorIds = new Set(
+    (authorProfiles ?? [])
+      .filter((profile) => isTeamLeadEvaluationExcludedRole(profile.role))
+      .map((profile) => profile.id),
+  );
+  const visibleSubmissionRows = currentSubmissionRows.filter((row) => !excludedAuthorIds.has(row.author_id));
+  const submissionIds = visibleSubmissionRows.map((row) => row.id);
+  const visibleAuthorIds = Array.from(new Set(visibleSubmissionRows.map((row) => row.author_id)));
 
   const reviewQuery = supabase
     .from("reviews")
@@ -2761,8 +2781,8 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
 
   const authorNameMap = new Map((authorProfiles ?? []).map((profile) => [profile.id, profile.name.trim()] as const));
   const reviewerNameMap = new Map(reviewers.map((reviewer) => [reviewer.id, reviewer.name] as const));
-  const submissionAuthorMap = new Map(currentSubmissionRows.map((row) => [row.id, row.author_id] as const));
-  const submissionMap = new Map(currentSubmissionRows.map((row) => [row.id, row] as const));
+  const submissionAuthorMap = new Map(visibleSubmissionRows.map((row) => [row.id, row.author_id] as const));
+  const submissionMap = new Map(visibleSubmissionRows.map((row) => [row.id, row] as const));
   const scoreMap = new Map<string, Map<string, number[]>>();
   const reviewerDetailMap = new Map<string, TeamLeadBestReportReviewerDetailRow>();
 
@@ -2803,7 +2823,7 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
     reviewerDetailMap.set(detailKey, detailRow);
   });
 
-  const rows = authorIds
+  const rows = visibleAuthorIds
     .map((authorId) => {
       const reviewerScoreMap = scoreMap.get(authorId) ?? new Map<string, number[]>();
       const reviewerScores = reviewers.map((reviewer) => {

@@ -6,10 +6,12 @@ import { createRestaurantComment } from "@/lib/restaurants/comments";
 export function RestaurantCommentForm({
   restaurantId,
   authorId,
+  readOnly = false,
   onCreated,
 }: {
   restaurantId: string;
   authorId: string | null;
+  readOnly?: boolean;
   onCreated: () => Promise<void> | void;
 }) {
   const [content, setContent] = useState("");
@@ -23,6 +25,11 @@ export function RestaurantCommentForm({
     if (!authorId) {
       setMessageTone("warn");
       setMessage("로그인 정보가 없습니다. 다시 로그인해 주세요.");
+      return;
+    }
+    if (readOnly) {
+      setMessageTone("warn");
+      setMessage("현재 계정은 조회 전용이라 코멘트를 등록할 수 없습니다.");
       return;
     }
 
@@ -52,13 +59,13 @@ export function RestaurantCommentForm({
         placeholder="이 맛집에 대한 짧은 코멘트를 남겨 주세요."
         rows={4}
         style={{ resize: "vertical", minHeight: 110 }}
-        disabled={submitting}
+        disabled={submitting || readOnly}
       />
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted" style={{ fontSize: 12 }}>
           {content.length}/200
         </span>
-        <button type="submit" className="btn primary" disabled={submitting}>
+        <button type="submit" className="btn primary" disabled={submitting || readOnly}>
           {submitting ? "등록 중..." : "코멘트 등록"}
         </button>
       </div>

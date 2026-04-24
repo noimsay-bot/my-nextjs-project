@@ -9,12 +9,14 @@ import {
   updateAdminProfileAccess,
 } from "@/lib/team-lead/storage";
 
-const roles = ["member", "reviewer", "team_lead", "desk", "admin"] as const;
+const roles = ["member", "reviewer", "advisor", "observer", "team_lead", "desk", "admin"] as const;
 type RoleOption = (typeof roles)[number];
 
 const roleLabels: Record<RoleOption, string> = {
   member: "멤버",
   reviewer: "리뷰어",
+  advisor: "Advisor",
+  observer: "Observer",
   team_lead: "팀장",
   desk: "DESK",
   admin: "관리자",
@@ -25,6 +27,16 @@ const roleToneStyles: Partial<Record<RoleOption, CSSProperties>> = {
     color: "#fff1bf",
     border: "1px solid rgba(250,204,21,.45)",
     background: "rgba(250,204,21,.16)",
+  },
+  advisor: {
+    color: "#c4b5fd",
+    border: "1px solid rgba(167,139,250,.42)",
+    background: "rgba(139,92,246,.14)",
+  },
+  observer: {
+    color: "#bae6fd",
+    border: "1px solid rgba(56,189,248,.42)",
+    background: "rgba(14,165,233,.12)",
   },
   team_lead: {
     color: "#fbcfe8",
@@ -43,7 +55,9 @@ const adminRoleOrder: Record<RoleOption, number> = {
   desk: 1,
   admin: 2,
   reviewer: 3,
-  member: 4,
+  advisor: 4,
+  observer: 5,
+  member: 6,
 };
 
 const permissionGuides = [
@@ -61,6 +75,22 @@ const permissionGuides = [
     lines: [
       "기존 멤버 등급은 그대로 유지됩니다.",
       "팀장이 지정하면 베스트리포트 평가 메뉴가 열리고 `/review`에서 평가와 저장이 가능합니다.",
+    ],
+  },
+  {
+    title: "Advisor",
+    tone: roleToneStyles.advisor ?? {},
+    lines: [
+      "멤버가 볼 수 있는 페이지를 동일하게 조회할 수 있습니다.",
+      "신청, 작성, 수정, 삭제는 할 수 없고 팀장 평가 대상에도 포함되지 않습니다.",
+    ],
+  },
+  {
+    title: "Observer",
+    tone: roleToneStyles.observer ?? {},
+    lines: [
+      "멤버 접근 페이지를 조회만 할 수 있는 읽기 전용 등급입니다.",
+      "휴가 신청, 베스트리포트 제출, 댓글 작성 같은 변경 작업은 모두 막힙니다.",
     ],
   },
   {

@@ -4,7 +4,7 @@ import {
   SUPABASE_ENV_ERROR_MESSAGE,
 } from "@/lib/supabase/client";
 
-export type UserRole = "member" | "reviewer" | "team_lead" | "admin" | "desk";
+export type UserRole = "member" | "reviewer" | "team_lead" | "admin" | "desk" | "advisor" | "observer";
 export type UserStatus = "ACTIVE" | "DISABLED";
 
 export interface UserAccount {
@@ -364,7 +364,9 @@ function normalizeRole(value: string | null | undefined): UserRole {
   return value === "reviewer" ||
     value === "team_lead" ||
     value === "admin" ||
-    value === "desk"
+    value === "desk" ||
+    value === "advisor" ||
+    value === "observer"
     ? value
     : "member";
 }
@@ -375,7 +377,9 @@ function normalizeExperienceRole(value: unknown): UserRole | null {
     value === "reviewer" ||
     value === "desk" ||
     value === "team_lead" ||
-    value === "admin"
+    value === "admin" ||
+    value === "advisor" ||
+    value === "observer"
   ) {
     return value;
   }
@@ -1432,4 +1436,22 @@ export function hasDeskAccess(role: UserRole | null | undefined) {
 
 export function hasAdminAccess(role: UserRole | null | undefined) {
   return role === "admin" || role === "team_lead";
+}
+
+export function isReadOnlyPortalRole(role: UserRole | null | undefined) {
+  return role === "advisor" || role === "observer";
+}
+
+export function hasMemberPortalAccess(role: UserRole | null | undefined) {
+  return (
+    role === "member" ||
+    role === "reviewer" ||
+    role === "advisor" ||
+    role === "observer" ||
+    hasDeskAccess(role)
+  );
+}
+
+export function isTeamLeadEvaluationExcludedRole(role: UserRole | null | undefined) {
+  return role === "team_lead" || role === "desk" || role === "advisor" || role === "observer";
 }

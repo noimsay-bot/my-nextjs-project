@@ -6,6 +6,7 @@ import {
   getLastAuthCheckStatus,
   getSession,
   hasAdminAccess,
+  hasMemberPortalAccess,
   hasSupabaseSessionCookie,
   initializeAuth,
   primeSession,
@@ -61,6 +62,8 @@ function hasAccess(
 
   switch (session.role) {
     case "member":
+    case "advisor":
+    case "observer":
       return (
         pathname === "/" ||
         (pathname === "/vacation" && Boolean(vacationRequestOpen)) ||
@@ -90,7 +93,7 @@ function hasAccess(
     case "admin":
       return true;
     default:
-      return false;
+      return hasMemberPortalAccess(session.role);
   }
 }
 

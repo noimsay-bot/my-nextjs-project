@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { getSessionAsync, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import type { RestaurantCommentCreateInput } from "@/lib/restaurants/types";
 
 function validateCommentContent(input: RestaurantCommentCreateInput) {
@@ -28,6 +29,20 @@ export async function createRestaurantComment(authorId: string, restaurantId: st
   }
 
   try {
+    const session = await getSessionAsync();
+    if (!session?.approved || session.id !== authorId) {
+      return {
+        ok: false as const,
+        message: "로그인 정보를 확인하지 못했습니다. 다시 로그인해 주세요.",
+      };
+    }
+    if (isReadOnlyPortalRole(session.role)) {
+      return {
+        ok: false as const,
+        message: "Advisor와 Observer 등급은 코멘트를 등록할 수 없습니다.",
+      };
+    }
+
     const supabase = createClient();
     const { error } = await supabase.from("restaurant_comments").insert({
       restaurant_id: restaurantId,
@@ -61,6 +76,20 @@ export async function updateRestaurantComment(editorId: string, commentId: strin
   }
 
   try {
+    const session = await getSessionAsync();
+    if (!session?.approved || session.id !== editorId) {
+      return {
+        ok: false as const,
+        message: "로그인 정보를 확인하지 못했습니다. 다시 로그인해 주세요.",
+      };
+    }
+    if (isReadOnlyPortalRole(session.role)) {
+      return {
+        ok: false as const,
+        message: "Advisor와 Observer 등급은 코멘트를 수정할 수 없습니다.",
+      };
+    }
+
     const supabase = createClient();
     const { data: commentRow, error: commentError } = await supabase
       .from("restaurant_comments")
@@ -135,6 +164,20 @@ export async function updateRestaurantComment(editorId: string, commentId: strin
 
 export async function deleteRestaurantComment(authorId: string, commentId: string) {
   try {
+    const session = await getSessionAsync();
+    if (!session?.approved || session.id !== authorId) {
+      return {
+        ok: false as const,
+        message: "로그인 정보를 확인하지 못했습니다. 다시 로그인해 주세요.",
+      };
+    }
+    if (isReadOnlyPortalRole(session.role)) {
+      return {
+        ok: false as const,
+        message: "Advisor와 Observer 등급은 코멘트를 삭제할 수 없습니다.",
+      };
+    }
+
     const supabase = createClient();
     const { error } = await supabase
       .from("restaurant_comments")

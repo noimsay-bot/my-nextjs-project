@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { getSession, isReadOnlyPortalRole, subscribeToAuth } from "@/lib/auth/storage";
 import {
   applyToHomePopupNotice,
   getHomePopupNotice,
@@ -28,6 +29,7 @@ function getNoticeToneStyle(tone: "normal" | "urgent") {
 }
 
 export function HomePopupNoticeModal() {
+  const [session, setSession] = useState(() => getSession());
   const [notice, setNotice] = useState(() => getHomePopupNotice());
   const [hasApplied, setHasApplied] = useState(() => hasAppliedToCurrentHomePopupNotice());
   const [open, setOpen] = useState(false);
@@ -62,6 +64,12 @@ export function HomePopupNoticeModal() {
       });
     }
   };
+
+  useEffect(() => {
+    return subscribeToAuth((nextSession) => {
+      setSession(nextSession);
+    });
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -127,6 +135,7 @@ export function HomePopupNoticeModal() {
   if (!notice?.isActive || !open || (notice.applicationEnabled && hasApplied) || !portalReady) return null;
 
   const toneStyle = getNoticeToneStyle(notice.tone);
+  const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
 
   return createPortal(
     <div
@@ -164,7 +173,10 @@ export function HomePopupNoticeModal() {
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, color: "#f8fafc" }}>{notice.body}</div>
           </div>
           {message?.text ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-          {notice.applicationEnabled ? (
+          {notice.applicationEnabled && isReadOnlyUser ? (
+            <div className="status note">현재 계정은 조회 전용이라 공지 신청을 할 수 없습니다.</div>
+          ) : null}
+          {notice.applicationEnabled && !isReadOnlyUser ? (
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button className="btn primary" type="button" disabled={submitting} onClick={() => void handleApply()}>
                 신청하기

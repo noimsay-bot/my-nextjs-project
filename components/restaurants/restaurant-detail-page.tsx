@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getSession, initializeAuth, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
+import { getSession, initializeAuth, isReadOnlyPortalRole, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
 import { RestaurantsMap } from "@/components/restaurants/restaurants-map";
 import { RestaurantCommentForm } from "@/components/restaurants/restaurant-comment-form";
 import { RestaurantCommentList } from "@/components/restaurants/restaurant-comment-list";
@@ -121,6 +121,7 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
       },
     ];
   }, [currentLocation, restaurant]);
+  const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
 
   return (
     <section className="panel">
@@ -183,9 +184,11 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
             <div className="panel" style={{ background: "rgba(35, 52, 84, 0.22)" }}>
               <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
                 <strong style={{ fontSize: 18 }}>코멘트 남기기</strong>
+                {isReadOnlyUser ? <div className="status note">현재 계정은 조회 전용이라 코멘트를 작성하거나 수정할 수 없습니다.</div> : null}
                 <RestaurantCommentForm
                   restaurantId={restaurant.id}
                   authorId={session?.id ?? null}
+                  readOnly={isReadOnlyUser}
                   onCreated={async () => {
                     await loadComments();
                   }}
@@ -206,6 +209,7 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
                     comments={comments}
                     currentUserId={session?.id ?? null}
                     restaurantAuthorId={restaurant.authorId}
+                    readOnly={isReadOnlyUser}
                     onChanged={async () => {
                       await loadComments();
                     }}

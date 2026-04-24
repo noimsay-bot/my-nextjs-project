@@ -11,6 +11,7 @@ import {
 } from "@/lib/portal/data";
 import {
   getSession,
+  isReadOnlyPortalRole,
   subscribeToAuth,
   type SessionUser,
 } from "@/lib/auth/storage";
@@ -26,6 +27,7 @@ export default function SubmissionsPage() {
   const dateInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const hasLocalDraftRef = useRef(false);
   const loadedSessionIdRef = useRef<string | null>(session?.id ?? null);
+  const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
 
   useEffect(() => {
     let mounted = true;
@@ -106,6 +108,10 @@ export default function SubmissionsPage() {
       setMessage("로그인 후 이용해 주세요.");
       return;
     }
+    if (isReadOnlyUser) {
+      setMessage("현재 계정은 조회 전용이라 제출을 수정할 수 없습니다.");
+      return;
+    }
 
     setSaving(true);
     const result = await saveMySubmissionEntry(cards);
@@ -123,6 +129,7 @@ export default function SubmissionsPage() {
     <section className="panel">
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         <div className="chip">베스트리포트 제출</div>
+        {isReadOnlyUser ? <div className="status note">현재 계정은 조회 전용이라 제출 추가, 수정, 삭제를 할 수 없습니다.</div> : null}
         <label>
           <div style={{ marginBottom: 8 }}>제출자</div>
           <input className="field-input" value={submitter} disabled onChange={(event) => setSubmitter(event.target.value)} />
@@ -153,7 +160,9 @@ export default function SubmissionsPage() {
                 <button
                   type="button"
                   className="btn"
+                  disabled={isReadOnlyUser}
                   onClick={() => {
+                    if (isReadOnlyUser) return;
                     hasLocalDraftRef.current = true;
                     setCards((current) => current.filter((item) => item.id !== card.id));
                   }}
@@ -176,6 +185,7 @@ export default function SubmissionsPage() {
                       type="button"
                       className={`btn ${selected ? "white" : ""}`}
                       style={{ padding: "10px 14px", fontSize: 14, minWidth: 96 }}
+                      disabled={isReadOnlyUser}
                       onClick={() => updateCard(card.id, { type })}
                     >
                       {type}
@@ -189,12 +199,14 @@ export default function SubmissionsPage() {
               className="field-input"
               placeholder="제목"
               value={card.title}
+              disabled={isReadOnlyUser}
               onChange={(event) => updateCard(card.id, { title: event.target.value })}
             />
             <input
               className="field-input"
               placeholder="링크 (가급적 유튜브 링크 부탁드립니다.)"
               value={card.link}
+              disabled={isReadOnlyUser}
               onChange={(event) => updateCard(card.id, { link: event.target.value })}
             />
 
@@ -203,6 +215,7 @@ export default function SubmissionsPage() {
                 type="button"
                 className="btn white"
                 style={{ padding: "12px 16px", minWidth: 68 }}
+                disabled={isReadOnlyUser}
                 onClick={() => {
                   const input = dateInputRefs.current[card.id];
                   if (!input) return;
@@ -220,6 +233,7 @@ export default function SubmissionsPage() {
                 className="field-input date-input-no-icon"
                 type="date"
                 value={card.date}
+                disabled={isReadOnlyUser}
                 onChange={(event) => updateCard(card.id, { date: event.target.value })}
               />
             </div>
@@ -228,6 +242,7 @@ export default function SubmissionsPage() {
               className="field-textarea"
               placeholder="코멘트"
               value={card.comment}
+              disabled={isReadOnlyUser}
               onChange={(event) => updateCard(card.id, { comment: event.target.value })}
             />
           </article>
@@ -237,7 +252,7 @@ export default function SubmissionsPage() {
           <button
             type="button"
             className="btn"
-            disabled={cards.length >= 3 || loading || saving}
+            disabled={isReadOnlyUser || cards.length >= 3 || loading || saving}
             onClick={() => {
               hasLocalDraftRef.current = true;
               setCards((current) => [...current, createEmptySubmissionCard()]);
@@ -245,7 +260,7 @@ export default function SubmissionsPage() {
           >
             리포트 추가
           </button>
-          <button className="btn primary" disabled={loading || saving} onClick={handleSave}>
+          <button className="btn primary" disabled={isReadOnlyUser || loading || saving} onClick={handleSave}>
             {saving ? "저장 중..." : "제출 저장"}
           </button>
         </div>

@@ -2,6 +2,7 @@ import {
   getPortalSession,
   getPortalSupabaseClient,
 } from "@/lib/supabase/portal";
+import { isReadOnlyPortalRole } from "@/lib/auth/storage";
 
 export type ReportType = "일반리포트" | "기획리포트" | "인터뷰리포트" | "LIVE";
 
@@ -778,6 +779,9 @@ export async function saveMySubmissionEntry(cards: SubmissionCard[]) {
   const session = await getPortalSession();
   if (!session) {
     return { ok: false as const, message: "로그인이 필요합니다." };
+  }
+  if (isReadOnlyPortalRole(session.role)) {
+    return { ok: false as const, message: "Advisor와 Observer 등급은 제출을 수정할 수 없습니다." };
   }
 
   const sanitizedCards = cards

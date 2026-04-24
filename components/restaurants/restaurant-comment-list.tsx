@@ -21,11 +21,13 @@ export function RestaurantCommentList({
   comments,
   currentUserId,
   restaurantAuthorId,
+  readOnly = false,
   onChanged,
 }: {
   comments: RestaurantCommentRow[];
   currentUserId: string | null;
   restaurantAuthorId: string | null;
+  readOnly?: boolean;
   onChanged: () => Promise<void> | void;
 }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -91,8 +93,8 @@ export function RestaurantCommentList({
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {comments.map((comment) => {
-        const isOwn = currentUserId === comment.authorId;
-        const canEdit = currentUserId === comment.authorId || currentUserId === restaurantAuthorId;
+        const isOwn = !readOnly && currentUserId === comment.authorId;
+        const canEdit = !readOnly && (currentUserId === comment.authorId || currentUserId === restaurantAuthorId);
         const editing = editingId === comment.id;
         return (
           <article key={comment.id} className="panel">
