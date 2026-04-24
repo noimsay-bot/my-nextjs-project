@@ -3342,3 +3342,16 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     display: none;
   }
 }
+
+@media (max-width: 380px) {
+  .portal-sidebar-sublink {
+    min-height: auto;
+    line-height: 1.35;
+  }
+
+  .portal-sidebar-sublink span {
+    display: block;
+    white-space: normal;
+    word-break: keep-all;
+  }
+}
