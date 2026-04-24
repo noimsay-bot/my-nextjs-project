@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, SidebarTrigger, useSidebar } from "@/components/sidebar";
@@ -36,6 +36,7 @@ const links = [
 type PortalTheme = "dark" | "light" | "pink" | "green";
 
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
+const MOBILE_SIDEBAR_TRIGGER_STORAGE_KEY = "jtbc-mobile-sidebar-trigger-top";
 const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
 const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "reviewer", "desk", "team_lead", "admin"];
 const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
@@ -51,11 +52,31 @@ const THEME_LABELS: Record<PortalTheme, string> = {
   pink: "핑크",
   green: "그린",
 };
+const MOBILE_SIDEBAR_TRIGGER_DEFAULT_TOP = 65;
+const MOBILE_SIDEBAR_TRIGGER_MIN_TOP = 12;
+const MOBILE_SIDEBAR_TRIGGER_HEIGHT = 100;
+const MOBILE_SIDEBAR_TRIGGER_BOTTOM_GAP = 12;
+const MOBILE_SIDEBAR_TRIGGER_LONG_PRESS_MS = 320;
 
 function readStoredTheme(): PortalTheme {
   if (typeof window === "undefined") return "dark";
   const storedTheme = window.localStorage.getItem(PORTAL_THEME_STORAGE_KEY);
   return PORTAL_THEMES.includes(storedTheme as PortalTheme) ? (storedTheme as PortalTheme) : "dark";
+}
+
+function readStoredMobileSidebarTriggerTop() {
+  if (typeof window === "undefined") return null;
+  const storedTop = Number(window.localStorage.getItem(MOBILE_SIDEBAR_TRIGGER_STORAGE_KEY));
+  if (!Number.isFinite(storedTop)) return null;
+  return storedTop;
+}
+
+function clampMobileSidebarTriggerTop(top: number, viewportHeight: number) {
+  const maxTop = Math.max(
+    MOBILE_SIDEBAR_TRIGGER_MIN_TOP,
+    viewportHeight - MOBILE_SIDEBAR_TRIGGER_HEIGHT - MOBILE_SIDEBAR_TRIGGER_BOTTOM_GAP,
+  );
+  return Math.min(Math.max(top, MOBILE_SIDEBAR_TRIGGER_MIN_TOP), maxTop);
 }
 
 function getVisibleLinks(
@@ -160,6 +181,7 @@ function PortalSidebar({
   onCycleTheme,
   onCycleExperienceRole,
   onConfirmRoleExperience,
+  mobileTriggerProps,
 }: {
   pathname: string;
   session: SessionUser | null;
@@ -171,12 +193,13 @@ function PortalSidebar({
   onCycleTheme: () => void;
   onCycleExperienceRole: () => void;
   onConfirmRoleExperience: () => void;
+  mobileTriggerProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 }) {
   const { closeMobileSidebar } = useSidebar();
   const shouldShowLogoutButton = Boolean(session);
 
   return (
-    <Sidebar>
+    <Sidebar mobileTriggerProps={mobileTriggerProps}>
       <SidebarContent>
         <nav aria-label="주요 메뉴">
           <SidebarMenu>
@@ -250,11 +273,17 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const [theme, setTheme] = useState<PortalTheme>("dark");
   const [sidebarTopOffset, setSidebarTopOffset] = useState(0);
   const [sidebarTriggerTopOffset, setSidebarTriggerTopOffset] = useState(12);
+  const [mobileSidebarTriggerTop, setMobileSidebarTriggerTop] = useState(MOBILE_SIDEBAR_TRIGGER_DEFAULT_TOP);
+  const [isDraggingMobileSidebarTrigger, setIsDraggingMobileSidebarTrigger] = useState(false);
   const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>("member");
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
   const [reviewLocked, setReviewLocked] = useState(false);
   const shouldTrackReviewLock = Boolean(session?.canReview);
+  const mobileSidebarTriggerLongPressTimeoutRef = useRef<number | null>(null);
+  const mobileSidebarTriggerPointerIdRef = useRef<number | null>(null);
+  const mobileSidebarTriggerPointerOffsetRef = useRef(0);
+  const shouldSuppressMobileSidebarTriggerClickRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -271,6 +300,32 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 
     setOpen(false);
   }, [isMobile, pathname, setOpen, setOpenMobile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (!isMobile) {
+      setIsDraggingMobileSidebarTrigger(false);
+      return;
+    }
+
+    const storedTop = readStoredMobileSidebarTriggerTop();
+    setMobileSidebarTriggerTop(clampMobileSidebarTriggerTop(storedTop ?? MOBILE_SIDEBAR_TRIGGER_DEFAULT_TOP, window.innerHeight));
+    const syncMobileSidebarTriggerTop = () => {
+      setMobileSidebarTriggerTop((current) => clampMobileSidebarTriggerTop(current, window.innerHeight));
+    };
+
+    syncMobileSidebarTriggerTop();
+    window.addEventListener("resize", syncMobileSidebarTriggerTop);
+
+    return () => {
+      window.removeEventListener("resize", syncMobileSidebarTriggerTop);
+      if (mobileSidebarTriggerLongPressTimeoutRef.current !== null) {
+        window.clearTimeout(mobileSidebarTriggerLongPressTimeoutRef.current);
+        mobileSidebarTriggerLongPressTimeoutRef.current = null;
+      }
+    };
+  }, [isMobile]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -308,6 +363,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (isMobile) return;
 
     const isSidebarOpen = isMobile ? openMobile : open;
     const syncSidebarTriggerTopOffset = () => {
@@ -337,6 +393,60 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
       window.removeEventListener("scroll", syncSidebarTriggerTopOffset);
     };
   }, [isMobile, open, openMobile, sidebarTopOffset]);
+
+  const clearMobileSidebarTriggerLongPressTimeout = () => {
+    if (mobileSidebarTriggerLongPressTimeoutRef.current === null) return;
+    window.clearTimeout(mobileSidebarTriggerLongPressTimeoutRef.current);
+    mobileSidebarTriggerLongPressTimeoutRef.current = null;
+  };
+
+  const updateMobileSidebarTriggerTop = (nextTop: number, shouldPersist: boolean) => {
+    const clampedTop = clampMobileSidebarTriggerTop(nextTop, window.innerHeight);
+    setMobileSidebarTriggerTop(clampedTop);
+    if (shouldPersist) {
+      window.localStorage.setItem(MOBILE_SIDEBAR_TRIGGER_STORAGE_KEY, String(clampedTop));
+    }
+  };
+
+  const handleMobileSidebarTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isMobile) return;
+    mobileSidebarTriggerPointerIdRef.current = event.pointerId;
+    mobileSidebarTriggerPointerOffsetRef.current = event.clientY - event.currentTarget.getBoundingClientRect().top;
+    shouldSuppressMobileSidebarTriggerClickRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    clearMobileSidebarTriggerLongPressTimeout();
+    mobileSidebarTriggerLongPressTimeoutRef.current = window.setTimeout(() => {
+      setIsDraggingMobileSidebarTrigger(true);
+      shouldSuppressMobileSidebarTriggerClickRef.current = true;
+    }, MOBILE_SIDEBAR_TRIGGER_LONG_PRESS_MS);
+  };
+
+  const handleMobileSidebarTriggerPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isDraggingMobileSidebarTrigger || mobileSidebarTriggerPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateMobileSidebarTriggerTop(event.clientY - mobileSidebarTriggerPointerOffsetRef.current, false);
+  };
+
+  const finishMobileSidebarTriggerInteraction = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    shouldPersistPosition: boolean,
+  ) => {
+    if (mobileSidebarTriggerPointerIdRef.current !== event.pointerId) return;
+
+    clearMobileSidebarTriggerLongPressTimeout();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (isDraggingMobileSidebarTrigger) {
+      updateMobileSidebarTriggerTop(event.clientY - mobileSidebarTriggerPointerOffsetRef.current, shouldPersistPosition);
+      shouldSuppressMobileSidebarTriggerClickRef.current = true;
+      setIsDraggingMobileSidebarTrigger(false);
+    }
+
+    mobileSidebarTriggerPointerIdRef.current = null;
+    mobileSidebarTriggerPointerOffsetRef.current = 0;
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -436,7 +546,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
       style={
         {
           "--portal-sidebar-top-offset": `${sidebarTopOffset}px`,
-          "--portal-sidebar-rail-top": `${sidebarTriggerTopOffset}px`,
+          "--portal-sidebar-rail-top": `${isMobile ? mobileSidebarTriggerTop : sidebarTriggerTopOffset}px`,
           "--portal-sidebar-width": "232px",
           "--portal-sidebar-mobile-width": "288px",
         } as CSSProperties
@@ -453,6 +563,19 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         onCycleTheme={cycleTheme}
         onCycleExperienceRole={cycleExperienceRole}
         onConfirmRoleExperience={confirmRoleExperience}
+        mobileTriggerProps={{
+          className: isDraggingMobileSidebarTrigger ? "portal-sidebar-trigger--dragging" : undefined,
+          onPointerDown: handleMobileSidebarTriggerPointerDown,
+          onPointerMove: handleMobileSidebarTriggerPointerMove,
+          onPointerUp: (event) => finishMobileSidebarTriggerInteraction(event, true),
+          onPointerCancel: (event) => finishMobileSidebarTriggerInteraction(event, false),
+          onClick: (event) => {
+            if (shouldSuppressMobileSidebarTriggerClickRef.current) {
+              shouldSuppressMobileSidebarTriggerClickRef.current = false;
+              event.preventDefault();
+            }
+          },
+        }}
       />
       <SidebarInset>
         <div className="shell portal-shell-main">

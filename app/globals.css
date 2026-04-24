@@ -3170,6 +3170,12 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   top: var(--portal-sidebar-rail-top, 12px);
   z-index: 41;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  touch-action: none;
+}
+
+.portal-sidebar-trigger--dragging {
+  transform: scale(1.04);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
 }
 
 @media (min-width: 961px) {
@@ -3224,7 +3230,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   .portal-sidebar-trigger--rail {
     position: fixed;
     display: inline-flex;
-    top: 65px;
+    top: var(--portal-sidebar-rail-top, 65px);
     left: 0;
     right: auto;
     width: 40px !important;

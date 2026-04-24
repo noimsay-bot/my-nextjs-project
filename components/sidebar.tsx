@@ -183,10 +183,12 @@ export function SidebarProvider({
 
 type SidebarProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
+  mobileTriggerProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 };
 
-export function Sidebar({ children, className, ...props }: SidebarProps) {
+export function Sidebar({ children, className, mobileTriggerProps, ...props }: SidebarProps) {
   const { open, openMobile, closeMobileSidebar, isMobile } = useSidebar();
+  const { className: mobileTriggerClassName, ...mobileTriggerRest } = mobileTriggerProps ?? {};
 
   return (
     <>
@@ -207,7 +209,11 @@ export function Sidebar({ children, className, ...props }: SidebarProps) {
       >
         <div className="portal-sidebar__spacer" aria-hidden="true" />
         {isMobile ? (
-          <SidebarTrigger className="portal-sidebar-trigger--rail" aria-label="사이드바 열기" />
+          <SidebarTrigger
+            className={joinClassNames("portal-sidebar-trigger--rail", mobileTriggerClassName)}
+            aria-label="사이드바 열기"
+            {...mobileTriggerRest}
+          />
         ) : null}
         <aside
           className={joinClassNames("portal-sidebar__panel", openMobile && "is-open")}
