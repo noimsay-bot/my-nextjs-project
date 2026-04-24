@@ -188,11 +188,11 @@ export const GENERAL_TEAM_DEFAULT_NAMES = [
   "이학진",
   "정상원",
   "정재우",
-  "최무룡",
   "황현우",
   "정철원",
   "조용희",
 ] as const;
+export const GENERAL_TEAM_ROSTER_VERSION = 2;
 
 function createSeedList(...names: string[]) {
   return Array.from({ length: 30 }, (_, index) => names[index] ?? "");
@@ -415,6 +415,9 @@ export const defaultScheduleState: ScheduleState = {
   extraHolidays: "",
   vacations: "",
   generalTeamPeople: [...GENERAL_TEAM_DEFAULT_NAMES],
+  generalTeamRosterVersion: GENERAL_TEAM_ROSTER_VERSION,
+  generalTeamOffPeople: [],
+  generalTeamOffPeopleByDate: {},
   globalOffPool: [],
   offPeople: [],
   offByCategory: createEmptyOffByCategory(),

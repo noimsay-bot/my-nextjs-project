@@ -187,7 +187,7 @@ type SidebarProps = HTMLAttributes<HTMLDivElement> & {
 };
 
 export function Sidebar({ children, className, mobileTriggerProps, ...props }: SidebarProps) {
-  const { open, openMobile, closeMobileSidebar, isMobile } = useSidebar();
+  const { open, openMobile, closeMobileSidebar, isMobile, setOpen } = useSidebar();
   const { className: mobileTriggerClassName, ...mobileTriggerRest } = mobileTriggerProps ?? {};
 
   return (
@@ -218,10 +218,30 @@ export function Sidebar({ children, className, mobileTriggerProps, ...props }: S
         <aside
           className={joinClassNames("portal-sidebar__panel", openMobile && "is-open")}
           aria-label="포털 사이드바"
+          onClickCapture={(event) => {
+            if (isMobile) {
+              return;
+            }
+
+            if (!open) {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(true);
+              return;
+            }
+
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest('a, button, input, select, textarea, summary, [role="button"], [role="link"]')
+            ) {
+              return;
+            }
+
+            event.preventDefault();
+            setOpen(false);
+          }}
         >
-          {!isMobile ? (
-            <SidebarTrigger className="portal-sidebar-trigger--rail" aria-label="사이드바 열기" />
-          ) : null}
           <div className="portal-sidebar__inner">{children}</div>
         </aside>
       </div>

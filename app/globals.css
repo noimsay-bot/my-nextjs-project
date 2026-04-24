@@ -3018,6 +3018,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar.is-collapsed .portal-sidebar__panel {
   transform: translateX(calc(-1 * var(--portal-sidebar-width, 256px) + 56px));
+  cursor: pointer;
 }
 
 .portal-sidebar__inner {
@@ -3070,6 +3071,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar__menu-item {
   min-width: 0;
+  position: relative;
 }
 
 .portal-sidebar-link {
@@ -3088,6 +3090,19 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
+.portal-sidebar-link--toggle {
+  cursor: pointer;
+}
+
+.portal-sidebar-link__chevron {
+  font-size: 12px;
+  transition: transform 0.2s ease;
+}
+
+.portal-sidebar-link__chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
 .portal-sidebar-link:hover {
   color: var(--text);
   transform: translateX(2px);
@@ -3097,6 +3112,58 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   color: var(--text);
   background: var(--nav-active-bg);
   border-color: var(--nav-active-line);
+}
+
+.portal-sidebar-submenu {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 12px;
+}
+
+.portal-sidebar-sublink {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.portal-sidebar-sublink:hover {
+  color: var(--text);
+  transform: translateX(2px);
+}
+
+.portal-sidebar-sublink.is-active {
+  color: var(--text);
+  border-color: var(--nav-active-line);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@media (min-width: 961px) {
+  .portal-sidebar__menu-item--has-children {
+    overflow: visible;
+  }
+
+  .portal-sidebar-submenu {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 10px);
+    min-width: 180px;
+    margin-top: 0;
+    padding: 10px;
+    border-radius: 18px;
+    border: 1px solid var(--line);
+    background: var(--bg-start);
+    box-shadow: var(--panel-shadow);
+    z-index: 70;
+  }
 }
 
 .portal-sidebar-action {

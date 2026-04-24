@@ -5,6 +5,7 @@
   defaultPointers,
   defaultScheduleState,
   GENERAL_TEAM_DEFAULT_NAMES,
+  GENERAL_TEAM_ROSTER_VERSION,
   buildScheduleAssignmentNameTagKey,
   getNextScheduleAssignmentNameTag,
   getStoredAssignmentDisplayRank,
@@ -229,6 +230,12 @@ export function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[]
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   syncDayVacationsFromState(state, orderedDays);
   let previousNight: string[] = [];
+  const datedGeneralTeamOffEntries = Object.entries(state.generalTeamOffPeopleByDate ?? {})
+    .filter(([dateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
+    .sort(([left], [right]) => left.localeCompare(right));
+  const fallbackGeneralTeamOffPeople = normalizeEditableNameList(state.generalTeamOffPeople);
+  let generalTeamOffEntryIndex = 0;
+  let activeGeneralTeamOffPeople = datedGeneralTeamOffEntries.length > 0 ? [] as string[] : fallbackGeneralTeamOffPeople;
 
   orderedDays.forEach((day) => {
     if (hasRequiredDayOverride(day.dateKey)) {
@@ -271,9 +278,19 @@ export function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[]
       if (vacationName) assignedNames.add(vacationName);
     });
 
-    const globalOffSet = new Set((state.offPeople ?? []).map((name) => name.trim()).filter(Boolean));
+    while (generalTeamOffEntryIndex < datedGeneralTeamOffEntries.length) {
+      const [entryDateKey, entryNames] = datedGeneralTeamOffEntries[generalTeamOffEntryIndex] ?? [];
+      if (!entryDateKey || entryDateKey.localeCompare(day.dateKey) > 0) {
+        break;
+      }
+
+      activeGeneralTeamOffPeople = entryNames ?? [];
+      generalTeamOffEntryIndex += 1;
+    }
+
+    const generalTeamOffSet = new Set(activeGeneralTeamOffPeople.map((name) => name.trim()).filter(Boolean));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !globalOffSet.has(name),
+      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
     );
 
     if (nextGeneralNames.length > 0) {
@@ -286,6 +303,28 @@ export function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[]
     day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
     previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
   });
+}
+
+export function getGeneralTeamOffPeopleForDate(state: ScheduleState, dateKey: string) {
+  const datedGeneralTeamOffEntries = Object.entries(state.generalTeamOffPeopleByDate ?? {})
+    .filter(([entryDateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(entryDateKey))
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  if (datedGeneralTeamOffEntries.length === 0) {
+    return normalizeEditableNameList(state.generalTeamOffPeople);
+  }
+
+  let activeGeneralTeamOffPeople: string[] = [];
+
+  for (const [entryDateKey, names] of datedGeneralTeamOffEntries) {
+    if (entryDateKey.localeCompare(dateKey) > 0) {
+      break;
+    }
+
+    activeGeneralTeamOffPeople = normalizeEditableNameList(names);
+  }
+
+  return activeGeneralTeamOffPeople;
 }
 
 export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): ScheduleState {
@@ -348,10 +387,31 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   const normalizedGeneralTeamPeople = normalizeEditableNameList(
     input.generalTeamPeople ?? base.generalTeamPeople ?? GENERAL_TEAM_DEFAULT_NAMES,
   );
+  const generalTeamRosterVersion =
+    typeof input.generalTeamRosterVersion === "number"
+      ? input.generalTeamRosterVersion
+      : 0;
   const generalTeamPeople =
-    normalizedGeneralTeamPeople.length > 0
+    generalTeamRosterVersion === GENERAL_TEAM_ROSTER_VERSION && normalizedGeneralTeamPeople.length > 0
       ? normalizedGeneralTeamPeople
       : [...GENERAL_TEAM_DEFAULT_NAMES];
+  const generalTeamOffPeople = Array.from(
+    new Set(
+      normalizeEditableNameList(input.generalTeamOffPeople).filter((name) => generalTeamPeople.includes(name)),
+    ),
+  );
+  const generalTeamOffPeopleByDate = Object.fromEntries(
+    Object.entries(input.generalTeamOffPeopleByDate ?? {})
+      .filter(([dateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
+      .map(([dateKey, names]) => [
+        dateKey,
+        Array.from(
+          new Set(
+            normalizeEditableNameList(names).filter((name) => generalTeamPeople.includes(name)),
+          ),
+        ),
+      ]),
+  ) as Record<string, string[]>;
 
   const nextState: ScheduleState = {
     ...base,
@@ -361,6 +421,9 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     jcheckCount: DEFAULT_JCHECK_COUNT,
     extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays, nextYear, nextMonth),
     generalTeamPeople: generalTeamPeople,
+    generalTeamRosterVersion: GENERAL_TEAM_ROSTER_VERSION,
+    generalTeamOffPeople,
+    generalTeamOffPeopleByDate,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,

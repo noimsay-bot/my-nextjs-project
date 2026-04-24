@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, SidebarTrigger, useSidebar } from "@/components/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, useSidebar } from "@/components/sidebar";
 import { ScrollToTop } from "@/components/home/ScrollToTop";
 import {
   getSession,
@@ -21,15 +21,54 @@ import {
 } from "@/lib/portal/access-state";
 import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
 
-const links = [
+type PortalNavChild = {
+  href: string;
+  label: string;
+};
+
+type PortalNavLink = {
+  href: string;
+  label: string;
+  children?: PortalNavChild[];
+};
+
+const links: PortalNavLink[] = [
   { href: "/community", label: "커뮤니티" },
   { href: "/work-schedule", label: "근무표" },
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/restaurants", label: "내 주변 맛집" },
-  { href: "/schedule", label: "DESK" },
+  {
+    href: "/schedule",
+    label: "DESK",
+    children: [
+      { href: "/schedule/schedule-assignment", label: "일정배정" },
+      { href: "/schedule/vacations", label: "휴가관리" },
+      { href: "/schedule/domestic-trip", label: "국내출장" },
+      { href: "/schedule/international-trip", label: "해외출장" },
+      { href: "/schedule/press-support", label: "출입처지원" },
+      { href: "/schedule/health-checks", label: "건강검진" },
+      { href: "/schedule/long-service-leave", label: "장기근속휴가" },
+      { href: "/schedule/final-cut", label: "정제본" },
+      { href: "/schedule/write", label: "근무표관리" },
+    ],
+  },
   { href: "/review", label: "베스트리포트 평가" },
-  { href: "/team-lead", label: "팀장" },
+  {
+    href: "/team-lead",
+    label: "총괄",
+    children: [
+      { href: "/team-lead/overall-score", label: "개인별 점수" },
+      { href: "/team-lead/overall-score-summary", label: "종합점수" },
+      { href: "/team-lead/reviewer-management", label: "리뷰어 관리" },
+      { href: "/team-lead/reference-notes", label: "참고사항" },
+      { href: "/team-lead/broadcast-accident", label: "방송사고" },
+      { href: "/team-lead/live-safety", label: "LIVE무사고" },
+      { href: "/team-lead/contribution", label: "기여도" },
+      { href: "/team-lead/final-cut", label: "정제본" },
+      { href: "/team-lead/special-report", label: "영상평가관리" },
+    ],
+  },
   { href: "/admin", label: "관리자" },
 ];
 
@@ -197,6 +236,12 @@ function PortalSidebar({
 }) {
   const { closeMobileSidebar } = useSidebar();
   const shouldShowLogoutButton = Boolean(session);
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
+
+  const handleMenuNavigate = () => {
+    setExpandedMenus({});
+    closeMobileSidebar();
+  };
 
   return (
     <Sidebar mobileTriggerProps={mobileTriggerProps}>
@@ -205,17 +250,56 @@ function PortalSidebar({
           <SidebarMenu>
             {visibleLinks.map((link) => {
               const active = isLinkActive(pathname, link.href);
+              const hasChildren = Boolean(link.children?.length);
+              const isExpanded = expandedMenus[link.href] ?? false;
 
               return (
-                <SidebarMenuItem key={link.href}>
-                  <Link
-                    href={link.href}
-                    className={`portal-sidebar-link ${active ? "is-active" : ""}`.trim()}
-                    aria-current={active ? "page" : undefined}
-                    onClick={closeMobileSidebar}
-                  >
-                    <span>{link.label}</span>
-                  </Link>
+                <SidebarMenuItem key={link.href} className={hasChildren ? "portal-sidebar__menu-item--has-children" : undefined}>
+                  {hasChildren ? (
+                    <>
+                      <button
+                        type="button"
+                        className={`portal-sidebar-link portal-sidebar-link--toggle ${active ? "is-active" : ""}`.trim()}
+                        aria-expanded={isExpanded}
+                        onClick={() =>
+                          setExpandedMenus(isExpanded ? {} : { [link.href]: true })
+                        }
+                      >
+                        <span>{link.label}</span>
+                        <span className={`portal-sidebar-link__chevron ${isExpanded ? "is-expanded" : ""}`.trim()} aria-hidden="true">
+                          ▾
+                        </span>
+                      </button>
+                      {isExpanded ? (
+                        <div className="portal-sidebar-submenu">
+                          {link.children?.map((child) => {
+                            const childActive = pathname === child.href;
+
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                className={`portal-sidebar-sublink ${childActive ? "is-active" : ""}`.trim()}
+                                aria-current={childActive ? "page" : undefined}
+                                onClick={handleMenuNavigate}
+                              >
+                                <span>{child.label}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <Link
+                      href={link.href}
+                      className={`portal-sidebar-link ${active ? "is-active" : ""}`.trim()}
+                      aria-current={active ? "page" : undefined}
+                      onClick={handleMenuNavigate}
+                    >
+                      <span>{link.label}</span>
+                    </Link>
+                  )}
                 </SidebarMenuItem>
               );
             })}
@@ -581,7 +665,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         <div className="shell portal-shell-main">
           <section ref={headerRef} className="panel portal-header-shell">
             <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
-            <div style={{ display: "flex", justifyContent: "stretch" }}>
+              <div style={{ display: "flex", justifyContent: "stretch" }}>
               <Link href="/" className="brand-logo" aria-label="홈으로 이동">
                   <span
                     className="brand-logo-text"
@@ -594,9 +678,6 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
                     JTBC NEWS CAMERA HUB
                   </span>
                 </Link>
-              </div>
-              <div className="portal-header-shell__trigger-row">
-                <SidebarTrigger aria-label="사이드바 토글" />
               </div>
             </div>
           </section>

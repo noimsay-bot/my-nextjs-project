@@ -121,6 +121,9 @@ export interface ScheduleState {
   extraHolidays: string;
   vacations: string;
   generalTeamPeople: string[];
+  generalTeamRosterVersion: number;
+  generalTeamOffPeople: string[];
+  generalTeamOffPeopleByDate: Record<string, string[]>;
   globalOffPool: string[];
   offPeople: string[];
   offByCategory: Record<CategoryKey, string[]>;

@@ -57,6 +57,7 @@ import {
   generateSchedule,
   getCategoryPeople,
   getEffectiveOffByCategory,
+  getGeneralTeamOffPeopleForDate,
   getMonthKey,
   getStartPointerRawIndex,
   getUniquePeople,
@@ -77,7 +78,7 @@ import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
 import { deskEditableVacationTypes, vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
-import { CategoryKey, DaySchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
+import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
@@ -112,6 +113,30 @@ function isSchedulableMonth(year: number, month: number) {
   const firstYear = SCHEDULE_YEARS[0];
   const lastYear = SCHEDULE_YEARS[SCHEDULE_YEARS.length - 1];
   return year >= firstYear && year <= lastYear && month >= 1 && month <= 12;
+}
+
+function formatLocalDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getGeneralTeamOffEffectiveDateKey(schedule: GeneratedSchedule | null) {
+  const todayKey = formatLocalDateKey(new Date());
+
+  if (!schedule) {
+    return todayKey;
+  }
+
+  const ownedDateKeys = schedule.days
+    .filter((day) => !day.isOverflowMonth && day.year === schedule.year && day.month === schedule.month)
+    .map((day) => day.dateKey)
+    .sort((left, right) => left.localeCompare(right));
+
+  const firstOwnedDateKey = ownedDateKeys[0];
+  if (!firstOwnedDateKey) {
+    return todayKey;
+  }
+
+  return todayKey.localeCompare(firstOwnedDateKey) > 0 ? todayKey : firstOwnedDateKey;
 }
 
 interface AddPersonDialogState {
@@ -187,6 +212,10 @@ interface OrderOffEditorState {
 }
 
 interface GlobalOffEditorState {
+  selectedNames: string[];
+}
+
+interface GeneralTeamOffEditorState {
   selectedNames: string[];
 }
 
@@ -433,7 +462,10 @@ export function ScheduleApp() {
   const [addPersonVacationType, setAddPersonVacationType] = useState<VacationType>("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
+  const [generalTeamOffEditor, setGeneralTeamOffEditor] = useState<GeneralTeamOffEditorState | null>(null);
   const [isOrderEditMode, setIsOrderEditMode] = useState(false);
+  const [isGeneralTeamEditMode, setIsGeneralTeamEditMode] = useState(false);
+  const [isGlobalOffEditMode, setIsGlobalOffEditMode] = useState(false);
   const [isGeneralTeamAdding, setIsGeneralTeamAdding] = useState(false);
   const [generalTeamDraftName, setGeneralTeamDraftName] = useState("");
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
@@ -712,6 +744,11 @@ export function ScheduleApp() {
     if (state.generatedHistory.length === 0) return state.generated;
     return state.generatedHistory.find((item) => item.monthKey === visibleMonthKey) ?? state.generatedHistory[state.generatedHistory.length - 1];
   }, [state.generated, state.generatedHistory, visibleMonthKey]);
+  const generalTeamOffEffectiveDateKey = useMemo(() => getGeneralTeamOffEffectiveDateKey(visibleSchedule), [visibleSchedule]);
+  const effectiveGeneralTeamOffPeople = useMemo(
+    () => getGeneralTeamOffPeopleForDate(state, generalTeamOffEffectiveDateKey),
+    [generalTeamOffEffectiveDateKey, state],
+  );
   const visibleMonthTabs = useMemo(
     () => (state.generatedHistory.length > 0 ? state.generatedHistory : visibleSchedule ? [visibleSchedule] : []),
     [state.generatedHistory, visibleSchedule],
@@ -885,25 +922,33 @@ export function ScheduleApp() {
     setGlobalOffEditor({
       selectedNames: [...state.offPeople],
     });
+    setIsGlobalOffEditMode(true);
   };
 
   const cancelGlobalOffEdit = () => {
     setGlobalOffEditor(null);
+    setIsGlobalOffEditMode(false);
+  };
+
+  const startGeneralTeamOffEdit = () => {
+    setGeneralTeamOffEditor({
+      selectedNames: [...effectiveGeneralTeamOffPeople],
+    });
+    setIsGeneralTeamEditMode(true);
+  };
+
+  const cancelGeneralTeamOffEdit = () => {
+    setGeneralTeamOffEditor(null);
+    setIsGeneralTeamEditMode(false);
+    setIsGeneralTeamAdding(false);
+    setGeneralTeamDraftName("");
   };
 
   const toggleOrderEditMode = () => {
     setIsOrderEditMode((current) => {
       const next = !current;
-      if (next) {
-        setGlobalOffEditor({
-          selectedNames: [...state.offPeople],
-        });
-      }
       if (!next) {
         setOrderOffEditor(null);
-        setGlobalOffEditor(null);
-        setIsGeneralTeamAdding(false);
-        setGeneralTeamDraftName("");
       }
       return next;
     });
@@ -929,10 +974,16 @@ export function ScheduleApp() {
       sanitizeScheduleState({
         ...current,
         generalTeamPeople: (current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES).filter((item) => item !== name),
-        offPeople: current.offPeople.filter((item) => item !== name),
+        generalTeamOffPeople: current.generalTeamOffPeople.filter((item) => item !== name),
+        generalTeamOffPeopleByDate: Object.fromEntries(
+          Object.entries(current.generalTeamOffPeopleByDate ?? {}).map(([dateKey, names]) => [
+            dateKey,
+            names.filter((item) => item !== name),
+          ]),
+        ),
       }),
     );
-    setGlobalOffEditor((current) => (current ? { ...current, selectedNames: current.selectedNames.filter((item) => item !== name) } : current));
+    setGeneralTeamOffEditor((current) => (current ? { ...current, selectedNames: current.selectedNames.filter((item) => item !== name) } : current));
   };
 
   const appendGlobalOffPoolPerson = () => {
@@ -1008,7 +1059,34 @@ export function ScheduleApp() {
       }),
     );
     setGlobalOffEditor(null);
+    setIsGlobalOffEditMode(false);
     setMessage({ tone: "ok", text: "기본 오프 인원을 저장했습니다." });
+  };
+
+  const saveGeneralTeamOffEdit = () => {
+    if (!generalTeamOffEditor) return;
+    const nextGeneralTeamOff = Array.from(
+      new Set(
+        generalTeamOffEditor.selectedNames
+          .map((name) => name.trim())
+          .filter((name) => name && generalTeamPeople.includes(name)),
+      ),
+    );
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        generalTeamOffPeople: nextGeneralTeamOff,
+        generalTeamOffPeopleByDate: {
+          ...(current.generalTeamOffPeopleByDate ?? {}),
+          [generalTeamOffEffectiveDateKey]: nextGeneralTeamOff,
+        },
+      }),
+    );
+    setGeneralTeamOffEditor(null);
+    setIsGeneralTeamEditMode(false);
+    setIsGeneralTeamAdding(false);
+    setGeneralTeamDraftName("");
+    setMessage({ tone: "ok", text: "일반조 오프 인원을 저장했습니다." });
   };
 
   const submitAddPerson = () => {
@@ -2306,7 +2384,7 @@ export function ScheduleApp() {
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <div className="chip">순번 입력</div>
               <button className={`btn ${isOrderEditMode ? "white" : ""}`} disabled={isEditingDate} onClick={toggleOrderEditMode}>
-                {isOrderEditMode ? "수정모드 종료" : "수정모드"}
+                {isOrderEditMode ? "수정 종료" : "수정"}
               </button>
             </div>
             <div className="schedule-order-sheet">
@@ -2429,9 +2507,15 @@ export function ScheduleApp() {
         <div className="panel-pad" style={{ display: "grid", gap: 8, padding: "8px 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <div className="chip">일반조</div>
-            {isOrderEditMode ? (
+            {isGeneralTeamEditMode ? (
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: 12 }}>이름을 눌러 오프 설정</span>
+                {generalTeamOffEditor ? (
+                  <>
+                    <button className="btn primary" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={saveGeneralTeamOffEdit}>저장</button>
+                    <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={cancelGeneralTeamOffEdit}>취소</button>
+                  </>
+                ) : null}
                 {isGeneralTeamAdding ? (
                   <form
                     style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
@@ -2475,21 +2559,21 @@ export function ScheduleApp() {
                 )}
               </div>
             ) : (
-              <span className="muted" style={{ fontSize: 12 }}>수정모드에서 편집</span>
+              <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={startGeneralTeamOffEdit}>수정</button>
             )}
           </div>
 
           <div className="schedule-order-name-grid schedule-order-name-grid--wide">
             {generalTeamPeople.map((name) => {
-              const selected = ((isOrderEditMode ? globalOffEditor?.selectedNames : null) ?? state.offPeople).includes(name);
+              const selected = ((isGeneralTeamEditMode ? generalTeamOffEditor?.selectedNames : null) ?? effectiveGeneralTeamOffPeople).includes(name);
               return (
                 <div key={`general-team-off-${name}`} className="schedule-order-name-cell-wrap">
                   <button
                     type="button"
                     className={`schedule-order-name-cell${selected ? " schedule-order-name-cell--selected" : ""}`}
-                    disabled={!isOrderEditMode || !globalOffEditor}
+                    disabled={!isGeneralTeamEditMode || !generalTeamOffEditor}
                     onClick={() =>
-                      setGlobalOffEditor((current) =>
+                      setGeneralTeamOffEditor((current) =>
                         current
                           ? {
                               ...current,
@@ -2503,7 +2587,7 @@ export function ScheduleApp() {
                   >
                     {name}
                   </button>
-                  {isOrderEditMode ? (
+                  {isGeneralTeamEditMode ? (
                     <button
                       type="button"
                       className="schedule-order-name-delete"
@@ -2525,14 +2609,14 @@ export function ScheduleApp() {
           <div className="panel-pad" style={{ display: "grid", gap: 4, padding: "8px 12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <div className="chip">기본 오프 인원</div>
-              {isOrderEditMode && globalOffEditor ? (
+              {isGlobalOffEditMode && globalOffEditor ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={appendGlobalOffPoolPerson}>추가</button>
                   <button className="btn primary" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={saveGlobalOffEdit}>저장</button>
                   <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={cancelGlobalOffEdit}>취소</button>
                 </div>
               ) : (
-                <span className="muted" style={{ fontSize: 12 }}>수정모드에서 편집</span>
+                <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={startGlobalOffEdit}>수정</button>
               )}
             </div>
 
@@ -2554,13 +2638,13 @@ export function ScheduleApp() {
             <div className="schedule-order-name-grid">
               {globalOffPool.length > 0 ? (
                 globalOffPool.map((name) => {
-                  const selected = ((isOrderEditMode ? globalOffEditor?.selectedNames : null) ?? state.offPeople).includes(name);
+                  const selected = ((isGlobalOffEditMode ? globalOffEditor?.selectedNames : null) ?? state.offPeople).includes(name);
                   return (
                     <div key={`global-off-${name}`} className="schedule-order-name-cell-wrap">
                       <button
                         type="button"
                         className={`schedule-order-name-cell${selected ? " schedule-order-name-cell--selected" : ""}`}
-                        disabled={!isOrderEditMode || !globalOffEditor}
+                        disabled={!isGlobalOffEditMode || !globalOffEditor}
                         onClick={() =>
                           setGlobalOffEditor((current) =>
                             current
@@ -2573,10 +2657,10 @@ export function ScheduleApp() {
                               : current,
                           )
                         }
-                      >
-                        {name}
-                      </button>
-                      {isOrderEditMode ? (
+                        >
+                          {name}
+                        </button>
+                      {isGlobalOffEditMode ? (
                         <button
                           type="button"
                           className="schedule-order-name-delete"
