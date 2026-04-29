@@ -1,8 +1,12 @@
 import styles from "@/components/home/HomeNews.module.css";
-import { HomeNewsTickerItem, HOME_NEWS_CATEGORY_LABELS } from "@/components/home/home-news.types";
+
+type HomeNoticeTickerItem = {
+  id: string;
+  text: string;
+};
 
 type HomeNewsTickerProps = {
-  items: HomeNewsTickerItem[];
+  items: HomeNoticeTickerItem[];
   loading?: boolean;
   onSelectItem?: (itemId: string) => void;
 };
@@ -24,14 +28,14 @@ export function HomeNewsTicker({ items, loading = false, onSelectItem }: HomeNew
   if (items.length === 0) {
     return (
       <div className={styles.empty} role="status" aria-live="polite">
-        <strong>아직 표시할 브리핑 문구가 없습니다.</strong>
-        <p>뉴스 요약 데이터가 연결되면 이 영역에 전광판형 브리핑이 자동으로 표시됩니다.</p>
+        <strong>아직 표시할 공지가 없습니다.</strong>
+        <p>공지 제목이 등록되면 이 영역에 흐르는 전광판처럼 표시됩니다.</p>
       </div>
     );
   }
 
   return (
-    <div className={styles.tickerViewport} aria-label="핵심 뉴스 브리핑">
+    <div className={styles.tickerViewport} aria-label="공지 제목 흐름">
       <div className={styles.tickerTrack}>
         {[0, 1].map((groupIndex) => (
           <div key={groupIndex} className={styles.tickerGroup} aria-hidden={groupIndex === 1}>
@@ -40,7 +44,7 @@ export function HomeNewsTicker({ items, loading = false, onSelectItem }: HomeNew
                 key={`${groupIndex}-${item.id}`}
                 type="button"
                 className={styles.tickerItem}
-                aria-label={`${HOME_NEWS_CATEGORY_LABELS[item.category]} 브리핑`}
+                aria-label={`공지 제목 ${item.text}`}
                 aria-hidden={groupIndex === 1}
                 tabIndex={groupIndex === 1 ? -1 : 0}
                 onPointerDown={(event) => {
@@ -49,7 +53,7 @@ export function HomeNewsTicker({ items, loading = false, onSelectItem }: HomeNew
                 }}
                 onClick={() => handleSelectItem(item.id)}
               >
-                <span className={styles.tickerCategory}>{HOME_NEWS_CATEGORY_LABELS[item.category]}</span>
+                <span className={styles.tickerCategory}>공지</span>
                 <span className={styles.tickerText}>{item.text}</span>
               </button>
             ))}

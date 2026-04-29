@@ -1,0 +1,161 @@
+supabase\schema.sql:10:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:30:before update on public.profiles
+supabase\schema.sql:142:after insert on auth.users
+supabase\schema.sql:217:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:227:before update on public.submissions
+supabase\schema.sql:291:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:327:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:339:before update on public.reviews
+supabase\schema.sql:490:before update on public.schedule_settings
+supabase\schema.sql:532:before update on public.schedule_months
+supabase\schema.sql:574:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:581:create index if not exists schedule_change_requests_status_idx on public.schedule_change_requests (status, created_at desc);
+supabase\schema.sql:656:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:662:before update on public.home_popup_notice_state
+supabase\schema.sql:707:  created_at timestamptz not null default timezone('utc', now())
+supabase\schema.sql:711:  on public.home_popup_notice_applications (notice_id, created_at desc);
+supabase\schema.sql:713:  on public.home_popup_notice_applications (applicant_id, created_at desc);
+supabase\schema.sql:775:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:780:create index if not exists vacation_requests_month_key_idx on public.vacation_requests (month_key, created_at desc);
+supabase\schema.sql:785:before update on public.vacation_requests
+supabase\schema.sql:856:before update on public.vacation_months
+supabase\schema.sql:893:before update on public.vacation_settings
+supabase\schema.sql:935:before update on public.team_lead_schedule_assignments
+supabase\schema.sql:985:before update on public.team_lead_schedule_assignment_cell_locks
+supabase\schema.sql:1166:before update on public.team_lead_state
+supabase\schema.sql:1231:  briefing_slot text not null check (briefing_slot in ('morning_6', 'afternoon_3')),
+supabase\schema.sql:1253:  created_at timestamptz not null default timezone('utc', now()),
+supabase\schema.sql:1271:before update on public.home_news_briefings
+supabase\incremental_team_lead_schedule_assignment_cell_locks.sql:27:before update on public.team_lead_schedule_assignment_cell_locks
+app\globals.css:3001:.restaurants-map__label::before {
+app\api\home\public-workspace\route.ts:26:  created_at: string;
+app\api\home\public-workspace\route.ts:35:  created_at: string;
+app\api\home\public-workspace\route.ts:395:      createdAt: row.created_at,
+app\api\home\public-workspace\route.ts:498:    createdAt: row.created_at,
+app\api\home\public-workspace\route.ts:803:          .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
+app\api\home\public-workspace\route.ts:845:            .select("id, notice_id, applicant_id, applicant_name, created_at")
+app\api\home\public-workspace\route.ts:847:            .order("created_at", { ascending: false })
+lib\vacation\storage.ts:82:  created_at: string;
+lib\vacation\storage.ts:241:    createdAt: row.created_at,
+lib\vacation\storage.ts:424:        .select("id, requester_id, requester_name, type, year, month, month_key, requested_dates, raw_dates, status, created_at, updated_at")
+lib\vacation\storage.ts:425:        .order("created_at", { ascending: false })
+lib\print.ts:204:      window.addEventListener("afterprint", function () {
+lib\portal\data.ts:30:  created_at: string;
+lib\portal\data.ts:41:  created_at: string;
+lib\portal\data.ts:241:    .select("id, submission_id, reviewer_id, scores, comment, total, completed_at, created_at, updated_at")
+lib\portal\data.ts:695:  created_at: string;
+lib\portal\data.ts:699:const SUBMISSION_COLUMNS = "id, author_id, type, title, link, date, notes, status, created_at, updated_at";
+lib\auth\storage.ts:53:  created_at: string;
+lib\auth\storage.ts:67:const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
+lib\auth\storage.ts:521:    createdAt: profile.created_at,
+lib\auth\storage.ts:664:  const afterInsert = await fetchProfileResult(user.id);
+lib\auth\storage.ts:665:  if (afterInsert.profile) {
+lib\auth\storage.ts:666:    return afterInsert.profile;
+lib\auth\storage.ts:668:  if (afterInsert.status !== "empty") {
+lib\auth\storage.ts:1103:      .order("created_at", { ascending: false });
+lib\home-popup\storage.ts:91:  created_at: string;
+lib\home-popup\storage.ts:100:  created_at: string;
+lib\home-popup\storage.ts:489:      createdAt: row.created_at,
+lib\home-popup\storage.ts:598:    createdAt: row.created_at,
+lib\home-popup\storage.ts:636:    created_at: now,
+lib\home-popup\storage.ts:779:    .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
+lib\home-popup\storage.ts:789:    .select("key, notice_id, title, body, is_active, created_at, updated_at")
+lib\home-popup\storage.ts:807:    .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
+lib\home-popup\storage.ts:817:      created_at: payload.created_at,
+lib\home-popup\storage.ts:824:      .select("key, notice_id, title, body, is_active, created_at, updated_at")
+lib\home-popup\storage.ts:1671:    .select("id, notice_id, applicant_id, applicant_name, created_at")
+lib\team-lead\storage.ts:1912:  created_at: string;
+lib\team-lead\storage.ts:1925:  created_at: string;
+lib\team-lead\storage.ts:1936:  created_at: string;
+lib\team-lead\storage.ts:1946:  created_at: string;
+lib\team-lead\storage.ts:2102:  "id, email, login_id, name, role, approved, created_at, updated_at";
+lib\team-lead\storage.ts:2136:    createdAt: row.created_at,
+lib\team-lead\storage.ts:2467:    .select("id, author_id, type, title, link, date, notes, status, created_at, updated_at")
+lib\team-lead\storage.ts:2479:    .select("id, submission_id, reviewer_id, assigned_by, assigned_at, reset_at, created_at")
+lib\team-lead\storage.ts:2490:    .select("id, submission_id, reviewer_id, comment, total, completed_at, created_at, updated_at")
+lib\team-lead\storage.ts:2727:    .select("id, author_id, type, title, link, date, notes, status, created_at, updated_at")
+lib\team-lead\storage.ts:2767:    .select("id, submission_id, reviewer_id, comment, total, completed_at, created_at, updated_at")
+lib\team-lead\storage.ts:3092:    .order("created_at", { ascending: false })
+lib\schedule\change-requests.ts:36:  created_at: string;
+lib\schedule\change-requests.ts:48:  "id, month_key, requester_id, requester_name, source_ref, target_ref, route, status, has_conflict_warning, resolved_by, rolled_back_by, created_at, resolved_at, rolled_back_at";
+lib\schedule\change-requests.ts:158:    createdAt: row.created_at,
+lib\schedule\change-requests.ts:211:    created_at: request.createdAt,
+lib\schedule\change-requests.ts:492:      .order("created_at", { ascending: false });
+lib\restaurants\fetch.ts:5:  "id, name, address, note, place_id, lat, lng, author_id, created_at",
+lib\restaurants\fetch.ts:6:  "id, name, address, note, lat, lng, author_id, created_at",
+lib\restaurants\fetch.ts:7:  "id, name, address, place_id, lat, lng, author_id, created_at",
+lib\restaurants\fetch.ts:8:  "id, name, address, lat, lng, author_id, created_at",
+lib\restaurants\fetch.ts:18:    typeof item.created_at !== "string"
+lib\restaurants\fetch.ts:33:    createdAt: item.created_at,
+lib\restaurants\fetch.ts:73:        .order("created_at", { ascending: false });
+lib\restaurants\fetch.ts:176:      .select("id, restaurant_id, author_id, content, created_at")
+lib\restaurants\fetch.ts:178:      .order("created_at", { ascending: false });
+lib\restaurants\fetch.ts:195:        typeof item.created_at !== "string"
+lib\restaurants\fetch.ts:207:          createdAt: item.created_at,
+lib\schedule\engine.ts:1307:        const beforeCount = enforceLocalImprovement ? getVisibleWarningCount() : 0;
+lib\schedule\engine.ts:1311:        const afterCount = enforceLocalImprovement ? getVisibleWarningCount() : beforeCount - 1;
+lib\schedule\engine.ts:1312:        if (enforceLocalImprovement && afterCount >= beforeCount) {
+lib\schedule\engine.ts:1383:        const beforeCount = enforceLocalImprovement ? getVisibleWarningCount() : 0;
+lib\schedule\engine.ts:1395:        const afterCount = enforceLocalImprovement ? getVisibleWarningCount() : beforeCount - 1;
+lib\schedule\engine.ts:1396:        if (enforceLocalImprovement && afterCount >= beforeCount) {
+lib\schedule\engine.ts:1456:          const beforeCount = enforceLocalImprovement ? getVisibleWarningCount() : 0;
+lib\schedule\engine.ts:1460:          const afterCount = enforceLocalImprovement ? getVisibleWarningCount() : beforeCount - 1;
+lib\schedule\engine.ts:1461:          if (enforceLocalImprovement && afterCount >= beforeCount) {
+lib\schedule\engine.ts:1544:      const beforeCount = getVisibleWarningCount();
+lib\schedule\engine.ts:1572:          const afterCount = getVisibleWarningCount();
+lib\schedule\engine.ts:1573:          if (afterCount < beforeCount) {
+lib\schedule\engine.ts:1657:    const beforeSignature = getAssignmentSignature();
+lib\schedule\engine.ts:1658:    if (seenSignatures.has(beforeSignature)) break;
+lib\schedule\engine.ts:1659:    seenSignatures.add(beforeSignature);
+lib\schedule\preset-schedules.generated.ts:503:        "dateKey": "2026-04-16",
+lib\team-lead\print.ts:84:          page-break-after: always;
+lib\team-lead\print.ts:89:          page-break-after: auto;
+lib\team-lead\print.ts:208:  printWindow.onafterprint = cleanup;
+lib\home-news\admin-types.ts:8:export const NEWS_BRIEFING_SLOTS = ["morning_6", "afternoon_3"] as const;
+lib\home-news\admin-types.ts:42:  afternoon_3: "오후 3시 브리핑",
+lib\home-news\admin-queries.ts:26:  created_at,
+lib\home-news\admin-actions.ts:22:  "id, category, title, summary_lines, why_it_matters, check_points, priority, published_at, occurred_at, briefing_slot, briefing_text, is_active, source_label, tags, event_stage, likes_count, dislikes_count, created_at, updated_at";
+lib\home-news\briefing-batch.ts:81:  const afternoonBatch = buildBatch("afternoon_3", candidates, generatedAt);
+lib\home-news\briefing-batch.ts:89:      afternoon_3: afternoonBatch,
+lib\home-news\external-source-fetchers.ts:24:      slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\external-source-fetchers.ts:34:      slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\external-source-fetchers.ts:44:      slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\external-source-fetchers.ts:54:      slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\external-source-fetchers.ts:64:      slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\external-source-fetchers.ts:74:      slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\external-source-fetchers.ts:95:    slotHints: ["morning_6", "afternoon_3"],
+lib\home-news\current-issue-set.ts:19:  return getKstHour(now) >= HOME_NEWS_AFTERNOON_SLOT_START_HOUR ? "afternoon_3" : "morning_6";
+lib\home-news\current-issue-set.ts:24:  const secondary = primary === "morning_6" ? "afternoon_3" : "morning_6";
+lib\home-news\issue-set-actions.ts:24:  created_at,
+lib\home-news\issue-set-actions.ts:33:    created_at,
+lib\home-news\issue-set-actions.ts:53:      created_at,
+lib\home-news\issue-set-actions.ts:133:    .order("created_at", { ascending: false })
+lib\home-news\issue-set-home-queries.ts:18:  briefing_slot: "morning_6" | "afternoon_3";
+lib\home-news\issue-set-home-queries.ts:45:  created_at,
+lib\home-news\issue-set-queries.ts:28:  created_at,
+lib\home-news\issue-set-queries.ts:39:  created_at,
+lib\home-news\issue-set-queries.ts:48:    created_at,
+lib\home-news\issue-set-queries.ts:65:function pickCurrentIssueSet(records: NewsIssueSetRecord[], issueDate: string, slot: "morning_6" | "afternoon_3") {
+lib\home-news\issue-set-queries.ts:83:      .order("created_at", { ascending: false })
+lib\home-news\issue-set-queries.ts:93:      afternoon_3: pickCurrentIssueSet(issueSets, todayKstDate, "afternoon_3"),
+app\(portal)\review\page.tsx:366:    window.addEventListener("beforeunload", handlePageHide);
+app\(portal)\review\page.tsx:372:      window.removeEventListener("beforeunload", handlePageHide);
+lib\home-news\issue-set-types.ts:13:  created_at: string | null;
+lib\home-news\issue-set-types.ts:25:  created_at: string | null;
+lib\home-news\like-queries.ts:17:  rows: Array<{ briefing_id: string; created_at: string }>,
+lib\home-news\like-queries.ts:35:        createdAt: row.created_at,
+lib\home-news\like-queries.ts:52:      .select("briefing_id, created_at")
+lib\home-news\like-queries.ts:54:      .order("created_at", { ascending: false })
+lib\home-news\like-queries.ts:55:      .returns<Array<{ briefing_id: string; created_at: string }>>(),
+lib\home-news\like-queries.ts:58:      .select("briefing_id, created_at")
+lib\home-news\like-queries.ts:60:      .order("created_at", { ascending: false })
+lib\home-news\like-queries.ts:61:      .returns<Array<{ briefing_id: string; created_at: string }>>(),
+lib\home-news\like-types.ts:10:  created_at: string;
+lib\home-news\queries.ts:32:  created_at,
+lib\home-news\ranking.ts:9:  created_at: string | null;
+lib\home-news\ranking.ts:80:  return toNewsTimestamp(right.updated_at ?? right.created_at) - toNewsTimestamp(left.updated_at ?? left.created_at);
+lib\home-news\timed-live-preview-actions.ts:76:async function generateDraftForCandidate(candidate: ExternalNewsCandidate, slot: "morning_6" | "afternoon_3") {
+lib\home-news\timed-live-preview-actions.ts:412:  slot: "morning_6" | "afternoon_3",
+lib\home-news\timed-live-preview-actions.ts:432:    created_at: now.toISOString(),
+lib\home-news\transform.ts:18:export type HomeNewsBriefingSlot = "morning_6" | "afternoon_3";
+lib\home-news\transform.ts:50:  created_at: string | null;

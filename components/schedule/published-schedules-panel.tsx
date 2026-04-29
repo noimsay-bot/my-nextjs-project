@@ -196,10 +196,16 @@ function getDayCardStyle(day: DaySchedule, sameSheet: boolean) {
 
 function compactAssignments(item: PublishedScheduleItem, currentUser: string) {
   return item.schedule.days
-    .filter((day) => Object.values(day.assignments).some((names) => names.includes(currentUser)))
+    .filter((day) =>
+      Object.entries(day.assignments).some(([category, names]) =>
+        names.some((name) => isSameScheduleActorName(getComparableAssignmentName(category, name), currentUser)),
+      ),
+    )
     .map((day) => {
       const categories = Object.entries(day.assignments)
-        .filter(([, names]) => names.includes(currentUser))
+        .filter(([category, names]) =>
+          names.some((name) => isSameScheduleActorName(getComparableAssignmentName(category, name), currentUser)),
+        )
         .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory))
         .map(([category]) => getScheduleCategoryLabel(category))
         .join(", ");
@@ -207,10 +213,24 @@ function compactAssignments(item: PublishedScheduleItem, currentUser: string) {
     });
 }
 
+function normalizeScheduleActorName(value: string | null | undefined) {
+  if (typeof value !== "string") return "";
+  return value.replace(/\s+/g, "").trim();
+}
+
+function isSameScheduleActorName(left: string | null | undefined, right: string | null | undefined) {
+  const normalizedLeft = normalizeScheduleActorName(left);
+  const normalizedRight = normalizeScheduleActorName(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return normalizedLeft === normalizedRight;
+}
+
 function dayContainsUser(day: DaySchedule, username: string) {
   if (!username) return false;
-  if (day.headerName?.trim() === username) return true;
-  return Object.values(day.assignments).some((names) => names.includes(username));
+  if (isSameScheduleActorName(day.headerName, username)) return true;
+  return Object.entries(day.assignments).some(([category, names]) =>
+    names.some((name) => isSameScheduleActorName(getComparableAssignmentName(category, name), username)),
+  );
 }
 
 function getCurrentMonthKey() {
@@ -1283,8 +1303,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     }
 
     if (selectedRoute.length === 0) {
-      if (person.name !== username) {
-        setRequestMessage("먼저 내 근무를 선택해 주세요.");
+      if (!isSameScheduleActorName(person.name, username)) {
+        setRequestMessage("먼저 내 근무를 선택해 주세요. 계정 이름과 근무표 이름이 다르면 교환 요청을 시작할 수 없습니다.");
         setRequestMessageTone("warn");
         return;
       }
@@ -1848,7 +1868,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                             pending: isPendingRef(allPendingRequests, ref),
                                           };
                                           const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
-                                          const isMine = Boolean(username) && username === assignmentDisplay.name;
+                                          const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                           const mineHighlighted =
                                             isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
                                           const routeSelected = routeIncludes(selectedRoute, ref);
@@ -2189,7 +2209,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                     pending: isPendingRef(allPendingRequests, ref),
                                   };
                                   const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
-                                  const isMine = Boolean(username) && username === assignmentDisplay.name;
+                                  const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                   const mineHighlighted =
                                     isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
                                   const routeSelected = routeIncludes(selectedRoute, ref);

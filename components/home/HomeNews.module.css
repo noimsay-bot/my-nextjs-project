@@ -20,7 +20,7 @@
   gap: 4px;
   width: fit-content;
   max-width: 100%;
-  flex: 0 1 auto;
+  flex: 1 1 280px;
 }
 
 .metaBarTitle {
@@ -37,9 +37,55 @@
   line-height: 1.45;
 }
 
+.metaBarDdayArea {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+}
+
+.metaBarHoverBanner {
+  position: relative;
+  display: block;
+  flex: 0 0 220px;
+  width: 220px;
+  max-width: 340px;
+  aspect-ratio: 451 / 148;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  background: rgba(2, 6, 23, 0.72);
+  box-shadow: 0 14px 32px rgba(2, 6, 23, 0.18);
+}
+
+.metaBarHoverBannerDefault,
+.metaBarHoverBannerHover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.metaBarHoverBannerDefault {
+  opacity: 1;
+}
+
+.metaBarHoverBannerHover {
+  opacity: 0;
+}
+
+.metaBarHoverBanner:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.52);
+  outline-offset: 2px;
+}
+
 .metaBarDdays {
   display: flex;
-  flex: 1 1 420px;
+  flex: 0 1 auto;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
@@ -100,6 +146,12 @@ html[data-theme="light"] .metaBarDdayCard {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
+html[data-theme="light"] .metaBarHoverBanner {
+  border-color: rgba(56, 189, 248, 0.24);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.1);
+}
+
 html[data-theme="light"] .metaBarDdayTitle {
   color: rgba(146, 64, 14, 0.82);
 }
@@ -125,9 +177,23 @@ html[data-theme="light"] .metaBarDdayDate {
     width: 100%;
   }
 
-  .metaBarDdays {
+  .metaBarDdayArea {
     width: 100%;
     flex: 1 1 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .metaBarHoverBanner {
+    width: 100%;
+    max-width: none;
+    flex-basis: auto;
+  }
+
+  .metaBarDdays {
+    width: 100%;
+    flex: 1 1 auto;
     gap: 6px;
     flex-wrap: nowrap;
   }
@@ -809,10 +875,6 @@ html[data-theme="light"] .tickerText {
 }
 
 @media (max-width: 1180px) {
-  .section {
-    grid-template-columns: minmax(0, 1fr) 280px;
-  }
-
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -820,14 +882,7 @@ html[data-theme="light"] .tickerText {
 
 @media (max-width: 760px) {
   .section {
-    grid-template-columns: 1fr;
     gap: 12px;
-  }
-
-  .topRail,
-  .sideRail,
-  .tabsRow {
-    grid-column: auto;
   }
 
   .metaBarTitle {
