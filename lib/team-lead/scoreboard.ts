@@ -15,6 +15,7 @@ import {
   getFinalCutCards,
   getTeamLeadBestReportResultsWorkspace,
   getTeamLeadSchedules,
+  refreshTeamLeadMetaState,
 } from "@/lib/team-lead/storage";
 import { getTeamLeadEvaluationYear } from "@/lib/team-lead/evaluation-year";
 
@@ -272,6 +273,8 @@ export async function refreshScoreboardState() {
       }
       return;
     }
+
+    await refreshTeamLeadMetaState();
 
     const supabase = await getPortalSupabaseClient();
     const [{ data: stateRow, error: stateError }, nextVideoWorkspace] = await Promise.all([

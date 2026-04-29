@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getUsers } from "@/lib/auth/storage";
+import { getUsers, refreshUsers } from "@/lib/auth/storage";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { getTeamLeadEvaluationMonthKeys } from "@/lib/team-lead/evaluation-year";
@@ -11,6 +11,7 @@ import {
   ContributionPersonCard,
   getContributionCards,
   getContributionPeriod,
+  refreshTeamLeadMetaState,
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
@@ -168,8 +169,12 @@ export function ContributionPage() {
 
   useEffect(() => {
     const refresh = async () => {
-      await refreshScheduleState();
-      await refreshTeamLeadAssignmentMonths(getTeamLeadEvaluationMonthKeys(evaluationYear));
+      await Promise.all([
+        refreshUsers(),
+        refreshScheduleState(),
+        refreshTeamLeadMetaState(),
+        refreshTeamLeadAssignmentMonths(getTeamLeadEvaluationMonthKeys(evaluationYear)),
+      ]);
       syncFromCache();
     };
     const onFocusRefresh = () => {
