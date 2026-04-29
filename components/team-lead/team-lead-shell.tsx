@@ -39,7 +39,7 @@ export function TeamLeadShell({ children }: { children: React.ReactNode }) {
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">팀장</div>
+          <div className="chip">총괄팀장</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {items.map((item) => (
               <Link

@@ -451,6 +451,10 @@ function sortNotices(notices: HomeNotice[]) {
   });
 }
 
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
 function sortCommunityPosts(posts: CommunityBoardPost[]) {
   return [...posts].sort((left, right) => {
     if (left.updatedAt !== right.updatedAt) {
@@ -624,11 +628,12 @@ function buildRowPayload(
   const sortedNotices = sortNotices(notices);
   const activePopup = getActivePopupNotice(sortedNotices);
   const latestNotice = sortedNotices[0] ?? null;
+  const representativeNotice = sortedNotices.find((notice) => isUuidLike(notice.id)) ?? null;
   const now = new Date().toISOString();
 
   return {
     key: HOME_POPUP_NOTICE_ROW_KEY,
-    notice_id: activePopup?.id ?? latestNotice?.id ?? crypto.randomUUID(),
+    notice_id: activePopup?.id ?? representativeNotice?.id ?? crypto.randomUUID(),
     title: activePopup?.title ?? latestNotice?.title ?? "",
     body: buildStorePayload(sortedNotices, ddays, communityPosts, communityComments),
     is_active: Boolean(activePopup),
@@ -1198,7 +1203,7 @@ export async function updateHomeNotice(input: {
 }) {
   const session = await getPortalSession();
   if (!session?.approved || !isManagerRole(session.role)) {
-    throw new Error("공지 수정은 DESK 또는 팀장 권한이 필요합니다.");
+    throw new Error("공지 수정은 DESK 또는 총괄팀장 권한이 필요합니다.");
   }
 
   const noticeId = input.noticeId.trim();
@@ -1365,7 +1370,7 @@ export async function saveCommunityBoardPost(input: {
   if (!canWriteCommunityCategory(input.category, session)) {
     throw new Error(
       input.category === "notice"
-        ? "공지 게시판은 DESK 또는 팀장 권한자만 작성할 수 있습니다."
+        ? "공지 게시판은 DESK 또는 총괄팀장 권한자만 작성할 수 있습니다."
         : "Advisor와 Observer 등급은 커뮤니티 글을 작성할 수 없습니다.",
     );
   }
@@ -1471,7 +1476,7 @@ export async function updateCommunityBoardPost(input: {
   if (!canManage) {
     throw new Error(
       targetPost.category === "notice"
-        ? "공지 수정은 DESK 또는 팀장 권한이 필요합니다."
+        ? "공지 수정은 DESK 또는 총괄팀장 권한이 필요합니다."
         : "작성자 또는 DESK 권한이 필요합니다.",
     );
   }
@@ -1550,7 +1555,7 @@ export async function deleteCommunityBoardPost(postId: string) {
   if (!canManage) {
     throw new Error(
       targetPost.category === "notice"
-        ? "공지 삭제는 DESK 또는 팀장 권한이 필요합니다."
+        ? "공지 삭제는 DESK 또는 총괄팀장 권한이 필요합니다."
         : "작성자 또는 DESK 권한이 필요합니다.",
     );
   }

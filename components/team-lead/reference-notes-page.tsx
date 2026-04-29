@@ -127,7 +127,7 @@ export function ReferenceNotesPage() {
           <span className="muted" style={{ fontSize: 13 }}>
             {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
           </span>
-          <div className="status note">팀장을 제외한 가입자 기준 사람카드입니다. 카드마다 참고 항목을 추가하고 저장할 수 있습니다.</div>
+          <div className="status note">총괄팀장을 제외한 가입자 기준 사람카드입니다. 카드마다 참고 항목을 추가하고 저장할 수 있습니다.</div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>

@@ -57,7 +57,7 @@ const links: PortalNavLink[] = [
   { href: "/review", label: "베스트리포트 평가" },
   {
     href: "/team-lead",
-    label: "총괄",
+    label: "총괄팀장",
     children: [
       { href: "/team-lead/overall-score", label: "개인별 점수" },
       { href: "/team-lead/overall-score-summary", label: "종합점수" },
@@ -85,7 +85,7 @@ const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
   advisor: "Advisor",
   observer: "Observer",
   desk: "DESK",
-  team_lead: "팀장",
+  team_lead: "총괄팀장",
   admin: "관리자",
 };
 const THEME_LABELS: Record<PortalTheme, string> = {
@@ -350,7 +350,7 @@ function PortalSidebar({
               <strong className="portal-sidebar-usercard__name">{session.username}</strong>
               <span className="muted portal-sidebar-usercard__meta">{formatRoleSummary(session)}</span>
               {!adminSession && canOpenAdminArea ? (
-                <span className="muted portal-sidebar-usercard__meta">팀장 권한으로 관리자 메뉴 사용 가능</span>
+                <span className="muted portal-sidebar-usercard__meta">총괄팀장 권한으로 관리자 메뉴 사용 가능</span>
               ) : null}
             </div>
           ) : null}

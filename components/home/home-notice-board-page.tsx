@@ -381,7 +381,7 @@ export default function HomeNoticeBoardPage() {
 
   const getBoardHelpText = useCallback((category: CommunityBoardCategory) => {
     return category === "notice"
-      ? "공지 게시판의 쓰기, 수정, 삭제는 DESK와 팀장 권한자만 가능합니다."
+      ? "공지 게시판의 쓰기, 수정, 삭제는 DESK와 총괄팀장 권한자만 가능합니다."
       : isReadOnlyUser
         ? "Advisor와 Observer는 게시글과 댓글을 조회만 할 수 있습니다."
         : "승인된 멤버는 글을 쓰고 자기 글을 수정하거나 삭제할 수 있습니다.";

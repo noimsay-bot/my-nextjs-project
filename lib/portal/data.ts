@@ -356,7 +356,7 @@ export async function saveReviewEntry(entry: SubmissionEntry, state: ReviewState
 
   return {
     ok: true as const,
-    message: state.done ? "평가를 팀장 페이지로 전송했습니다." : "평가가 저장되었습니다.",
+    message: state.done ? "평가를 총괄팀장 페이지로 전송했습니다." : "평가가 저장되었습니다.",
   };
 }
 

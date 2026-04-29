@@ -17,7 +17,7 @@ const roleLabels: Record<RoleOption, string> = {
   reviewer: "리뷰어",
   advisor: "Advisor",
   observer: "Observer",
-  team_lead: "팀장",
+  team_lead: "총괄팀장",
   desk: "DESK",
   admin: "관리자",
 };
@@ -66,7 +66,7 @@ const permissionGuides = [
     tone: {} as CSSProperties,
     lines: [
       "홈, 휴가 신청, 베스트리포트 제출 화면을 사용할 수 있습니다.",
-      "근무 관리, 팀장 페이지, 관리자 페이지는 들어갈 수 없습니다.",
+      "근무 관리, 총괄팀장 페이지, 관리자 페이지는 들어갈 수 없습니다.",
     ],
   },
   {
@@ -74,7 +74,7 @@ const permissionGuides = [
     tone: roleToneStyles.reviewer ?? {},
     lines: [
       "기존 멤버 등급은 그대로 유지됩니다.",
-      "팀장이 지정하면 베스트리포트 평가 메뉴가 열리고 `/review`에서 평가와 저장이 가능합니다.",
+      "총괄팀장이 지정하면 베스트리포트 평가 메뉴가 열리고 `/review`에서 평가와 저장이 가능합니다.",
     ],
   },
   {
@@ -82,7 +82,7 @@ const permissionGuides = [
     tone: roleToneStyles.advisor ?? {},
     lines: [
       "멤버가 볼 수 있는 페이지를 동일하게 조회할 수 있습니다.",
-      "신청, 작성, 수정, 삭제는 할 수 없고 팀장 평가 대상에도 포함되지 않습니다.",
+      "신청, 작성, 수정, 삭제는 할 수 없고 총괄팀장 평가 대상에도 포함되지 않습니다.",
     ],
   },
   {
@@ -94,11 +94,11 @@ const permissionGuides = [
     ],
   },
   {
-    title: "팀장",
+    title: "총괄팀장",
     tone: roleToneStyles.team_lead ?? {},
     lines: [
       "관리자 페이지를 포함한 전체 메뉴를 사용할 수 있습니다.",
-      "홈, 휴가 신청, 베스트리포트 제출·평가, DESK, 팀장 기능과 사용자 관리까지 모두 사용할 수 있습니다.",
+      "홈, 휴가 신청, 베스트리포트 제출·평가, DESK, 총괄팀장 기능과 사용자 관리까지 모두 사용할 수 있습니다.",
     ],
   },
   {
@@ -106,7 +106,7 @@ const permissionGuides = [
     tone: roleToneStyles.desk ?? {},
     lines: [
       "멤버가 가진 권한에 더해 DESK 페이지의 모든 기능을 사용할 수 있습니다.",
-      "리뷰 화면과 팀장/관리자 기능은 사용할 수 없습니다.",
+      "리뷰 화면과 총괄팀장/관리자 기능은 사용할 수 없습니다.",
     ],
   },
   {
@@ -118,7 +118,7 @@ const permissionGuides = [
     } as CSSProperties,
     lines: [
       "모든 메뉴 접근과 사용자 role/승인 관리가 가능합니다.",
-      "베스트리포트 평가, 팀장 기능, DESK 기능을 모두 사용할 수 있습니다.",
+      "베스트리포트 평가, 총괄팀장 기능, DESK 기능을 모두 사용할 수 있습니다.",
     ],
   },
 ];
