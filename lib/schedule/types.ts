@@ -38,6 +38,7 @@ export interface DaySchedule {
   assignmentNameTags?: Record<string, ScheduleAssignmentNameTag>;
   assignmentLabelOverrides?: Record<string, string>;
   assignmentOrderOverrides?: string[];
+  generalManualAdditions?: string[];
   manualExtras: string[];
   headerName: string;
   conflicts: Conflict[];
@@ -50,6 +51,7 @@ export interface GeneratedSchedule {
   days: DaySchedule[];
   nextPointers: PointerState;
   nextStartDate: string;
+  isBlankTemplate?: boolean;
 }
 
 export interface SnapshotItem {

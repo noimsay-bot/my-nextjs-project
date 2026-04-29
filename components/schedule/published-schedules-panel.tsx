@@ -759,6 +759,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [isRecommendationPopoverOpen, setIsRecommendationPopoverOpen] = useState(false);
+  const [inlineRecommendationConfirmRef, setInlineRecommendationConfirmRef] = useState<SchedulePersonRef | null>(null);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
@@ -1256,6 +1257,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       if (index === 0) return [];
       return current.filter((_, entryIndex) => entryIndex !== index);
     });
+    setInlineRecommendationConfirmRef(null);
     if (index === 0) {
       setIsRecommendationPopoverOpen(false);
     }
@@ -1272,6 +1274,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       return [...current, candidate];
     });
     setIsRecommendationPopoverOpen(false);
+    setInlineRecommendationConfirmRef(candidate);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -1334,6 +1337,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       }
       setSelectedRoute([person.ref]);
       setIsRecommendationPopoverOpen(true);
+      setInlineRecommendationConfirmRef(null);
       setConfirmConflictRequest(false);
       setRequestMessage("");
       setRequestMessageTone("ok");
@@ -1355,15 +1359,22 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
     setSelectedRoute([...selectedRoute, person.ref]);
     setIsRecommendationPopoverOpen(false);
+    setInlineRecommendationConfirmRef(null);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
   };
 
   const renderInlineRecommendedCandidates = (anchorRef: SchedulePersonRef) => {
-    if (!isRecommendationPopoverOpen || !sameRef(firstSelectedRef, anchorRef) || selectedRoute.length !== 1) return null;
+    if (!sameRef(firstSelectedRef, anchorRef)) return null;
 
     const openToRight = scheduleLayoutMode !== "mobile";
+    const inlineConfirmVisible =
+      Boolean(inlineRecommendationConfirmRef) &&
+      selectedRoute.length === 2 &&
+      sameRef(selectedRoute[selectedRoute.length - 1] ?? null, inlineRecommendationConfirmRef);
+
+    if (!isRecommendationPopoverOpen && !inlineConfirmVisible) return null;
 
     return (
       <div
@@ -1386,25 +1397,54 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
           gap: 8,
         }}
       >
-        <span className="muted" style={{ fontSize: 12, color: "#1d4ed8" }}>
-          추천 직접 교환 후보
-        </span>
-        {recommendedCandidates.length > 0 ? (
-          recommendedCandidates.map((candidate) => (
-            <button
-              key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
-              type="button"
-              className="btn"
-              style={{ justifyContent: "flex-start", textAlign: "left" }}
-              onClick={() => appendRouteCandidate(candidate)}
-            >
-              {candidate.dateKey} {getScheduleCategoryLabel(candidate.category)} {candidate.name}
-            </button>
-          ))
+        {inlineConfirmVisible ? (
+          <>
+            <span className="muted" style={{ fontSize: 12, color: "#1d4ed8" }}>
+              근무 변경을 요청하시겠습니까?
+            </span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn primary" type="button" onClick={onConfirmRequest}>
+                확인
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setSelectedRoute((current) => current.slice(0, 1));
+                  setInlineRecommendationConfirmRef(null);
+                  setIsRecommendationPopoverOpen(true);
+                  setConfirmConflictRequest(false);
+                  setRequestMessage("");
+                  setRequestMessageTone("ok");
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </>
         ) : (
-          <span style={{ fontSize: 12, lineHeight: 1.5, color: "#1e3a8a" }}>
-            추천 후보가 없습니다.
-          </span>
+          <>
+            <span className="muted" style={{ fontSize: 12, color: "#1d4ed8" }}>
+              추천 직접 교환 후보
+            </span>
+            {recommendedCandidates.length > 0 ? (
+              recommendedCandidates.map((candidate) => (
+                <button
+                  key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
+                  type="button"
+                  className="btn"
+                  style={{ justifyContent: "flex-start", textAlign: "left" }}
+                  onClick={() => appendRouteCandidate(candidate)}
+                >
+                  {candidate.dateKey} {getScheduleCategoryLabel(candidate.category)} {candidate.name}
+                </button>
+              ))
+            ) : (
+              <span style={{ fontSize: 12, lineHeight: 1.5, color: "#1e3a8a" }}>
+                추천 후보가 없습니다.
+              </span>
+            )}
+          </>
         )}
       </div>
     );
@@ -1423,6 +1463,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const clearRoute = () => {
     setSelectedRoute([]);
     setIsRecommendationPopoverOpen(false);
+    setInlineRecommendationConfirmRef(null);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -1449,6 +1490,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       setRequestMessageTone("ok");
       setConfirmConflictRequest(false);
       setSelectedRoute([]);
+      setInlineRecommendationConfirmRef(null);
     } catch (error) {
       setRequestMessage(error instanceof Error ? error.message : "근무 변경 요청을 저장하지 못했습니다.");
       setRequestMessageTone("warn");
@@ -1462,6 +1504,11 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     }
     void submitRequest();
   };
+
+  const hasInlineRecommendationConfirm =
+    Boolean(inlineRecommendationConfirmRef) &&
+    selectedRoute.length === 2 &&
+    sameRef(selectedRoute[selectedRoute.length - 1] ?? null, inlineRecommendationConfirmRef);
 
   if (itemsLoading && items.length === 0) {
     return (
@@ -1557,7 +1604,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
               <div className="muted">먼저 내 이름을 누른 뒤, {routeScopeLabel} 전체에서 미래 날짜의 교환 또는 삼각 트레이드 상대를 선택하세요. 달을 바꿔도 선택 경로는 유지됩니다.</div>
             )}
 
-            {selectedRoute.length >= 2 ? (
+            {selectedRoute.length >= 2 && !hasInlineRecommendationConfirm ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn primary" onClick={onConfirmRequest}>
                   {selectedRoute.length === 2 ? "교환 요청" : "삼각 트레이드 요청"}

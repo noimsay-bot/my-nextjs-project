@@ -54,6 +54,7 @@ import {
   cloneScheduleState,
   compactGeneratedAssignments,
   formatVacationEntry,
+  generateEmptySchedule,
   generateSchedule,
   getCategoryPeople,
   getEffectiveOffByCategory,
@@ -456,6 +457,7 @@ export function ScheduleApp() {
   const [loaded, setLoaded] = useState(false);
   const [visibleMonthKey, setVisibleMonthKey] = useState<string | null>(null);
   const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
+  const [emptyOverwriteConfirmOpen, setEmptyOverwriteConfirmOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishMonthKey, setPublishMonthKey] = useState<string>("");
@@ -1249,6 +1251,25 @@ export function ScheduleApp() {
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
   };
 
+  const onGenerateEmpty = () => {
+    if (!saveCurrent()) return;
+    if (generationBlockedReason) {
+      setMessage({ tone: "warn", text: generationBlockedReason });
+      return;
+    }
+    if (targetHasExistingMonth) {
+      setEmptyOverwriteConfirmOpen(true);
+      return;
+    }
+    preGenerateBackupRef.current = cloneScheduleState(state);
+    setHasPreGenerateBackup(true);
+    const result = generateEmptySchedule(state);
+    markVisibleMonthAsLocallyFresh(result.state.generated?.monthKey ?? null);
+    setState(result.state);
+    setVisibleMonthKey(result.state.generated?.monthKey ?? null);
+    setMessage({ tone: "ok", text: result.message });
+  };
+
   const confirmGenerate = () => {
     setOverwriteConfirmOpen(false);
     preGenerateBackupRef.current = cloneScheduleState(state);
@@ -1262,6 +1283,17 @@ export function ScheduleApp() {
     setState(nextState);
     setVisibleMonthKey(nextState.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
+  };
+
+  const confirmGenerateEmpty = () => {
+    setEmptyOverwriteConfirmOpen(false);
+    preGenerateBackupRef.current = cloneScheduleState(state);
+    setHasPreGenerateBackup(true);
+    const result = generateEmptySchedule(state);
+    markVisibleMonthAsLocallyFresh(result.state.generated?.monthKey ?? null);
+    setState(result.state);
+    setVisibleMonthKey(result.state.generated?.monthKey ?? null);
+    setMessage({ tone: "ok", text: result.message });
   };
 
   const handleScheduleMonthContextChange = (nextYear: number, nextMonth: number) => {
@@ -1374,6 +1406,7 @@ export function ScheduleApp() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
             <button className="btn white" disabled={isEditingDate} onClick={onGenerate}>작성</button>
+            <button className="btn" disabled={isEditingDate} onClick={onGenerateEmpty}>빈 근무표 작성</button>
             <button className="btn" disabled={isEditingDate} onClick={onRebalance}>자동 재배치</button>
             <button className="btn" disabled={isEditingDate || !visibleSchedule} onClick={() => setDeleteConfirmOpen(true)}>삭제</button>
             <button className="btn" onClick={() => {
@@ -1397,6 +1430,15 @@ export function ScheduleApp() {
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn primary" onClick={confirmGenerate}>작성</button>
                 <button className="btn" onClick={() => setOverwriteConfirmOpen(false)}>취소</button>
+              </div>
+            </div>
+          ) : null}
+          {emptyOverwriteConfirmOpen ? (
+            <div className="status warn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <span>이미 작성된 {state.month}월 근무표가 있습니다. 빈 근무표로 다시 작성하시겠습니까?</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn primary" onClick={confirmGenerateEmpty}>빈 근무표 작성</button>
+                <button className="btn" onClick={() => setEmptyOverwriteConfirmOpen(false)}>취소</button>
               </div>
             </div>
           ) : null}

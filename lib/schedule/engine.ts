@@ -85,6 +85,10 @@ function normalizeDayAssignmentOrderOverrides(day: DaySchedule) {
   });
 }
 
+function normalizeDayGeneralManualAdditions(day: DaySchedule) {
+  return Array.from(new Set((day.generalManualAdditions ?? []).map((name) => name.trim()).filter(Boolean)));
+}
+
 const REQUIRED_DAY_ASSIGNMENT_OVERRIDES: Record<
   string,
   {
@@ -150,7 +154,24 @@ function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
   };
 }
 
+function isBlankTemplateSchedule(schedule: GeneratedSchedule | null | undefined) {
+  return Boolean(schedule?.isBlankTemplate);
+}
+
 export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+  if (isBlankTemplateSchedule(schedule)) {
+    return {
+      ...schedule,
+      days: schedule.days.map((day) => ({
+        ...day,
+        assignments: normalizeDayAssignments(day),
+        assignmentNameTags: normalizeDayAssignmentNameTags(day),
+        assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(day),
+        assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(day),
+        generalManualAdditions: normalizeDayGeneralManualAdditions(day),
+      })),
+    };
+  }
   return {
     ...schedule,
     days: schedule.days.map((day) => {
@@ -160,6 +181,7 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
         assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
         assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
         assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
+        generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
       };
     }),
   };
@@ -328,9 +350,16 @@ export function syncGeneralAssignments(
     const nextGeneralNames = generalTeamPeople.filter(
       (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
     );
+    const manualGeneralAdditions = normalizeDayGeneralManualAdditions(day);
+    const combinedGeneralNames = [...nextGeneralNames];
+    manualGeneralAdditions.forEach((name) => {
+      if (!combinedGeneralNames.includes(name)) {
+        combinedGeneralNames.push(name);
+      }
+    });
 
-    if (nextGeneralNames.length > 0) {
-      day.assignments["일반"] = nextGeneralNames;
+    if (combinedGeneralNames.length > 0) {
+      day.assignments["일반"] = combinedGeneralNames;
     } else {
       delete day.assignments["일반"];
     }
@@ -492,10 +521,14 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   };
 
   if (nextState.generated) {
-    syncGeneralAssignments(nextState, nextState.generated.days, generalTeamPeople);
+    if (!isBlankTemplateSchedule(nextState.generated)) {
+      syncGeneralAssignments(nextState, nextState.generated.days, generalTeamPeople);
+    }
   }
   nextState.generatedHistory.forEach((item) => {
-    syncGeneralAssignments(nextState, item.days, generalTeamPeople);
+    if (!isBlankTemplateSchedule(item)) {
+      syncGeneralAssignments(nextState, item.days, generalTeamPeople);
+    }
   });
 
   return nextState;
@@ -1108,6 +1141,134 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
       warnings.length > 0
         ? `순번대로 작성했고 충돌 ${warnings.length}건을 표시했습니다. 자동 재배치로 조정할 수 있습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`
         : `순번대로 작성했습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`,
+  };
+}
+
+export function generateEmptySchedule(state: ScheduleState): GenerationResult {
+  const nextState = cloneScheduleState(state);
+  const monthKey = getMonthKey(nextState.year, nextState.month);
+  const holidaySet = parseHolidaySet(nextState.extraHolidays, nextState.year, nextState.month);
+  const range = getScheduleRange(nextState.year, nextState.month);
+  const startPointers = getMonthStartPointers(nextState, monthKey);
+  const days: DaySchedule[] = [];
+
+  const createAssignments = (input: {
+    isWeekend: boolean;
+    isCustomHoliday: boolean;
+    isHoliday: boolean;
+  }) => {
+    if (input.isCustomHoliday) {
+      const assignments: Record<string, string[]> = {
+        조근: [],
+        연장: [],
+        일반: [],
+        야근: [],
+        국회: [],
+      };
+      return assignments;
+    }
+
+    if (input.isWeekend) {
+      const assignments: Record<string, string[]> = {
+        주말조근: [],
+        주말일반근무: [],
+        뉴스대기: [],
+        청와대: [],
+        국회: [],
+        청사: [],
+        야근: [],
+      };
+      return assignments;
+    }
+
+    if (input.isHoliday) {
+      const assignments: Record<string, string[]> = {
+        조근: [],
+        연장: [],
+        석근: [],
+        일반: [],
+        야근: [],
+        국회: [],
+        청사: [],
+        청와대: [],
+      };
+      return assignments;
+    }
+
+    const assignments: Record<string, string[]> = {
+      조근: [],
+      연장: [],
+      석근: [],
+      일반: [],
+      야근: [],
+      제크: [],
+    };
+    return assignments;
+  };
+
+  for (const cursor = new Date(range.start); cursor <= range.end; cursor.setDate(cursor.getDate() + 1)) {
+    const dateKey = fmtDate(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate());
+    const dow = cursor.getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = holidaySet.has(dateKey);
+    const isCustomHoliday = isHoliday;
+    const isWeekdayHoliday = isHoliday && !isWeekend;
+
+    days.push({
+      dateKey,
+      day: cursor.getDate(),
+      month: cursor.getMonth() + 1,
+      year: cursor.getFullYear(),
+      dow,
+      isWeekend,
+      isHoliday,
+      isCustomHoliday,
+      isWeekdayHoliday,
+      isOverflowMonth: cursor.getMonth() + 1 !== nextState.month,
+      vacations: [],
+      assignments: createAssignments({ isWeekend, isCustomHoliday, isHoliday }),
+      manualExtras: [],
+      headerName: "",
+      conflicts: [],
+    });
+  }
+
+  const nextMonthStart = new Date(range.end);
+  nextMonthStart.setDate(nextMonthStart.getDate() + 1);
+  const nextMonthKey = getMonthKey(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1);
+  const nextMonthStartNames = buildMonthStartNamesFromPointers(nextState, startPointers);
+
+  const generated: GeneratedSchedule = {
+    year: nextState.year,
+    month: nextState.month,
+    monthKey,
+    days,
+    nextPointers: { ...startPointers },
+    nextStartDate: fmtDate(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1, nextMonthStart.getDate()),
+    isBlankTemplate: true,
+  };
+
+  nextState.generated = generated;
+  nextState.monthStartPointers = {
+    ...nextState.monthStartPointers,
+    [monthKey]: { ...startPointers },
+    [nextMonthKey]: { ...startPointers },
+  };
+  nextState.monthStartNames = {
+    ...nextState.monthStartNames,
+    [nextMonthKey]: nextMonthStartNames,
+  };
+  nextState.generatedHistory = [
+    ...nextState.generatedHistory.filter((item) => item.monthKey !== generated.monthKey),
+    generated,
+  ].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  nextState.pointers = { ...startPointers };
+  nextState.pendingSnapshotMonthKey = monthKey;
+
+  return {
+    state: nextState,
+    warningCount: 0,
+    message: `빈 근무표를 작성했습니다. 다음 근무표는 ${generated.nextStartDate}부터 이어서 작성하면 됩니다.`,
   };
 }
 
@@ -1728,7 +1889,9 @@ function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule
   });
 
   next.vacations = serializeVacationMap(nextVacationMap);
-  syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople);
+  if (!isBlankTemplateSchedule(normalizedGenerated)) {
+    syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople);
+  }
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
   normalizedGenerated.days.forEach((day) => {
@@ -1912,6 +2075,11 @@ export function addPersonToCategory(state: ScheduleState, dateKey: string, categ
   if (!day) return state;
   const trimmed = name.trim();
   if (!trimmed) return state;
+  if (isGeneralAssignmentCategory(category)) {
+    day.generalManualAdditions = Array.from(
+      new Set([...(day.generalManualAdditions ?? []), trimmed].map((item) => item.trim()).filter(Boolean)),
+    );
+  }
   day.assignments[category] = [...(day.assignments[category] ?? []), trimmed];
   if (category === "휴가") day.vacations = day.assignments[category];
   return syncGeneratedSchedule(next, generated);
@@ -1935,7 +2103,11 @@ export function removePersonFromCategory(
     removeIndex = typeof name === "string" ? assignments.findIndex((item) => item === name) : -1;
   }
   if (removeIndex < 0 || removeIndex >= assignments.length) return state;
+  const removedName = assignments[removeIndex]?.trim() ?? "";
   assignments.splice(removeIndex, 1);
+  if (isGeneralAssignmentCategory(category) && removedName) {
+    day.generalManualAdditions = (day.generalManualAdditions ?? []).filter((item) => item.trim() !== removedName);
+  }
   if (category === "휴가") day.vacations = day.assignments[category];
   if (next.selectedPerson?.dateKey === dateKey && next.selectedPerson.category === category) {
     if (next.selectedPerson.index === removeIndex) {

@@ -89,7 +89,6 @@ export function HomeNewsPortal() {
   const [deletingNoticeId, setDeletingNoticeId] = useState<string | null>(null);
   const [canDeleteNotice, setCanDeleteNotice] = useState(false);
   const [canManageDdays, setCanManageDdays] = useState(false);
-  const [requestedOpen, setRequestedOpen] = useState<{ id: string; token: number } | null>(null);
   const hostRef = useRef<HTMLElement | null>(null);
 
   const syncNotices = () => {
@@ -263,8 +262,6 @@ export function HomeNewsPortal() {
         })();
       }}
       loading={loading}
-      requestedOpenItemId={requestedOpen?.id ?? null}
-      requestedOpenToken={requestedOpen?.token ?? 0}
       canDeleteNotice={canDeleteNotice}
       deletingNoticeId={deletingNoticeId}
       onDeleteNotice={(itemId) => {
@@ -290,7 +287,6 @@ export function HomeNewsPortal() {
           }
         })();
       }}
-      onSelectTickerItem={(itemId) => setRequestedOpen({ id: itemId, token: Date.now() })}
     />,
     host,
   );
