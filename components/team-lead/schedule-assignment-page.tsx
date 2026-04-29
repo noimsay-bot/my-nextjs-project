@@ -1856,18 +1856,21 @@ export function ScheduleAssignmentPage() {
   const monthEntries = store.entries[selectedMonthKey] ?? {};
   const monthRows = store.rows[selectedMonthKey] ?? {};
   const monthDays = useMemo(() => buildMonthDays(selectedMonth), [selectedMonth]);
-    const allDaysIndex = useMemo(() => {
-      const map = new Map<string, DaySchedule>();
-      schedules.forEach((schedule) => {
-        schedule.days.forEach((day) => {
-          // 실제 해당 월의 일자만 인덱싱하여 정확한 전날 데이터 참조 보장
-          if (day.month === schedule.month && day.year === schedule.year) {
-            map.set(day.dateKey, day);
-          }
-        });
+  const selectedMonthDayIndex = useMemo(() => {
+    return new Map(monthDays.map((item) => [item.dateKey, item] as const));
+  }, [monthDays]);
+  const allDaysIndex = useMemo(() => {
+    const map = new Map<string, DaySchedule>();
+    schedules.forEach((schedule) => {
+      schedule.days.forEach((day) => {
+        // 실제 해당 월의 일자만 인덱싱하여 정확한 전날 데이터 참조 보장
+        if (day.month === schedule.month && day.year === schedule.year) {
+          map.set(day.dateKey, day);
+        }
       });
-      return map;
-    }, [schedules]);
+    });
+    return map;
+  }, [schedules]);
 
   const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [schedules, store]);
 
@@ -2392,7 +2395,7 @@ export function ScheduleAssignmentPage() {
         const vacationPeople = day.vacations.map((entry) => parseVacationEntry(entry)).filter((item) => item.name);
         const jcheckPeople = day.assignments["제크"] ?? [];
         const previousDay = selectedMonthDayIndex.get(getPreviousDateKey(day.dateKey));
-        const nightOffPeople =
+        const nightOffPeople: string[] =
           day.isWeekend || day.isWeekdayHoliday || day.isCustomHoliday
             ? []
             : (previousDay?.assignments["야근"] ?? []);

@@ -72,7 +72,13 @@ import {
   updateDayHeaderName,
   updateManualAssignment,
 } from "@/lib/schedule/engine";
-import { getPublishedSchedules, publishSchedule, PublishedScheduleItem, refreshPublishedSchedules } from "@/lib/schedule/published";
+import {
+  getPublishedSchedules,
+  publishSchedule,
+  PublishedScheduleItem,
+  refreshPublishedSchedules,
+  removePublishedSchedule,
+} from "@/lib/schedule/published";
 import { PUBLISHED_SCHEDULES_STATUS_EVENT } from "@/lib/schedule/published";
 import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
@@ -483,6 +489,10 @@ export function ScheduleApp() {
   const activeEditMonthKey = state.editingMonthKey ?? state.generated?.monthKey ?? null;
   const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [state.generatedHistory, publishedItems]);
   const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [state.generatedHistory, publishedItems]);
+
+  const markVisibleMonthAsLocallyFresh = (monthKey: string | null | undefined) => {
+    lastLoadedAssignmentMonthRef.current = monthKey ?? "";
+  };
 
   const applyNameTagsToState = (input: ScheduleState) => {
     const generated = input.generated ? applyScheduleAssignmentNameTagsToSchedule(input.generated) : null;
@@ -1233,6 +1243,7 @@ export function ScheduleApp() {
     if (nextState.generated) {
       syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
     }
+    markVisibleMonthAsLocallyFresh(nextState.generated?.monthKey ?? null);
     setState(nextState);
     setVisibleMonthKey(nextState.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
@@ -1247,6 +1258,7 @@ export function ScheduleApp() {
     if (nextState.generated) {
       syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
     }
+    markVisibleMonthAsLocallyFresh(nextState.generated?.monthKey ?? null);
     setState(nextState);
     setVisibleMonthKey(nextState.generated?.monthKey ?? null);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
@@ -1280,6 +1292,7 @@ export function ScheduleApp() {
       ),
     });
     const result = autoRebalance(workingState);
+    markVisibleMonthAsLocallyFresh(visibleSchedule.monthKey);
     setState(result.state);
     setVisibleMonthKey(visibleSchedule.monthKey);
     setMessage({ tone: result.warningCount > 0 ? "warn" : "ok", text: result.message });
@@ -1287,22 +1300,27 @@ export function ScheduleApp() {
 
   const confirmDeleteSchedule = () => {
     if (!visibleSchedule) return;
-    const nextHistory = state.generatedHistory.filter((item) => item.monthKey !== visibleSchedule.monthKey);
+    const deletedMonthKey = visibleSchedule.monthKey;
+    const nextHistory = state.generatedHistory.filter((item) => item.monthKey !== deletedMonthKey);
     const nextVisible = nextHistory[visibleIndex - 1] ?? nextHistory[visibleIndex] ?? nextHistory[nextHistory.length - 1] ?? null;
+    const nextState = sanitizeScheduleState({
+      ...state,
+      generatedHistory: nextHistory,
+      generated: state.generated?.monthKey === deletedMonthKey ? nextVisible : state.generated,
+      snapshots: Object.fromEntries(
+        Object.entries(state.snapshots).filter(([monthKey]) => monthKey !== deletedMonthKey),
+      ),
+      editDateKey: state.editingMonthKey === deletedMonthKey ? null : state.editDateKey,
+      editingMonthKey: state.editingMonthKey === deletedMonthKey ? null : state.editingMonthKey,
+      selectedPerson: null,
+    });
 
-    setState((current) =>
-      sanitizeScheduleState({
-        ...current,
-        generatedHistory: current.generatedHistory.filter((item) => item.monthKey !== visibleSchedule.monthKey),
-        generated: current.generated?.monthKey === visibleSchedule.monthKey ? nextVisible : current.generated,
-        snapshots: Object.fromEntries(
-          Object.entries(current.snapshots).filter(([monthKey]) => monthKey !== visibleSchedule.monthKey),
-        ),
-        editDateKey: current.editingMonthKey === visibleSchedule.monthKey ? null : current.editDateKey,
-        editingMonthKey: current.editingMonthKey === visibleSchedule.monthKey ? null : current.editingMonthKey,
-        selectedPerson: null,
-      }),
-    );
+    setState(nextState);
+    if (publishedItems.some((item) => item.monthKey === deletedMonthKey)) {
+      removePublishedSchedule(deletedMonthKey);
+      setPublishedItems((current) => current.filter((item) => item.monthKey !== deletedMonthKey));
+    }
+    markVisibleMonthAsLocallyFresh(nextVisible?.monthKey ?? null);
     setVisibleMonthKey(nextVisible?.monthKey ?? null);
     setDeleteConfirmOpen(false);
     closeAddPersonDialog();
@@ -1343,6 +1361,7 @@ export function ScheduleApp() {
     if (backup.generated) {
       syncVacationMonthSheetFromGeneratedSchedule(backup.generated);
     }
+    markVisibleMonthAsLocallyFresh(backup.generated?.monthKey ?? null);
     setVisibleMonthKey(backup.generated?.monthKey ?? null);
     preGenerateBackupRef.current = null;
     setHasPreGenerateBackup(false);
