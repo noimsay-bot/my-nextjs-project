@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getUsers } from "@/lib/auth/storage";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
+import { getTeamLeadEvaluationMonthKeys } from "@/lib/team-lead/evaluation-year";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   ContributionManualItem,
   ContributionPersonCard,
   getContributionCards,
   getContributionPeriod,
-  getTeamLeadSchedules,
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
@@ -169,12 +169,7 @@ export function ContributionPage() {
   useEffect(() => {
     const refresh = async () => {
       await refreshScheduleState();
-      const nextPeriod = getContributionPeriod(evaluationYear);
-      await refreshTeamLeadAssignmentMonths(
-        getTeamLeadSchedules()
-          .map((schedule) => schedule.monthKey)
-          .filter((monthKey) => monthKey >= nextPeriod.startMonthKey && monthKey <= nextPeriod.endMonthKey),
-      );
+      await refreshTeamLeadAssignmentMonths(getTeamLeadEvaluationMonthKeys(evaluationYear));
       syncFromCache();
     };
     const onFocusRefresh = () => {

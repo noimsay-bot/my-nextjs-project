@@ -218,27 +218,20 @@ export function Sidebar({ children, className, mobileTriggerProps, ...props }: S
         <aside
           className={joinClassNames("portal-sidebar__panel", openMobile && "is-open")}
           aria-label="포털 사이드바"
-          onClickCapture={(event) => {
+          onMouseEnter={() => {
             if (isMobile) {
               return;
             }
 
             if (!open) {
-              event.preventDefault();
-              event.stopPropagation();
               setOpen(true);
+            }
+          }}
+          onMouseLeave={() => {
+            if (isMobile || !open) {
               return;
             }
 
-            const target = event.target;
-            if (
-              target instanceof Element &&
-              target.closest('a, button, input, select, textarea, summary, [role="button"], [role="link"]')
-            ) {
-              return;
-            }
-
-            event.preventDefault();
             setOpen(false);
           }}
         >

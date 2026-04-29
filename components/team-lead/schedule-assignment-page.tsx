@@ -1856,10 +1856,19 @@ export function ScheduleAssignmentPage() {
   const monthEntries = store.entries[selectedMonthKey] ?? {};
   const monthRows = store.rows[selectedMonthKey] ?? {};
   const monthDays = useMemo(() => buildMonthDays(selectedMonth), [selectedMonth]);
-  const selectedMonthDayIndex = useMemo(
-    () => new Map(monthDays.map((day) => [day.dateKey, day])),
-    [monthDays],
-  );
+    const allDaysIndex = useMemo(() => {
+      const map = new Map<string, DaySchedule>();
+      schedules.forEach((schedule) => {
+        schedule.days.forEach((day) => {
+          // 실제 해당 월의 일자만 인덱싱하여 정확한 전날 데이터 참조 보장
+          if (day.month === schedule.month && day.year === schedule.year) {
+            map.set(day.dateKey, day);
+          }
+        });
+      });
+      return map;
+    }, [schedules]);
+
   const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [schedules, store]);
 
   useEffect(() => {
@@ -2304,7 +2313,7 @@ export function ScheduleAssignmentPage() {
       return;
     }
 
-    const baseTimes = getScheduleAssignmentBaseTimes(duty, dateKey, selectedMonthDayIndex.get(dateKey) ?? null);
+    const baseTimes = getScheduleAssignmentBaseTimes(duty, dateKey, allDaysIndex.get(dateKey) ?? null);
     if (!baseTimes) return;
 
     updateMonthEntry(row.key, (current) => ({

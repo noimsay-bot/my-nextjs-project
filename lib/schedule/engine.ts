@@ -226,10 +226,46 @@ function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
   });
 }
 
-export function syncGeneralAssignments(state: ScheduleState, days: DaySchedule[], generalTeamPeople: string[]) {
+function getPreviousDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() - 1);
+  return fmtDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+function getPreviousNightSeedForDays(state: ScheduleState, days: DaySchedule[]) {
+  const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  const firstDay = orderedDays[0];
+  if (!firstDay) return [] as string[];
+
+  const previousDateKey = getPreviousDateKey(firstDay.dateKey);
+  if (orderedDays.some((day) => day.dateKey === previousDateKey)) {
+    return [] as string[];
+  }
+
+  const relatedSchedules = [
+    ...(state.generated ? [state.generated] : []),
+    ...state.generatedHistory,
+  ];
+
+  for (const schedule of relatedSchedules) {
+    const previousDay = schedule.days.find((day) => day.dateKey === previousDateKey);
+    if (!previousDay) continue;
+    return (previousDay.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+  }
+
+  return [] as string[];
+}
+
+export function syncGeneralAssignments(
+  state: ScheduleState,
+  days: DaySchedule[],
+  generalTeamPeople: string[],
+  initialPreviousNight = getPreviousNightSeedForDays(state, days),
+) {
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   syncDayVacationsFromState(state, orderedDays);
-  let previousNight: string[] = [];
+  let previousNight = [...initialPreviousNight];
   const datedGeneralTeamOffEntries = Object.entries(state.generalTeamOffPeopleByDate ?? {})
     .filter(([dateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
     .sort(([left], [right]) => left.localeCompare(right));

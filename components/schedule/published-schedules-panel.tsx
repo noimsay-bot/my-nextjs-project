@@ -497,6 +497,7 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
   if (route.length < 2) return false;
   const previewMap = rotateRoutePreview(items, route);
   if (!previewMap) return true;
+  const sourceDayIndex = buildDayIndex(items);
 
   if (isGeneralAssistRoute(route)) {
     const allDays = Array.from(previewMap.values())
@@ -507,7 +508,10 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
       return true;
     }
 
-    let previousNight: string[] = [];
+    let previousNight =
+      allDays.length > 0
+        ? getPreviousNightNames(sourceDayIndex, allDays[0].dateKey)
+        : [];
     for (const day of allDays) {
       const hasNightConflict = Object.entries(day.assignments).some(([category, names]) =>
         category !== "휴가" &&
@@ -535,7 +539,7 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
     const name = previewDay?.assignments[ref.category]?.[ref.index];
     if (!name) return true;
     if (hasAssignmentElsewhereOnDay(day, ref, name)) return true;
-    if (hadNightShiftPreviousDay(dayIndex, name, ref.dateKey)) return true;
+    if (hadNightShiftPreviousDay(dayIndex, name, ref.dateKey, sourceDayIndex)) return true;
     if (ref.category === "야근" && hasWorkAfterNightShift(dayIndex, name, ref.dateKey)) return true;
     return false;
   });
@@ -662,9 +666,21 @@ function hasWorkAfterNightShift(dayIndex: Map<string, DaySchedule>, name: string
   return hasAssignmentOnDay(nextDay, name);
 }
 
-function hadNightShiftPreviousDay(dayIndex: Map<string, DaySchedule>, name: string, dateKey: string) {
+function getPreviousNightNames(dayIndex: Map<string, DaySchedule>, dateKey: string) {
   const previousDay = dayIndex.get(getPreviousDateKey(dateKey));
-  return (previousDay?.assignments["야근"] ?? []).includes(name);
+  return (previousDay?.assignments["야근"] ?? []).map((item) => item.trim()).filter(Boolean);
+}
+
+function hadNightShiftPreviousDay(
+  dayIndex: Map<string, DaySchedule>,
+  name: string,
+  dateKey: string,
+  fallbackDayIndex?: Map<string, DaySchedule>,
+) {
+  const previousNightNames = getPreviousNightNames(dayIndex, dateKey);
+  if (previousNightNames.includes(name)) return true;
+  if (!fallbackDayIndex) return false;
+  return getPreviousNightNames(fallbackDayIndex, dateKey).includes(name);
 }
 
 function isSwapCandidateValid(

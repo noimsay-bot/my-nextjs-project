@@ -32,6 +32,18 @@ export function getTeamLeadEvaluationPeriod(evaluationYear = getTeamLeadEvaluati
   };
 }
 
+export function getTeamLeadEvaluationMonthKeys(evaluationYear = getTeamLeadEvaluationYear()) {
+  const monthKeys: string[] = [];
+
+  monthKeys.push(`${evaluationYear - 1}-12`);
+
+  for (let month = 1; month <= 11; month += 1) {
+    monthKeys.push(`${evaluationYear}-${String(month).padStart(2, "0")}`);
+  }
+
+  return monthKeys;
+}
+
 export function getTeamLeadEvaluationYearFromMonthKey(monthKey: string) {
   const [yearText, monthText] = monthKey.split("-");
   const year = Number(yearText);

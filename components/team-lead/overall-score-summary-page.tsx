@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
+import { getTeamLeadEvaluationMonthKeys } from "@/lib/team-lead/evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument, TeamLeadPrintPage } from "@/lib/team-lead/print";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
@@ -17,8 +18,6 @@ import {
   TeamLeadWeightedQuarterSummaryRow,
 } from "@/lib/team-lead/scoreboard";
 import {
-  getContributionPeriod,
-  getTeamLeadSchedules,
   refreshTeamLeadAssignmentMonths,
   TEAM_LEAD_CONTRIBUTION_EVENT,
   TEAM_LEAD_FINAL_CUT_EVENT,
@@ -360,12 +359,7 @@ export function OverallScoreSummaryPage() {
   useEffect(() => {
     const refresh = async () => {
       await Promise.all([refreshUsers(), refreshScheduleState(), refreshScoreboardState()]);
-      const period = getContributionPeriod(evaluationYear);
-      await refreshTeamLeadAssignmentMonths(
-        getTeamLeadSchedules()
-          .map((schedule) => schedule.monthKey)
-          .filter((monthKey) => monthKey >= period.startMonthKey && monthKey <= period.endMonthKey),
-      );
+      await refreshTeamLeadAssignmentMonths(getTeamLeadEvaluationMonthKeys(evaluationYear));
       syncFromCache();
     };
     const onFocusRefresh = () => {

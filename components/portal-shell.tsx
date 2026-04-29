@@ -680,13 +680,11 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
           <section ref={headerRef} className="panel portal-header-shell">
             <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
               <div style={{ display: "flex", justifyContent: "stretch" }}>
-              <Link href="/" className="brand-logo" aria-label="홈으로 이동">
+                <Link href="/" className="brand-logo" aria-label="홈으로 이동">
                   <span
                     className="brand-logo-text"
                     style={{
-                      fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
                       fontWeight: 600,
-                      letterSpacing: "0.1em",
                     }}
                   >
                     JTBC NEWS CAMERA HUB
