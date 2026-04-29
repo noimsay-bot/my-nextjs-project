@@ -758,6 +758,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [draftHiddenPublishedMonthKeys, setDraftHiddenPublishedMonthKeys] = useState<string[]>([]);
   const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
+  const [isRecommendationPopoverOpen, setIsRecommendationPopoverOpen] = useState(false);
   const [confirmConflictRequest, setConfirmConflictRequest] = useState(false);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
   const [requestMessage, setRequestMessage] = useState("");
@@ -1255,6 +1256,22 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       if (index === 0) return [];
       return current.filter((_, entryIndex) => entryIndex !== index);
     });
+    if (index === 0) {
+      setIsRecommendationPopoverOpen(false);
+    }
+    setConfirmConflictRequest(false);
+    setRequestMessage("");
+    setRequestMessageTone("ok");
+  };
+
+  const appendRouteCandidate = (candidate: SchedulePersonRef) => {
+    setSelectedRoute((current) => {
+      if (routeIncludes(current, candidate) || current.length >= MAX_ROUTE_SIZE) return current;
+      const lastSelectedRef = current[current.length - 1];
+      if (lastSelectedRef && !hasCompatibleVacationType(lastSelectedRef, candidate)) return current;
+      return [...current, candidate];
+    });
+    setIsRecommendationPopoverOpen(false);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -1292,6 +1309,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
     const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
     if (existingIndex >= 0) {
+      if (existingIndex === 0 && selectedRoute.length === 1 && !isRecommendationPopoverOpen) {
+        setIsRecommendationPopoverOpen(true);
+        setConfirmConflictRequest(false);
+        setRequestMessage("");
+        setRequestMessageTone("ok");
+        return;
+      }
       removeRouteEntry(existingIndex);
       return;
     }
@@ -1309,6 +1333,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
         return;
       }
       setSelectedRoute([person.ref]);
+      setIsRecommendationPopoverOpen(true);
       setConfirmConflictRequest(false);
       setRequestMessage("");
       setRequestMessageTone("ok");
@@ -1329,13 +1354,75 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     }
 
     setSelectedRoute([...selectedRoute, person.ref]);
+    setIsRecommendationPopoverOpen(false);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
   };
 
+  const renderInlineRecommendedCandidates = (anchorRef: SchedulePersonRef) => {
+    if (!isRecommendationPopoverOpen || !sameRef(firstSelectedRef, anchorRef) || selectedRoute.length !== 1) return null;
+
+    const openToRight = scheduleLayoutMode !== "mobile";
+
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: openToRight ? "50%" : "calc(100% + 8px)",
+          left: openToRight ? "calc(100% + 8px)" : 0,
+          transform: openToRight ? "translateY(-50%)" : undefined,
+          zIndex: 60,
+          minWidth: openToRight ? 220 : 180,
+          maxWidth: openToRight ? 280 : "min(280px, calc(100vw - 48px))",
+          maxHeight: 240,
+          overflowY: "auto",
+          padding: 10,
+          borderRadius: 14,
+          border: "1px solid rgba(147,197,253,.82)",
+          background: "rgba(219,234,254,.96)",
+          boxShadow: "0 16px 38px rgba(59,130,246,.18)",
+          display: "grid",
+          gap: 8,
+        }}
+      >
+        <span className="muted" style={{ fontSize: 12, color: "#1d4ed8" }}>
+          추천 직접 교환 후보
+        </span>
+        {recommendedCandidates.length > 0 ? (
+          recommendedCandidates.map((candidate) => (
+            <button
+              key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
+              type="button"
+              className="btn"
+              style={{ justifyContent: "flex-start", textAlign: "left" }}
+              onClick={() => appendRouteCandidate(candidate)}
+            >
+              {candidate.dateKey} {getScheduleCategoryLabel(candidate.category)} {candidate.name}
+            </button>
+          ))
+        ) : (
+          <span style={{ fontSize: 12, lineHeight: 1.5, color: "#1e3a8a" }}>
+            추천 후보가 없습니다.
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const handleSchedulePanelClickCapture = (event: React.MouseEvent<HTMLElement>) => {
+    if (!firstSelectedRef || selectedRoute.length !== 1 || !isRecommendationPopoverOpen) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest('[data-swap-recommendation-root="true"]')) return;
+    setIsRecommendationPopoverOpen(false);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   const clearRoute = () => {
     setSelectedRoute([]);
+    setIsRecommendationPopoverOpen(false);
     setConfirmConflictRequest(false);
     setRequestMessage("");
     setRequestMessageTone("ok");
@@ -1445,6 +1532,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   return (
     <section
       className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}
+      onClickCapture={handleSchedulePanelClickCapture}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {!isHomePreview && editMode && username ? (
@@ -1468,34 +1556,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
             ) : (
               <div className="muted">먼저 내 이름을 누른 뒤, {routeScopeLabel} 전체에서 미래 날짜의 교환 또는 삼각 트레이드 상대를 선택하세요. 달을 바꿔도 선택 경로는 유지됩니다.</div>
             )}
-
-            {firstSelectedRef ? (
-              <div style={{ display: "grid", gap: 8 }}>
-                <span className="muted">추천 직접 교환 후보</span>
-                {recommendedCandidates.length > 0 ? (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: 240, overflowY: "auto", paddingRight: 4 }}>
-                    {recommendedCandidates.map((candidate) => (
-                      <button
-                        key={`${candidate.monthKey}-${candidate.dateKey}-${candidate.category}-${candidate.index}-${candidate.name}`}
-                        type="button"
-                        className="btn"
-                        onClick={() => {
-                          setSelectedRoute((current) => {
-                            if (routeIncludes(current, candidate) || current.length >= MAX_ROUTE_SIZE) return current;
-                            return [...current, candidate];
-                          });
-                          setRequestMessage("");
-                        }}
-                      >
-                        {candidate.dateKey} {getScheduleCategoryLabel(candidate.category)} {candidate.name}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="status note">추천 후보가 없어도 현재 보고 있는 달 표에서 다른 근무를 눌러 요청할 수 있습니다.</div>
-                )}
-              </div>
-            ) : null}
 
             {selectedRoute.length >= 2 ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1701,6 +1761,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                           const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                           const centeredDayLabel = getCenteredDayLabel(day);
                           const isWeekendLike = day.isWeekend || day.isHoliday;
+                          const dayHasInlineRecommendations =
+                            isRecommendationPopoverOpen &&
+                            Boolean(firstSelectedRef) &&
+                            selectedRoute.length === 1 &&
+                            firstSelectedRef.monthKey === day.ownerMonthKey &&
+                            firstSelectedRef.dateKey === day.dateKey;
+                          const dayHasRouteSelection = selectedRoute.some(
+                            (ref) => ref.monthKey === day.ownerMonthKey && ref.dateKey === day.dateKey,
+                          );
                           const highlightDayHead = showMine && dayContainsUser(day, username);
                           const highlightHeaderName = showMine && Boolean(username) && day.headerName?.trim() === username;
                           const duplicateNameSet = getDayDuplicateNameSet(day);
@@ -1724,11 +1793,14 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                               }}
                               className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
                               style={{
+                                position: "relative",
                                 padding: 6,
                                 minHeight: 0,
                                 opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                                 background: dayCardStyle.background,
                                 border: dayCardStyle.border,
+                                overflow: "visible",
+                                zIndex: dayHasInlineRecommendations ? 80 : dayHasRouteSelection ? 12 : 1,
                               }}
                             >
                               <div
@@ -1897,102 +1969,113 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           const isInteractiveChip =
                                             !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
                                           return (
-                                            <button
+                                            <div
                                               key={personObject.key}
-                                              type="button"
-                                              className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
-                                              disabled={!isInteractiveChip}
-                                              onClick={() => void handleNameClick(personObject)}
+                                              data-swap-recommendation-root={firstSelected ? "true" : undefined}
                                               style={{
-                                                display: "flex",
-                                                flexDirection: "column",
-                                                gridColumn: "auto",
-                                                justifySelf: "stretch",
-                                                alignItems: "center",
-                                                justifyContent: "center",
+                                                position: "relative",
                                                 width: "100%",
-                                                maxWidth: "100%",
-                                                gap: personObject.pending ? 0 : 5,
-                                                minHeight: 28,
-                                                padding: "3px 4px",
-                                                borderRadius: 0,
-                                                background: personObject.pending
-                                                  ? "rgba(245,158,11,.18)"
-                                                  : duplicated
-                                                    ? "rgba(239,68,68,.22)"
-                                                  : routeSelected
-                                                    ? firstSelected
-                                                      ? "rgba(168,85,247,.28)"
-                                                      : "rgba(56,189,248,.22)"
-                                                    : recommendedHighlighted
-                                                      ? "rgba(124,58,237,.32)"
-                                                      : mineHighlighted
-                                                        ? "rgba(148,163,184,.38)"
-                                                        : dimOtherNames
-                                                          ? "rgba(255,255,255,.06)"
-                                                          : hasTaggedDisplayName
-                                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
-                                                          : nameTagColors
-                                                            ? nameTagColors.background
-                                                            : assignmentDisplay.chipStyle?.background
-                                                              ? assignmentDisplay.chipStyle.background
-                                                              : "rgba(255,255,255,.16)",
-                                                border: personObject.pending
-                                                  ? "1px solid rgba(245,158,11,.35)"
-                                                  : duplicated
-                                                    ? "1px solid rgba(239,68,68,.28)"
+                                                overflow: "visible",
+                                                zIndex: firstSelected ? 40 : routeSelected ? 10 : 1,
+                                              }}
+                                            >
+                                              <button
+                                                type="button"
+                                                className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                                disabled={!isInteractiveChip}
+                                                onClick={() => void handleNameClick(personObject)}
+                                                style={{
+                                                  display: "flex",
+                                                  flexDirection: "column",
+                                                  gridColumn: "auto",
+                                                  justifySelf: "stretch",
+                                                  alignItems: "center",
+                                                  justifyContent: "center",
+                                                  width: "100%",
+                                                  maxWidth: "100%",
+                                                  gap: personObject.pending ? 0 : 5,
+                                                  minHeight: 28,
+                                                  padding: "3px 4px",
+                                                  borderRadius: 0,
+                                                  background: personObject.pending
+                                                    ? "rgba(245,158,11,.18)"
+                                                    : routeSelected
+                                                      ? firstSelected
+                                                        ? "rgba(168,85,247,.28)"
+                                                        : "rgba(56,189,248,.22)"
+                                                      : duplicated
+                                                        ? "rgba(239,68,68,.22)"
+                                                        : recommendedHighlighted
+                                                          ? "rgba(124,58,237,.32)"
+                                                          : mineHighlighted
+                                                            ? "rgba(148,163,184,.38)"
+                                                            : dimOtherNames
+                                                              ? "rgba(255,255,255,.06)"
+                                                              : hasTaggedDisplayName
+                                                                ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
+                                                                : nameTagColors
+                                                                  ? nameTagColors.background
+                                                                  : assignmentDisplay.chipStyle?.background
+                                                                    ? assignmentDisplay.chipStyle.background
+                                                                    : "rgba(255,255,255,.16)",
+                                                  border: personObject.pending
+                                                    ? "1px solid rgba(245,158,11,.35)"
                                                     : routeSelected
                                                       ? firstSelected
                                                         ? "1px solid rgba(192,132,252,.78)"
                                                         : "1px solid rgba(56,189,248,.75)"
-                                                      : recommendedHighlighted
-                                                        ? "3px solid rgba(255,255,255,.95)"
-                                                      : mineHighlighted
-                                                        ? "2px solid rgba(226,232,240,.82)"
-                                                        : dimOtherNames
-                                                          ? "1px solid rgba(255,255,255,.08)"
-                                                          : hasTaggedDisplayName
-                                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
-                                                          : nameTagColors
-                                                            ? nameTagColors.border
-                                                          : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                                color: routeSelected && firstSelected
-                                                  ? "#f5eaff"
-                                                  : duplicated
-                                                    ? "#ffe4e6"
-                                                    : recommendedHighlighted || mineHighlighted
+                                                      : duplicated
+                                                        ? "1px solid rgba(239,68,68,.28)"
+                                                        : recommendedHighlighted
+                                                          ? "3px solid rgba(255,255,255,.95)"
+                                                          : mineHighlighted
+                                                            ? "2px solid rgba(226,232,240,.82)"
+                                                            : dimOtherNames
+                                                              ? "1px solid rgba(255,255,255,.08)"
+                                                              : hasTaggedDisplayName
+                                                                ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
+                                                                : nameTagColors
+                                                                  ? nameTagColors.border
+                                                                  : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                                  color: routeSelected && firstSelected
+                                                    ? "#f5eaff"
+                                                    : routeSelected || recommendedHighlighted || mineHighlighted
                                                       ? "#ffffff"
-                                                      : dimOtherNames
-                                                        ? "rgba(248,251,255,.48)"
-                                                        : hasTaggedDisplayName
-                                                          ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
-                                                          : nameTagColors
-                                                            ? nameTagColors.color
-                                                            : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                                fontWeight: mineHighlighted ? 800 : 700,
-                                                lineHeight: 1.3,
-                                                boxShadow: "none",
-                                                textShadow: undefined,
-                                                opacity: dimOtherNames ? 0.42 : 1,
-                                                cursor: isInteractiveChip ? "pointer" : "default",
-                                              }}
-                                            >
-                                              <FittedNameText
-                                                text={getAssignmentChipText(assignmentDisplayText, nameTag)}
-                                                className="schedule-name-chip__text"
-                                                minFontSize={shouldAutoFitSchedule ? 5 : 9}
-                                                maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
-                                                style={{
-                                                  display: "inline-block",
-                                                  flex: "0 1 auto",
-                                                  width: "100%",
-                                                  margin: "0 auto",
-                                                  overflow: "visible",
-                                                  textOverflow: "clip",
+                                                      : duplicated
+                                                        ? "#ffe4e6"
+                                                        : dimOtherNames
+                                                          ? "rgba(248,251,255,.48)"
+                                                          : hasTaggedDisplayName
+                                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
+                                                            : nameTagColors
+                                                              ? nameTagColors.color
+                                                              : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                                  fontWeight: mineHighlighted ? 800 : 700,
+                                                  lineHeight: 1.3,
+                                                  boxShadow: "none",
+                                                  textShadow: undefined,
+                                                  opacity: dimOtherNames ? 0.42 : 1,
+                                                  cursor: isInteractiveChip ? "pointer" : "default",
                                                 }}
-                                              />
-                                              {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
-                                            </button>
+                                              >
+                                                <FittedNameText
+                                                  text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                                  className="schedule-name-chip__text"
+                                                  minFontSize={shouldAutoFitSchedule ? 5 : 9}
+                                                  maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                                  style={{
+                                                    display: "inline-block",
+                                                    flex: "0 1 auto",
+                                                    width: "100%",
+                                                    margin: "0 auto",
+                                                    overflow: "visible",
+                                                    textOverflow: "clip",
+                                                  }}
+                                                />
+                                                {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
+                                              </button>
+                                              {renderInlineRecommendedCandidates(ref)}
+                                            </div>
                                           );
                                         })
                                       ) : (
@@ -2041,6 +2124,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
+                  const dayHasInlineRecommendations =
+                    isRecommendationPopoverOpen &&
+                    Boolean(firstSelectedRef) &&
+                    selectedRoute.length === 1 &&
+                    firstSelectedRef.monthKey === day.ownerMonthKey &&
+                    firstSelectedRef.dateKey === day.dateKey;
+                  const dayHasRouteSelection = selectedRoute.some(
+                    (ref) => ref.monthKey === day.ownerMonthKey && ref.dateKey === day.dateKey,
+                  );
                   const highlightDayHead = showMine && dayContainsUser(day, username);
                   const highlightHeaderName = showMine && Boolean(username) && day.headerName?.trim() === username;
                   const duplicateNameSet = getDayDuplicateNameSet(day);
@@ -2064,12 +2156,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       }}
                       className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
                       style={{
+                        position: "relative",
                         padding: 6,
                         minHeight: isHomeMobileThreeDayView ? 160 : isCompactMonthlyView ? 148 : 216,
                         height: isCompactMonthlyView && compactMonthCardHeight ? compactMonthCardHeight : undefined,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
                         border: dayCardStyle.border,
+                        overflow: "visible",
+                        zIndex: dayHasInlineRecommendations ? 80 : dayHasRouteSelection ? 12 : 1,
                       }}
                     >
                         <div
@@ -2238,102 +2333,113 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                   const isInteractiveChip =
                                     !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
                                   return (
-                                    <button
+                                    <div
                                       key={personObject.key}
-                                      type="button"
-                                      className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
-                                      disabled={!isInteractiveChip}
-                                      onClick={() => void handleNameClick(personObject)}
+                                      data-swap-recommendation-root={firstSelected ? "true" : undefined}
                                       style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        gridColumn: "auto",
-                                        justifySelf: "stretch",
-                                        alignItems: "center",
-                                        justifyContent: "center",
+                                        position: "relative",
                                         width: "100%",
-                                        maxWidth: "100%",
-                                        gap: personObject.pending ? 0 : 5,
-                                        minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
-                                        padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
-                                        borderRadius: 0,
-                                        background: personObject.pending
-                                          ? "rgba(245,158,11,.18)"
-                                          : duplicated
-                                            ? "rgba(239,68,68,.22)"
-                                          : routeSelected
-                                            ? firstSelected
-                                              ? "rgba(168,85,247,.28)"
-                                              : "rgba(56,189,248,.22)"
-                                            : recommendedHighlighted
-                                              ? "rgba(124,58,237,.32)"
-                                            : mineHighlighted
-                                              ? "rgba(148,163,184,.38)"
-                                            : dimOtherNames
-                                                ? "rgba(255,255,255,.06)"
-                                                : hasTaggedDisplayName
-                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
-                                                : nameTagColors
-                                                  ? nameTagColors.background
-                                                : assignmentDisplay.chipStyle?.background
-                                                  ? assignmentDisplay.chipStyle.background
-                                                  : "rgba(255,255,255,.16)",
-                                        border: personObject.pending
-                                          ? "1px solid rgba(245,158,11,.35)"
-                                          : duplicated
-                                            ? "1px solid rgba(239,68,68,.28)"
-                                          : routeSelected
-                                            ? firstSelected
-                                              ? "1px solid rgba(192,132,252,.78)"
-                                              : "1px solid rgba(56,189,248,.75)"
-                                            : recommendedHighlighted
-                                              ? "3px solid rgba(255,255,255,.95)"
-                                            : mineHighlighted
-                                              ? "2px solid rgba(226,232,240,.82)"
-                                            : dimOtherNames
-                                                ? "1px solid rgba(255,255,255,.08)"
-                                                : hasTaggedDisplayName
-                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
-                                                : nameTagColors
-                                                  ? nameTagColors.border
-                                              : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: routeSelected && firstSelected
-                                          ? "#f5eaff"
-                                          : duplicated
-                                            ? "#ffe4e6"
-                                          : recommendedHighlighted || mineHighlighted
-                                            ? "#ffffff"
-                                          : dimOtherNames
-                                              ? "rgba(248,251,255,.48)"
-                                              : hasTaggedDisplayName
-                                                  ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
-                                                : nameTagColors
-                                                  ? nameTagColors.color
-                                                : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: mineHighlighted ? 800 : 700,
-                                        lineHeight: 1.3,
-                                        boxShadow: "none",
-                                        textShadow: undefined,
-                                        opacity: dimOtherNames ? 0.42 : 1,
-                                        cursor: isInteractiveChip ? "pointer" : "default",
+                                        overflow: "visible",
+                                        zIndex: firstSelected ? 40 : routeSelected ? 10 : 1,
                                       }}
+                                    >
+                                      <button
+                                        type="button"
+                                        className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                        disabled={!isInteractiveChip}
+                                        onClick={() => void handleNameClick(personObject)}
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gridColumn: "auto",
+                                          justifySelf: "stretch",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          width: "100%",
+                                          maxWidth: "100%",
+                                          gap: personObject.pending ? 0 : 5,
+                                          minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
+                                          padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
+                                          borderRadius: 0,
+                                          background: personObject.pending
+                                            ? "rgba(245,158,11,.18)"
+                                            : routeSelected
+                                              ? firstSelected
+                                                ? "rgba(168,85,247,.28)"
+                                                : "rgba(56,189,248,.22)"
+                                              : duplicated
+                                                ? "rgba(239,68,68,.22)"
+                                                : recommendedHighlighted
+                                                  ? "rgba(124,58,237,.32)"
+                                                  : mineHighlighted
+                                                    ? "rgba(148,163,184,.38)"
+                                                    : dimOtherNames
+                                                      ? "rgba(255,255,255,.06)"
+                                                      : hasTaggedDisplayName
+                                                        ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
+                                                        : nameTagColors
+                                                          ? nameTagColors.background
+                                                          : assignmentDisplay.chipStyle?.background
+                                                            ? assignmentDisplay.chipStyle.background
+                                                            : "rgba(255,255,255,.16)",
+                                          border: personObject.pending
+                                            ? "1px solid rgba(245,158,11,.35)"
+                                            : routeSelected
+                                              ? firstSelected
+                                                ? "1px solid rgba(192,132,252,.78)"
+                                                : "1px solid rgba(56,189,248,.75)"
+                                              : duplicated
+                                                ? "1px solid rgba(239,68,68,.28)"
+                                                : recommendedHighlighted
+                                                  ? "3px solid rgba(255,255,255,.95)"
+                                                  : mineHighlighted
+                                                    ? "2px solid rgba(226,232,240,.82)"
+                                                    : dimOtherNames
+                                                      ? "1px solid rgba(255,255,255,.08)"
+                                                      : hasTaggedDisplayName
+                                                        ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
+                                                        : nameTagColors
+                                                          ? nameTagColors.border
+                                                          : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                          color: routeSelected && firstSelected
+                                            ? "#f5eaff"
+                                            : routeSelected || recommendedHighlighted || mineHighlighted
+                                              ? "#ffffff"
+                                              : duplicated
+                                                ? "#ffe4e6"
+                                                : dimOtherNames
+                                                  ? "rgba(248,251,255,.48)"
+                                                  : hasTaggedDisplayName
+                                                    ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
+                                                    : nameTagColors
+                                                      ? nameTagColors.color
+                                                      : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                          fontWeight: mineHighlighted ? 800 : 700,
+                                          lineHeight: 1.3,
+                                          boxShadow: "none",
+                                          textShadow: undefined,
+                                          opacity: dimOtherNames ? 0.42 : 1,
+                                          cursor: isInteractiveChip ? "pointer" : "default",
+                                        }}
                                       >
                                         <FittedNameText
-                                        text={getAssignmentChipText(assignmentDisplayText, nameTag)}
-                                        className="schedule-name-chip__text"
-                                        minFontSize={shouldAutoFitSchedule ? 5 : 9}
-                                        maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
-                                        style={{
-                                          display: "inline-block",
-                                          flex: "0 1 auto",
-                                          width: "100%",
-                                          margin: "0 auto",
-                                          overflow: "visible",
-                                          textOverflow: "clip",
-                                        }}
-                                      />
-                                      {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
-                                    </button>
+                                          text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                          className="schedule-name-chip__text"
+                                          minFontSize={shouldAutoFitSchedule ? 5 : 9}
+                                          maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                          style={{
+                                            display: "inline-block",
+                                            flex: "0 1 auto",
+                                            width: "100%",
+                                            margin: "0 auto",
+                                            overflow: "visible",
+                                            textOverflow: "clip",
+                                          }}
+                                        />
+                                        {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
+                                      </button>
+                                      {renderInlineRecommendedCandidates(ref)}
+                                    </div>
                                   );
                                 })
                               ) : (

@@ -17,21 +17,6 @@ type HomeNewsMetaProps = {
 
 const WORLD_CUP_PROJECT_URL = "https://marchis1015ab-sketch.github.io/2026worldcup-project/";
 
-function formatKstDateTime(value?: string) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function formatKstDate(value: string) {
   const parsed = new Date(`${value}T00:00:00+09:00`);
   if (Number.isNaN(parsed.getTime())) return value;
@@ -70,15 +55,6 @@ function getDdayLabel(targetDate: string) {
   if (diffDays === 0) return "D-Day";
   if (diffDays > 0) return `D-${diffDays}`;
   return `D+${Math.abs(diffDays)}`;
-}
-
-function getLatestNoticeTimestamp(noticeItems: HomeNoticeMetaItem[]) {
-  const latest = noticeItems
-    .map((item) => (item.publishedAt ? new Date(item.publishedAt).getTime() : Number.NaN))
-    .filter((value) => Number.isFinite(value))
-    .sort((left, right) => right - left)[0];
-
-  return Number.isFinite(latest) ? new Date(latest).toISOString() : "";
 }
 
 function renderDdayItems(ddayItems: HomeDdayItem[], canManageDdays: boolean, onManageDday?: (item: HomeDdayItem) => void) {
@@ -137,22 +113,9 @@ function renderDdayArea(ddayItems: HomeDdayItem[], canManageDdays: boolean, onMa
   );
 }
 
-export function HomeNewsMeta({ noticeItems = [], ddayItems = [], canManageDdays = false, onManageDday }: HomeNewsMetaProps) {
-  const latestLabel = formatKstDateTime(getLatestNoticeTimestamp(noticeItems));
-  const title = latestLabel ? `${latestLabel} 공지 업데이트 기준` : "공지 업데이트 기준";
-  const detail =
-    noticeItems.length > 0
-      ? `등록 공지 ${noticeItems.length}건 · 제목 클릭 시 본문으로 이동`
-      : "등록된 공지를 기다리는 중입니다.";
-
+export function HomeNewsMeta({ noticeItems: _noticeItems = [], ddayItems = [], canManageDdays = false, onManageDday }: HomeNewsMetaProps) {
   return (
     <div className={styles.metaBar} aria-live="polite">
-      <div className={styles.metaBarInfo}>
-        <div className={styles.metaBarTitle}>{title}</div>
-        <div className={styles.metaBarDetail} data-portal-news-meta-detail="true">
-          {detail}
-        </div>
-      </div>
       {renderDdayArea(ddayItems, canManageDdays, onManageDday)}
     </div>
   );
