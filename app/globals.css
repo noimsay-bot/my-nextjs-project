@@ -547,6 +547,18 @@ h6 {
   z-index: 1;
 }
 
+@media (max-width: 1200px) {
+  .brand-logo {
+    width: auto;
+    max-width: 500px;
+    margin-inline: auto;
+  }
+
+  .brand-logo-text {
+    font-size: clamp(20px, 3vw, 30px);
+  }
+}
+
 .desk-shell-sticky {
   position: sticky;
   top: 12px;
@@ -1368,7 +1380,10 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   }
 
   .brand-logo {
-    min-width: 100%;
+    width: auto;
+    min-width: 0;
+    max-width: 360px;
+    margin-inline: auto;
     padding: 14px 18px;
     gap: 12px;
   }
@@ -1380,6 +1395,7 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   }
 
   .brand-logo-text {
+    font-size: clamp(18px, 4.4vw, 26px);
     letter-spacing: 0.16em;
     text-indent: 0.16em;
   }

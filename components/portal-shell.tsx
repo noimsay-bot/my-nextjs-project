@@ -679,7 +679,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         <div className="shell portal-shell-main">
           <section ref={headerRef} className="panel portal-header-shell">
             <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
-              <div style={{ display: "flex", justifyContent: "stretch" }}>
+              <div style={{ display: "flex", justifyContent: "center" }}>
                 <Link href="/" className="brand-logo" aria-label="홈으로 이동">
                   <span
                     className="brand-logo-text"
