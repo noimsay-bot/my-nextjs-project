@@ -3351,6 +3351,36 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   line-height: 1.45;
 }
 
+.portal-sidebar-usercard__level-track {
+  position: relative;
+  width: 100%;
+  height: 7px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.portal-sidebar-usercard__level-track > span {
+  display: block;
+  width: var(--member-level-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.75), rgba(125, 211, 252, 0.98));
+  box-shadow: 0 0 12px rgba(125, 211, 252, 0.42);
+  transition: width 0.25s ease;
+}
+
+.portal-sidebar-usercard__level-next {
+  justify-self: end;
+  margin-top: -2px;
+  color: rgba(219, 234, 254, 0.82);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .portal-sidebar__inset {
   display: block;
   width: 100%;

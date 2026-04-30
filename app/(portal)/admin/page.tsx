@@ -9,10 +9,12 @@ import {
   updateAdminProfileAccess,
 } from "@/lib/team-lead/storage";
 import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
+import { getMemberLevelMap, type MemberLevelSnapshot } from "@/lib/portal/member-level";
 import {
   getAdminPageVisitAnalytics,
   PageVisitAnalytics,
   PageVisitMetric,
+  PageVisitVisitorRank,
   PageVisitRange,
 } from "@/lib/portal/page-visit-analytics";
 
@@ -140,13 +142,14 @@ function formatDateTime(value: string | null | undefined) {
 const emptyPageVisitAnalytics: PageVisitAnalytics = {
   week: [],
   month: [],
+  monthlyTopVisitors: [],
   schemaMissing: false,
   message: null,
 };
 
 const visitRangeLabels: Record<PageVisitRange, string> = {
   week: "최근 7일",
-  month: "최근 30일",
+  month: "이번 달",
 };
 
 function PageVisitChart({
@@ -177,12 +180,10 @@ function PageVisitChart({
             <div key={row.pageKey} style={{ display: "grid", gap: 6 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
                 <strong>{row.label}</strong>
-                <span className="muted">
-                  방문 {row.visits}회 · {row.uniqueUsers}명
-                </span>
+                <span className="muted">방문 {row.visits}회</span>
               </div>
               <div
-                aria-label={`${row.label} ${title} 방문 ${row.visits}회, 방문자 ${row.uniqueUsers}명`}
+                aria-label={`${row.label} ${title} 방문 ${row.visits}회`}
                 style={{
                   position: "relative",
                   height: 16,
@@ -211,9 +212,54 @@ function PageVisitChart({
   );
 }
 
+function MonthlyVisitorRanking({ rows }: { rows: PageVisitVisitorRank[] }) {
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 12,
+        padding: 16,
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,.08)",
+        background: "rgba(255,255,255,.03)",
+      }}
+    >
+      <strong style={{ fontSize: 18 }}>이번 달 방문 순위</strong>
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.length > 0 ? (
+          rows.map((row, index) => (
+            <div
+              key={row.profileId}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "44px minmax(0, 1fr) auto",
+                gap: 10,
+                alignItems: "center",
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,.08)",
+                background: "rgba(15,23,42,.22)",
+              }}
+            >
+              <strong style={{ color: "#bae6fd" }}>{index + 1}등</strong>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {row.name}
+              </span>
+              <strong>{row.visits}회</strong>
+            </div>
+          ))
+        ) : (
+          <div className="status note">이번 달 방문 기록이 없습니다.</div>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export default function AdminPage() {
   const canManageRoles = hasTeamLeadAccess(getSession()?.actualRole ?? getSession()?.role);
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
+  const [memberLevelMap, setMemberLevelMap] = useState<Map<string, MemberLevelSnapshot>>(new Map());
   const [visitAnalytics, setVisitAnalytics] = useState<PageVisitAnalytics>(emptyPageVisitAnalytics);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
@@ -228,7 +274,9 @@ export default function AdminPage() {
         getAdminWorkspace(),
         getAdminPageVisitAnalytics(),
       ]);
+      const nextMemberLevelMap = await getMemberLevelMap(workspace.profiles.map((profile) => profile.id));
       setProfiles(workspace.profiles);
+      setMemberLevelMap(nextMemberLevelMap);
       setVisitAnalytics(analytics);
       setDraftRoles(
         Object.fromEntries(workspace.profiles.map((profile) => [profile.id, profile.role])),
@@ -332,6 +380,7 @@ export default function AdminPage() {
             <PageVisitChart title={visitRangeLabels.week} rows={visitAnalytics.week} />
             <PageVisitChart title={visitRangeLabels.month} rows={visitAnalytics.month} />
           </div>
+          <MonthlyVisitorRanking rows={visitAnalytics.monthlyTopVisitors} />
         </div>
       </article>
 
@@ -358,6 +407,7 @@ export default function AdminPage() {
                 <th>login_id</th>
                 <th>email</th>
                 <th>role</th>
+                <th>레벨</th>
                 <th>최근 수정</th>
                 <th>관리</th>
               </tr>
@@ -365,6 +415,7 @@ export default function AdminPage() {
             <tbody>
               {filteredProfiles.map((profile) => {
                 const draftRole = draftRoles[profile.id] ?? profile.role;
+                const memberLevel = memberLevelMap.get(profile.id);
                 const dirty = draftRole !== profile.role;
 
                 return (
@@ -416,6 +467,12 @@ export default function AdminPage() {
                             ))}
                           </select>
                         ) : null}
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <strong>Lv {memberLevel?.level ?? 1}</strong>
+                        <span className="muted">{memberLevel?.totalPoints ?? 0}점</span>
                       </div>
                     </td>
                     <td>{formatDateTime(profile.updatedAt)}</td>

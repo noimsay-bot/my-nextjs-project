@@ -22,6 +22,12 @@ import {
   subscribeToPortalAccessState,
 } from "@/lib/portal/access-state";
 import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
+import {
+  getMemberLevelProgressPercent,
+  getMemberLevelSnapshot,
+  getNextMemberLevel,
+  type MemberLevelSnapshot,
+} from "@/lib/portal/member-level";
 import { recordPageVisit } from "@/lib/portal/page-visit-analytics";
 
 type PortalNavChild = {
@@ -221,21 +227,33 @@ function isLinkActive(pathname: string, href: string) {
   );
 }
 
-function formatRoleSummary(session: SessionUser | null) {
+function formatRoleSummary(session: SessionUser | null, memberLevel: MemberLevelSnapshot | null) {
   if (!session) {
     return "";
   }
 
+  const levelText = memberLevel ? ` Lv ${memberLevel.level}` : "";
   if (!session.experienceRole) {
-    return `권한: ${ROLE_EXPERIENCE_LABELS[session.role]}`;
+    return `${ROLE_EXPERIENCE_LABELS[session.role]}${levelText}`;
   }
 
-  return `체험 권한: ${ROLE_EXPERIENCE_LABELS[session.role]} · 실권한: ${ROLE_EXPERIENCE_LABELS[session.actualRole]}`;
+  return `체험 ${ROLE_EXPERIENCE_LABELS[session.role]}${levelText} · 실권한 ${ROLE_EXPERIENCE_LABELS[session.actualRole]}`;
+}
+
+function getLevelProgressStyle(memberLevel: MemberLevelSnapshot | null) {
+  const progressPercent = memberLevel ? getMemberLevelProgressPercent(memberLevel.totalPoints) : 0;
+  return { "--member-level-progress": `${progressPercent}%` } as CSSProperties;
+}
+
+function formatNextLevelLabel(memberLevel: MemberLevelSnapshot | null) {
+  const nextLevel = memberLevel ? getNextMemberLevel(memberLevel.totalPoints) : 2;
+  return `Lv${nextLevel}`;
 }
 
 function PortalSidebar({
   pathname,
   session,
+  memberLevel,
   theme,
   visibleLinks,
   experienceDraftRole,
@@ -248,6 +266,7 @@ function PortalSidebar({
 }: {
   pathname: string;
   session: SessionUser | null;
+  memberLevel: MemberLevelSnapshot | null;
   theme: PortalTheme;
   visibleLinks: typeof links;
   experienceDraftRole: UserRole;
@@ -358,7 +377,15 @@ function PortalSidebar({
           {session ? (
             <div className="portal-sidebar-usercard">
               <strong className="portal-sidebar-usercard__name">{session.username}</strong>
-              <span className="muted portal-sidebar-usercard__meta">{formatRoleSummary(session)}</span>
+              <span className="muted portal-sidebar-usercard__meta">{formatRoleSummary(session, memberLevel)}</span>
+              <div
+                className="portal-sidebar-usercard__level-track"
+                style={getLevelProgressStyle(memberLevel)}
+                aria-label="다음 레벨까지 진행률"
+              >
+                <span />
+              </div>
+              <div className="portal-sidebar-usercard__level-next">{formatNextLevelLabel(memberLevel)}</div>
               {!adminSession && canOpenAdminArea ? (
                 <span className="muted portal-sidebar-usercard__meta">총괄팀장 권한으로 관리자 메뉴 사용 가능</span>
               ) : null}
@@ -378,6 +405,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
   const headerRef = useRef<HTMLElement | null>(null);
   const [session, setSession] = useState<SessionUser | null>(null);
+  const [memberLevel, setMemberLevel] = useState<MemberLevelSnapshot | null>(null);
   const [theme, setTheme] = useState<PortalTheme>("dark");
   const [sidebarTopOffset, setSidebarTopOffset] = useState(0);
   const [sidebarTriggerTopOffset, setSidebarTriggerTopOffset] = useState(12);
@@ -399,6 +427,25 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
     setSession(getSession());
     setTheme(readStoredTheme());
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!session?.id) {
+      setMemberLevel(null);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void getMemberLevelSnapshot(session.id).then((snapshot) => {
+      if (!mounted) return;
+      setMemberLevel(snapshot);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [pathname, session?.id]);
 
   useEffect(() => {
     if (isMobile) {
@@ -667,6 +714,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
       <PortalSidebar
         pathname={pathname}
         session={session}
+        memberLevel={memberLevel}
         theme={theme}
         visibleLinks={visibleLinks}
         experienceDraftRole={experienceDraftRole}
