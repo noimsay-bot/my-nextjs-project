@@ -1051,8 +1051,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   );
   const mobileThreeDayDisplayDays = useMemo(() => {
     if (!isMobileThreeDayView) return [] as DisplayDay[];
-    return getHomeMobilePreviewDays(displayDays, todayKey);
-  }, [displayDays, isHomeMobileThreeDayView, isMobileThreeDayView, todayKey]);
+    if (isHomeMobileThreeDayView) return getHomeMobilePreviewDays(displayDays, todayKey);
+    return visibleDisplayDays;
+  }, [displayDays, isHomeMobileThreeDayView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
   const mobileThreeDayRows = useMemo(() => {
     if (!isMobileThreeDayView) return [];
 
