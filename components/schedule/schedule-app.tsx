@@ -150,6 +150,7 @@ interface AddPersonDialogState {
   dateKey: string;
   category: string;
   dayLabel: string;
+  ownerMonthKey: string;
 }
 
 const vacationLegendStyles = vacationStyleTones;
@@ -369,6 +370,14 @@ function getEditableSlotNames(names: string[]) {
   return slots;
 }
 
+function cloneDaySchedule(day: DaySchedule): DaySchedule {
+  return JSON.parse(JSON.stringify(day)) as DaySchedule;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
+}
+
 function isSameSelectedSlot(
   left: { dateKey: string; category: string; index: number } | null,
   right: { dateKey: string; category: string; index: number },
@@ -427,6 +436,42 @@ function getOwnedDisplayDays(days: DaySchedule[], previousSchedule?: { nextStart
       ...day,
       isOverflowMonth: false,
     }));
+}
+
+function buildVisibleScheduleDays(
+  schedule: GeneratedSchedule,
+  schedules: GeneratedSchedule[],
+  previousSchedule?: { nextStartDate: string } | null,
+) {
+  const baseDays = getOwnedDisplayDays(schedule.days, previousSchedule).map((day) => cloneDaySchedule(day));
+  const dayMap = new Map(baseDays.map((day) => [day.dateKey, day] as const));
+
+  for (let day = 1; day <= getDaysInMonth(schedule.year, schedule.month); day += 1) {
+    const dateKey = `${schedule.year}-${String(schedule.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (dayMap.has(dateKey)) continue;
+    const matched = schedules
+      .map((item) => item.days.find((entry) => entry.dateKey === dateKey))
+      .find((entry): entry is DaySchedule => Boolean(entry));
+    if (!matched) continue;
+    dayMap.set(dateKey, {
+      ...cloneDaySchedule(matched),
+      isOverflowMonth: false,
+    });
+  }
+
+  return Array.from(dayMap.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+function getDayOwnerMonthKey(
+  dateKey: string,
+  visibleSchedule: GeneratedSchedule | null,
+  schedules: GeneratedSchedule[],
+) {
+  if (visibleSchedule?.days.some((day) => day.dateKey === dateKey)) {
+    return visibleSchedule.monthKey;
+  }
+
+  return schedules.find((schedule) => schedule.days.some((day) => day.dateKey === dateKey))?.monthKey ?? visibleSchedule?.monthKey ?? null;
 }
 
 function sameRef(left: SchedulePersonRef | null, right: SchedulePersonRef | null) {
@@ -720,10 +765,10 @@ export function ScheduleApp() {
 
   useEffect(() => {
     if (!addPersonDialog) return;
-    if (activeEditMonthKey === visibleMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
+    if (activeEditMonthKey === addPersonDialog.ownerMonthKey && (isAllDaysEditMode || state.editDateKey === addPersonDialog.dateKey)) return;
     setAddPersonDialog(null);
     setAddPersonName("");
-  }, [activeEditMonthKey, addPersonDialog, isAllDaysEditMode, state.editDateKey, visibleMonthKey]);
+  }, [activeEditMonthKey, addPersonDialog, isAllDaysEditMode, state.editDateKey]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -786,8 +831,18 @@ export function ScheduleApp() {
     return state.generatedHistory[index - 1] ?? null;
   }, [originalPreviewSnapshot, state.generatedHistory]);
   const visibleDays = useMemo(
-    () => (visibleSchedule ? getOwnedDisplayDays(visibleSchedule.days, previousVisibleSchedule) : []),
-    [previousVisibleSchedule, visibleSchedule],
+    () => (visibleSchedule ? buildVisibleScheduleDays(visibleSchedule, state.generatedHistory, previousVisibleSchedule) : []),
+    [previousVisibleSchedule, state.generatedHistory, visibleSchedule],
+  );
+  const visibleDayOwnerMonthKeyMap = useMemo(
+    () =>
+      new Map(
+        visibleDays.map((day) => [
+          day.dateKey,
+          getDayOwnerMonthKey(day.dateKey, visibleSchedule, state.generatedHistory),
+        ] as const),
+      ),
+    [state.generatedHistory, visibleDays, visibleSchedule],
   );
   const originalVisibleDays = useMemo(
     () =>
@@ -1119,13 +1174,14 @@ export function ScheduleApp() {
     }
   };
 
-  const startDayEdit = (dateKey: string) => {
+  const startDayEdit = (dateKey: string, ownerMonthKey?: string | null) => {
     flushSync(() => {
       setState((current) =>
         {
           if (current.editDateKey) return current;
+          const targetMonthKey = ownerMonthKey ?? visibleMonthKey;
           const sourceSchedule =
-            current.generatedHistory.find((item) => item.monthKey === (visibleMonthKey ?? "")) ??
+            current.generatedHistory.find((item) => item.monthKey === (targetMonthKey ?? "")) ??
             current.generated ??
             current.generatedHistory[current.generatedHistory.length - 1] ??
             null;
@@ -1836,7 +1892,8 @@ export function ScheduleApp() {
                   </div>
                 )})}
                 {visibleDays.map((day) => {
-                  const isEditingVisibleMonth = activeEditMonthKey === visibleSchedule.monthKey && isEditingDate;
+                  const dayOwnerMonthKey = visibleDayOwnerMonthKeyMap.get(day.dateKey) ?? visibleSchedule.monthKey;
+                  const isEditingVisibleMonth = activeEditMonthKey === dayOwnerMonthKey && isEditingDate;
                   const editMode =
                     isEditingVisibleMonth &&
                     (isAllDaysEditMode || state.editDateKey === day.dateKey);
@@ -1970,7 +2027,7 @@ export function ScheduleApp() {
                               style={{ padding: "5px 8px", fontSize: 12 }}
                               type="button"
                               disabled={editLocked}
-                              onClick={() => startDayEdit(day.dateKey)}
+                              onClick={() => startDayEdit(day.dateKey, dayOwnerMonthKey)}
                             >
                               수정
                             </button>
@@ -2078,6 +2135,7 @@ export function ScheduleApp() {
                                         dateKey: day.dateKey,
                                         category,
                                         dayLabel: `${day.month}/${day.day}`,
+                                        ownerMonthKey: dayOwnerMonthKey,
                                       });
                                       setAddPersonName("");
                                     }}
@@ -2191,7 +2249,7 @@ export function ScheduleApp() {
 
                                   const assignmentDisplay = getAssignmentDisplay(category, name);
                                   const ref: SchedulePersonRef = {
-                                    monthKey: visibleSchedule.monthKey,
+                                    monthKey: dayOwnerMonthKey,
                                     dateKey: day.dateKey,
                                     category,
                                     index,
@@ -2214,7 +2272,7 @@ export function ScheduleApp() {
                                   const nameTag = getAssignmentChipTag(category, assignmentDisplay.name, day);
                                   const assignmentDisplayText = formatScheduleAssignmentDisplayName(
                                     {
-                                      monthKey: visibleSchedule?.monthKey ?? "",
+                                      monthKey: dayOwnerMonthKey,
                                       dateKey: day.dateKey,
                                       category,
                                       index,

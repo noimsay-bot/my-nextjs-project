@@ -125,32 +125,24 @@ function applyRequiredDayOverride(day: DaySchedule): DaySchedule {
     };
   }
 
+  const hasExistingAssignments = Object.keys(day.assignments ?? {}).length > 0;
+  const effectiveAssignments = hasExistingAssignments ? day.assignments : override.assignments;
+  const normalizedSourceDay = {
+    ...day,
+    isHoliday: override.isHoliday,
+    assignments: effectiveAssignments,
+  };
+
   return {
     ...day,
     isHoliday: override.isHoliday,
     isCustomHoliday: override.isCustomHoliday,
     isWeekdayHoliday: override.isWeekdayHoliday,
-    assignments: normalizeDayAssignments({
-      ...day,
-      isHoliday: override.isHoliday,
-      assignments: override.assignments,
-    }),
-    assignmentNameTags: normalizeDayAssignmentNameTags({
-      ...day,
-      isHoliday: override.isHoliday,
-      assignments: override.assignments,
-    }),
-    assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides({
-      ...day,
-      isHoliday: override.isHoliday,
-      assignments: override.assignments,
-    }),
-    assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides({
-      ...day,
-      isHoliday: override.isHoliday,
-      assignments: override.assignments,
-    }),
-    manualExtras: [],
+    assignments: normalizeDayAssignments(normalizedSourceDay),
+    assignmentNameTags: normalizeDayAssignmentNameTags(normalizedSourceDay),
+    assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedSourceDay),
+    assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedSourceDay),
+    manualExtras: hasExistingAssignments ? day.manualExtras : [],
   };
 }
 

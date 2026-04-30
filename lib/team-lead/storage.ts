@@ -1242,6 +1242,46 @@ function createSyntheticScheduleDay(date: Date): DaySchedule {
   };
 }
 
+function cloneScheduleDay(day: DaySchedule): DaySchedule {
+  return JSON.parse(JSON.stringify(day)) as DaySchedule;
+}
+
+function buildCompleteMonthSchedule(
+  schedule: GeneratedSchedule,
+  allSchedulesByDateKey: Map<string, DaySchedule>,
+) {
+  const directDayMap = new Map(
+    schedule.days
+      .filter((day) => day.month === schedule.month && day.year === schedule.year)
+      .map((day) => [day.dateKey, day] as const),
+  );
+  const lastDay = new Date(schedule.year, schedule.month, 0).getDate();
+  const days = Array.from({ length: lastDay }, (_, index) => {
+    const date = new Date(schedule.year, schedule.month - 1, index + 1);
+    const dateKey = `${schedule.year}-${String(schedule.month).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`;
+    const sourceDay = directDayMap.get(dateKey) ?? allSchedulesByDateKey.get(dateKey);
+    return sourceDay ? cloneScheduleDay(sourceDay) : createSyntheticScheduleDay(date);
+  });
+
+  return {
+    ...schedule,
+    days,
+  };
+}
+
+function normalizeTeamLeadSchedules(schedules: GeneratedSchedule[]) {
+  const allSchedulesByDateKey = new Map<string, DaySchedule>();
+  schedules.forEach((schedule) => {
+    schedule.days.forEach((day) => {
+      if (!allSchedulesByDateKey.has(day.dateKey)) {
+        allSchedulesByDateKey.set(day.dateKey, day);
+      }
+    });
+  });
+
+  return schedules.map((schedule) => buildCompleteMonthSchedule(schedule, allSchedulesByDateKey));
+}
+
 function buildSyntheticScheduleFromAssignmentMonth(
   monthKey: string,
   store: ScheduleAssignmentDataStore,
@@ -1451,7 +1491,9 @@ export function getTeamLeadSchedules() {
   });
 
   return applyScheduleAssignmentNameTagsToSchedules(
-    Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
+    normalizeTeamLeadSchedules(
+      Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
+    ),
     store,
   );
 }
