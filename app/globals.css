@@ -3375,7 +3375,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 .portal-sidebar-usercard__level-next {
   justify-self: end;
   margin-top: -2px;
-  color: rgba(219, 234, 254, 0.82);
+  color: var(--text);
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
