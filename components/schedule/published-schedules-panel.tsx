@@ -59,7 +59,14 @@ const TOUCH_SCHEDULE_ZOOM_MIN = 1;
 const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
+const VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON = 0.01;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
+
+function isVisualViewportPinchZoomActive() {
+  if (typeof window === "undefined") return false;
+  const scale = window.visualViewport?.scale ?? 1;
+  return scale > 1 + VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON;
+}
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -136,6 +143,7 @@ type ScheduleDisplaySource = {
 };
 
 type PublishedSchedulesPanelMode = "home" | "page";
+type MobileSchedulePageViewMode = "full" | "three-day";
 
 type PublishedSchedulesPanelProps = {
   mode?: PublishedSchedulesPanelMode;
@@ -757,6 +765,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [hiddenPublishedMonthKeys, setHiddenPublishedMonthKeys] = useState<string[]>([]);
   const [draftHiddenPublishedMonthKeys, setDraftHiddenPublishedMonthKeys] = useState<string[]>([]);
   const [scheduleLayoutMode, setScheduleLayoutMode] = useState<PublishedScheduleLayoutMode>("desktop");
+  const [mobilePageViewMode, setMobilePageViewMode] = useState<MobileSchedulePageViewMode>("full");
   const [selectedRoute, setSelectedRoute] = useState<SchedulePersonRef[]>([]);
   const [isRecommendationPopoverOpen, setIsRecommendationPopoverOpen] = useState(false);
   const [inlineRecommendationConfirmRef, setInlineRecommendationConfirmRef] = useState<SchedulePersonRef | null>(null);
@@ -774,6 +783,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const lastFocusRefreshAtRef = useRef(0);
+  const isViewportPinchZoomActiveRef = useRef(false);
   const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
   const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [items, scheduleHistory]);
@@ -945,7 +955,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   useEffect(() => {
     if (typeof window === "undefined") return;
     const coarsePointerMediaQuery = window.matchMedia("(any-pointer: coarse)");
+    const visualViewport = window.visualViewport;
     const syncViewport = () => {
+      isViewportPinchZoomActiveRef.current = isVisualViewportPinchZoomActive();
+      if (isViewportPinchZoomActiveRef.current) return;
       const viewportWidth = Math.round(window.innerWidth);
       const viewportHeight = Math.round(window.innerHeight);
       setScheduleLayoutMode(
@@ -955,16 +968,28 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     const syncViewportByOrientation = () => {
       syncViewport();
     };
+    const handleVisualViewportChange = () => {
+      const wasPinching = isViewportPinchZoomActiveRef.current;
+      const isPinching = isVisualViewportPinchZoomActive();
+      isViewportPinchZoomActiveRef.current = isPinching;
+      if (wasPinching && !isPinching) {
+        syncViewport();
+      }
+    };
     syncViewport();
     coarsePointerMediaQuery.addEventListener?.("change", syncViewport);
     coarsePointerMediaQuery.addListener?.(syncViewport);
     window.addEventListener("resize", syncViewport);
     window.addEventListener("orientationchange", syncViewportByOrientation);
+    visualViewport?.addEventListener("resize", handleVisualViewportChange);
+    visualViewport?.addEventListener("scroll", handleVisualViewportChange);
     return () => {
       coarsePointerMediaQuery.removeEventListener?.("change", syncViewport);
       coarsePointerMediaQuery.removeListener?.(syncViewport);
       window.removeEventListener("resize", syncViewport);
       window.removeEventListener("orientationchange", syncViewportByOrientation);
+      visualViewport?.removeEventListener("resize", handleVisualViewportChange);
+      visualViewport?.removeEventListener("scroll", handleVisualViewportChange);
     };
   }, []);
 
@@ -1013,6 +1038,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
   const isHomeMobileThreeDayView = isHomePreview && scheduleLayoutMode === "mobile";
+  const isPageMobileThreeDayView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "three-day";
+  const isMobileThreeDayView = isHomeMobileThreeDayView || isPageMobileThreeDayView;
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
@@ -1028,15 +1055,19 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
         : displayDays,
     [displayDays, isHomeMobileThreeDayView, isHomePreview, todayKey],
   );
-  const homeMobilePreviewDayRows = useMemo(() => {
-    if (!isHomeMobileThreeDayView) return [];
+  const mobileThreeDayDisplayDays = useMemo(() => {
+    if (!isMobileThreeDayView) return [] as DisplayDay[];
+    return isHomeMobileThreeDayView ? getHomeMobilePreviewDays(displayDays, todayKey) : displayDays;
+  }, [displayDays, isHomeMobileThreeDayView, isMobileThreeDayView, todayKey]);
+  const mobileThreeDayRows = useMemo(() => {
+    if (!isMobileThreeDayView) return [];
 
     const rows: DisplayDay[][] = [];
-    for (let index = 0; index < visibleDisplayDays.length; index += 3) {
-      rows.push(visibleDisplayDays.slice(index, index + 3));
+    for (let index = 0; index < mobileThreeDayDisplayDays.length; index += 3) {
+      rows.push(mobileThreeDayDisplayDays.slice(index, index + 3));
     }
     return rows;
-  }, [isHomeMobileThreeDayView, visibleDisplayDays]);
+  }, [isMobileThreeDayView, mobileThreeDayDisplayDays]);
   const homePreviewTitle = selectedItem
     ? `${String(selectedItem.schedule.year).slice(-2)}년 ${selectedItem.schedule.month}월 이번주 근무표`
     : "이번주 근무표";
@@ -1147,7 +1178,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     if (!selectedItem) return;
 
     let frameId = 0;
+    const visualViewport = window.visualViewport;
     const measureSchedule = () => {
+      if (isViewportPinchZoomActiveRef.current) return;
       const scrollNode = scheduleScrollRef.current;
       const zoomNode = scheduleZoomRef.current;
       if (!scrollNode || !zoomNode) return;
@@ -1166,16 +1199,30 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
     const queueMeasure = () => {
       cancelAnimationFrame(frameId);
+      if (isViewportPinchZoomActiveRef.current) return;
       frameId = window.requestAnimationFrame(measureSchedule);
+    };
+
+    const handleVisualViewportChange = () => {
+      const wasPinching = isViewportPinchZoomActiveRef.current;
+      const isPinching = isVisualViewportPinchZoomActive();
+      isViewportPinchZoomActiveRef.current = isPinching;
+      if (wasPinching && !isPinching) {
+        queueMeasure();
+      }
     };
 
     queueMeasure();
     window.addEventListener("resize", queueMeasure);
     window.addEventListener("orientationchange", queueMeasure);
+    visualViewport?.addEventListener("resize", handleVisualViewportChange);
+    visualViewport?.addEventListener("scroll", handleVisualViewportChange);
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener("resize", queueMeasure);
       window.removeEventListener("orientationchange", queueMeasure);
+      visualViewport?.removeEventListener("resize", handleVisualViewportChange);
+      visualViewport?.removeEventListener("scroll", handleVisualViewportChange);
     };
   }, [
     compactMonthCardHeight,
@@ -1715,6 +1762,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
                           {showMine ? "전체 보기" : "내 근무 보기"}
                         </button>
+                        {scheduleLayoutMode === "mobile" && !isHomePreview ? (
+                          <button
+                            className={`btn ${isPageMobileThreeDayView ? "white" : ""}`}
+                            onClick={() =>
+                              setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"))
+                            }
+                          >
+                            보기 변경
+                          </button>
+                        ) : null}
                         <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
                           {editMode ? "근무 수정 완료" : "근무 수정"}
                         </button>
@@ -1780,12 +1837,14 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                   position: shouldAutoFitSchedule ? "absolute" : undefined,
                   top: shouldAutoFitSchedule ? 0 : undefined,
                   left: shouldAutoFitSchedule ? 0 : undefined,
+                  willChange: shouldAutoFitSchedule ? "transform" : undefined,
+                  backfaceVisibility: shouldAutoFitSchedule ? "hidden" : undefined,
                 }}
               >
               <div
-                className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"} ${isHomeMobileThreeDayView ? "schedule-calendar-grid--home-mobile-three-day" : ""}`}
+                className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"} ${isMobileThreeDayView ? "schedule-calendar-grid--home-mobile-three-day" : ""}`}
               >
-                {isHomeMobileThreeDayView ? (
+                {isMobileThreeDayView ? (
                   <div
                     style={{
                       display: "grid",
@@ -1793,7 +1852,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       width: "100%",
                     }}
                   >
-                    {homeMobilePreviewDayRows.map((row, rowIndex) => (
+                    {mobileThreeDayRows.map((row, rowIndex) => (
                       <div
                         key={`home-mobile-row-${rowIndex}`}
                         style={{
@@ -2208,7 +2267,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       style={{
                         position: "relative",
                         padding: 6,
-                        minHeight: isHomeMobileThreeDayView ? 160 : isCompactMonthlyView ? 148 : 216,
+                        minHeight: isMobileThreeDayView ? 160 : isCompactMonthlyView ? 148 : 216,
                         height: isCompactMonthlyView && compactMonthCardHeight ? compactMonthCardHeight : undefined,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
