@@ -1843,7 +1843,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
               >
                 {isMobileThreeDayView ? (
                   <div
-                    className="schedule-three-day-rows"
                     style={{
                       display: "grid",
                       gap: 6,
@@ -1853,7 +1852,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                     {mobileThreeDayRows.map((row, rowIndex) => (
                       <div
                         key={`home-mobile-row-${rowIndex}`}
-                        className="schedule-three-day-row"
                         style={{
                           display: "grid",
                           gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
@@ -1991,13 +1989,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                               </div>
                               <div className="schedule-day-body" style={{ display: "grid", gap: 1 }}>
                                 {visibleAssignments.map(([category, names]) => (
-                                  <div
-                                    key={`${day.dateKey}-${category}`}
-                                    className="schedule-assignment-row"
-                                    style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}
-                                  >
+                                  <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
                                     <div
-                                      className="schedule-assignment-content"
                                       style={{
                                         display: "grid",
                                         gridTemplateColumns: "44px minmax(0, 1fr)",
