@@ -60,7 +60,7 @@ type BrowserRealtimeChannel = ReturnType<BrowserSupabaseClient["channel"]>;
 type AuthCheckStatus = "idle" | "ok" | "missing_session" | "timeout" | "error";
 type ProfileFetchStatus = "ok" | "empty" | "timeout" | "error";
 
-const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
+const AUTH_CACHE_KEY = "j-special-force-auth-cache-v4";
 const USERS_CACHE_KEY = "j-special-force-users-cache-v2";
 const ROLE_EXPERIENCE_CACHE_KEY = "j-special-force-role-experience-v1";
 const LOGIN_EMAIL_CACHE_KEY = "j-special-force-login-email-cache-v1";
@@ -390,7 +390,7 @@ function normalizeExperienceRole(value: unknown): UserRole | null {
 }
 
 function hasIntrinsicReviewAccess(role: UserRole) {
-  return role === "reviewer" || role === "team_lead" || role === "admin";
+  return role === "reviewer" || role === "team_lead";
 }
 
 function buildSessionWithExperience(
@@ -405,7 +405,7 @@ function buildSessionWithExperience(
   const actualRole = normalizeUserRole(base.actualRole ?? base.role);
   const actualCanReview = base.actualCanReview ?? base.canReview;
   const experienceRole =
-    hasAdminAccess(actualRole)
+    hasTeamLeadAccess(actualRole)
       ? normalizeExperienceRole(requestedExperienceRole)
       : null;
   const effectiveExperienceRole =
@@ -1061,7 +1061,7 @@ export function primeSession(session: SessionUser | null) {
 }
 
 export function setRoleExperience(role: UserRole | null) {
-  if (!cachedSession || !hasAdminAccess(cachedSession.actualRole)) {
+  if (!cachedSession || !hasTeamLeadAccess(cachedSession.actualRole)) {
     return cachedSession;
   }
 
@@ -1419,7 +1419,7 @@ export function updateUserRole(userId: string, role: UserRole) {
 
   setCachedUsers(nextUsers);
 
-  if (hasAdminAccess(cachedSession?.role)) {
+  if (hasTeamLeadAccess(cachedSession?.role)) {
     const supabase = getSupabaseClient();
     void supabase.from("profiles").update({ role }).eq("id", userId);
   }
@@ -1440,6 +1440,10 @@ export function hasDeskAccess(role: UserRole | null | undefined) {
 
 export function hasAdminAccess(role: UserRole | null | undefined) {
   return role === "admin" || role === "team_lead";
+}
+
+export function hasTeamLeadAccess(role: UserRole | null | undefined) {
+  return role === "team_lead";
 }
 
 export function isReadOnlyPortalRole(role: UserRole | null | undefined) {

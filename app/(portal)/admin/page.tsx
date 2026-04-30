@@ -8,6 +8,13 @@ import {
   getAdminWorkspace,
   updateAdminProfileAccess,
 } from "@/lib/team-lead/storage";
+import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
+import {
+  getAdminPageVisitAnalytics,
+  PageVisitAnalytics,
+  PageVisitMetric,
+  PageVisitRange,
+} from "@/lib/portal/page-visit-analytics";
 
 const roles = ["member", "outlet", "reviewer", "observer", "team_lead", "desk", "admin"] as const;
 type RoleOption = (typeof roles)[number];
@@ -117,8 +124,8 @@ const permissionGuides = [
       background: "rgba(255,255,255,.08)",
     } as CSSProperties,
     lines: [
-      "모든 메뉴 접근과 사용자 role/승인 관리가 가능합니다.",
-      "베스트리포트 평가, 총괄팀장 기능, DESK 기능을 모두 사용할 수 있습니다.",
+      "관리자 페이지와 기본 포털 기능을 사용할 수 있습니다.",
+      "DESK는 근무표 관리 페이지만 사용할 수 있고, 총괄팀장 페이지와 권한 변경 기능은 사용할 수 없습니다.",
     ],
   },
 ];
@@ -130,8 +137,84 @@ function formatDateTime(value: string | null | undefined) {
   return date.toLocaleString("ko-KR");
 }
 
+const emptyPageVisitAnalytics: PageVisitAnalytics = {
+  week: [],
+  month: [],
+  schemaMissing: false,
+  message: null,
+};
+
+const visitRangeLabels: Record<PageVisitRange, string> = {
+  week: "최근 7일",
+  month: "최근 30일",
+};
+
+function PageVisitChart({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: PageVisitMetric[];
+}) {
+  const maxVisits = Math.max(...rows.map((row) => row.visits), 1);
+
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 12,
+        padding: 16,
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,.08)",
+        background: "rgba(255,255,255,.03)",
+      }}
+    >
+      <strong style={{ fontSize: 18 }}>{title}</strong>
+      <div style={{ display: "grid", gap: 12 }}>
+        {rows.map((row) => {
+          const width = `${Math.max(4, Math.round((row.visits / maxVisits) * 100))}%`;
+          return (
+            <div key={row.pageKey} style={{ display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                <strong>{row.label}</strong>
+                <span className="muted">
+                  방문 {row.visits}회 · {row.uniqueUsers}명
+                </span>
+              </div>
+              <div
+                aria-label={`${row.label} ${title} 방문 ${row.visits}회, 방문자 ${row.uniqueUsers}명`}
+                style={{
+                  position: "relative",
+                  height: 16,
+                  overflow: "hidden",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,.08)",
+                  background: "rgba(15,23,42,.38)",
+                }}
+              >
+                <div
+                  style={{
+                    width,
+                    height: "100%",
+                    borderRadius: 999,
+                    background: "linear-gradient(90deg, rgba(56,189,248,.82), rgba(125,211,252,.96))",
+                    boxShadow: row.visits > 0 ? "0 0 14px rgba(56,189,248,.32)" : "none",
+                    transition: "width .2s ease",
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
 export default function AdminPage() {
+  const canManageRoles = hasTeamLeadAccess(getSession()?.actualRole ?? getSession()?.role);
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
+  const [visitAnalytics, setVisitAnalytics] = useState<PageVisitAnalytics>(emptyPageVisitAnalytics);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -141,8 +224,12 @@ export default function AdminPage() {
   async function refresh() {
     setLoading(true);
     try {
-      const workspace = await getAdminWorkspace();
+      const [workspace, analytics] = await Promise.all([
+        getAdminWorkspace(),
+        getAdminPageVisitAnalytics(),
+      ]);
       setProfiles(workspace.profiles);
+      setVisitAnalytics(analytics);
       setDraftRoles(
         Object.fromEntries(workspace.profiles.map((profile) => [profile.id, profile.role])),
       );
@@ -230,6 +317,27 @@ export default function AdminPage() {
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div className="chip">방문 통계</div>
+              <strong style={{ fontSize: 22 }}>주요 페이지 방문 현황</strong>
+            </div>
+            <span className="muted">커뮤니티 · 근무표 · 내 주변 맛집</span>
+          </div>
+          {visitAnalytics.message ? (
+            <div className={`status ${visitAnalytics.schemaMissing ? "warn" : "note"}`}>
+              {visitAnalytics.message}
+            </div>
+          ) : null}
+          <div className="subgrid-2">
+            <PageVisitChart title={visitRangeLabels.week} rows={visitAnalytics.week} />
+            <PageVisitChart title={visitRangeLabels.month} rows={visitAnalytics.month} />
+          </div>
+        </div>
+      </article>
+
+      <article className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <div className="chip">사용자 목록</div>
               <span className="muted">전체 사용자 {profiles.length}명</span>
@@ -290,46 +398,50 @@ export default function AdminPage() {
                         >
                           {roleLabels[draftRole]}
                         </strong>
-                        <select
-                          className="field-select"
-                          value={draftRole}
-                          onChange={(event) =>
-                            setDraftRoles((current) => ({
-                              ...current,
-                              [profile.id]: event.target.value as RoleOption,
-                            }))
-                          }
-                        >
-                          {roles.map((role) => (
-                            <option key={role} value={role}>
-                              {roleLabels[role]}
-                            </option>
-                          ))}
-                        </select>
+                        {canManageRoles ? (
+                          <select
+                            className="field-select"
+                            value={draftRole}
+                            onChange={(event) =>
+                              setDraftRoles((current) => ({
+                                ...current,
+                                [profile.id]: event.target.value as RoleOption,
+                              }))
+                            }
+                          >
+                            {roles.map((role) => (
+                              <option key={role} value={role}>
+                                {roleLabels[role]}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
                       </div>
                     </td>
                     <td>{formatDateTime(profile.updatedAt)}</td>
                     <td>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          className="btn primary"
-                          disabled={!dirty || savingProfileId === profile.id}
-                          onClick={async () => {
-                            setSavingProfileId(profile.id);
-                            const result = await updateAdminProfileAccess(profile.id, {
-                              role: draftRole,
-                              approved: profile.approved,
-                            });
-                            setMessage(result.message);
-                            if (result.ok) {
-                              await refresh();
-                            }
-                            setSavingProfileId(null);
-                          }}
-                        >
-                          저장
-                        </button>
+                        {canManageRoles ? (
+                          <button
+                            type="button"
+                            className="btn primary"
+                            disabled={!dirty || savingProfileId === profile.id}
+                            onClick={async () => {
+                              setSavingProfileId(profile.id);
+                              const result = await updateAdminProfileAccess(profile.id, {
+                                role: draftRole,
+                                approved: profile.approved,
+                              });
+                              setMessage(result.message);
+                              if (result.ok) {
+                                await refresh();
+                              }
+                              setSavingProfileId(null);
+                            }}
+                          >
+                            저장
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="btn"

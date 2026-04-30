@@ -7,6 +7,7 @@ import {
   getSession,
   hasAdminAccess,
   hasMemberPortalAccess,
+  hasTeamLeadAccess,
   hasSupabaseSessionCookie,
   initializeAuth,
   primeSession,
@@ -37,7 +38,7 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/team-lead")) {
-    return hasAdminAccess(session.role);
+    return hasTeamLeadAccess(session.role);
   }
 
   if (pathname.startsWith("/review")) {
@@ -56,8 +57,19 @@ function hasAccess(
     return true;
   }
 
+  if (pathname === "/vacation") {
+    return Boolean(vacationRequestOpen);
+  }
+
   if (pathname.startsWith("/schedule/vacations")) {
-    return session.role === "desk" || session.role === "admin" || session.role === "team_lead";
+    return session.role === "desk" || session.role === "team_lead";
+  }
+
+  if (pathname.startsWith("/schedule")) {
+    if (session.role === "admin") {
+      return pathname.startsWith("/schedule/write");
+    }
+    return session.role === "desk" || session.role === "team_lead";
   }
 
   switch (session.role) {
@@ -79,8 +91,7 @@ function hasAccess(
       return (
         pathname === "/" ||
         pathname === "/vacation" ||
-        pathname.startsWith("/submissions") ||
-        pathname.startsWith("/schedule")
+        pathname.startsWith("/submissions")
       );
     case "team_lead":
       return (
@@ -91,7 +102,12 @@ function hasAccess(
         pathname.startsWith("/admin")
       );
     case "admin":
-      return true;
+      return (
+        pathname === "/" ||
+        pathname === "/vacation" ||
+        pathname.startsWith("/submissions") ||
+        pathname.startsWith("/admin")
+      );
     default:
       return hasMemberPortalAccess(session.role);
   }
@@ -247,7 +263,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (
-      (session.role === "member" || session.role === "outlet" || session.role === "reviewer") &&
       needsVacationAccessCheck &&
       vacationRequestOpen === null
     ) {
@@ -280,9 +295,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (
     authPending ||
-    ((session?.role === "member" || session?.role === "outlet" || session?.role === "reviewer") &&
-      needsVacationAccessCheck &&
-      vacationRequestOpen === null) ||
+    (needsVacationAccessCheck && vacationRequestOpen === null) ||
     ((session?.role === "member" || session?.role === "outlet") &&
       needsSubmissionAccessCheck &&
       submissionAccessOpen === null)

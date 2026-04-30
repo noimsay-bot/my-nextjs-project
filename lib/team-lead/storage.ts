@@ -2284,6 +2284,10 @@ function hasAdminLikeAccess(role: ReviewManagementProfileRow["role"] | null | un
   return role === "admin" || role === "team_lead";
 }
 
+function hasTeamLeadLikeAccess(role: ReviewManagementProfileRow["role"] | null | undefined) {
+  return role === "team_lead";
+}
+
 function formatReviewCandidate(row: ReviewManagementProfileRow): ReviewerCandidate {
   return {
     id: row.id,
@@ -3291,8 +3295,8 @@ export async function updateAdminProfileAccess(
   },
 ) {
   const session = await getPrivilegedPortalSession();
-  if (!session || !hasAdminLikeAccess(session.role)) {
-    return { ok: false as const, message: "관리자 권한이 없습니다." };
+  if (!session || !hasTeamLeadLikeAccess(session.role)) {
+    return { ok: false as const, message: "총괄팀장 권한이 필요합니다." };
   }
 
   const supabase = await getPrivilegedSupabaseClient();

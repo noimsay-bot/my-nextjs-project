@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DeskPopupNoticeManager } from "@/components/schedule/desk-popup-notice-manager";
+import { getSession } from "@/lib/auth/storage";
 
 const items = [
   { href: "/schedule/schedule-assignment", label: "일정배정" },
@@ -17,6 +18,10 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const headerRef = useRef<HTMLElement | null>(null);
   const isStickyPage = pathname.startsWith("/schedule/schedule-assignment");
+  const session = getSession();
+  const visibleItems = session?.role === "admin"
+    ? items.filter((item) => item.href === "/schedule/write")
+    : items;
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -75,7 +80,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
               paddingBottom: 2,
             }}
           >
-            {items.map((item) => {
+            {visibleItems.map((item) => {
               const active =
                 pathname === item.href ||
                 (item.href === "/schedule/write" &&
@@ -90,7 +95,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            <DeskPopupNoticeManager inline showMeta={false} />
+            {session?.role === "admin" ? null : <DeskPopupNoticeManager inline showMeta={false} />}
           </div>
         </div>
       </article>

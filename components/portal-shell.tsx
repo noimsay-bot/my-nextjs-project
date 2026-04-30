@@ -9,6 +9,7 @@ import { ScrollToTop } from "@/components/home/ScrollToTop";
 import {
   getSession,
   hasAdminAccess,
+  hasTeamLeadAccess,
   isReadOnlyPortalRole,
   logoutUser,
   setRoleExperience,
@@ -21,6 +22,7 @@ import {
   subscribeToPortalAccessState,
 } from "@/lib/portal/access-state";
 import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
+import { recordPageVisit } from "@/lib/portal/page-visit-analytics";
 
 type PortalNavChild = {
   href: string;
@@ -72,6 +74,14 @@ const links: PortalNavLink[] = [
   },
   { href: "/admin", label: "관리자" },
 ];
+
+function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
+  if (!link.children) return link;
+  return {
+    ...link,
+    children: link.children.filter((child) => childHrefs.includes(child.href)),
+  };
+}
 
 type PortalTheme = "dark" | "light" | "pink" | "green";
 
@@ -175,8 +185,8 @@ function getVisibleLinks(
           link.href === "/admin",
       );
     case "admin":
-      return links.filter(
-        (link) =>
+      return links
+        .filter((link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -184,9 +194,9 @@ function getVisibleLinks(
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/schedule" ||
           (link.href === "/review" && session.canReview && !reviewLocked) ||
-          link.href === "/team-lead" ||
           link.href === "/admin",
-      );
+        )
+        .map((link) => (link.href === "/schedule" ? withVisibleChildren(link, ["/schedule/write"]) : link));
     default:
       return links.filter(
         (link) =>
@@ -335,7 +345,7 @@ function PortalSidebar({
               로그아웃
             </button>
           ) : null}
-          {adminSession ? (
+          {adminSession && hasTeamLeadAccess(adminSession.actualRole) ? (
             <>
               <button type="button" className="btn primary portal-sidebar-action" onClick={onConfirmRoleExperience}>
                 확인
@@ -567,6 +577,10 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   }, [theme]);
 
   useEffect(() => {
+    void recordPageVisit(pathname);
+  }, [pathname]);
+
+  useEffect(() => {
     return subscribeToPortalAccessState((accessState) => {
       setVacationRequestOpen(accessState.vacationRequestOpen);
       setSubmissionAccessOpen(accessState.submissionAccessOpen);
@@ -625,7 +639,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   };
 
   const confirmRoleExperience = () => {
-    if (!adminSession) return;
+    if (!adminSession || !hasTeamLeadAccess(adminSession.actualRole)) return;
 
     const nextExperienceRole = experienceDraftRole === adminSession.actualRole ? null : experienceDraftRole;
     const confirmed = window.confirm(
