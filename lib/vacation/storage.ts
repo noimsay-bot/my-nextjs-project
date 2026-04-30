@@ -8,6 +8,7 @@ import {
 import {
   formatVacationEntry,
   getMonthKey,
+  isDeskPriorityVacationEntry,
   parseVacationMap,
   parseVacationEntry,
 } from "@/lib/schedule/engine";
@@ -1455,8 +1456,9 @@ export function applyVacationMonthToSchedule(year: number, month: number) {
   });
 
   Object.entries(approvedMap).forEach(([dateKey, entries]) => {
-    if (entries.length === 0) return;
-    nextVacationMap[dateKey] = [...entries];
+    const persistedEntries = entries.filter((entry) => !isDeskPriorityVacationEntry(entry));
+    if (persistedEntries.length === 0) return;
+    nextVacationMap[dateKey] = [...persistedEntries];
   });
 
   scheduleState.vacations = serializeVacationMap(nextVacationMap);

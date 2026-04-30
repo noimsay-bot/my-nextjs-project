@@ -232,8 +232,26 @@ function normalizeExtraHolidaysText(value: unknown, year?: number, month?: numbe
   return [...normalized].join(", ");
 }
 
+export function isDeskPriorityVacationEntry(value: string) {
+  return /^(근속휴가|건강검진)\s*:/.test(value.trim());
+}
+
+function filterNonDeskPriorityVacationMap(map: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(map)
+      .map(([dateKey, entries]) => [
+        dateKey,
+        entries.map((entry) => entry.trim()).filter((entry) => entry && !isDeskPriorityVacationEntry(entry)),
+      ])
+      .filter(([, entries]) => entries.length > 0),
+  ) as Record<string, string[]>;
+}
+
 function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
-  const vacationMap = mergeVacationMaps(getDeskPriorityVacationMap(), parseVacationMap(state.vacations));
+  const vacationMap = mergeVacationMaps(
+    getDeskPriorityVacationMap(),
+    filterNonDeskPriorityVacationMap(parseVacationMap(state.vacations)),
+  );
 
   days.forEach((day) => {
     const nextVacations = [...(vacationMap[day.dateKey] ?? [])];
@@ -485,6 +503,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     month: nextMonth,
     jcheckCount: DEFAULT_JCHECK_COUNT,
     extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays, nextYear, nextMonth),
+    vacations: serializeVacationMap(filterNonDeskPriorityVacationMap(parseVacationMap(input.vacations ?? base.vacations))),
     generalTeamPeople: generalTeamPeople,
     generalTeamRosterVersion: GENERAL_TEAM_ROSTER_VERSION,
     generalTeamOffPeople,
@@ -1882,7 +1901,9 @@ function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule
   // Keep the vacation source-of-truth aligned with manual edits in schedule edit mode.
   normalizedGenerated.days.forEach((day) => {
     delete nextVacationMap[day.dateKey];
-    const nextEntries = (day.assignments["휴가"] ?? day.vacations ?? []).map((name) => name.trim()).filter(Boolean);
+    const nextEntries = (day.assignments["휴가"] ?? day.vacations ?? [])
+      .map((name) => name.trim())
+      .filter((name) => name && !isDeskPriorityVacationEntry(name));
     if (nextEntries.length > 0) {
       nextVacationMap[day.dateKey] = nextEntries;
     }

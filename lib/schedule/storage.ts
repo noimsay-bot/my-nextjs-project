@@ -1,4 +1,5 @@
 import { defaultScheduleState } from "@/lib/schedule/constants";
+import { refreshDeskRecordStore } from "@/lib/schedule/desk-records";
 import { getMonthKey, sanitizeScheduleState } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
@@ -153,6 +154,8 @@ async function loadScheduleStateFromDb() {
     scheduleMonthKeyCache = new Set();
     return sanitizeScheduleState(defaultScheduleState);
   }
+
+  await refreshDeskRecordStore();
 
   const supabase = await getPortalSupabaseClient();
   const [{ data: settingsRow, error: settingsError }, { data: monthRows, error: monthError }] = await Promise.all([

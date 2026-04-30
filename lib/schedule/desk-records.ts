@@ -1,6 +1,16 @@
+import {
+  getPortalSession,
+  getPortalSupabaseClient,
+  getSupabaseStorageErrorMessage,
+  isSupabaseSchemaMissingError,
+} from "@/lib/supabase/portal";
+
 export type DeskRecordKind = "long-service-leave" | "health-check";
 
 export const DESK_RECORD_YEAR = 2026;
+export const DESK_RECORDS_EVENT = "j-desk-records-updated";
+export const DESK_RECORDS_STATUS_EVENT = "j-desk-records-status";
+const DESK_RECORDS_STATE_KEY = "desk_records_v1";
 
 export interface DeskRecordEntry {
   id: string;
@@ -17,6 +27,16 @@ export interface DeskRecordConfig {
   description: string;
   storageKey: string;
   seedEntries: DeskRecordEntry[];
+}
+
+interface DeskRecordStore {
+  "long-service-leave": DeskRecordEntry[];
+  "health-check": DeskRecordEntry[];
+}
+
+interface ScheduleSettingsStateRow {
+  key: string;
+  state: unknown;
 }
 
 const seedEntriesByKind: Record<DeskRecordKind, Array<Omit<DeskRecordEntry, "id" | "dateKeys">>> = {
@@ -229,6 +249,13 @@ function createSeedEntries(kind: DeskRecordKind) {
   );
 }
 
+function createSeedStore(): DeskRecordStore {
+  return {
+    "long-service-leave": createSeedEntries("long-service-leave"),
+    "health-check": createSeedEntries("health-check"),
+  };
+}
+
 export function getDeskRecordConfig(kind: DeskRecordKind): DeskRecordConfig {
   return {
     ...configByKind[kind],
@@ -256,14 +283,381 @@ function readEntriesFromStorage(kind: DeskRecordKind) {
   }
 }
 
-export function getDeskRecordEntries(kind: DeskRecordKind) {
-  return readEntriesFromStorage(kind);
+function createStoreFromLocalStorage(): DeskRecordStore {
+  return {
+    "long-service-leave": readEntriesFromStorage("long-service-leave"),
+    "health-check": readEntriesFromStorage("health-check"),
+  };
 }
 
-export function saveDeskRecordEntries(kind: DeskRecordKind, entries: DeskRecordEntry[]) {
+function normalizeDeskRecordStore(store: unknown): DeskRecordStore {
+  const localOrSeed = createStoreFromLocalStorage();
+  if (!store || typeof store !== "object") {
+    return localOrSeed;
+  }
+
+  const record = store as Record<string, unknown>;
+  return {
+    "long-service-leave": Array.isArray(record["long-service-leave"])
+      ? (record["long-service-leave"] as unknown[]).map((entry, index) =>
+          normalizeDeskRecordEntry("long-service-leave", entry as Partial<DeskRecordEntry>, index),
+        )
+      : localOrSeed["long-service-leave"],
+    "health-check": Array.isArray(record["health-check"])
+      ? (record["health-check"] as unknown[]).map((entry, index) =>
+          normalizeDeskRecordEntry("health-check", entry as Partial<DeskRecordEntry>, index),
+        )
+      : localOrSeed["health-check"],
+  };
+}
+
+let deskRecordCache: DeskRecordStore | null = null;
+let deskRecordRefreshPromise: Promise<DeskRecordStore> | null = null;
+let deskRecordPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let deskRecordPersistResolvers: Array<() => void> = [];
+
+function ensureDeskRecordCache() {
+  if (!deskRecordCache) {
+    deskRecordCache = createStoreFromLocalStorage();
+  }
+  return deskRecordCache;
+}
+
+function cloneDeskRecordStore(store: DeskRecordStore): DeskRecordStore {
+  return {
+    "long-service-leave": store["long-service-leave"].map((entry, index) =>
+      normalizeDeskRecordEntry("long-service-leave", entry, index),
+    ),
+    "health-check": store["health-check"].map((entry, index) =>
+      normalizeDeskRecordEntry("health-check", entry, index),
+    ),
+  };
+}
+
+function hasLocalStorageOverride(kind: DeskRecordKind) {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.localStorage.getItem(getDeskRecordConfig(kind).storageKey));
+}
+
+function writeEntriesToLocalStorage(kind: DeskRecordKind, entries: DeskRecordEntry[]) {
   if (typeof window === "undefined") return;
   const { storageKey } = getDeskRecordConfig(kind);
   window.localStorage.setItem(storageKey, JSON.stringify(entries));
+}
+
+function isDeskPriorityEntry(value: string) {
+  return /^(근속휴가|건강검진)\s*:/.test(value.trim());
+}
+
+function buildDeskPriorityMapFromStore(store: DeskRecordStore) {
+  const map: Record<string, string[]> = {};
+  const pushEntry = (dateKey: string, value: string) => {
+    map[dateKey] = [...(map[dateKey] ?? []), value];
+  };
+
+  store["long-service-leave"].forEach((entry) => {
+    entry.dateKeys.forEach((dateKey) => pushEntry(dateKey, `근속휴가:${entry.name}`));
+  });
+  store["health-check"].forEach((entry) => {
+    entry.dateKeys.forEach((dateKey) => pushEntry(dateKey, `건강검진:${entry.name}`));
+  });
+
+  return map;
+}
+
+function buildDeskPrioritySetMap(store: DeskRecordStore) {
+  return new Map(
+    Object.entries(buildDeskPriorityMapFromStore(store)).map(([dateKey, entries]) => [dateKey, new Set(entries)] as const),
+  );
+}
+
+function parseVacationStateText(value: string) {
+  const map: Record<string, string[]> = {};
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const matched = /^(\d{4}-\d{2}-\d{2})\s*:\s*(.+)$/.exec(line);
+      if (!matched) return;
+      const [, dateKey, rawEntries] = matched;
+      const entries = rawEntries.split(",").map((entry) => entry.trim()).filter(Boolean);
+      if (entries.length > 0) {
+        map[dateKey] = entries;
+      }
+    });
+  return map;
+}
+
+function serializeVacationStateText(map: Record<string, string[]>) {
+  return Object.keys(map)
+    .sort((left, right) => left.localeCompare(right))
+    .map((dateKey) => {
+      const entries = map[dateKey].map((entry) => entry.trim()).filter(Boolean);
+      if (entries.length === 0) return null;
+      return `${dateKey}:${entries.join(",")}`;
+    })
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function filterActiveDeskPriorityEntries(dateKey: string, entries: string[], activeMap: Map<string, Set<string>>) {
+  const activeEntries = activeMap.get(dateKey) ?? null;
+  return entries.filter((entry) => !isDeskPriorityEntry(entry) || Boolean(activeEntries?.has(entry)));
+}
+
+function scrubDeskPriorityFromSchedule(schedule: unknown, activeMap: Map<string, Set<string>>) {
+  if (!schedule || typeof schedule !== "object") return { schedule, changed: false };
+  const record = schedule as Record<string, unknown>;
+  const days = Array.isArray(record.days) ? record.days : null;
+  if (!days) return { schedule, changed: false };
+
+  let changed = false;
+  const nextDays = days.map((day) => {
+    if (!day || typeof day !== "object") return day;
+    const dayRecord = day as Record<string, unknown>;
+    const dateKey = typeof dayRecord.dateKey === "string" ? dayRecord.dateKey : "";
+    if (!dateKey) return day;
+
+    const assignments = dayRecord.assignments && typeof dayRecord.assignments === "object"
+      ? { ...(dayRecord.assignments as Record<string, string[]>) }
+      : {};
+    const currentVacationEntries =
+      Array.isArray(assignments["휴가"]) ? assignments["휴가"] : Array.isArray(dayRecord.vacations) ? (dayRecord.vacations as string[]) : [];
+    const nextVacationEntries = filterActiveDeskPriorityEntries(dateKey, currentVacationEntries, activeMap);
+
+    if (JSON.stringify(currentVacationEntries) === JSON.stringify(nextVacationEntries)) {
+      return day;
+    }
+
+    changed = true;
+    if (nextVacationEntries.length > 0) {
+      assignments["휴가"] = nextVacationEntries;
+    } else {
+      delete assignments["휴가"];
+    }
+
+    return {
+      ...dayRecord,
+      assignments,
+      vacations: nextVacationEntries,
+    };
+  });
+
+  if (!changed) return { schedule, changed: false };
+  return {
+    schedule: {
+      ...record,
+      days: nextDays,
+    },
+    changed: true,
+  };
+}
+
+function syncLocalStorageFromCache(store: DeskRecordStore) {
+  writeEntriesToLocalStorage("long-service-leave", store["long-service-leave"]);
+  writeEntriesToLocalStorage("health-check", store["health-check"]);
+}
+
+function emitDeskRecordEvent() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(DESK_RECORDS_EVENT));
+}
+
+function emitDeskRecordStatus(detail: { ok: boolean; message: string }) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(DESK_RECORDS_STATUS_EVENT, { detail }));
+}
+
+async function persistDeskRecordStoreNow(store: DeskRecordStore) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.from("schedule_settings").upsert({
+    key: DESK_RECORDS_STATE_KEY,
+    state: store,
+    updated_by: session.id,
+  });
+
+  if (error) {
+    throw new Error(getSupabaseStorageErrorMessage(error, "schedule_settings"));
+  }
+}
+
+async function cleanupDeskPriorityScheduleArtifacts(store: DeskRecordStore) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const activeMap = buildDeskPrioritySetMap(store);
+
+  const [{ data: globalRow, error: globalError }, { data: monthRows, error: monthError }] = await Promise.all([
+    supabase.from("schedule_settings").select("key,state").eq("key", "global").maybeSingle<ScheduleSettingsStateRow>(),
+    supabase.from("schedule_months").select("month_key,draft_state,published_state"),
+  ]);
+
+  if (globalError) {
+    throw new Error(getSupabaseStorageErrorMessage(globalError, "schedule_settings"));
+  }
+  if (monthError) {
+    throw new Error(getSupabaseStorageErrorMessage(monthError, "schedule_months"));
+  }
+
+  const globalState = globalRow?.state && typeof globalRow.state === "object"
+    ? { ...(globalRow.state as Record<string, unknown>) }
+    : null;
+
+  if (globalState) {
+    const currentVacations = typeof globalState.vacations === "string" ? globalState.vacations : "";
+    const currentMap = parseVacationStateText(currentVacations);
+    const nextMap = Object.fromEntries(
+      Object.entries(currentMap)
+        .map(([dateKey, entries]) => [dateKey, filterActiveDeskPriorityEntries(dateKey, entries, activeMap)])
+        .filter(([, entries]) => entries.length > 0),
+    ) as Record<string, string[]>;
+    const nextVacations = serializeVacationStateText(nextMap);
+
+    if (nextVacations !== currentVacations) {
+      const { error } = await supabase.from("schedule_settings").upsert({
+        key: "global",
+        state: {
+          ...globalState,
+          vacations: nextVacations,
+        },
+        updated_by: session.id,
+      });
+      if (error) {
+        throw new Error(getSupabaseStorageErrorMessage(error, "schedule_settings"));
+      }
+    }
+  }
+
+  const changedRows = (monthRows ?? [])
+    .map((row) => {
+      const draftResult = scrubDeskPriorityFromSchedule(row.draft_state, activeMap);
+      const publishedResult = scrubDeskPriorityFromSchedule(row.published_state, activeMap);
+      if (!draftResult.changed && !publishedResult.changed) {
+        return null;
+      }
+      return {
+        month_key: row.month_key,
+        draft_state: draftResult.schedule,
+        published_state: publishedResult.schedule,
+        updated_by: session.id,
+      };
+    })
+    .filter(Boolean);
+
+  if (changedRows.length > 0) {
+    const { error } = await supabase.from("schedule_months").upsert(changedRows);
+    if (error) {
+      throw new Error(getSupabaseStorageErrorMessage(error, "schedule_months"));
+    }
+  }
+}
+
+export async function refreshDeskRecordStore() {
+  if (deskRecordRefreshPromise) {
+    return deskRecordRefreshPromise;
+  }
+
+  deskRecordRefreshPromise = (async () => {
+    const fallbackStore = createStoreFromLocalStorage();
+    const session = await getPortalSession();
+    if (!session?.approved) {
+      deskRecordCache = fallbackStore;
+      return cloneDeskRecordStore(fallbackStore);
+    }
+
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("schedule_settings")
+      .select("key, state")
+      .eq("key", DESK_RECORDS_STATE_KEY)
+      .maybeSingle<ScheduleSettingsStateRow>();
+
+    if (error) {
+      if (isSupabaseSchemaMissingError(error)) {
+        console.warn(getSupabaseStorageErrorMessage(error, "schedule_settings"));
+        deskRecordCache = fallbackStore;
+        return cloneDeskRecordStore(fallbackStore);
+      }
+      throw new Error(error.message);
+    }
+
+    if (!data?.state) {
+      deskRecordCache = fallbackStore;
+      if (hasLocalStorageOverride("long-service-leave") || hasLocalStorageOverride("health-check")) {
+        await persistDeskRecordStoreNow(fallbackStore);
+      }
+      return cloneDeskRecordStore(fallbackStore);
+    }
+
+    const nextStore = normalizeDeskRecordStore(data.state);
+    deskRecordCache = nextStore;
+    syncLocalStorageFromCache(nextStore);
+    return cloneDeskRecordStore(nextStore);
+  })().finally(() => {
+    deskRecordRefreshPromise = null;
+  });
+
+  return deskRecordRefreshPromise;
+}
+
+function saveDeskRecordStore(store: DeskRecordStore) {
+  const previous = cloneDeskRecordStore(ensureDeskRecordCache());
+  deskRecordCache = cloneDeskRecordStore(store);
+  syncLocalStorageFromCache(store);
+  emitDeskRecordEvent();
+
+  if (deskRecordPersistTimer) {
+    clearTimeout(deskRecordPersistTimer);
+  }
+
+  return new Promise<void>((resolve) => {
+    deskRecordPersistResolvers.push(resolve);
+    deskRecordPersistTimer = setTimeout(() => {
+      deskRecordPersistTimer = null;
+      void persistDeskRecordStoreNow(cloneDeskRecordStore(store))
+        .then(async () => {
+          await cleanupDeskPriorityScheduleArtifacts(store);
+        })
+        .catch(async (error) => {
+          emitDeskRecordStatus({
+            ok: false,
+            message: error instanceof Error ? error.message : "인원 기록 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
+          });
+          deskRecordCache = previous;
+          syncLocalStorageFromCache(previous);
+          emitDeskRecordEvent();
+          await refreshDeskRecordStore();
+        })
+        .finally(() => {
+          const resolvers = [...deskRecordPersistResolvers];
+          deskRecordPersistResolvers = [];
+          resolvers.forEach((item) => item());
+        });
+    }, 180);
+  });
+}
+
+export function getDeskRecordEntries(kind: DeskRecordKind) {
+  const store = ensureDeskRecordCache();
+  return store[kind].map((entry, index) => normalizeDeskRecordEntry(kind, entry, index));
+}
+
+export function saveDeskRecordEntries(kind: DeskRecordKind, entries: DeskRecordEntry[]) {
+  const store = ensureDeskRecordCache();
+  const nextEntries = entries.map((entry, index) => normalizeDeskRecordEntry(kind, entry, index));
+  void saveDeskRecordStore({
+    ...store,
+    [kind]: nextEntries,
+  });
 }
 
 export function resetDeskRecordEntries(kind: DeskRecordKind) {

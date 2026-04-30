@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import { DateRangeField } from "@/components/schedule/date-range-field";
 import {
+  DESK_RECORDS_EVENT,
+  DESK_RECORDS_STATUS_EVENT,
   DeskRecordEntry,
   DeskRecordKind,
   formatDeskRecordDateKeys,
   getDeskRecordConfig,
   getDeskRecordEntries,
+  refreshDeskRecordStore,
   resetDeskRecordEntries,
   saveDeskRecordEntries,
 } from "@/lib/schedule/desk-records";
@@ -26,11 +29,39 @@ export function DeskRecordsPage({ kind }: { kind: DeskRecordKind }) {
   const config = getDeskRecordConfig(kind);
   const [entries, setEntries] = useState<DeskRecordEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [message, setMessage] = useState<{ tone: "ok" | "note"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: "ok" | "note" | "warn"; text: string } | null>(null);
 
   useEffect(() => {
-    setEntries(getDeskRecordEntries(kind));
-    setLoaded(true);
+    const syncFromCache = () => {
+      setEntries(getDeskRecordEntries(kind));
+      setLoaded(true);
+    };
+    const onStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setMessage({ tone: "warn", text: detail.message });
+    };
+
+    syncFromCache();
+    void refreshDeskRecordStore()
+      .then(() => {
+        syncFromCache();
+      })
+      .catch((error) => {
+        setLoaded(true);
+        setMessage({
+          tone: "warn",
+          text: error instanceof Error ? error.message : "기록을 불러오지 못했습니다.",
+        });
+      });
+
+    window.addEventListener(DESK_RECORDS_EVENT, syncFromCache);
+    window.addEventListener(DESK_RECORDS_STATUS_EVENT, onStatus);
+
+    return () => {
+      window.removeEventListener(DESK_RECORDS_EVENT, syncFromCache);
+      window.removeEventListener(DESK_RECORDS_STATUS_EVENT, onStatus);
+    };
   }, [kind]);
 
   const updateEntries = (nextEntries: DeskRecordEntry[], nextMessage?: { tone: "ok" | "note"; text: string } | null) => {
