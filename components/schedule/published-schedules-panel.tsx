@@ -1710,9 +1710,14 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       <VacationLegendChips />
                     </div>
-                    <Link href="/work-schedule" className="btn primary" style={{ marginLeft: "auto" }}>
-                      근무표 전체 보기
-                    </Link>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginLeft: "auto" }}>
+                      <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
+                        {showMine ? "전체 보기" : "내 근무 보기"}
+                      </button>
+                      <Link href="/work-schedule" className="btn primary">
+                        근무표 전체 보기
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ) : (
