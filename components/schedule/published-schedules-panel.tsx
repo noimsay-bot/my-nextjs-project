@@ -2063,6 +2063,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                           const mineHighlighted =
                                             isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
+                                          const editModeMineHighlighted =
+                                            isMine && editMode && !isAutoManagedGeneralCategory(category);
                                           const routeSelected = routeIncludes(selectedRoute, ref);
                                           const firstSelected = sameRef(firstSelectedRef, ref);
                                           const recommendedHighlighted =
@@ -2096,7 +2098,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 position: "relative",
                                                 width: "100%",
                                                 overflow: "visible",
-                                                zIndex: firstSelected ? 40 : routeSelected ? 10 : 1,
+                                                zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
                                               }}
                                             >
                                               <button
@@ -2173,11 +2175,18 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                   fontWeight: mineHighlighted ? 800 : 700,
                                                   lineHeight: 1.3,
                                                   boxShadow: mineHighlighted
-                                                    ? "0 6px 14px rgba(15,23,42,.34), 0 0 0 1px rgba(255,255,255,.18)"
+                                                    ? editModeMineHighlighted
+                                                      ? "0 14px 28px rgba(15,23,42,.48), 0 0 18px rgba(125,211,252,.36), 0 0 0 1px rgba(255,255,255,.2)"
+                                                      : "0 6px 14px rgba(15,23,42,.34), 0 0 0 1px rgba(255,255,255,.18)"
                                                     : "none",
                                                   textShadow: undefined,
                                                   opacity: dimOtherNames ? 0.42 : 1,
-                                                  transform: mineHighlighted ? "translateY(-1px)" : undefined,
+                                                  transform: editModeMineHighlighted
+                                                    ? "translateY(-2px) scale(1.5)"
+                                                    : mineHighlighted
+                                                      ? "translateY(-1px)"
+                                                      : undefined,
+                                                  transformOrigin: "center",
                                                   cursor: isInteractiveChip ? "pointer" : "default",
                                                 }}
                                               >
@@ -2432,6 +2441,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                   const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                   const mineHighlighted =
                                     isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
+                                  const editModeMineHighlighted =
+                                    isMine && editMode && !isAutoManagedGeneralCategory(category);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
                                   const recommendedHighlighted =
@@ -2464,10 +2475,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                       style={{
                                         position: "relative",
                                         width: "100%",
-                                        overflow: "visible",
-                                        zIndex: firstSelected ? 40 : routeSelected ? 10 : 1,
-                                      }}
-                                    >
+                                      overflow: "visible",
+                                      zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
+                                    }}
+                                  >
                                       <button
                                         type="button"
                                         className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
@@ -2542,11 +2553,18 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           fontWeight: mineHighlighted ? 800 : 700,
                                           lineHeight: 1.3,
                                           boxShadow: mineHighlighted
-                                            ? "0 6px 14px rgba(15,23,42,.34), 0 0 0 1px rgba(255,255,255,.18)"
+                                            ? editModeMineHighlighted
+                                              ? "0 14px 28px rgba(15,23,42,.48), 0 0 18px rgba(125,211,252,.36), 0 0 0 1px rgba(255,255,255,.2)"
+                                              : "0 6px 14px rgba(15,23,42,.34), 0 0 0 1px rgba(255,255,255,.18)"
                                             : "none",
                                           textShadow: undefined,
                                           opacity: dimOtherNames ? 0.42 : 1,
-                                          transform: mineHighlighted ? "translateY(-1px)" : undefined,
+                                          transform: editModeMineHighlighted
+                                            ? "translateY(-2px) scale(1.5)"
+                                            : mineHighlighted
+                                              ? "translateY(-1px)"
+                                              : undefined,
+                                          transformOrigin: "center",
                                           cursor: isInteractiveChip ? "pointer" : "default",
                                         }}
                                       >
