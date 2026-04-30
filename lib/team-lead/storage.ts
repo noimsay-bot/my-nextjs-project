@@ -2163,6 +2163,7 @@ const BEST_REPORT_2026_Q1_SCORE_ROWS = [
   ["정상원", ["22", "25", "20", "20", "20", "25", "20"], 21.4],
   ["정철원", ["24", "24", "22", "20", "22", "24", "20"], 22.4],
   ["이완근", ["23", "25", "21", "21", "21", "22", "20"], 21.6],
+  ["김진광", ["23", "24", "20", "21", "21", "20", "20"], 21.0],
   ["조용희", ["20", "23", "20", "20", "20", "17", "20"], 20.0],
   ["이지수", ["17", "22", "20", "17", "20", "20", "20"], 19.4],
   ["박대권", ["21", "23", "20", "20", "20", "21", "20"], 20.4],
@@ -2240,8 +2241,28 @@ function buildBestReport2026Q1Snapshot(): TeamLeadBestReportQuarterSnapshot {
 }
 
 function mergeDefaultBestReportQuarterSnapshots(snapshots: TeamLeadBestReportQuarterSnapshot[]) {
-  if (snapshots.some((snapshot) => snapshot.key === "2026-Q1")) return snapshots;
-  return [...snapshots, buildBestReport2026Q1Snapshot()].sort(
+  const defaultQ1Snapshot = buildBestReport2026Q1Snapshot();
+  const mergedSnapshots = snapshots.some((snapshot) => snapshot.key === defaultQ1Snapshot.key)
+    ? snapshots.map((snapshot) => {
+        if (snapshot.key !== defaultQ1Snapshot.key) return snapshot;
+
+        const existingAuthorNames = new Set(snapshot.rows.map((row) => row.authorName));
+        const missingRows = defaultQ1Snapshot.rows.filter((row) => !existingAuthorNames.has(row.authorName));
+        if (missingRows.length === 0) return snapshot;
+
+        const missingAuthorNames = new Set(missingRows.map((row) => row.authorName));
+        return {
+          ...snapshot,
+          rows: [...snapshot.rows, ...missingRows],
+          reviewerDetails: [
+            ...snapshot.reviewerDetails,
+            ...defaultQ1Snapshot.reviewerDetails.filter((row) => missingAuthorNames.has(row.authorName)),
+          ],
+        } satisfies TeamLeadBestReportQuarterSnapshot;
+      })
+    : [...snapshots, defaultQ1Snapshot];
+
+  return mergedSnapshots.sort(
     (left, right) => left.year - right.year || left.quarter - right.quarter,
   );
 }

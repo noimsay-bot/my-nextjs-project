@@ -2654,6 +2654,25 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   row-gap: 0 !important;
 }
 
+.schedule-published-panel--fit .schedule-calendar-zoom--page-mobile-three-day,
+.schedule-published-panel--fit .schedule-calendar-grid--page-mobile-three-day {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.schedule-published-panel--fit .schedule-calendar-grid--page-mobile-three-day {
+  display: block;
+}
+
+.schedule-published-panel--fit .schedule-calendar-grid--page-mobile-three-day > div {
+  width: 100%;
+}
+
+.schedule-published-panel--fit .schedule-calendar-grid--page-mobile-three-day .schedule-day-card {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
 .schedule-published-panel--fit .schedule-assignment-label {
   font-size: 14px !important;
 }
