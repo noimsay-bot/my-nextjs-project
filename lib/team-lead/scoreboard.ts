@@ -380,6 +380,14 @@ function getEligibleUsers() {
   ).sort((left, right) => left.localeCompare(right, "ko"));
 }
 
+function isEvaluationExcludedName(name: string) {
+  const trimmedName = name.trim();
+  if (!trimmedName) return true;
+  return getUsers().some(
+    (user) => user.status === "ACTIVE" && user.username.trim() === trimmedName && isTeamLeadEvaluationExcludedRole(user.role),
+  );
+}
+
 export function getTeamLeadManualScoreItems(
   category: TeamLeadManualScoreCategory,
   name: string,
@@ -398,6 +406,7 @@ export function updateTeamLeadManualScoreItems(
 ) {
   const trimmedName = name.trim();
   if (!trimmedName) return;
+  if (isEvaluationExcludedName(trimmedName)) return;
 
   const store = getScoreboardStore();
   const manualStore = getManualStoreByCategory(store, category, evaluationYear);
