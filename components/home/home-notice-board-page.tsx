@@ -379,14 +379,6 @@ export default function HomeNoticeBoardPage() {
     return category === "notice" ? canManageNotices : canWrite;
   }, [canManageNotices, canWrite]);
 
-  const getBoardHelpText = useCallback((category: CommunityBoardCategory) => {
-    return category === "notice"
-      ? "공지 게시판의 쓰기, 수정, 삭제는 DESK와 총괄팀장 권한자만 가능합니다."
-      : isReadOnlyUser
-        ? "Advisor와 Observer는 게시글과 댓글을 조회만 할 수 있습니다."
-        : "승인된 멤버는 글을 쓰고 자기 글을 수정하거나 삭제할 수 있습니다.";
-  }, [isReadOnlyUser]);
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <section className="panel">
@@ -398,7 +390,6 @@ export default function HomeNoticeBoardPage() {
                 <span className="muted">전체 글 {Object.values(categoryCounts).reduce((sum, count) => sum + count, 0)}건</span>
               </div>
               <strong style={{ fontSize: 24, lineHeight: 1.2 }}>커뮤니티</strong>
-              <span className="muted">공지, 경조사, 축하합니다, 자료실 게시판을 한 화면에서 함께 봅니다.</span>
             </div>
             <input
               className="field-input"
@@ -458,7 +449,6 @@ export default function HomeNoticeBoardPage() {
                       <span className="muted" style={{ fontSize: 12 }}>읽기 전용</span>
                     )}
                   </div>
-                  <span className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>{getBoardHelpText(category)}</span>
                 </div>
 
                 {isEditingThisCategory ? (
@@ -478,11 +468,6 @@ export default function HomeNoticeBoardPage() {
                           ? `${communityCategoryLabels[category]} 글 수정`
                           : `${communityCategoryLabels[category]} 글쓰기`}
                       </strong>
-                      <span className="muted" style={{ fontSize: 13 }}>
-                        {category === "notice"
-                          ? "데스크 공지는 이 게시판에 자동으로 함께 표시됩니다. 직접 올리는 공지도 같이 누적됩니다."
-                          : "현재 게시판에 새 글을 등록합니다."}
-                      </span>
                     </div>
                     <input
                       className="field-input"
@@ -509,9 +494,6 @@ export default function HomeNoticeBoardPage() {
                       >
                         <div style={{ display: "grid", gap: 4 }}>
                           <strong style={{ fontSize: 14 }}>홈 디데이</strong>
-                          <span className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-                            홈 뉴스 상단 우측에 노출됩니다. 이름과 목표 날짜를 정해 최대 3개까지 등록할 수 있습니다.
-                          </span>
                         </div>
                         <div
                           style={{
@@ -672,11 +654,7 @@ export default function HomeNoticeBoardPage() {
                               </button>
                             </div>
                           </div>
-                        ) : (
-                          <span className="muted" style={{ fontSize: 12 }}>
-                            자료실 글에는 문서 파일을 하나 첨부할 수 있습니다.
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                     ) : null}
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>

@@ -22,9 +22,10 @@ function serializeReferenceItems(items: TeamLeadReferenceNoteItem[]) {
 
 function getRoleLabel(role: TeamLeadReferenceNoteCard["role"]) {
   if (role === "reviewer") return "평가자";
+  if (role === "outlet") return "출입처";
   if (role === "desk") return "데스크";
   if (role === "admin") return "관리자";
-  return "멤버";
+  return "팀원";
 }
 
 export function ReferenceNotesPage() {

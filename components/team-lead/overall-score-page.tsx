@@ -129,7 +129,7 @@ function renderPrintRankingTable(cards: TeamLeadOverallScoreCard[], selectedName
             <th>이름</th>
             <th>총점</th>
             <th>정제본</th>
-            <th>평가 평균</th>
+            <th>영상평가</th>
             <th>팀 기여도</th>
             <th>장비/인적 사고</th>
             <th>라이브 무사고</th>
@@ -523,7 +523,7 @@ export function OverallScorePage() {
             </button>
           </div>
           <div className="status note">
-            활성 사용자 기준으로 개인별 기여도, 베스트리포트 평가 평균, 정제본, 장비/인적 사고, 라이브 무사고 점수를 합산합니다.
+            활성 사용자 기준으로 개인별 기여도, 베스트리포트 영상평가, 정제본, 장비/인적 사고, 라이브 무사고 점수를 합산합니다.
             정제본 점수는 현재까지 반영된 수행 결과를 기준으로 계산합니다.
           </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
@@ -619,7 +619,7 @@ export function OverallScorePage() {
                       background: "rgba(15,23,42,.16)",
                     }}
                   >
-                    <strong>베스트리포트 평가 평균</strong>
+                    <strong>베스트리포트 영상평가</strong>
                     <strong>{formatScore(card.videoReviewScore)}점</strong>
                   </div>
 

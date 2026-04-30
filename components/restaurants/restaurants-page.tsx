@@ -160,9 +160,6 @@ export function RestaurantsPage() {
             <div className="chip">내 주변 맛집</div>
             <div>
               <h1 style={{ margin: 0, fontSize: "clamp(30px, 5vw, 44px)", lineHeight: 1.05 }}>내 주변 맛집</h1>
-              <p className="muted" style={{ margin: "10px 0 0", fontSize: 15 }}>
-                현재 위치 기준으로 등록된 맛집을 확인할 수 있습니다.
-              </p>
             </div>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -225,7 +222,7 @@ export function RestaurantsPage() {
                   {currentLocation ? "현재 위치 기준 가까운 순" : "현재 위치 권한이 없으면 기본 등록 순으로 표시됩니다."}
                 </span>
               </div>
-              <RestaurantsList restaurants={nearbyRestaurants} hasCurrentLocation={Boolean(currentLocation)} />
+              <RestaurantsList restaurants={nearbyRestaurants} />
             </div>
           </div>
         </div>

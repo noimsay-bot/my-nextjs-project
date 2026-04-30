@@ -61,7 +61,7 @@ const links: PortalNavLink[] = [
     children: [
       { href: "/team-lead/overall-score", label: "개인별 점수" },
       { href: "/team-lead/overall-score-summary", label: "종합점수" },
-      { href: "/team-lead/reviewer-management", label: "리뷰어 관리" },
+      { href: "/team-lead/reviewer-management", label: "평가자 관리" },
       { href: "/team-lead/reference-notes", label: "참고사항" },
       { href: "/team-lead/broadcast-accident", label: "방송사고" },
       { href: "/team-lead/live-safety", label: "LIVE무사고" },
@@ -78,11 +78,11 @@ type PortalTheme = "dark" | "light" | "pink" | "green";
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
 const MOBILE_SIDEBAR_TRIGGER_STORAGE_KEY = "jtbc-mobile-sidebar-trigger-top";
 const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
-const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "reviewer", "advisor", "observer", "desk", "team_lead", "admin"];
+const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "outlet", "reviewer", "observer", "desk", "team_lead", "admin"];
 const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
-  member: "일반",
+  member: "팀원",
+  outlet: "출입처",
   reviewer: "평가자",
-  advisor: "Advisor",
   observer: "Observer",
   desk: "DESK",
   team_lead: "총괄팀장",
@@ -129,7 +129,7 @@ function getVisibleLinks(
 ) {
   switch (session?.role) {
     case "member":
-    case "advisor":
+    case "outlet":
     case "observer":
       return links.filter(
         (link) =>

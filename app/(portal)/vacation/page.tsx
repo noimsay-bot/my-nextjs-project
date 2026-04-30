@@ -212,7 +212,6 @@ export default function VacationPage() {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ display: "grid", gap: 6 }}>
               <div className="chip">휴가 신청</div>
-              <strong style={{ fontSize: 22 }}>달력으로 휴가 신청</strong>
             </div>
           </div>
           {isReadOnlyUser ? <div className="status note">현재 계정은 조회 전용이라 날짜 선택과 신청 제출을 할 수 없습니다.</div> : null}

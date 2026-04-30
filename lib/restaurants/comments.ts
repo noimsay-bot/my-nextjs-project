@@ -39,7 +39,7 @@ export async function createRestaurantComment(authorId: string, restaurantId: st
     if (isReadOnlyPortalRole(session.role)) {
       return {
         ok: false as const,
-        message: "Advisor와 Observer 등급은 코멘트를 등록할 수 없습니다.",
+        message: "Observer 등급은 코멘트를 등록할 수 없습니다.",
       };
     }
 
@@ -86,7 +86,7 @@ export async function updateRestaurantComment(editorId: string, commentId: strin
     if (isReadOnlyPortalRole(session.role)) {
       return {
         ok: false as const,
-        message: "Advisor와 Observer 등급은 코멘트를 수정할 수 없습니다.",
+        message: "Observer 등급은 코멘트를 수정할 수 없습니다.",
       };
     }
 
@@ -174,7 +174,7 @@ export async function deleteRestaurantComment(authorId: string, commentId: strin
     if (isReadOnlyPortalRole(session.role)) {
       return {
         ok: false as const,
-        message: "Advisor와 Observer 등급은 코멘트를 삭제할 수 없습니다.",
+        message: "Observer 등급은 코멘트를 삭제할 수 없습니다.",
       };
     }
 

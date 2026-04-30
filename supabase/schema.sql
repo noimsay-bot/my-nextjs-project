@@ -1,4 +1,4 @@
-create type public.app_role as enum ('member', 'reviewer', 'advisor', 'observer', 'desk', 'team_lead', 'admin');
+create type public.app_role as enum ('member', 'outlet', 'reviewer', 'observer', 'desk', 'team_lead', 'admin');
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
@@ -244,7 +244,7 @@ for insert
 to authenticated
 with check (
   author_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 drop policy if exists "submissions_update_own" on public.submissions;
@@ -254,11 +254,11 @@ for update
 to authenticated
 using (
   author_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 )
 with check (
   author_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 drop policy if exists "submissions_delete_own" on public.submissions;
@@ -268,7 +268,7 @@ for delete
 to authenticated
 using (
   author_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 drop policy if exists "submissions_select_reviewers_and_leads" on public.submissions;
@@ -744,7 +744,7 @@ to authenticated
 with check (
   applicant_id = auth.uid()
   and public.current_profile_approved() = true
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 drop policy if exists "home_popup_notice_applications_manage_privileged" on public.home_popup_notice_applications;
@@ -813,7 +813,7 @@ to authenticated
 with check (
   requester_id = auth.uid()
   and public.current_profile_approved() = true
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 drop policy if exists "vacation_requests_update_own" on public.vacation_requests;
@@ -823,11 +823,11 @@ for update
 to authenticated
 using (
   requester_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 )
 with check (
   requester_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 drop policy if exists "vacation_requests_delete_own" on public.vacation_requests;
@@ -837,7 +837,7 @@ for delete
 to authenticated
 using (
   requester_id = auth.uid()
-  and public.current_profile_role() not in ('advisor', 'observer')
+  and public.current_profile_role() <> 'observer'
 );
 
 create table if not exists public.vacation_months (

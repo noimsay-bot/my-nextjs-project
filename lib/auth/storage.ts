@@ -4,7 +4,7 @@ import {
   SUPABASE_ENV_ERROR_MESSAGE,
 } from "@/lib/supabase/client";
 
-export type UserRole = "member" | "reviewer" | "team_lead" | "admin" | "desk" | "advisor" | "observer";
+export type UserRole = "member" | "outlet" | "reviewer" | "team_lead" | "admin" | "desk" | "observer";
 export type UserStatus = "ACTIVE" | "DISABLED";
 
 export interface UserAccount {
@@ -75,7 +75,10 @@ const AUTH_TIMEOUT = Symbol("auth-timeout");
 let browserClient: ReturnType<typeof createSupabaseBrowserClient> | null = null;
 let cachedExperienceRole = readStoredExperienceRole();
 let cachedSession = normalizeStoredSession(readJson<SessionUser | null>(AUTH_CACHE_KEY, null));
-let cachedUsers = readJson<UserAccount[]>(USERS_CACHE_KEY, []);
+let cachedUsers = readJson<UserAccount[]>(USERS_CACHE_KEY, []).map((user) => ({
+  ...user,
+  role: normalizeUserRole(user.role),
+}));
 let authInitialized = false;
 let refreshPromise: Promise<SessionUser | null> | null = null;
 let initializePromise: Promise<SessionUser | null> | null = null;
@@ -360,12 +363,12 @@ export function getSupabaseSetupMessage() {
   return "Supabase 환경변수가 없습니다. `.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`를 설정하고 개발 서버를 다시 시작해 주세요.";
 }
 
-function normalizeRole(value: string | null | undefined): UserRole {
+export function normalizeUserRole(value: string | null | undefined): UserRole {
   return value === "reviewer" ||
+    value === "outlet" ||
     value === "team_lead" ||
     value === "admin" ||
     value === "desk" ||
-    value === "advisor" ||
     value === "observer"
     ? value
     : "member";
@@ -374,11 +377,11 @@ function normalizeRole(value: string | null | undefined): UserRole {
 function normalizeExperienceRole(value: unknown): UserRole | null {
   if (
     value === "member" ||
+    value === "outlet" ||
     value === "reviewer" ||
     value === "desk" ||
     value === "team_lead" ||
     value === "admin" ||
-    value === "advisor" ||
     value === "observer"
   ) {
     return value;
@@ -399,7 +402,7 @@ function buildSessionWithExperience(
   },
   requestedExperienceRole = cachedExperienceRole,
 ): SessionUser {
-  const actualRole = base.actualRole ?? base.role;
+  const actualRole = normalizeUserRole(base.actualRole ?? base.role);
   const actualCanReview = base.actualCanReview ?? base.canReview;
   const experienceRole =
     hasAdminAccess(actualRole)
@@ -493,13 +496,14 @@ async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean })
 }
 
 function profileToSession(profile: ProfileRow, canReview: boolean, mustChangePassword: boolean): SessionUser {
+  const role = normalizeUserRole(profile.role);
   return buildSessionWithExperience({
     id: profile.id,
     email: profile.email,
     loginId: profile.login_id ?? "",
     username: profile.name,
-    role: profile.role,
-    actualRole: profile.role,
+    role,
+    actualRole: role,
     approved: profile.approved,
     mustChangePassword,
     canReview,
@@ -515,7 +519,7 @@ function profileToAccount(profile: ProfileRow): UserAccount {
     password: "",
     email: profile.email,
     phone: "",
-    role: profile.role,
+    role: normalizeUserRole(profile.role),
     status: profile.approved ? "ACTIVE" : "DISABLED",
     mustChangePassword: false,
     createdAt: profile.created_at,
@@ -1439,19 +1443,19 @@ export function hasAdminAccess(role: UserRole | null | undefined) {
 }
 
 export function isReadOnlyPortalRole(role: UserRole | null | undefined) {
-  return role === "advisor" || role === "observer";
+  return role === "observer";
 }
 
 export function hasMemberPortalAccess(role: UserRole | null | undefined) {
   return (
     role === "member" ||
+    role === "outlet" ||
     role === "reviewer" ||
-    role === "advisor" ||
     role === "observer" ||
     hasDeskAccess(role)
   );
 }
 
-export function isTeamLeadEvaluationExcludedRole(role: UserRole | null | undefined) {
-  return role === "team_lead" || role === "desk" || role === "advisor" || role === "observer";
+export function isTeamLeadEvaluationExcludedRole(role: UserRole | string | null | undefined) {
+  return role === "team_lead" || role === "desk" || role === "outlet" || role === "observer";
 }

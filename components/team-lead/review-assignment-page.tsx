@@ -134,7 +134,7 @@ export function ReviewAssignmentPage() {
             <input
               className="field-input"
               style={{ width: 280 }}
-              placeholder="제출자, 제목, reviewer 검색"
+              placeholder="제출자, 제목, 평가자 검색"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -193,7 +193,7 @@ export function ReviewAssignmentPage() {
                             }))
                           }
                         >
-                          <option value="">reviewer 선택</option>
+                          <option value="">평가자 선택</option>
                           {candidates.map((candidate) => (
                             <option key={candidate.id} value={candidate.id}>
                               {candidate.name} ({candidate.email})
@@ -207,7 +207,7 @@ export function ReviewAssignmentPage() {
                         <strong>{getReviewStatusLabel(item)}</strong>
                         {currentReview ? (
                           <>
-                            <span className="muted">reviewer {currentReview.reviewerName}</span>
+                            <span className="muted">평가자 {currentReview.reviewerName}</span>
                             <span className="muted">총점 {currentReview.total ?? 0}</span>
                             <span className="muted">완료 시각 {formatDateTime(currentReview.completedAt)}</span>
                           </>

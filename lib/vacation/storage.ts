@@ -1222,7 +1222,7 @@ export function submitVacationRequests(input: {
 }) {
   const session = getSession();
   if (session && isReadOnlyPortalRole(session.role)) {
-    return { ok: false as const, message: "Advisor와 Observer 등급은 휴가 신청을 제출할 수 없습니다." };
+    return { ok: false as const, message: "Observer 등급은 휴가 신청을 제출할 수 없습니다." };
   }
 
   const requesterName = input.requesterName.trim();

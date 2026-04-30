@@ -801,11 +801,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     setDraftHiddenPublishedMonthKeys(nextHidden);
   }, [session?.id, session?.username]);
 
-  const getRequestScopeMonthKeys = () => {
-    const monthKeys = (items.length > 0 ? items : getPublishedSchedules()).map((item) => item.monthKey);
-    return Array.from(new Set(monthKeys)).sort((left, right) => left.localeCompare(right));
-  };
-
   const syncItemsFromCache = () => {
     setItems(
       getPublishedSchedules().map((item) => ({
@@ -816,7 +811,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   };
 
   const syncRequestsFromCache = () => {
-    setRequests(getScheduleChangeRequests(getRequestScopeMonthKeys()));
+    setRequests(getScheduleChangeRequests());
   };
 
   const loadItems = async () => {
@@ -832,7 +827,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const loadRequests = async () => {
     await refreshScheduleChangeRequests({
-      monthKeys: getRequestScopeMonthKeys(),
       statuses: ["pending"],
     });
     syncRequestsFromCache();

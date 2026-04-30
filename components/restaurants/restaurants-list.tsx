@@ -16,10 +16,8 @@ function formatCreatedAt(value: string) {
 
 export function RestaurantsList({
   restaurants,
-  hasCurrentLocation,
 }: {
   restaurants: NearbyRestaurant[];
-  hasCurrentLocation: boolean;
 }) {
   if (restaurants.length === 0) {
     return <div className="status note">등록된 맛집이 아직 없습니다.</div>;
@@ -46,11 +44,6 @@ export function RestaurantsList({
                   <span className="chip">#{index + 1}</span>
                   <span className="chip">{formatDistance(restaurant.distanceMeters)}</span>
                 </div>
-              </div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {hasCurrentLocation
-                  ? "현재 위치 기준 가까운 순으로 정렬했습니다."
-                  : "현재 위치 확인 전이라 등록 순으로 표시합니다."}
               </div>
               {restaurant.note ? (
                 <div

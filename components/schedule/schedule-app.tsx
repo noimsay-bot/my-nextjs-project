@@ -443,11 +443,13 @@ function buildVisibleScheduleDays(
   schedules: GeneratedSchedule[],
   previousSchedule?: { nextStartDate: string } | null,
 ) {
+  const startDateKey = previousSchedule?.nextStartDate ?? schedule.days[0]?.dateKey ?? "";
   const baseDays = getOwnedDisplayDays(schedule.days, previousSchedule).map((day) => cloneDaySchedule(day));
   const dayMap = new Map(baseDays.map((day) => [day.dateKey, day] as const));
 
   for (let day = 1; day <= getDaysInMonth(schedule.year, schedule.month); day += 1) {
     const dateKey = `${schedule.year}-${String(schedule.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (dateKey < startDateKey) continue;
     if (dayMap.has(dateKey)) continue;
     const matched = schedules
       .map((item) => item.days.find((entry) => entry.dateKey === dateKey))
@@ -570,8 +572,7 @@ export function ScheduleApp() {
   };
 
   const syncRequestsFromCache = () => {
-    const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
-    setRequests(getScheduleChangeRequests(routeMonthKey ? [routeMonthKey] : undefined));
+    setRequests(getScheduleChangeRequests());
   };
 
   const syncAssignmentDecorationsFromCache = (nextState: ScheduleState) => {
@@ -594,7 +595,6 @@ export function ScheduleApp() {
         refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey] } : undefined),
         includeRequests
           ? refreshScheduleChangeRequests({
-              monthKeys: routeMonthKey ? [routeMonthKey] : undefined,
               statuses: REQUEST_VISIBLE_STATUSES,
             })
           : Promise.resolve(),
@@ -624,9 +624,7 @@ export function ScheduleApp() {
   };
 
   const loadRequests = async () => {
-    const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
     await refreshScheduleChangeRequests({
-      monthKeys: routeMonthKey ? [routeMonthKey] : undefined,
       statuses: REQUEST_VISIBLE_STATUSES,
     });
     syncRequestsFromCache();

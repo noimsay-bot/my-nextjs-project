@@ -1,4 +1,4 @@
-import { getUsers } from "@/lib/auth/storage";
+import { getUsers, isTeamLeadEvaluationExcludedRole } from "@/lib/auth/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -373,7 +373,7 @@ function getEligibleUsers() {
     new Set(
       getUsers()
         .filter((user) => user.status === "ACTIVE")
-        .filter((user) => user.role !== "team_lead" && user.role !== "desk")
+        .filter((user) => !isTeamLeadEvaluationExcludedRole(user.role))
         .map((user) => user.username.trim())
         .filter(Boolean),
     ),

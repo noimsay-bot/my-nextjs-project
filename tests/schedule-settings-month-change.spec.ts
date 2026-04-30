@@ -43,4 +43,5 @@ test("changing the schedule month clears weekday holidays and updates the visibl
 
   await expect(holidayField).toHaveValue("");
   await expect(currentTitle).toHaveText("2026년 5월");
+  await expect(page.locator(".schedule-day-card").first()).toHaveAttribute("data-date-key", "2026-05-04");
 });

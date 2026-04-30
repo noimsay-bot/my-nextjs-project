@@ -79,7 +79,7 @@ export function setSubmittedReviewLock(userId: string, locked: boolean) {
 
 export async function subscribeToReviewWorkspaceChanges(onChange: () => void | Promise<void>) {
   const session = await getPortalSession();
-  if (!session || (session.role === "member" && !session.canReview)) {
+  if (!session || ((session.role === "member" || session.role === "outlet") && !session.canReview)) {
     return () => {};
   }
 
@@ -177,7 +177,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
   }
 
   const role = session.role;
-  if (role === "member" && !session.canReview) {
+  if ((role === "member" || role === "outlet") && !session.canReview) {
     return {
       entries: [],
       reviewState: {},
@@ -781,7 +781,7 @@ export async function saveMySubmissionEntry(cards: SubmissionCard[]) {
     return { ok: false as const, message: "로그인이 필요합니다." };
   }
   if (isReadOnlyPortalRole(session.role)) {
-    return { ok: false as const, message: "Advisor와 Observer 등급은 제출을 수정할 수 없습니다." };
+    return { ok: false as const, message: "Observer 등급은 제출을 수정할 수 없습니다." };
   }
 
   const sanitizedCards = cards

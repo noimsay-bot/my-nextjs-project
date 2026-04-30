@@ -70,7 +70,7 @@ export async function createRestaurant(authorId: string, input: RestaurantCreate
   if (isReadOnlyPortalRole(session.role)) {
     return {
       ok: false as const,
-      message: "Advisor와 Observer 등급은 맛집을 등록할 수 없습니다.",
+      message: "Observer 등급은 맛집을 등록할 수 없습니다.",
     };
   }
 

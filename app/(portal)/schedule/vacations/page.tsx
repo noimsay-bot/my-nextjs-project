@@ -260,7 +260,11 @@ export default function ScheduleVacationsPage() {
     return Array.from(
       new Set(
         users
-          .filter((user) => user.status === "ACTIVE" && (user.role === "member" || user.role === "reviewer"))
+          .filter(
+            (user) =>
+              user.status === "ACTIVE" &&
+              (user.role === "member" || user.role === "outlet" || user.role === "reviewer"),
+          )
           .filter((user) => !submittedIds.has(user.id) && !submittedNames.has(user.username.trim()))
           .map((user) => user.username.trim())
           .filter(Boolean),

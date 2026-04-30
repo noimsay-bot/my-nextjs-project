@@ -5,10 +5,8 @@ import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-
 import { subscribeToReviewWorkspaceChanges } from "@/lib/portal/data";
 import { getTeamLeadEvaluationYear } from "@/lib/team-lead/evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
-import { refreshScoreboardState } from "@/lib/team-lead/scoreboard";
 import {
   getTeamLeadBestReportResultsWorkspace,
-  saveCurrentBestReportResultsAsNextQuarter,
   TeamLeadBestReportQuarterSnapshot,
   TeamLeadBestReportReviewerDetailRow,
   TeamLeadBestReportResultsRow,
@@ -17,7 +15,7 @@ import {
 
 function formatScore(score: number | null) {
   if (score === null) return "-";
-  return `${score.toFixed(1)}점`;
+  return score.toFixed(1);
 }
 
 function buildBestReportPrintBody(reviewers: TeamLeadBestReportReviewer[], rows: TeamLeadBestReportResultsRow[]) {
@@ -67,11 +65,9 @@ export function BestReportResultsPage() {
   const [rows, setRows] = useState<TeamLeadBestReportResultsRow[]>([]);
   const [reviewerDetails, setReviewerDetails] = useState<TeamLeadBestReportReviewerDetailRow[]>([]);
   const [savedQuarters, setSavedQuarters] = useState<TeamLeadBestReportQuarterSnapshot[]>([]);
-  const [nextQuarterLabel, setNextQuarterLabel] = useState("1분기");
   const [selectedResultKey, setSelectedResultKey] = useState("current");
   const [selectedReviewerId, setSelectedReviewerId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [savingQuarter, setSavingQuarter] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   async function refresh() {
@@ -82,7 +78,6 @@ export function BestReportResultsPage() {
       setRows(workspace.rows);
       setReviewerDetails(workspace.reviewerDetails);
       setSavedQuarters(workspace.savedQuarters);
-      setNextQuarterLabel(`${workspace.nextQuarter.quarter}분기`);
       setSelectedResultKey((current) =>
         current === "current" || workspace.savedQuarters.some((quarter) => quarter.key === current) ? current : "current",
       );
@@ -138,7 +133,8 @@ export function BestReportResultsPage() {
   useEffect(() => {
     setSelectedResultKey((current) => {
       if (isCurrentEvaluationYear) {
-        return current === "current" || visibleSavedQuarters.some((quarter) => quarter.key === current) ? current : "current";
+        if (visibleSavedQuarters.some((quarter) => quarter.key === current)) return current;
+        return visibleSavedQuarters[0]?.key ?? "current";
       }
       return visibleSavedQuarters.some((quarter) => quarter.key === current)
         ? current
@@ -160,9 +156,7 @@ export function BestReportResultsPage() {
     (isCurrentEvaluationYear && selectedResultKey === "current" ? reviewerDetails : []);
   const selectedResultLabel = selectedQuarter
     ? selectedQuarter.label
-    : isCurrentEvaluationYear && selectedResultKey === "current"
-      ? "현재 결과"
-      : `${evaluationYear}년 저장 결과`;
+    : `${evaluationYear}년 저장 결과`;
 
   useEffect(() => {
     setSelectedReviewerId((current) => {
@@ -194,19 +188,31 @@ export function BestReportResultsPage() {
         .sort((left, right) => left.authorName.localeCompare(right.authorName, "ko")),
     [displayedReviewerDetails, selectedReviewerId],
   );
+  const sortedDisplayedRows = useMemo(
+    () =>
+      [...displayedRows].sort((left, right) => {
+        const rightScore = right.trimmedAverage ?? Number.NEGATIVE_INFINITY;
+        const leftScore = left.trimmedAverage ?? Number.NEGATIVE_INFINITY;
+        if (rightScore !== leftScore) return rightScore - leftScore;
+        return left.authorName.localeCompare(right.authorName, "ko");
+      }),
+    [displayedRows],
+  );
+  const scoredDisplayedRowCount = useMemo(
+    () => sortedDisplayedRows.filter((row) => row.trimmedAverage !== null).length,
+    [sortedDisplayedRows],
+  );
 
   const completedRowCount = useMemo(
     () => displayedRows.filter((row) => row.reviewerScores.some((score) => score.score !== null)).length,
     [displayedRows],
   );
 
-  const canSaveQuarter =
-    isCurrentEvaluationYear && selectedResultKey === "current" && completedRowCount > 0 && !loading && !savingQuarter;
   const handlePrint = () => {
     const ok = printTeamLeadDocument("영상평가 결과", [
       {
         title: `${selectedResultLabel} 영상평가 결과`,
-        bodyHtml: buildBestReportPrintBody(displayedReviewers, displayedRows),
+        bodyHtml: buildBestReportPrintBody(displayedReviewers, sortedDisplayedRows),
         size: displayedReviewers.length >= 6 ? "compact" : "dense",
       },
     ]);
@@ -246,36 +252,7 @@ export function BestReportResultsPage() {
             <button type="button" className="btn" onClick={handlePrint} disabled={loading || displayedRows.length === 0}>
               인쇄
             </button>
-            {isCurrentEvaluationYear ? (
-              <button
-                type="button"
-                className="btn primary"
-                disabled={!canSaveQuarter}
-                onClick={async () => {
-                  setSavingQuarter(true);
-                  try {
-                    const result = await saveCurrentBestReportResultsAsNextQuarter();
-                    if (result.ok) {
-                      setSelectedResultKey(result.savedQuarter.key);
-                      await refreshScoreboardState();
-                      await refresh();
-                      setMessage({ tone: "ok", text: result.message });
-                    } else {
-                      setMessage({ tone: "warn", text: result.message });
-                    }
-                  } finally {
-                    setSavingQuarter(false);
-                  }
-                }}
-              >
-                {savingQuarter ? `${nextQuarterLabel} 저장 중...` : `${nextQuarterLabel} 결과 저장`}
-              </button>
-            ) : null}
-            <span className="muted">
-              {isCurrentEvaluationYear && selectedResultKey === "current"
-                ? `저장하면 현재 결과를 ${nextQuarterLabel} 스냅샷으로 보관하고, 결과 페이지는 비워져 다음 분기 데이터를 새로 받습니다.`
-                : `${evaluationYear}년 저장 결과를 보고 있는 중입니다.`}
-            </span>
+            <span className="muted">{`${evaluationYear}년 저장 결과를 보고 있는 중입니다.`}</span>
           </div>
           <div className="status note">
             세로축은 피평가자, 가로축은 평가자입니다. 각 칸에는 해당 평가자가 1~3개 리포트에 입력한 점수 중 최고점만 표시하고,
@@ -293,35 +270,6 @@ export function BestReportResultsPage() {
           <div className="chip">저장된 분기</div>
           <strong style={{ fontSize: 22 }}>저장된 영상평가 결과</strong>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {isCurrentEvaluationYear ? (
-              <button
-                type="button"
-                onClick={() => setSelectedResultKey("current")}
-                style={{
-                  display: "grid",
-                  gap: 4,
-                  minWidth: 160,
-                  padding: "12px 14px",
-                  borderRadius: 16,
-                  border:
-                    selectedResultKey === "current"
-                      ? "1px solid rgba(56,189,248,.55)"
-                      : "1px solid rgba(255,255,255,.08)",
-                  background:
-                    selectedResultKey === "current"
-                      ? "rgba(14,165,233,.16)"
-                      : "rgba(255,255,255,.04)",
-                  color: "#f8fbff",
-                  textAlign: "left",
-                  cursor: "pointer",
-                }}
-              >
-                <strong>현재 결과</strong>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  피평가자 {rows.length}명
-                </span>
-              </button>
-            ) : null}
             {visibleSavedQuarters.length > 0 ? (
               [...visibleSavedQuarters]
                 .sort((left, right) => right.year - left.year || right.quarter - left.quarter)
@@ -329,11 +277,7 @@ export function BestReportResultsPage() {
                   <button
                     key={quarter.key}
                     type="button"
-                    onClick={() =>
-                      setSelectedResultKey((current) =>
-                        current === quarter.key ? (isCurrentEvaluationYear ? "current" : quarter.key) : quarter.key,
-                      )
-                    }
+                    onClick={() => setSelectedResultKey(quarter.key)}
                     style={{
                       display: "grid",
                       gap: 4,
@@ -371,7 +315,7 @@ export function BestReportResultsPage() {
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">평가자 명단</div>
+          <div className="chip">평가자 선택</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {reviewerCards.length > 0 ? (
               reviewerCards.map((reviewer) => (
@@ -384,9 +328,9 @@ export function BestReportResultsPage() {
                   style={{
                     display: "grid",
                     gap: 4,
-                    minWidth: 150,
-                    padding: "12px 14px",
-                    borderRadius: 18,
+                    minWidth: 120,
+                    padding: "10px 12px",
+                    borderRadius: 16,
                     border:
                       reviewer.id === selectedReviewerId
                         ? "1px solid rgba(56,189,248,.55)"
@@ -401,20 +345,12 @@ export function BestReportResultsPage() {
                   }}
                 >
                   <strong>{reviewer.name}</strong>
-                  <span className="muted" style={{ fontSize: 12 }}>{reviewer.email}</span>
-                  <span className="muted" style={{ fontSize: 12 }}>점수 입력 행 {reviewer.scoredCount}건</span>
                 </button>
               ))
             ) : (
               <div className="status note">{loading ? "평가자 명단을 불러오는 중입니다." : "평가자 지정에 저장된 명단이 없습니다."}</div>
             )}
           </div>
-        </div>
-      </article>
-
-      <article className="panel">
-        <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">선택 평가자 상세</div>
           <strong style={{ fontSize: 22 }}>
             {selectedReviewer ? `${selectedReviewer.name} 평가 상세` : "평가자를 선택해 주세요"}
           </strong>
@@ -477,11 +413,9 @@ export function BestReportResultsPage() {
             </div>
           ) : (
             <div className="status note">
-              {loading
-                ? "평가 상세를 불러오는 중입니다."
-                : selectedReviewer
+              {selectedReviewer
                   ? "이 평가자가 제출한 완료 평가가 없습니다."
-                  : "평가자 명단에서 이름카드를 선택해 주세요."}
+                  : "평가자를 선택해 주세요."}
             </div>
           )}
         </div>
@@ -502,41 +436,60 @@ export function BestReportResultsPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayedRows.map((row) => (
-                  <tr key={row.authorId}>
-                    <td>
-                      <strong>{row.authorName}</strong>
-                    </td>
-                    {row.reviewerScores.map((score) => (
-                      <td key={`${row.authorId}-${score.reviewerId}`} style={{ textAlign: "center" }}>
-                        <div
-                          title={
-                            score.reportCount > 0
-                              ? `리포트 점수: ${score.reportScores.map((item) => item.toFixed(1)).join(", ")}`
-                              : `${score.reviewerName} 평가 없음`
-                          }
-                          style={{ display: "grid", gap: 4, justifyItems: "center" }}
-                        >
-                          <strong style={{ color: score.score === null ? "#9bb0c7" : "#f8fbff" }}>{formatScore(score.score)}</strong>
-                          {score.reportCount > 1 ? (
-                            <span className="muted" style={{ fontSize: 12 }}>최고 {score.reportCount}건 중 1건</span>
-                          ) : score.reportCount === 1 ? (
-                            <span className="muted" style={{ fontSize: 12 }}>1건 완료</span>
-                          ) : (
-                            <span className="muted" style={{ fontSize: 12 }}>-</span>
-                          )}
-                        </div>
+                {sortedDisplayedRows.map((row, index) => {
+                  const hasAverageScore = row.trimmedAverage !== null;
+                  const isTopRank = hasAverageScore && index < 3;
+                  const isBottomRank =
+                    hasAverageScore && !isTopRank && index >= Math.max(0, scoredDisplayedRowCount - 3);
+                  const rankHighlightStyle = isTopRank
+                    ? {
+                        background: "rgba(134,239,172,.14)",
+                      }
+                    : isBottomRank
+                      ? {
+                          background: "rgba(252,165,165,.14)",
+                        }
+                      : undefined;
+
+                  return (
+                    <tr key={row.authorId} style={rankHighlightStyle}>
+                      <td>
+                        <strong>{row.authorName}</strong>
                       </td>
-                    ))}
-                    <td style={{ textAlign: "center" }}>
-                      <strong style={{ color: row.trimmedAverage === null ? "#9bb0c7" : "#fde68a" }}>{formatScore(row.trimmedAverage)}</strong>
-                    </td>
-                  </tr>
-                ))}
+                      {row.reviewerScores.map((score) => (
+                        <td key={`${row.authorId}-${score.reviewerId}`} style={{ textAlign: "center" }}>
+                          <div
+                            title={
+                              score.reportCount > 0
+                                ? `리포트 점수: ${score.reportScores.map((item) => item.toFixed(1)).join(", ")}`
+                                : `${score.reviewerName} 평가 없음`
+                            }
+                            style={{ display: "grid", gap: 4, justifyItems: "center" }}
+                          >
+                            <strong style={{ color: score.score === null ? "#9bb0c7" : "#f8fbff" }}>{formatScore(score.score)}</strong>
+                            {score.reportCount > 1 ? (
+                              <span className="muted" style={{ fontSize: 12 }}>
+                                최고 {score.reportCount}건 중 1건
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "center" }}>
+                        <strong
+                          className={row.trimmedAverage === null ? undefined : "best-report-trimmed-average-score"}
+                          style={{ color: row.trimmedAverage === null ? "#9bb0c7" : undefined }}
+                        >
+                          {formatScore(row.trimmedAverage)}
+                        </strong>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          {!displayedRows.length ? (
+          {!sortedDisplayedRows.length ? (
             <div className="status note">{loading ? "결과 표를 불러오는 중입니다." : "표시할 제출 데이터가 없습니다."}</div>
           ) : null}
         </div>

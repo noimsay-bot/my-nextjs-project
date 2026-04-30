@@ -454,12 +454,12 @@ export function OverallScoreSummaryPage() {
         }}
       >
         {[
-          { label: "전체 평균", value: averages.total },
-          { label: "정제본 평균", value: averages.finalCut },
-          { label: "평가 평균", value: averages.review },
-          { label: "팀 기여도 평균", value: averages.contribution },
-          { label: "사고 점수 평균", value: averages.accident },
-          { label: "LIVE 평균", value: averages.liveSafety },
+          { label: "전체", value: averages.total },
+          { label: "정제본", value: averages.finalCut },
+          { label: "영상평가", value: averages.review },
+          { label: "팀 기여도", value: averages.contribution },
+          { label: "사고 점수", value: averages.accident },
+          { label: "LIVE", value: averages.liveSafety },
         ].map((item) => (
           <article key={item.label} className="panel">
             <div className="panel-pad" style={{ display: "grid", gap: 6 }}>
@@ -513,7 +513,7 @@ export function OverallScoreSummaryPage() {
             <table className="team-lead-summary-table" style={{ width: "100%", minWidth: 840, borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  {["순위", "이름", "총점", "정제본", "평가 평균", "팀 기여도", "장비/인적 사고", "라이브 무사고"].map((label) => (
+                  {["순위", "이름", "총점", "정제본", "영상평가", "팀 기여도", "장비/인적 사고", "라이브 무사고"].map((label) => (
                     <th
                       key={label}
                       style={{

@@ -537,7 +537,7 @@ export default function ReviewPage() {
                 >
                   <div style={{ display: "grid", gap: 4 }}>
                     <strong style={{ fontSize: 24 }}>{current.submitter}</strong>
-                    {!canEdit && current.reviewerName ? <span className="muted">reviewer {current.reviewerName}</span> : null}
+                    {!canEdit && current.reviewerName ? <span className="muted">평가자 {current.reviewerName}</span> : null}
                   </div>
                   <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
                     <span className="muted">마지막 제출 업데이트: {current.updatedAt}</span>

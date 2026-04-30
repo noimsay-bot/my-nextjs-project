@@ -1,6 +1,12 @@
 "use client";
 
-import { getUsers, isReadOnlyPortalRole, isTeamLeadEvaluationExcludedRole, type UserRole } from "@/lib/auth/storage";
+import {
+  getUsers,
+  isReadOnlyPortalRole,
+  isTeamLeadEvaluationExcludedRole,
+  normalizeUserRole,
+  type UserRole,
+} from "@/lib/auth/storage";
 import {
   buildScheduleAssignmentNameTagKey,
   defaultPointers,
@@ -2140,6 +2146,106 @@ export interface TeamLeadBestReportResultsWorkspace {
   nextQuarter: TeamLeadBestReportQuarterTarget;
 }
 
+const BEST_REPORT_2026_Q1_REVIEWER_NAMES = ["박재현", "이경", "이학진", "방극철", "정철원", "김진광", "정재우"] as const;
+
+const BEST_REPORT_2026_Q1_SCORE_ROWS = [
+  ["반일훈", ["22", "24", "20", "20", "20", "20", "17"], 20.4],
+  ["김재식", ["22", "25+2", "20", "21", "22", "22", "20"], 21.4],
+  ["박재현", ["25", "24", "25+1", "22", "24", "25", "20"], 24.0],
+  ["구본준", ["20", "23", "20", "20", "21", "20", "20"], 20.2],
+  ["장후원", ["25+1", "24", "20", "21", "23", "23", "20"], 22.2],
+  ["이학진", ["24", "24", "20", "21", "21", "23", "20"], 21.8],
+  ["황현우", ["23", "24", "20", "20", "21", "20", "20"], 20.8],
+  ["유규열", ["21", "24", "20", "20", "21", "20", "20"], 20.4],
+  ["김준택", ["23", "23", "17", "20", "20", "18", "20"], 20.2],
+  ["방극철", ["23", "24", "22", "21", "20", "16", "20"], 21.2],
+  ["이주원", ["22", "24", "20", "20", "20", "21", "20"], 20.6],
+  ["정상원", ["22", "25", "20", "20", "20", "25", "20"], 21.4],
+  ["정철원", ["24", "24", "22", "20", "22", "24", "20"], 22.4],
+  ["이완근", ["23", "25", "21", "21", "21", "22", "20"], 21.6],
+  ["조용희", ["20", "23", "20", "20", "20", "17", "20"], 20.0],
+  ["이지수", ["17", "22", "20", "17", "20", "20", "20"], 19.4],
+  ["박대권", ["21", "23", "20", "20", "20", "21", "20"], 20.4],
+  ["이현일", ["17", "22", "20", "14", "20", "15", "20"], 18.4],
+  ["유연경", ["22", "25", "24", "21", "21", "20", "20"], 21.6],
+  ["정재우", ["20", "24", "22", "17", "20", "20", "17"], 20.6],
+] as const;
+
+function parseBestReportSeedScore(value: string) {
+  return roundScore(
+    value
+      .split("+")
+      .map((item) => Number(item.trim()))
+      .filter((item) => Number.isFinite(item))
+      .reduce((sum, item) => sum + item, 0),
+  );
+}
+
+function buildBestReport2026Q1Snapshot(): TeamLeadBestReportQuarterSnapshot {
+  const reviewers = BEST_REPORT_2026_Q1_REVIEWER_NAMES.map((name, index) => ({
+    id: `2026-q1-reviewer-${index + 1}`,
+    name,
+    email: "",
+  })) satisfies TeamLeadBestReportReviewer[];
+
+  const rows = BEST_REPORT_2026_Q1_SCORE_ROWS.map(([authorName, scores, average]) => ({
+    authorId: `2026-q1-author-${authorName}`,
+    authorName,
+    reviewerScores: reviewers.map((reviewer, index) => {
+      const score = parseBestReportSeedScore(scores[index] ?? "");
+      return {
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+        score,
+        reportCount: 1,
+        reportScores: [score],
+      } satisfies TeamLeadBestReportReviewerScore;
+    }),
+    trimmedAverage: average,
+  })) satisfies TeamLeadBestReportResultsRow[];
+
+  const reviewerDetails = reviewers.flatMap((reviewer, reviewerIndex) =>
+    BEST_REPORT_2026_Q1_SCORE_ROWS.map(([authorName, scores]) => {
+      const score = parseBestReportSeedScore(scores[reviewerIndex] ?? "");
+      return {
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+        authorId: `2026-q1-author-${authorName}`,
+        authorName,
+        totalScore: score,
+        reports: [
+          {
+            submissionId: `2026-q1-${reviewer.id}-${authorName}`,
+            reportType: "영상리포트",
+            reportTitle: "26년 1분기 영상리포트 점수표",
+            score,
+            completedAt: "2026-03-31T00:00:00+09:00",
+            updatedAt: "2026-03-31T00:00:00+09:00",
+          },
+        ],
+      } satisfies TeamLeadBestReportReviewerDetailRow;
+    }),
+  );
+
+  return {
+    year: 2026,
+    quarter: 1,
+    key: "2026-Q1",
+    label: "2026년 1분기",
+    savedAt: "2026-03-31T00:00:00+09:00",
+    reviewers,
+    rows,
+    reviewerDetails,
+  };
+}
+
+function mergeDefaultBestReportQuarterSnapshots(snapshots: TeamLeadBestReportQuarterSnapshot[]) {
+  if (snapshots.some((snapshot) => snapshot.key === "2026-Q1")) return snapshots;
+  return [...snapshots, buildBestReport2026Q1Snapshot()].sort(
+    (left, right) => left.year - right.year || left.quarter - right.quarter,
+  );
+}
+
 const REVIEW_MANAGEMENT_PROFILE_COLUMNS =
   "id, email, login_id, name, role, approved, created_at, updated_at";
 
@@ -2168,12 +2274,13 @@ function formatReviewCandidate(row: ReviewManagementProfileRow): ReviewerCandida
 }
 
 function formatAdminProfile(row: ReviewManagementProfileRow): AdminProfileItem {
+  const role = normalizeUserRole(row.role);
   return {
     id: row.id,
     email: row.email,
     loginId: row.login_id ?? "",
     name: row.name,
-    role: row.role,
+    role,
     approved: row.approved,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -2181,14 +2288,15 @@ function formatAdminProfile(row: ReviewManagementProfileRow): AdminProfileItem {
 }
 
 function formatReviewerRoleProfile(row: ReviewManagementProfileRow): ReviewerRoleProfileItem {
+  const role = normalizeUserRole(row.role);
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     loginId: row.login_id ?? "",
     role:
-      row.role === "reviewer" || row.role === "desk" || row.role === "admin"
-        ? row.role
+      role === "reviewer" || role === "outlet" || role === "desk" || role === "admin"
+        ? role
         : "member",
     approved: row.approved,
   };
@@ -2464,7 +2572,7 @@ async function getSavedBestReportQuarterSnapshots() {
     throw new Error(error.message);
   }
 
-  return normalizeBestReportQuarterSnapshots(data?.state);
+  return mergeDefaultBestReportQuarterSnapshots(normalizeBestReportQuarterSnapshots(data?.state));
 }
 
 async function getBestReportCurrentResetAt() {
@@ -2629,7 +2737,6 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
     .eq("approved", true)
-    .in("role", ["member", "reviewer", "desk", "admin"])
     .order("name", { ascending: true })
     .returns<ReviewManagementProfileRow[]>();
 
@@ -2638,7 +2745,12 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
   }
 
   return {
-    profiles: (data ?? []).map(formatReviewerRoleProfile),
+    profiles: (data ?? [])
+      .filter((profile) => {
+        const role = normalizeUserRole(profile.role);
+        return role === "member" || role === "outlet" || role === "reviewer" || role === "desk" || role === "admin";
+      })
+      .map(formatReviewerRoleProfile),
     grantedProfileIds: await getGrantedReviewerProfileIds(),
   };
 }
@@ -2682,15 +2794,15 @@ export async function getTeamLeadReferenceNotesWorkspace(
   const visibleProfiles = (profiles ?? []).filter((profile) => !isTeamLeadEvaluationExcludedRole(profile.role));
 
   return {
-    cards: visibleProfiles.map((profile) => ({
-      profileId: profile.id,
-      name: profile.name,
-      role:
-        profile.role === "reviewer" || profile.role === "desk" || profile.role === "admin"
-          ? profile.role
-          : "member",
-      items: [...(noteMap[profile.id] ?? [])],
-    })),
+    cards: visibleProfiles.map((profile) => {
+      const role = normalizeUserRole(profile.role);
+      return {
+        profileId: profile.id,
+        name: profile.name,
+        role: role === "reviewer" || role === "outlet" || role === "desk" || role === "admin" ? role : "member",
+        items: [...(noteMap[profile.id] ?? [])],
+      };
+    }),
   };
 }
 
@@ -3004,14 +3116,20 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
     .eq("approved", true)
-    .in("role", ["member", "reviewer", "desk", "admin"])
     .returns<ReviewManagementProfileRow[]>();
 
   if (profileError) {
     return { ok: false as const, message: profileError.message };
   }
 
-  const availableIds = new Set((profiles ?? []).map((profile) => profile.id));
+  const availableIds = new Set(
+    (profiles ?? [])
+      .filter((profile) => {
+        const role = normalizeUserRole(profile.role);
+        return role === "member" || role === "outlet" || role === "reviewer" || role === "desk" || role === "admin";
+      })
+      .map((profile) => profile.id),
+  );
   const grantedProfileIds = normalizedSelectedIds.filter((id) => availableIds.has(id));
 
   try {
@@ -3098,7 +3216,7 @@ export async function assignReviewerToSubmission(submissionId: string, reviewerI
     return { ok: false as const, message: assignError.message };
   }
 
-  return { ok: true as const, message: "reviewer assignment를 저장했습니다." };
+  return { ok: true as const, message: "평가자 배정을 저장했습니다." };
 }
 
 export async function resetSubmissionAssignment(submissionId: string) {

@@ -1371,7 +1371,7 @@ export async function saveCommunityBoardPost(input: {
     throw new Error(
       input.category === "notice"
         ? "공지 게시판은 DESK 또는 총괄팀장 권한자만 작성할 수 있습니다."
-        : "Advisor와 Observer 등급은 커뮤니티 글을 작성할 수 없습니다.",
+        : "Observer 등급은 커뮤니티 글을 작성할 수 없습니다.",
     );
   }
 
@@ -1447,7 +1447,7 @@ export async function updateCommunityBoardPost(input: {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
   if (isReadOnlyPortalRole(session.role)) {
-    throw new Error("Advisor와 Observer 등급은 커뮤니티 글을 수정할 수 없습니다.");
+    throw new Error("Observer 등급은 커뮤니티 글을 수정할 수 없습니다.");
   }
 
   const postId = input.postId.trim();
@@ -1532,7 +1532,7 @@ export async function deleteCommunityBoardPost(postId: string) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
   if (isReadOnlyPortalRole(session.role)) {
-    throw new Error("Advisor와 Observer 등급은 커뮤니티 글을 삭제할 수 없습니다.");
+    throw new Error("Observer 등급은 커뮤니티 글을 삭제할 수 없습니다.");
   }
 
   const trimmedPostId = postId.trim();
@@ -1588,7 +1588,7 @@ export async function saveCommunityBoardComment(input: {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
   if (isReadOnlyPortalRole(session.role)) {
-    throw new Error("Advisor와 Observer 등급은 댓글을 등록할 수 없습니다.");
+    throw new Error("Observer 등급은 댓글을 등록할 수 없습니다.");
   }
 
   const targetKey = input.targetKey.trim();
@@ -1651,7 +1651,7 @@ export async function applyToHomePopupNotice() {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
   if (isReadOnlyPortalRole(session.role)) {
-    throw new Error("Advisor와 Observer 등급은 신청할 수 없습니다.");
+    throw new Error("Observer 등급은 신청할 수 없습니다.");
   }
 
   const currentNotice = noticeCache ?? (await refreshHomePopupNoticeWorkspace()).notice;

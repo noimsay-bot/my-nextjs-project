@@ -1343,6 +1343,17 @@ html[data-theme="light"] .muted {
   color: #374151 !important;
 }
 
+html:not([data-theme="light"]) .best-report-trimmed-average-score {
+  color: #fb923c !important;
+  text-shadow: 0 0 12px rgba(251, 146, 60, 0.32);
+}
+
+html[data-theme="light"] .panel .best-report-trimmed-average-score {
+  color: #ea580c !important;
+  text-shadow: none;
+}
+
+
 html[data-theme="light"] [style*="border: 1px solid rgba(255,255,255"],
 html[data-theme="light"] [style*="border: 1px solid rgba(255, 255, 255"],
 html[data-theme="light"] [style*="border-bottom: 1px solid rgba(255,255,255"],

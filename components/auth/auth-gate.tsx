@@ -62,7 +62,7 @@ function hasAccess(
 
   switch (session.role) {
     case "member":
-    case "advisor":
+    case "outlet":
     case "observer":
       return (
         pathname === "/" ||
@@ -246,11 +246,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if ((session.role === "member" || session.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) {
+    if (
+      (session.role === "member" || session.role === "outlet" || session.role === "reviewer") &&
+      needsVacationAccessCheck &&
+      vacationRequestOpen === null
+    ) {
       return;
     }
 
-    if (session.role === "member" && needsSubmissionAccessCheck && submissionAccessOpen === null) {
+    if ((session.role === "member" || session.role === "outlet") && needsSubmissionAccessCheck && submissionAccessOpen === null) {
       return;
     }
 
@@ -276,8 +280,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (
     authPending ||
-    ((session?.role === "member" || session?.role === "reviewer") && needsVacationAccessCheck && vacationRequestOpen === null) ||
-    (session?.role === "member" && needsSubmissionAccessCheck && submissionAccessOpen === null)
+    ((session?.role === "member" || session?.role === "outlet" || session?.role === "reviewer") &&
+      needsVacationAccessCheck &&
+      vacationRequestOpen === null) ||
+    ((session?.role === "member" || session?.role === "outlet") &&
+      needsSubmissionAccessCheck &&
+      submissionAccessOpen === null)
   ) {
     return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   }
