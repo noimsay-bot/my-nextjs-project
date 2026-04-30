@@ -1827,7 +1827,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
               >
               <div
                 ref={scheduleZoomRef}
-                className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"} ${isPageMobileThreeDayView ? "schedule-calendar-zoom--page-mobile-three-day" : ""}`}
+                className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
                 style={{
                   transform: shouldAutoFitSchedule ? `scale(${appliedScheduleScale})` : undefined,
                   transformOrigin: shouldAutoFitSchedule ? "top left" : undefined,
@@ -1839,7 +1839,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                 }}
               >
               <div
-                className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"} ${isMobileThreeDayView ? "schedule-calendar-grid--home-mobile-three-day" : ""} ${isPageMobileThreeDayView ? "schedule-calendar-grid--page-mobile-three-day" : ""}`}
+                className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"} ${isMobileThreeDayView ? "schedule-calendar-grid--home-mobile-three-day" : ""}`}
               >
                 {isMobileThreeDayView ? (
                   <div
