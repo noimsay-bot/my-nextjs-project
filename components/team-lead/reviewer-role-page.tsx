@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   getTeamLeadReviewerRoleWorkspace,
   isTeamLeadSubmissionAccessOpen,
@@ -75,7 +76,17 @@ function writeNameChips(names: string[]) {
   window.localStorage.setItem(REVIEWER_NAME_CHIP_STORAGE_KEY, JSON.stringify(normalizeNames(names)));
 }
 
+function sortNamesByChipOrder(names: string[], order: Map<string, number>) {
+  return normalizeNames(names).sort((left, right) => {
+    const leftRank = order.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = order.get(right) ?? Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left.localeCompare(right, "ko");
+  });
+}
+
 export function ReviewerRolePage() {
+  const router = useRouter();
   const [profiles, setProfiles] = useState<ReviewerRoleProfileItem[]>([]);
   const [nameChips, setNameChips] = useState<string[]>(DEFAULT_REVIEWER_NAME_CHIPS);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
@@ -108,20 +119,10 @@ export function ReviewerRolePage() {
         .map((profile) => profile.name);
 
       setProfiles(workspace.profiles);
-      const sortedGrantedReviewerNames = normalizeNames(grantedReviewerNames).sort((left, right) => {
-        const leftRank = nameChipOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
-        const rightRank = nameChipOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
-        if (leftRank !== rightRank) return leftRank - rightRank;
-        return left.localeCompare(right, "ko");
-      });
+      const sortedGrantedReviewerNames = sortNamesByChipOrder(grantedReviewerNames, nameChipOrder);
       setSelectedNames((current) => {
         const currentMissing = current.filter((name) => !workspace.profiles.some((profile) => profile.name === name));
-        return normalizeNames([...sortedGrantedReviewerNames, ...currentMissing]).sort((left, right) => {
-          const leftRank = nameChipOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
-          const rightRank = nameChipOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
-          if (leftRank !== rightRank) return leftRank - rightRank;
-          return left.localeCompare(right, "ko");
-        });
+        return sortNamesByChipOrder([...sortedGrantedReviewerNames, ...currentMissing], nameChipOrder);
       });
       setMessage(null);
     } catch (error) {
@@ -140,14 +141,18 @@ export function ReviewerRolePage() {
 
   useEffect(() => {
     void refresh();
-  }, [nameChipOrder]);
+  }, []);
 
   useEffect(() => {
     const syncSubmissionOpen = () => {
       setSubmissionOpen(isTeamLeadSubmissionAccessOpen());
     };
 
-    void refreshTeamLeadSubmissionAccessState().then(syncSubmissionOpen);
+    void refreshTeamLeadSubmissionAccessState().then(() => {
+      const nextOpen = isTeamLeadSubmissionAccessOpen();
+      setSubmissionOpen(nextOpen);
+      void refresh();
+    });
     window.addEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
     return () => {
       window.removeEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncSubmissionOpen);
@@ -221,6 +226,51 @@ export function ReviewerRolePage() {
     setMessage({ tone: "note", text: `${name} 이름칩을 삭제했습니다.` });
   };
 
+  const handleAssignReviewers = async () => {
+    const linkedSelectedIds = selectedNames
+      .map((name) => profileByName.get(name)?.id ?? null)
+      .filter((id): id is string => Boolean(id));
+    const missingNames = selectedNames.filter((name) => !profileByName.has(name));
+
+    if (linkedSelectedIds.length === 0) {
+      setMessage({ tone: "warn", text: "평가자로 지정할 이름을 먼저 선택해 주세요." });
+      return;
+    }
+
+    const confirmed = window.confirm("선택한 인원을 평가자로 지정하시겠습니까?");
+    if (!confirmed) return;
+
+    setSaving(true);
+    const saveResult = await saveTeamLeadReviewerRoles(linkedSelectedIds);
+    setSaving(false);
+
+    setMessage({
+      tone: saveResult.ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
+      text: saveResult.ok
+        ? `평가자를 지정했습니다.${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 저장되지 않았습니다: ${missingNames.join(", ")}` : ""}`
+        : saveResult.message,
+    });
+
+    if (saveResult.ok) {
+      await refresh();
+    }
+  };
+
+  const handleOpenSubmissions = async () => {
+    setSaving(true);
+    const result = await setTeamLeadSubmissionAccessOpen(true);
+    setSaving(false);
+
+    if (!result.ok) {
+      setMessage({ tone: "warn", text: result.message });
+      return;
+    }
+
+    await refreshTeamLeadSubmissionAccessState();
+    setMessage({ tone: "ok", text: `${result.message} 베스트리포트 제출 페이지로 이동합니다.` });
+    router.push("/submissions");
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <section className="subgrid-3">
@@ -252,58 +302,13 @@ export function ReviewerRolePage() {
             <button
               type="button"
               className={`btn ${submissionOpen ? "white" : ""}`}
-              onClick={async () => {
-                if (!submissionOpen) {
-                  const linkedSelectedIds = selectedNames
-                    .map((name) => profileByName.get(name)?.id ?? null)
-                    .filter((id): id is string => Boolean(id));
-                  const missingNames = selectedNames.filter((name) => !profileByName.has(name));
-
-                  if (linkedSelectedIds.length === 0) {
-                    setMessage({ tone: "warn", text: "영상평가 제출을 오픈하려면 먼저 평가자를 선택해 주세요." });
-                    return;
-                  }
-
-                  const confirmed = window.confirm("평가자 지정을 마치셨나요?");
-                  if (!confirmed) return;
-
-                  setSaving(true);
-                  const saveResult = await saveTeamLeadReviewerRoles(linkedSelectedIds);
-                  if (!saveResult.ok) {
-                    setSaving(false);
-                    setMessage({
-                      tone: "warn",
-                      text: saveResult.message,
-                    });
-                    return;
-                  }
-
-                  const result = await setTeamLeadSubmissionAccessOpen(true);
-                  setSaving(false);
-                  setMessage({
-                    tone: result.ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
-                    text: result.ok
-                      ? `${result.message}${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 화면에서만 유지됩니다: ${missingNames.join(", ")}` : ""}`
-                      : result.message,
-                  });
-                  if (result.ok) {
-                    await refresh();
-                    await refreshTeamLeadSubmissionAccessState();
-                  }
-                  return;
-                }
-
-                const result = await setTeamLeadSubmissionAccessOpen(false);
-                setMessage({
-                  tone: result.ok ? "ok" : "warn",
-                  text: result.message,
-                });
-                if (result.ok) {
-                  await refreshTeamLeadSubmissionAccessState();
-                }
-              }}
+              onClick={handleOpenSubmissions}
+              disabled={saving}
             >
-              {submissionOpen ? "오픈중" : "영상평가 제출 오픈"}
+              {submissionOpen ? "오픈중 · 제출 페이지 열기" : "영상평가 제출 오픈"}
+            </button>
+            <button type="button" className="btn" onClick={handleAssignReviewers} disabled={saving || selectedNames.length === 0}>
+              평가자 지정
             </button>
             <button type="button" className="btn" onClick={() => setEditingNames((current) => !current)}>
               {editingNames ? "수정 완료" : "수정"}

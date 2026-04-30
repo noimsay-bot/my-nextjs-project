@@ -1388,6 +1388,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       return;
     }
 
+    if (isSameScheduleActorName(person.name, username)) {
+      setSelectedRoute([person.ref]);
+      setIsRecommendationPopoverOpen(true);
+      setInlineRecommendationConfirmRef(null);
+      setConfirmConflictRequest(false);
+      setRequestMessage("");
+      setRequestMessageTone("ok");
+      return;
+    }
+
     if (selectedRoute.length >= MAX_ROUTE_SIZE) {
       setRequestMessage("게시 근무표 요청은 최대 3명 경로까지 등록할 수 있습니다.");
       setRequestMessageTone("warn");
@@ -2136,12 +2146,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                         : "1px solid rgba(56,189,248,.75)"
                                                       : duplicated
                                                         ? "1px solid rgba(239,68,68,.28)"
-                                                        : recommendedHighlighted
-                                                          ? "3px solid rgba(255,255,255,.95)"
-                                                          : mineHighlighted
-                                                            ? "2px solid rgba(226,232,240,.82)"
-                                                            : dimOtherNames
-                                                              ? "1px solid rgba(255,255,255,.08)"
+                                                  : recommendedHighlighted
+                                                    ? "3px solid rgba(255,255,255,.95)"
+                                                  : mineHighlighted
+                                                    ? "4px solid rgba(226,232,240,.82)"
+                                                    : dimOtherNames
+                                                      ? "1px solid rgba(255,255,255,.08)"
                                                               : hasTaggedDisplayName
                                                                 ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
                                                                 : nameTagColors
@@ -2162,9 +2172,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                               : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                                   fontWeight: mineHighlighted ? 800 : 700,
                                                   lineHeight: 1.3,
-                                                  boxShadow: "none",
+                                                  boxShadow: mineHighlighted
+                                                    ? "0 6px 14px rgba(15,23,42,.34), 0 0 0 1px rgba(255,255,255,.18)"
+                                                    : "none",
                                                   textShadow: undefined,
                                                   opacity: dimOtherNames ? 0.42 : 1,
+                                                  transform: mineHighlighted ? "translateY(-1px)" : undefined,
                                                   cursor: isInteractiveChip ? "pointer" : "default",
                                                 }}
                                               >
@@ -2504,10 +2517,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 ? "1px solid rgba(239,68,68,.28)"
                                                 : recommendedHighlighted
                                                   ? "3px solid rgba(255,255,255,.95)"
-                                                  : mineHighlighted
-                                                    ? "2px solid rgba(226,232,240,.82)"
-                                                    : dimOtherNames
-                                                      ? "1px solid rgba(255,255,255,.08)"
+                                                : mineHighlighted
+                                                  ? "4px solid rgba(226,232,240,.82)"
+                                                  : dimOtherNames
+                                                    ? "1px solid rgba(255,255,255,.08)"
                                                       : hasTaggedDisplayName
                                                         ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
                                                         : nameTagColors
@@ -2528,9 +2541,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                       : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
                                           fontWeight: mineHighlighted ? 800 : 700,
                                           lineHeight: 1.3,
-                                          boxShadow: "none",
+                                          boxShadow: mineHighlighted
+                                            ? "0 6px 14px rgba(15,23,42,.34), 0 0 0 1px rgba(255,255,255,.18)"
+                                            : "none",
                                           textShadow: undefined,
                                           opacity: dimOtherNames ? 0.42 : 1,
+                                          transform: mineHighlighted ? "translateY(-1px)" : undefined,
                                           cursor: isInteractiveChip ? "pointer" : "default",
                                         }}
                                       >

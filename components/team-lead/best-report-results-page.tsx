@@ -7,6 +7,7 @@ import { getTeamLeadEvaluationYear } from "@/lib/team-lead/evaluation-year";
 import { escapeTeamLeadPrintHtml, printTeamLeadDocument } from "@/lib/team-lead/print";
 import {
   getTeamLeadBestReportResultsWorkspace,
+  saveCurrentBestReportResultsAsNextQuarter,
   TeamLeadBestReportQuarterSnapshot,
   TeamLeadBestReportReviewerDetailRow,
   TeamLeadBestReportResultsRow,
@@ -68,6 +69,7 @@ export function BestReportResultsPage() {
   const [selectedResultKey, setSelectedResultKey] = useState("current");
   const [selectedReviewerId, setSelectedReviewerId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   async function refresh() {
@@ -133,8 +135,9 @@ export function BestReportResultsPage() {
   useEffect(() => {
     setSelectedResultKey((current) => {
       if (isCurrentEvaluationYear) {
+        if (current === "current") return current;
         if (visibleSavedQuarters.some((quarter) => quarter.key === current)) return current;
-        return visibleSavedQuarters[0]?.key ?? "current";
+        return "current";
       }
       return visibleSavedQuarters.some((quarter) => quarter.key === current)
         ? current
@@ -156,7 +159,9 @@ export function BestReportResultsPage() {
     (isCurrentEvaluationYear && selectedResultKey === "current" ? reviewerDetails : []);
   const selectedResultLabel = selectedQuarter
     ? selectedQuarter.label
-    : `${evaluationYear}년 저장 결과`;
+    : isCurrentEvaluationYear && selectedResultKey === "current"
+      ? "현재 영상평가 결과"
+      : `${evaluationYear}년 저장 결과`;
 
   useEffect(() => {
     setSelectedReviewerId((current) => {
@@ -222,6 +227,25 @@ export function BestReportResultsPage() {
     }
   };
 
+  const handleConfirmResults = async () => {
+    if (confirming) return;
+    const ok = window.confirm("현재 영상평가 결과를 확정하고 평가자 권한을 해제하시겠습니까?");
+    if (!ok) return;
+
+    setConfirming(true);
+    const result = await saveCurrentBestReportResultsAsNextQuarter();
+    setConfirming(false);
+
+    if (!result.ok) {
+      setMessage({ tone: "warn", text: result.message });
+      return;
+    }
+
+    setMessage({ tone: "ok", text: `${result.message} 평가자 권한을 초기화했습니다.` });
+    await refresh();
+    setSelectedResultKey(result.savedQuarter.key);
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <section className="subgrid-3">
@@ -252,6 +276,16 @@ export function BestReportResultsPage() {
             <button type="button" className="btn" onClick={handlePrint} disabled={loading || displayedRows.length === 0}>
               인쇄
             </button>
+            {isCurrentEvaluationYear && selectedResultKey === "current" ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleConfirmResults}
+                disabled={loading || confirming || displayedRows.length === 0}
+              >
+                {confirming ? "확정 중..." : "평가 확정"}
+              </button>
+            ) : null}
             <span className="muted">{`${evaluationYear}년 저장 결과를 보고 있는 중입니다.`}</span>
           </div>
           <div className="status note">
@@ -270,6 +304,38 @@ export function BestReportResultsPage() {
           <div className="chip">저장된 분기</div>
           <strong style={{ fontSize: 22 }}>저장된 영상평가 결과</strong>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {isCurrentEvaluationYear ? (
+              <button
+                type="button"
+                onClick={() => setSelectedResultKey("current")}
+                style={{
+                  display: "grid",
+                  gap: 4,
+                  minWidth: 160,
+                  padding: "12px 14px",
+                  borderRadius: 16,
+                  border:
+                    selectedResultKey === "current"
+                      ? "1px solid rgba(56,189,248,.55)"
+                      : "1px solid rgba(255,255,255,.08)",
+                  background:
+                    selectedResultKey === "current"
+                      ? "rgba(14,165,233,.16)"
+                      : "rgba(255,255,255,.04)",
+                  color: "#f8fbff",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <strong>현재 결과</strong>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  피평가자 {rows.length}명
+                </span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  확정 전
+                </span>
+              </button>
+            ) : null}
             {visibleSavedQuarters.length > 0 ? (
               [...visibleSavedQuarters]
                 .sort((left, right) => right.year - left.year || right.quarter - left.quarter)
