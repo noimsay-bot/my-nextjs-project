@@ -767,7 +767,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const normalizedPathname = pathname ? pathname.replace(/\/+$/, "") || "/" : "";
-  const shouldShowGlobalScrollTop = !normalizedPathname.endsWith("/schedule-assignment");
+  const shouldShowGlobalScrollTop = normalizedPathname !== "/" && !normalizedPathname.endsWith("/schedule-assignment");
 
   return (
     <SidebarProvider defaultOpen={false}>

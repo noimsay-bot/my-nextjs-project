@@ -630,6 +630,18 @@ function getSummaryQuarterKeyInCurrentPeriod(monthKey: string, evaluationYear = 
   return getSummaryQuarterKey(monthKey);
 }
 
+function getManualContributionQuarterKey(evaluationYear = getTeamLeadEvaluationYear()) {
+  const period = getContributionPeriod(evaluationYear);
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const targetMonthKey =
+    currentMonthKey >= period.startMonthKey && currentMonthKey <= period.endMonthKey
+      ? currentMonthKey
+      : period.endMonthKey;
+
+  return getSummaryQuarterKey(targetMonthKey);
+}
+
 export function getVideoReviewSummaryRows(evaluationYear = getTeamLeadEvaluationYear()) {
   const eligibleNames = getEligibleUsers();
   const authorQuarterScoreMap = new Map<string, Map<TeamLeadSummaryQuarterKey, number>>();
@@ -687,6 +699,12 @@ export function getContributionSummaryRows(evaluationYear = getTeamLeadEvaluatio
         if (!quarterKey) return;
         quarterScoreMap.set(quarterKey, roundScore((quarterScoreMap.get(quarterKey) ?? 0) + item.totalScore));
       });
+
+      const manualScore = roundScore((card?.manualItems ?? []).reduce((sum, item) => sum + item.score, 0));
+      if (manualScore !== 0) {
+        const manualQuarterKey = getManualContributionQuarterKey(evaluationYear);
+        quarterScoreMap.set(manualQuarterKey, roundScore((quarterScoreMap.get(manualQuarterKey) ?? 0) + manualScore));
+      }
 
       const quarterScores = SUMMARY_QUARTERS.map((quarter) => ({
         key: quarter.key,
