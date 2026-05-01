@@ -624,12 +624,7 @@ function getHomeMobilePreviewDays(days: DisplayDay[], todayKey: string) {
           ? days.findIndex((day) => !day.isOverflowMonth)
           : 0;
 
-  const rotatedDays = [
-    ...days.slice(resolvedAnchorIndex),
-    ...days.slice(0, resolvedAnchorIndex),
-  ];
-
-  return rotatedDays.slice(0, 6);
+  return days.slice(resolvedAnchorIndex, resolvedAnchorIndex + 6);
 }
 
 function getPreviousDateKey(dateKey: string) {
@@ -1029,6 +1024,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     return scheduleHistory[selectedHistoryIndex - 1] ?? null;
   }, [previousSelectedItem, scheduleHistory, selectedItem]);
 
+  const nextSelectedItem = useMemo(() => {
+    if (!selectedItem) return null;
+    const index = activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey);
+    if (index < 0) return null;
+    return activeItems[index + 1] ?? null;
+  }, [activeItems, selectedItem]);
+
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
   const isHomeMobileThreeDayView = isHomePreview && scheduleLayoutMode === "mobile";
@@ -1040,20 +1042,33 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     () => (selectedItem ? buildDisplayDays(selectedItem, previousDisplaySource) : []),
     [previousDisplaySource, selectedItem],
   );
+  const homeMobileDisplayDays = useMemo(() => {
+    if (!isHomePreview || !selectedItem) return displayDays;
+    if (!nextSelectedItem) return displayDays;
+
+    const merged = new Map<string, DisplayDay>();
+    [...displayDays, ...buildDisplayDays(nextSelectedItem, selectedItem)].forEach((day) => {
+      if (!merged.has(day.dateKey)) {
+        merged.set(day.dateKey, day);
+      }
+    });
+
+    return Array.from(merged.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  }, [displayDays, isHomePreview, nextSelectedItem, selectedItem]);
   const visibleDisplayDays = useMemo(
     () =>
       isHomePreview
         ? isHomeMobileThreeDayView
-          ? getHomeMobilePreviewDays(displayDays, todayKey)
+          ? getHomeMobilePreviewDays(homeMobileDisplayDays, todayKey)
           : getWeeklyPreviewDays(displayDays, todayKey)
         : displayDays,
-    [displayDays, isHomeMobileThreeDayView, isHomePreview, todayKey],
+    [displayDays, homeMobileDisplayDays, isHomeMobileThreeDayView, isHomePreview, todayKey],
   );
   const mobileThreeDayDisplayDays = useMemo(() => {
     if (!isMobileThreeDayView) return [] as DisplayDay[];
-    if (isHomeMobileThreeDayView) return getHomeMobilePreviewDays(displayDays, todayKey);
+    if (isHomeMobileThreeDayView) return getHomeMobilePreviewDays(homeMobileDisplayDays, todayKey);
     return visibleDisplayDays;
-  }, [displayDays, isHomeMobileThreeDayView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
+  }, [homeMobileDisplayDays, isHomeMobileThreeDayView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
   const mobileThreeDayRows = useMemo(() => {
     if (!isMobileThreeDayView) return [];
 
