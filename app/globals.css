@@ -3174,7 +3174,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 }
 
 .portal-sidebar.is-collapsed .portal-sidebar__panel {
-  transform: translateX(calc(-1 * var(--portal-sidebar-width, 256px) + 56px));
+  transform: translateX(calc(-1 * var(--portal-sidebar-width, 256px) + 28px));
   cursor: pointer;
 }
 
@@ -3303,7 +3303,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   background: rgba(255, 255, 255, 0.08);
 }
 
-@media (min-width: 961px) {
+@media (min-width: 1025px) {
   .portal-sidebar__menu-item--has-children {
     overflow: visible;
   }
@@ -3432,7 +3432,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
 }
 
-@media (min-width: 961px) {
+@media (min-width: 1025px) {
   .portal-sidebar.is-collapsed .portal-sidebar-trigger--rail {
     top: calc(var(--portal-sidebar-rail-top, 12px) - 14px);
   }
@@ -3448,7 +3448,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   transition: opacity 0.2s ease;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1024px) {
   .portal-sidebar-layout {
     display: block;
   }
@@ -3487,16 +3487,20 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     top: var(--portal-sidebar-rail-top, 65px);
     left: 0;
     right: auto;
-    width: 40px !important;
-    min-width: 40px !important;
-    height: 100px !important;
-    min-height: 100px !important;
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
     padding: 0 !important;
     background: linear-gradient(180deg, var(--bg-start), var(--bg-mid));
     border: 1px solid var(--line);
     color: var(--text);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-    border-radius: 14px;
+    border-radius: 10px;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar-trigger--rail {
+    left: 0;
   }
 
   .portal-sidebar-backdrop.is-open {
@@ -3524,7 +3528,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   }
 }
 
-@media (min-width: 961px) {
+@media (min-width: 1025px) {
   .portal-header-shell__trigger-row {
     display: none;
   }
