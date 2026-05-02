@@ -1804,8 +1804,7 @@ function isSameScheduleAssignmentDisplayTarget(
   parsed: { dateKey: string; category: string; name: string } | null,
 ) {
   if (!parsed || parsed.dateKey !== input.dateKey) return false;
-  if (parsed.name.trim() !== input.name.trim()) return false;
-  return parsed.category === input.category || getScheduleCategoryLabel(parsed.category) === getScheduleCategoryLabel(input.category);
+  return parsed.name.trim() === input.name.trim();
 }
 
 function hasScheduleAssignmentTripDisplay(
@@ -1813,7 +1812,13 @@ function hasScheduleAssignmentTripDisplay(
   entry: ScheduleAssignmentEntry | null | undefined,
   visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag>,
 ) {
-  return Boolean(visibleTripTagMap.get(rowKey) || entry?.travelType || entry?.tripTagId);
+  const parsed = parseScheduleAssignmentRowKey(rowKey);
+  return Boolean(
+    visibleTripTagMap.get(rowKey) ||
+      entry?.travelType ||
+      entry?.tripTagId ||
+      (parsed && getScheduleCategoryLabel(parsed.category) === "출장"),
+  );
 }
 
 function findCustomScheduleAssignmentRowKeyForDisplay(
@@ -1825,7 +1830,7 @@ function findCustomScheduleAssignmentRowKeyForDisplay(
 
   const matched = dayRows.addedRows.find((row) => {
     if (row.name.trim() !== input.name.trim()) return false;
-    return row.duty === input.category || getScheduleCategoryLabel(row.duty) === getScheduleCategoryLabel(input.category);
+    return true;
   });
 
   return matched ? createCustomAssignmentRowKey(input.dateKey, matched.id) : null;
