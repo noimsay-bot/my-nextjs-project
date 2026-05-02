@@ -1792,8 +1792,43 @@ function buildScheduleAssignmentTripWorkspace(
   };
 }
 
-export function getScheduleAssignmentVisibleTripTagMap() {
-  return buildScheduleAssignmentTripWorkspace().visibleTripTagMap;
+export function getScheduleAssignmentVisibleTripTagMap(
+  schedules?: GeneratedSchedule[],
+  store?: ScheduleAssignmentDataStore,
+) {
+  return buildScheduleAssignmentTripWorkspace(schedules, store).visibleTripTagMap;
+}
+
+function isSameScheduleAssignmentDisplayTarget(
+  input: ScheduleAssignmentDisplayNameInput,
+  parsed: { dateKey: string; category: string; name: string } | null,
+) {
+  if (!parsed || parsed.dateKey !== input.dateKey) return false;
+  if (parsed.name.trim() !== input.name.trim()) return false;
+  return parsed.category === input.category || getScheduleCategoryLabel(parsed.category) === getScheduleCategoryLabel(input.category);
+}
+
+function hasScheduleAssignmentTripDisplay(
+  rowKey: string,
+  entry: ScheduleAssignmentEntry | null | undefined,
+  visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag>,
+) {
+  return Boolean(visibleTripTagMap.get(rowKey) || entry?.travelType || entry?.tripTagId);
+}
+
+function findCustomScheduleAssignmentRowKeyForDisplay(
+  input: ScheduleAssignmentDisplayNameInput,
+  store: ScheduleAssignmentDataStore,
+) {
+  const dayRows = store.rows[input.monthKey]?.[input.dateKey];
+  if (!dayRows) return null;
+
+  const matched = dayRows.addedRows.find((row) => {
+    if (row.name.trim() !== input.name.trim()) return false;
+    return row.duty === input.category || getScheduleCategoryLabel(row.duty) === getScheduleCategoryLabel(input.category);
+  });
+
+  return matched ? createCustomAssignmentRowKey(input.dateKey, matched.id) : null;
 }
 
 export function formatScheduleAssignmentDisplayName(
@@ -1807,7 +1842,24 @@ export function formatScheduleAssignmentDisplayName(
   const rowKey = createAssignmentRowKey(input.dateKey, input.category, input.index, input.name);
   const monthEntries = store.entries[input.monthKey] ?? {};
   const entry = monthEntries[rowKey] ?? null;
-  const hasTripTag = Boolean(visibleTripTagMap.get(rowKey) || entry?.travelType || entry?.tripTagId);
+  const hasTripTag = hasScheduleAssignmentTripDisplay(rowKey, entry, visibleTripTagMap);
+
+  if (!hasTripTag) {
+    const candidateRowKeys = new Set([...Object.keys(monthEntries), ...Array.from(visibleTripTagMap.keys())]);
+
+    for (const candidateRowKey of candidateRowKeys) {
+      const parsed = parseScheduleAssignmentRowKey(candidateRowKey);
+      if (!isSameScheduleAssignmentDisplayTarget(input, parsed)) continue;
+      if (hasScheduleAssignmentTripDisplay(candidateRowKey, monthEntries[candidateRowKey], visibleTripTagMap)) {
+        return `${trimmedName}(출)`;
+      }
+    }
+
+    const customRowKey = findCustomScheduleAssignmentRowKeyForDisplay(input, store);
+    if (customRowKey && hasScheduleAssignmentTripDisplay(customRowKey, monthEntries[customRowKey], visibleTripTagMap)) {
+      return `${trimmedName}(출)`;
+    }
+  }
 
   return hasTripTag ? `${trimmedName}(출)` : trimmedName;
 }

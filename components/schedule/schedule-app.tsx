@@ -40,9 +40,11 @@ import {
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentStore,
+  getScheduleAssignmentRows,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadAssignmentMonth,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
+  type ScheduleAssignmentDataStore,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
 import {
@@ -299,7 +301,7 @@ function getDayAssignmentSortRank(day: DaySchedule, category: string) {
   return getVisibleAssignmentDisplayRank(category, isWeekendLike);
 }
 
-function getVisibleDayAssignments(day: DaySchedule, options?: { editMode?: boolean }) {
+function getVisibleDayAssignments(day: DaySchedule, options?: { editMode?: boolean; assignmentStore?: ScheduleAssignmentDataStore; monthKey?: string | null }) {
   const isWeekendLike = day.isWeekend || day.isHoliday;
   const visibleMap = new Map<string, string[]>();
   const overrideOrder = (day.assignmentOrderOverrides ?? []).filter((category, index, array) => array.indexOf(category) === index);
@@ -331,6 +333,27 @@ function getVisibleDayAssignments(day: DaySchedule, options?: { editMode?: boole
         visibleMap.set(category, day.assignments[category] ?? []);
       }
     });
+  }
+
+  const monthKey = options?.monthKey ?? "";
+  const dayRows = monthKey ? options?.assignmentStore?.rows[monthKey]?.[day.dateKey] : null;
+  if (!editMode && dayRows) {
+    const generalCategory =
+      Object.keys(day.assignments).find((category) => isGeneralAssignmentCategory(category)) ??
+      (day.isWeekend ? "주말일반근무" : "일반");
+    const generalNames = getScheduleAssignmentRows(day, dayRows)
+      .filter((row) => getScheduleCategoryLabel(row.duty) === "일반")
+      .map((row) => row.name.trim())
+      .filter(Boolean);
+    const hasGeneralAddedRow = dayRows.addedRows.some((row) => getScheduleCategoryLabel(row.duty) === "일반");
+    const hasGeneralDeletedRow = dayRows.deletedRowKeys.some((rowKey) => {
+      const [, category = ""] = rowKey.split("::");
+      return getScheduleCategoryLabel(category) === "일반";
+    });
+
+    if (generalNames.length > 0 || hasGeneralAddedRow || hasGeneralDeletedRow) {
+      visibleMap.set(generalCategory, Array.from(new Set(generalNames)));
+    }
   }
 
   return Array.from(visibleMap.entries()).sort(
@@ -537,7 +560,6 @@ export function ScheduleApp() {
   const isEditingDate = Boolean(state.editDateKey);
   const activeEditMonthKey = state.editingMonthKey ?? state.generated?.monthKey ?? null;
   const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [state.generatedHistory, publishedItems]);
-  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [state.generatedHistory, publishedItems]);
 
   const markVisibleMonthAsLocallyFresh = (monthKey: string | null | undefined) => {
     lastLoadedAssignmentMonthRef.current = monthKey ?? "";
@@ -807,6 +829,10 @@ export function ScheduleApp() {
   const visibleMonthTabs = useMemo(
     () => (state.generatedHistory.length > 0 ? state.generatedHistory : visibleSchedule ? [visibleSchedule] : []),
     [state.generatedHistory, visibleSchedule],
+  );
+  const visibleTripTagMap = useMemo(
+    () => getScheduleAssignmentVisibleTripTagMap(visibleMonthTabs, scheduleAssignmentStore),
+    [scheduleAssignmentStore, visibleMonthTabs],
   );
   const originalSnapshotEntries = useMemo(
     () =>
@@ -1905,7 +1931,13 @@ export function ScheduleApp() {
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const duplicateNameSet = getDayDuplicateNameSet(day);
                   const headerNameDuplicated = Boolean(day.headerName?.trim()) && duplicateNameSet.has(day.headerName.trim());
-                  const visibleAssignments = getVisibleDayAssignments(day, { editMode });
+                  const visibleAssignments = getVisibleDayAssignments(day, {
+                    editMode,
+                    assignmentStore: scheduleAssignmentStore,
+                    monthKey: dayOwnerMonthKey,
+                  });
+                  const canDragAssignmentCategories = canDragAssignments;
+                  const canDropAssignmentCategories = canDropAssignments;
 
                   return (
                     <article
@@ -2040,25 +2072,26 @@ export function ScheduleApp() {
                           <article
                             key={`${day.dateKey}-${category}`}
                             data-category={category}
-                            draggable={canDragAssignments}
+                            draggable={canDragAssignmentCategories}
                             onDragStart={(event) => {
-                              if (!canDragAssignments) return;
+                              if (!canDragAssignmentCategories) return;
                               event.stopPropagation();
                               event.dataTransfer.effectAllowed = "move";
                               event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "category", dateKey: day.dateKey, category }));
                             }}
                             onDragOver={(event) => {
-                              if (!canDropAssignments) return;
+                              if (!canDropAssignmentCategories) return;
+                              const source = parseScheduleDragPayload(event.dataTransfer.getData("text/plain"));
+                              if (!source || source.kind !== "category") return;
                               event.preventDefault();
                             }}
                             onDrop={(event) => {
-                              if (!canDropAssignments) return;
-                              event.preventDefault();
                               const payload = event.dataTransfer.getData("text/plain");
                               if (!payload) return;
                               const source = parseScheduleDragPayload(payload);
-                              if (!source) return;
-                              if (source.kind === "person") return;
+                              if (!source || source.kind !== "category" || !canDropAssignmentCategories) return;
+                              event.preventDefault();
+                              event.stopPropagation();
                               if (source.dateKey === day.dateKey) {
                                 updateEditingState((current) => moveAssignmentCategory(current, day.dateKey, source.category, category));
                               }
@@ -2068,7 +2101,7 @@ export function ScheduleApp() {
                               borderRadius: 10,
                               padding: 6,
                               background: "rgba(9,17,30,.34)",
-                              cursor: canDragAssignments ? "grab" : "default",
+                              cursor: canDragAssignmentCategories ? "grab" : "default",
                             }}
                           >
                             <div
@@ -2201,6 +2234,8 @@ export function ScheduleApp() {
                                         key={`${category}-blank-${index}`}
                                         onDragOver={(event) => {
                                           if (!canDropAssignments) return;
+                                          const source = parseScheduleDragPayload(event.dataTransfer.getData("text/plain"));
+                                          if (source?.kind === "category") return;
                                           event.preventDefault();
                                           event.stopPropagation();
                                         }}
@@ -2289,6 +2324,8 @@ export function ScheduleApp() {
                                       key={personObject.key}
                                       onDragOver={(event) => {
                                         if (!canDropAssignments) return;
+                                        const source = parseScheduleDragPayload(event.dataTransfer.getData("text/plain"));
+                                        if (source?.kind === "category") return;
                                         event.preventDefault();
                                         event.stopPropagation();
                                       }}
