@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSession, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import { SCHEDULE_MONTHS, SCHEDULE_YEARS } from "@/lib/schedule/constants";
 import { VacationType } from "@/lib/schedule/types";
+import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import {
   getVacationCalendarDateItems,
   getVacationManagedDateKeys,
@@ -19,6 +20,11 @@ import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/sche
 import { refreshScheduleState } from "@/lib/schedule/storage";
 
 const vacationWeekdayLabels = ["월", "화", "수", "목", "금"];
+
+type VacationApplicantBadge = {
+  name: string;
+  type: Extract<VacationType, "연차" | "대휴">;
+};
 
 function getDefaultVacationTargetMonth(baseDate = new Date()) {
   const nextDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
@@ -148,14 +154,21 @@ export default function VacationPage() {
   );
   const requestCalendarCells = useMemo(() => buildVacationCalendarCells(calendarDateItems), [calendarDateItems]);
   const requestLoadByDate = useMemo(() => {
-    const map = new Map<string, string[]>();
+    const map = new Map<string, VacationApplicantBadge[]>();
     monthRequests.forEach((request) => {
       request.dates.forEach((dateKey) => {
         const current = map.get(dateKey) ?? [];
-        if (!current.includes(request.requesterName)) {
-          current.push(request.requesterName);
+        const applicant = {
+          name: request.requesterName,
+          type: request.type === "대휴" ? "대휴" : "연차",
+        } satisfies VacationApplicantBadge;
+        if (!current.some((item) => item.name === applicant.name && item.type === applicant.type)) {
+          current.push(applicant);
         }
-        map.set(dateKey, current.sort((left, right) => left.localeCompare(right, "ko")));
+        map.set(
+          dateKey,
+          current.sort((left, right) => left.name.localeCompare(right.name, "ko") || left.type.localeCompare(right.type, "ko")),
+        );
       });
     });
     return map;
@@ -402,13 +415,19 @@ export default function VacationPage() {
                       {myDutyPreview ? (
                         <div
                           style={{
-                            fontSize: 11,
+                            fontSize: 13,
                             lineHeight: 1.45,
                             color: cell.blocked ? "#fecaca" : "#9bd1ff",
                             wordBreak: "keep-all",
                           }}
                         >
-                          내 근무: {myDutyPreview}
+                          내 근무:{" "}
+                          {cell.myDutyLabels.map((label, labelIndex) => (
+                            <span key={`${cell.dateKey}-my-duty-${label}-${labelIndex}`}>
+                              {labelIndex > 0 ? ", " : ""}
+                              {label === "일반" ? <strong>{label}</strong> : label}
+                            </span>
+                          ))}
                         </div>
                       ) : null}
                     </button>
@@ -484,7 +503,6 @@ export default function VacationPage() {
                     return <div key={`blank-${index}`} style={{ minHeight: 104 }} />;
                   }
                   const applicants = requestLoadByDate.get(cell.dateKey) ?? [];
-                  const applicantPreview = applicants.length > 3 ? `${applicants.slice(0, 3).join(", ")} 외 ${applicants.length - 3}명` : applicants.join(", ");
                   const blocked = cell.blocked;
                   return (
                     <article
@@ -530,16 +548,46 @@ export default function VacationPage() {
                           </span>
                         ) : null}
                       </div>
-                      <div
-                        className="muted"
-                        style={{ fontSize: 12, lineHeight: 1.5, color: blocked ? "#fecaca" : undefined }}
-                      >
-                        {blocked
-                          ? "신청불가"
-                          : applicants.length > 0
-                          ? applicantPreview
-                          : "신청 없음"}
-                      </div>
+                      {blocked ? (
+                        <div
+                          className="muted"
+                          style={{ fontSize: 12, lineHeight: 1.5, color: "#fecaca" }}
+                        >
+                          신청불가
+                        </div>
+                      ) : applicants.length > 0 ? (
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "flex-start" }}>
+                          {applicants.map((applicant) => {
+                            const tone = vacationStyleTones[applicant.type];
+                            return (
+                              <span
+                                key={`${cell.dateKey}-${applicant.type}-${applicant.name}`}
+                                title={`${applicant.name} · ${applicant.type}`}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  maxWidth: "100%",
+                                  padding: "2px 7px",
+                                  borderRadius: 999,
+                                  border: tone.border,
+                                  background: tone.background,
+                                  color: tone.color,
+                                  fontSize: 12,
+                                  fontWeight: 800,
+                                  lineHeight: 1.35,
+                                  wordBreak: "keep-all",
+                                }}
+                              >
+                                {applicant.name}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                          신청 없음
+                        </div>
+                      )}
                     </article>
                   );
                 })}

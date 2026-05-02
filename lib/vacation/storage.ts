@@ -297,18 +297,23 @@ async function persistVacationStore(store: VacationStore) {
   const supabase = await getPortalSupabaseClient();
   const sanitized = sanitizeVacationStore(store);
 
-  const requestRows = sanitized.requests.map((request) => ({
-    id: request.id,
-    requester_id: request.requesterId ?? session.id,
-    requester_name: request.requesterName,
-    type: request.type,
-    year: request.year,
-    month: request.month,
-    month_key: request.monthKey,
-    requested_dates: request.dates,
-    raw_dates: request.rawDates,
-    status: "submitted",
-  }));
+  const ownRequestRows = sanitized.requests
+    .filter((request) =>
+      request.requesterId === session.id ||
+      (!request.requesterId && request.requesterName.trim() === session.username.trim()),
+    )
+    .map((request) => ({
+      id: request.id,
+      requester_id: session.id,
+      requester_name: request.requesterName,
+      type: request.type,
+      year: request.year,
+      month: request.month,
+      month_key: request.monthKey,
+      requested_dates: request.dates,
+      raw_dates: request.rawDates,
+      status: "submitted",
+    }));
 
   const monthRows = Object.values(sanitized.months).map((month) => ({
     month_key: month.monthKey,
@@ -330,8 +335,8 @@ async function persistVacationStore(store: VacationStore) {
     { error: settingsUpsertError },
   ] =
     await Promise.all([
-      supabase.from("vacation_requests").select("id"),
-      requestRows.length > 0 ? supabase.from("vacation_requests").upsert(requestRows) : Promise.resolve({ error: null }),
+      supabase.from("vacation_requests").select("id").eq("requester_id", session.id),
+      ownRequestRows.length > 0 ? supabase.from("vacation_requests").upsert(ownRequestRows) : Promise.resolve({ error: null }),
       canManageVacationMonths && monthRows.length > 0
         ? supabase.from("vacation_months").upsert(monthRows)
         : Promise.resolve({ error: null }),
@@ -355,7 +360,7 @@ async function persistVacationStore(store: VacationStore) {
 
   const staleRequestIds = (existingRequests ?? [])
     .map((row) => row.id as string)
-    .filter((id) => !requestRows.some((request) => request.id === id));
+    .filter((id) => !ownRequestRows.some((request) => request.id === id));
 
   if (staleRequestIds.length > 0) {
     const { error: deleteError } = await supabase.from("vacation_requests").delete().in("id", staleRequestIds);
