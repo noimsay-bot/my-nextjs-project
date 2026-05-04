@@ -1078,9 +1078,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     }
     return rows;
   }, [isMobileThreeDayView, mobileThreeDayDisplayDays]);
-  const homePreviewTitle = selectedItem
-    ? `${String(selectedItem.schedule.year).slice(-2)}년 ${selectedItem.schedule.month}월 이번주 근무표`
-    : "이번주 근무표";
+  const homePreviewTitle = "이번주 근무표";
   const homePreviewRangeLabel =
     visibleDisplayDays.length > 0
       ? isHomeMobileThreeDayView
@@ -1712,19 +1710,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                 </div>
               </div>
               {isHomePreview ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 4,
-                    borderRadius: 20,
-                    border: "1px solid rgba(255,255,255,.08)",
-                    background: "rgba(255,255,255,.03)",
-                    padding: "14px 18px 10px",
-                  }}
-                >
+                <div className="schedule-home-preview-card">
+                  <strong className="schedule-home-preview-title">{homePreviewTitle}</strong>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
                     <div style={{ display: "grid", gap: 2 }}>
-                      <strong style={{ fontSize: 20, lineHeight: 1.25 }}>{homePreviewTitle}</strong>
                       <span className="muted">게시 {formatPublishedAt(selectedItem.publishedAt)}</span>
                     </div>
                     <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>

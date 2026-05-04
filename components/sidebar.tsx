@@ -214,7 +214,12 @@ export function Sidebar({ children, className, mobileTriggerProps, ...props }: S
             aria-label={openMobile ? "사이드바 닫기" : "사이드바 열기"}
             {...mobileTriggerRest}
           />
-        ) : null}
+        ) : (
+          <SidebarTrigger
+            className="portal-sidebar-trigger--desktop"
+            aria-label={open ? "사이드바 접기" : "사이드바 펼치기"}
+          />
+        )}
         <aside
           className={joinClassNames("portal-sidebar__panel", openMobile && "is-open")}
           aria-label="포털 사이드바"
@@ -313,7 +318,7 @@ export function SidebarInset({ children, className, ...props }: SidebarInsetProp
 type SidebarTriggerProps = ButtonHTMLAttributes<HTMLButtonElement>;
 
 export function SidebarTrigger({ className, onClick, type = "button", ...props }: SidebarTriggerProps) {
-  const { toggleSidebar, isMobile } = useSidebar();
+  const { toggleSidebar } = useSidebar();
 
   return (
     <button
@@ -328,37 +333,20 @@ export function SidebarTrigger({ className, onClick, type = "button", ...props }
       }}
       {...props}
     >
-      {isMobile ? (
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          width="18"
-          height="18"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <rect width="18" height="18" x="3" y="3" rx="2" />
-          <path d="M9 3v18" />
-        </svg>
-      ) : (
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          width="18"
-          height="18"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        >
-          <path d="M4 7h16" />
-          <path d="M4 12h16" />
-          <path d="M4 17h16" />
-        </svg>
-      )}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        width="18"
+        height="18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <path d="M9 3v18" />
+      </svg>
       <span className="sr-only">사이드바 열기</span>
     </button>
   );

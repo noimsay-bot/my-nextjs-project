@@ -2678,6 +2678,31 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   flex-wrap: wrap;
 }
 
+.schedule-home-preview-card {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 14px 18px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.schedule-home-preview-title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  max-width: 100%;
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 950;
+  line-height: 1.05;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  word-break: keep-all;
+}
+
 .schedule-published-panel--fit .schedule-calendar-scroll--daily {
   overflow-x: auto !important;
   overflow-y: auto !important;
@@ -3706,6 +3731,18 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
 }
 
+.portal-sidebar-trigger--desktop {
+  position: fixed;
+  top: var(--portal-sidebar-rail-top, 12px);
+  left: calc(var(--portal-sidebar-width, 256px) + 12px);
+  z-index: 42;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar-trigger--desktop {
+  left: 42px;
+}
+
 @media (min-width: 1025px) {
   .portal-sidebar.is-collapsed .portal-sidebar-trigger--rail {
     top: calc(var(--portal-sidebar-rail-top, 12px) - 14px);
@@ -3773,6 +3810,10 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     color: var(--text);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
     border-radius: 10px;
+  }
+
+  .portal-sidebar-trigger--desktop {
+    display: none;
   }
 
   .portal-sidebar.is-collapsed .portal-sidebar-trigger--rail {
