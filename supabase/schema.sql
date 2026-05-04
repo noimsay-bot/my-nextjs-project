@@ -795,6 +795,13 @@ for select
 to authenticated
 using (requester_id = auth.uid());
 
+drop policy if exists "vacation_requests_select_approved" on public.vacation_requests;
+create policy "vacation_requests_select_approved"
+on public.vacation_requests
+for select
+to authenticated
+using (public.current_profile_approved() = true);
+
 drop policy if exists "vacation_requests_select_managers" on public.vacation_requests;
 create policy "vacation_requests_select_managers"
 on public.vacation_requests
