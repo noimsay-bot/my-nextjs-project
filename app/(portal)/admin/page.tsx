@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -316,7 +317,12 @@ export default function AdminPage() {
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           {message ? <div className="status note">{message}</div> : null}
-          <div className="chip">등급별 권한</div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="chip">등급별 권한</div>
+            <Link href="/admin/celebrations" className="btn primary">
+              축하 현수막 관리
+            </Link>
+          </div>
           <div className="subgrid-2">
             {permissionGuides.map((guide) => (
               <article

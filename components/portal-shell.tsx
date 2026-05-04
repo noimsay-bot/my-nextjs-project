@@ -33,6 +33,7 @@ import { recordPageVisit } from "@/lib/portal/page-visit-analytics";
 type PortalNavChild = {
   href: string;
   label: string;
+  children?: PortalNavChild[];
 };
 
 type PortalNavLink = {
@@ -52,14 +53,19 @@ const links: PortalNavLink[] = [
     label: "DESK",
     children: [
       { href: "/schedule/schedule-assignment", label: "일정배정" },
-      { href: "/schedule/vacations", label: "휴가관리" },
+      {
+        href: "/schedule/write",
+        label: "근무 관리",
+        children: [
+          { href: "/schedule/vacations", label: "휴가 관리" },
+          { href: "/schedule/long-service-leave", label: "근속휴가" },
+          { href: "/schedule/health-checks", label: "검진" },
+          { href: "/schedule/press-support", label: "출입처 지원" },
+        ],
+      },
+      { href: "/schedule/final-cut", label: "정제본" },
       { href: "/schedule/domestic-trip", label: "국내출장" },
       { href: "/schedule/international-trip", label: "해외출장" },
-      { href: "/schedule/press-support", label: "출입처지원" },
-      { href: "/schedule/health-checks", label: "건강검진" },
-      { href: "/schedule/long-service-leave", label: "장기근속휴가" },
-      { href: "/schedule/final-cut", label: "정제본" },
-      { href: "/schedule/write", label: "근무표관리" },
     ],
   },
   { href: "/review", label: "베스트리포트 평가" },
@@ -67,15 +73,14 @@ const links: PortalNavLink[] = [
     href: "/team-lead",
     label: "총괄팀장",
     children: [
+      { href: "/team-lead/special-report", label: "영상평가 결과" },
+      { href: "/team-lead/contribution", label: "팀 기여도" },
+      { href: "/team-lead/broadcast-accident", label: "장비/인적 사고" },
+      { href: "/team-lead/live-safety", label: "라이브 무사고" },
       { href: "/team-lead/overall-score", label: "개인별 점수" },
       { href: "/team-lead/overall-score-summary", label: "종합점수" },
       { href: "/team-lead/reviewer-management", label: "평가자 관리" },
       { href: "/team-lead/reference-notes", label: "참고사항" },
-      { href: "/team-lead/broadcast-accident", label: "방송사고" },
-      { href: "/team-lead/live-safety", label: "LIVE무사고" },
-      { href: "/team-lead/contribution", label: "기여도" },
-      { href: "/team-lead/final-cut", label: "정제본" },
-      { href: "/team-lead/special-report", label: "영상평가관리" },
     ],
   },
   { href: "/admin", label: "관리자" },
@@ -227,6 +232,10 @@ function isLinkActive(pathname: string, href: string) {
   );
 }
 
+function isChildLinkActive(pathname: string, child: PortalNavChild): boolean {
+  return pathname === child.href || Boolean(child.children?.some((nestedChild) => isChildLinkActive(pathname, nestedChild)));
+}
+
 function formatRoleSummary(session: SessionUser | null, memberLevel: MemberLevelSnapshot | null) {
   if (!session) {
     return "";
@@ -277,9 +286,67 @@ function PortalSidebar({
   onConfirmRoleExperience: () => void;
   mobileTriggerProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 }) {
-  const { closeMobileSidebar } = useSidebar();
+  const { closeMobileSidebar, isMobile, openMobile } = useSidebar();
   const shouldShowLogoutButton = Boolean(session);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
+  const [mobileSubmenuTop, setMobileSubmenuTop] = useState<number | null>(null);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const submenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const expandedMenuHref = Object.keys(expandedMenus).find((href) => expandedMenus[href]) ?? null;
+
+  useEffect(() => {
+    if (!openMobile) {
+      setExpandedMenus({});
+      setMobileSubmenuTop(null);
+    }
+  }, [openMobile]);
+
+  useEffect(() => {
+    if (!isMobile || !expandedMenuHref || typeof window === "undefined") {
+      setMobileSubmenuTop(null);
+      return;
+    }
+
+    let animationFrame = 0;
+    const viewportGap = 10;
+    const syncSubmenuPosition = () => {
+      const buttonElement = menuButtonRefs.current[expandedMenuHref];
+      const submenuElement = submenuRefs.current[expandedMenuHref];
+      if (!buttonElement || !submenuElement) return;
+
+      const buttonRect = buttonElement.getBoundingClientRect();
+      const submenuRect = submenuElement.getBoundingClientRect();
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const visibleSubmenuHeight = Math.min(submenuRect.height, viewportHeight - viewportGap * 2);
+      const preferredTop = buttonRect.bottom + 6;
+      const maxTop = viewportHeight - visibleSubmenuHeight - viewportGap;
+      setMobileSubmenuTop(Math.round(Math.max(viewportGap, Math.min(preferredTop, maxTop))));
+    };
+    const scheduleSync = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(syncSubmenuPosition);
+    };
+
+    scheduleSync();
+    window.addEventListener("resize", scheduleSync);
+    window.visualViewport?.addEventListener("resize", scheduleSync);
+
+    const submenuElement = submenuRefs.current[expandedMenuHref];
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && submenuElement
+        ? new ResizeObserver(scheduleSync)
+        : null;
+    if (resizeObserver && submenuElement) {
+      resizeObserver.observe(submenuElement);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", scheduleSync);
+      window.visualViewport?.removeEventListener("resize", scheduleSync);
+      resizeObserver?.disconnect();
+    };
+  }, [expandedMenuHref, isMobile]);
 
   const handleMenuNavigate = () => {
     setExpandedMenus({});
@@ -301,12 +368,16 @@ function PortalSidebar({
                   {hasChildren ? (
                     <>
                       <button
+                        ref={(node) => {
+                          menuButtonRefs.current[link.href] = node;
+                        }}
                         type="button"
                         className={`portal-sidebar-link portal-sidebar-link--toggle ${active ? "is-active" : ""}`.trim()}
                         aria-expanded={isExpanded}
-                        onClick={() =>
-                          setExpandedMenus(isExpanded ? {} : { [link.href]: true })
-                        }
+                        onClick={() => {
+                          setMobileSubmenuTop(null);
+                          setExpandedMenus(isExpanded ? {} : { [link.href]: true });
+                        }}
                       >
                         <span>{link.label}</span>
                         <span className={`portal-sidebar-link__chevron ${isExpanded ? "is-expanded" : ""}`.trim()} aria-hidden="true">
@@ -314,20 +385,55 @@ function PortalSidebar({
                         </span>
                       </button>
                       {isExpanded ? (
-                        <div className="portal-sidebar-submenu">
+                        <div
+                          ref={(node) => {
+                            submenuRefs.current[link.href] = node;
+                          }}
+                          className="portal-sidebar-submenu"
+                          style={
+                            isMobile
+                              ? ({
+                                  "--portal-sidebar-submenu-top": `${mobileSubmenuTop ?? 10}px`,
+                                  visibility: mobileSubmenuTop === null ? "hidden" : undefined,
+                                } as CSSProperties)
+                              : undefined
+                          }
+                        >
                           {link.children?.map((child) => {
-                            const childActive = pathname === child.href;
+                            const childActive = isChildLinkActive(pathname, child);
 
                             return (
-                              <Link
-                                key={child.href}
-                                href={child.href}
-                                className={`portal-sidebar-sublink ${childActive ? "is-active" : ""}`.trim()}
-                                aria-current={childActive ? "page" : undefined}
-                                onClick={handleMenuNavigate}
-                              >
-                                <span>{child.label}</span>
-                              </Link>
+                              <div key={child.href} className={child.children?.length ? "portal-sidebar-submenu-group" : undefined}>
+                                <Link
+                                  href={child.href}
+                                  className={`portal-sidebar-sublink ${childActive ? "is-active" : ""}`.trim()}
+                                  aria-current={pathname === child.href ? "page" : undefined}
+                                  onClick={handleMenuNavigate}
+                                >
+                                  <span>{child.label}</span>
+                                </Link>
+                                {child.children?.length ? (
+                                  <div className="portal-sidebar-submenu-children">
+                                    {child.children.map((nestedChild) => {
+                                      const nestedChildActive = pathname === nestedChild.href;
+
+                                      return (
+                                        <Link
+                                          key={nestedChild.href}
+                                          href={nestedChild.href}
+                                          className={`portal-sidebar-sublink portal-sidebar-sublink--nested ${
+                                            nestedChildActive ? "is-active" : ""
+                                          }`.trim()}
+                                          aria-current={nestedChildActive ? "page" : undefined}
+                                          onClick={handleMenuNavigate}
+                                        >
+                                          <span>{nestedChild.label}</span>
+                                        </Link>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
                             );
                           })}
                         </div>

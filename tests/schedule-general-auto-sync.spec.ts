@@ -4,6 +4,25 @@ import { defaultScheduleState } from "@/lib/schedule/constants";
 import { generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 
+test("2026 schedule months use the newsroom week-based ranges", () => {
+  const ranges = [
+    { month: 5, first: "2026-05-04", last: "2026-06-06" },
+    { month: 6, first: "2026-06-08", last: "2026-07-04" },
+    { month: 7, first: "2026-07-05", last: "2026-08-01" },
+  ];
+
+  ranges.forEach(({ month, first, last }) => {
+    const generated = generateSchedule({
+      ...defaultScheduleState,
+      year: 2026,
+      month,
+    }).state.generated;
+
+    expect(generated?.days[0]?.dateKey).toBe(first);
+    expect(generated?.days[generated.days.length - 1]?.dateKey).toBe(last);
+  });
+});
+
 test("general assignments are restored after an edit removes an eligible name", () => {
   const generated = generateSchedule({
     ...defaultScheduleState,

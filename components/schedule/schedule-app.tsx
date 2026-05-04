@@ -62,6 +62,7 @@ import {
   getEffectiveOffByCategory,
   getGeneralTeamOffPeopleForDate,
   getMonthKey,
+  getScheduleRange,
   getStartPointerRawIndex,
   getUniquePeople,
   moveAssignmentCategory,
@@ -397,10 +398,6 @@ function cloneDaySchedule(day: DaySchedule): DaySchedule {
   return JSON.parse(JSON.stringify(day)) as DaySchedule;
 }
 
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month, 0).getDate();
-}
-
 function isSameSelectedSlot(
   left: { dateKey: string; category: string; index: number } | null,
   right: { dateKey: string; category: string; index: number },
@@ -409,50 +406,20 @@ function isSameSelectedSlot(
   return left.dateKey === right.dateKey && left.category === right.category && left.index === right.index;
 }
 
-function buildDisplayDays(days: DaySchedule[], previousDays?: DaySchedule[], targetMonth?: number) {
-  if (days.length === 0) return days;
-  const first = days[0];
-  if (targetMonth && first.month !== targetMonth) return days;
-  const firstDate = new Date(first.year, first.month - 1, first.day);
-  const firstDow = firstDate.getDay();
-  const mondayOffset = firstDow === 0 ? 6 : firstDow - 1;
-  if (mondayOffset === 0) return days;
-
-  const leading: DaySchedule[] = [];
-  for (let offset = mondayOffset; offset >= 1; offset -= 1) {
-    const date = new Date(firstDate);
-    date.setDate(firstDate.getDate() - offset);
-    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    const matched = previousDays?.find((item) => item.dateKey === dateKey);
-    if (matched) {
-      leading.push({ ...matched, isOverflowMonth: true });
-      continue;
-    }
-    leading.push({
-      dateKey,
-      day: date.getDate(),
-      month: date.getMonth() + 1,
-      year: date.getFullYear(),
-      dow: date.getDay(),
-      isWeekend: date.getDay() === 0 || date.getDay() === 6,
-      isHoliday: false,
-      isCustomHoliday: false,
-      isWeekdayHoliday: false,
-      isOverflowMonth: true,
-      vacations: [],
-      assignments: {},
-      manualExtras: [],
-      headerName: "",
-      conflicts: [],
-    });
-  }
-
-  return [...leading, ...days];
+function getMondayFirstWeekdayOffset(day?: Pick<DaySchedule, "dow"> | null) {
+  if (!day) return 0;
+  return day.dow === 0 ? 6 : day.dow - 1;
 }
 
 function getOwnedDisplayDays(days: DaySchedule[], previousSchedule?: { nextStartDate: string } | null) {
   if (days.length === 0) return days;
-  const startDateKey = previousSchedule?.nextStartDate ?? days[0]?.dateKey;
+  const firstDateKey = days[0]?.dateKey ?? "";
+  const startDateKey =
+    previousSchedule?.nextStartDate && firstDateKey
+      ? previousSchedule.nextStartDate.localeCompare(firstDateKey) > 0
+        ? previousSchedule.nextStartDate
+        : firstDateKey
+      : previousSchedule?.nextStartDate ?? firstDateKey;
   return days
     .filter((day) => day.dateKey >= startDateKey)
     .map((day) => ({
@@ -858,6 +825,10 @@ export function ScheduleApp() {
     () => (visibleSchedule ? buildVisibleScheduleDays(visibleSchedule, state.generatedHistory, previousVisibleSchedule) : []),
     [previousVisibleSchedule, state.generatedHistory, visibleSchedule],
   );
+  const visibleLeadingPlaceholderCount = useMemo(
+    () => getMondayFirstWeekdayOffset(visibleDays[0]),
+    [visibleDays],
+  );
   const visibleDayOwnerMonthKeyMap = useMemo(
     () =>
       new Map(
@@ -874,6 +845,10 @@ export function ScheduleApp() {
         ? getOwnedDisplayDays(originalPreviewSnapshot.generated.days, previousOriginalSchedule)
         : [],
     [originalPreviewSnapshot, previousOriginalSchedule],
+  );
+  const originalLeadingPlaceholderCount = useMemo(
+    () => getMondayFirstWeekdayOffset(originalVisibleDays[0]),
+    [originalVisibleDays],
   );
   const visiblePublishedItem = useMemo(
     () => publishedItems.find((item) => item.monthKey === visibleSchedule?.monthKey) ?? null,
@@ -1915,6 +1890,13 @@ export function ScheduleApp() {
                     {label}
                   </div>
                 )})}
+                {Array.from({ length: visibleLeadingPlaceholderCount }, (_, index) => (
+                  <div
+                    key={`visible-leading-placeholder-${index}`}
+                    aria-hidden="true"
+                    style={{ minHeight: 1 }}
+                  />
+                ))}
                 {visibleDays.map((day) => {
                   const dayOwnerMonthKey = visibleDayOwnerMonthKeyMap.get(day.dateKey) ?? visibleSchedule.monthKey;
                   const isEditingVisibleMonth = activeEditMonthKey === dayOwnerMonthKey && isEditingDate;
@@ -2906,6 +2888,13 @@ export function ScheduleApp() {
                       {label}
                     </div>
                   )})}
+                  {Array.from({ length: originalLeadingPlaceholderCount }, (_, index) => (
+                    <div
+                      key={`preview-leading-placeholder-${originalPreviewSnapshot.id}-${index}`}
+                      aria-hidden="true"
+                      style={{ minHeight: 1 }}
+                    />
+                  ))}
                   {originalVisibleDays.map((day) => {
                     const dayCardStyle = getDayCardStyle(day);
                     const centeredDayLabel = getCenteredDayLabel(day);

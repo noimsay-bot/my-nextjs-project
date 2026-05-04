@@ -27,6 +27,8 @@ function authLog(stage: string, details: Record<string, unknown>) {
   console.info(`[auth] ${stage}`, details);
 }
 
+const AUTH_GATE_PENDING_TIMEOUT_MS = 6_000;
+
 function hasAccess(
   pathname: string,
   session: SessionUser,
@@ -118,8 +120,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const needsVacationAccessCheck = pathname === "/vacation";
   const needsSubmissionAccessCheck = pathname.startsWith("/submissions");
-  const [session, setSession] = useState<SessionUser | null>(null);
-  const [checkingSession, setCheckingSession] = useState(true);
+  const [session, setSession] = useState<SessionUser | null>(() => getSession());
+  const [checkingSession, setCheckingSession] = useState(() => !getSession());
   const [hadSessionCookie, setHadSessionCookie] = useState(false);
   const [recoveryAttempted, setRecoveryAttempted] = useState(false);
   const [vacationRequestOpen, setVacationRequestOpen] = useState<boolean | null>(() => {
@@ -171,6 +173,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setCheckingSession(false);
     });
 
+    const latestSession = getSession();
+    if (latestSession) {
+      setSession(latestSession);
+      setCheckingSession(false);
+    }
+
     return () => {
       mounted = false;
       unsubscribe();
@@ -198,12 +206,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     void initializeAuth()
       .then((nextSession) => {
         if (cancelled) return;
-        setSession(nextSession);
+        const resolvedSession = nextSession ?? getSession();
+        setSession(resolvedSession);
         setCheckingSession(false);
         authLog("session.check.complete", {
           source: "auth-gate",
           pathname,
-          status: nextSession ? "ok" : getLastAuthCheckStatus(),
+          status: resolvedSession ? "ok" : getLastAuthCheckStatus(),
         });
       })
       .catch((error) => {
@@ -219,6 +228,27 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   const authPending = checkingSession && !session;
+
+  useEffect(() => {
+    if (!authPending) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const latestSession = getSession();
+      setSession(latestSession);
+      setCheckingSession(false);
+      authLog("session.check.fallback", {
+        source: "auth-gate",
+        pathname,
+        status: latestSession ? "ok" : getLastAuthCheckStatus(),
+      });
+    }, AUTH_GATE_PENDING_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [authPending, pathname]);
 
   useEffect(() => {
     if (authPending) {

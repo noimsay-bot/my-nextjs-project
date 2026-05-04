@@ -1347,6 +1347,78 @@ with check (
   and public.current_profile_approved() = true
 );
 
+create table if not exists public.portal_celebration_events (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  message text,
+  button_label text not null default '확인하고 닫기',
+  effect text not null default 'confetti',
+  intensity text not null default 'normal',
+  is_active boolean not null default true,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  created_by uuid references auth.users (id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint portal_celebration_events_effect_check
+    check (effect in ('confetti')),
+  constraint portal_celebration_events_intensity_check
+    check (intensity in ('light', 'normal', 'strong')),
+  constraint portal_celebration_events_date_range_check
+    check (starts_at is null or ends_at is null or starts_at <= ends_at)
+);
+
+create index if not exists portal_celebration_events_active_created_at_idx
+on public.portal_celebration_events (is_active, created_at desc);
+
+drop trigger if exists set_portal_celebration_events_updated_at on public.portal_celebration_events;
+create trigger set_portal_celebration_events_updated_at
+before update on public.portal_celebration_events
+for each row
+execute function public.set_updated_at();
+
+alter table public.portal_celebration_events enable row level security;
+
+drop policy if exists "portal_celebration_events_select_current_active" on public.portal_celebration_events;
+create policy "portal_celebration_events_select_current_active"
+on public.portal_celebration_events
+for select
+to authenticated
+using (
+  is_active = true
+  and (starts_at is null or starts_at <= now())
+  and (ends_at is null or ends_at >= now())
+);
+
+drop policy if exists "portal_celebration_events_admin_select_all" on public.portal_celebration_events;
+create policy "portal_celebration_events_admin_select_all"
+on public.portal_celebration_events
+for select
+to authenticated
+using (public.is_admin());
+
+drop policy if exists "portal_celebration_events_admin_insert" on public.portal_celebration_events;
+create policy "portal_celebration_events_admin_insert"
+on public.portal_celebration_events
+for insert
+to authenticated
+with check (public.is_admin());
+
+drop policy if exists "portal_celebration_events_admin_update" on public.portal_celebration_events;
+create policy "portal_celebration_events_admin_update"
+on public.portal_celebration_events
+for update
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
+drop policy if exists "portal_celebration_events_admin_delete" on public.portal_celebration_events;
+create policy "portal_celebration_events_admin_delete"
+on public.portal_celebration_events
+for delete
+to authenticated
+using (public.is_admin());
+
 create or replace function public.current_profile_has_review_access()
 returns boolean
 language sql
@@ -1384,6 +1456,32 @@ with check (
   reviewer_id = auth.uid()
   and public.current_profile_has_review_access()
 );
+
+do $$
+declare
+  target_function regprocedure;
+  target_functions regprocedure[] := array[
+    to_regprocedure('public.current_profile_approved()'),
+    to_regprocedure('public.current_profile_has_review_access()'),
+    to_regprocedure('public.current_profile_role()'),
+    to_regprocedure('public.find_email_by_login_id(text)'),
+    to_regprocedure('public.handle_new_user()'),
+    to_regprocedure('public.is_admin()'),
+    to_regprocedure('public.repair_current_member_profile()'),
+    to_regprocedure('public.sync_home_news_briefing_dislikes_count()'),
+    to_regprocedure('public.sync_home_news_briefing_likes_count()')
+  ];
+begin
+  foreach target_function in array target_functions loop
+    if target_function is not null then
+      execute format(
+        'revoke execute on function %s from public, anon, authenticated',
+        target_function
+      );
+    end if;
+  end loop;
+end;
+$$;
 
 drop policy if exists "reviews_update_granted_reviewers" on public.reviews;
 create policy "reviews_update_granted_reviewers"

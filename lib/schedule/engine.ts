@@ -752,10 +752,18 @@ export function daysInMonth(year: number, month: number) {
 }
 
 export function getScheduleRange(year: number, month: number) {
-  if (year === 2026 && month === 5) {
+  const scheduleRangeOverrides: Record<string, { start: string; end: string }> = {
+    "2026-05": { start: "2026-05-04", end: "2026-06-06" },
+    "2026-06": { start: "2026-06-08", end: "2026-07-04" },
+    "2026-07": { start: "2026-07-05", end: "2026-08-01" },
+  };
+  const override = scheduleRangeOverrides[getMonthKey(year, month)];
+  if (override) {
+    const [startYear, startMonth, startDay] = override.start.split("-").map(Number);
+    const [endYear, endMonth, endDay] = override.end.split("-").map(Number);
     return {
-      start: new Date(year, month - 1, 4),
-      end: new Date(year, month - 1, 31),
+      start: new Date(startYear, startMonth - 1, startDay),
+      end: new Date(endYear, endMonth - 1, endDay),
     };
   }
   const start = new Date(year, month - 1, 1);
