@@ -2703,6 +2703,18 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   word-break: keep-all;
 }
 
+@media (max-width: 720px) {
+  .schedule-home-preview-card {
+    padding-top: 74px;
+  }
+
+  .schedule-home-preview-title {
+    top: 24px;
+    width: calc(100% - 28px);
+    transform: translateX(-50%);
+  }
+}
+
 .schedule-published-panel--fit .schedule-calendar-scroll--daily {
   overflow-x: auto !important;
   overflow-y: auto !important;
