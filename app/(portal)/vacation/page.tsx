@@ -537,11 +537,7 @@ export default function VacationPage() {
                           : applicants.length > 0
                             ? "1px solid rgba(34,211,238,.34)"
                             : "1px solid rgba(255,255,255,.08)",
-                        background: blocked
-                          ? "rgba(248,113,113,.2)"
-                          : applicants.length > 0
-                          ? `rgba(34,211,238,${Math.min(0.12 + applicants.length * 0.05, 0.3)})`
-                          : "rgba(255,255,255,.03)",
+                        background: "transparent",
                         display: "grid",
                         gap: 6,
                         alignContent: "start",
