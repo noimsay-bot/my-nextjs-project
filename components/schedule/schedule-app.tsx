@@ -433,23 +433,26 @@ function buildVisibleScheduleDays(
   schedules: GeneratedSchedule[],
   previousSchedule?: { nextStartDate: string } | null,
 ) {
-  const startDateKey = previousSchedule?.nextStartDate ?? schedule.days[0]?.dateKey ?? "";
-  const baseDays = getOwnedDisplayDays(schedule.days, previousSchedule).map((day) => cloneDaySchedule(day));
-  const dayMap = new Map(baseDays.map((day) => [day.dateKey, day] as const));
+  const range = getScheduleRange(schedule.year, schedule.month);
+  const rangeStartKey = formatLocalDateKey(range.start);
+  const rangeEndKey = formatLocalDateKey(range.end);
+  const firstDateKey = schedule.days[0]?.dateKey ?? rangeStartKey;
+  const startDateKey = [rangeStartKey, firstDateKey, previousSchedule?.nextStartDate ?? ""]
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left))[0] ?? rangeStartKey;
+  const dayMap = new Map<string, DaySchedule>();
 
-  for (let day = 1; day <= getDaysInMonth(schedule.year, schedule.month); day += 1) {
-    const dateKey = `${schedule.year}-${String(schedule.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    if (dateKey < startDateKey) continue;
-    if (dayMap.has(dateKey)) continue;
-    const matched = schedules
-      .map((item) => item.days.find((entry) => entry.dateKey === dateKey))
-      .find((entry): entry is DaySchedule => Boolean(entry));
-    if (!matched) continue;
-    dayMap.set(dateKey, {
-      ...cloneDaySchedule(matched),
-      isOverflowMonth: false,
+  schedules.forEach((item) => {
+    item.days.forEach((day) => {
+      if (day.dateKey < startDateKey || day.dateKey > rangeEndKey) return;
+      dayMap.set(day.dateKey, cloneDaySchedule(day));
     });
-  }
+  });
+
+  schedule.days.forEach((day) => {
+    if (day.dateKey < startDateKey || day.dateKey > rangeEndKey) return;
+    dayMap.set(day.dateKey, cloneDaySchedule(day));
+  });
 
   return Array.from(dayMap.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
 }
