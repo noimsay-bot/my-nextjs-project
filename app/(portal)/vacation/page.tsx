@@ -85,6 +85,16 @@ function buildVacationCalendarCells(dateItems: VacationCalendarDateItem[]) {
   return cells;
 }
 
+function getSelectedVacationDateKeys(requests: VacationRequest[], type: Extract<VacationType, "연차" | "대휴">) {
+  return Array.from(
+    new Set(
+      requests
+        .filter((request) => request.type === type)
+        .flatMap((request) => request.dates),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+}
+
 export default function VacationPage() {
   const session = getSession();
   const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
@@ -152,6 +162,14 @@ export default function VacationPage() {
     () => requests.filter((request) => request.year === year && request.month === month),
     [requests, year, month],
   );
+  const myMonthRequests = useMemo(
+    () => monthRequests.filter((request) => (
+      session?.id
+        ? request.requesterId === session.id
+        : request.requesterName === session?.username
+    )),
+    [monthRequests, session?.id, session?.username],
+  );
   const requestCalendarCells = useMemo(() => buildVacationCalendarCells(calendarDateItems), [calendarDateItems]);
   const requestLoadByDate = useMemo(() => {
     const map = new Map<string, VacationApplicantBadge[]>();
@@ -177,6 +195,11 @@ export default function VacationPage() {
   const allowedDaySummary = useMemo(() => formatAllowedDateSummary(managedDateKeys), [managedDateKeys]);
   const annualSelectedDateSummary = useMemo(() => formatDateList(annualSelectedDateKeys), [annualSelectedDateKeys]);
   const compensatorySelectedDateSummary = useMemo(() => formatDateList(compensatorySelectedDateKeys), [compensatorySelectedDateKeys]);
+
+  useEffect(() => {
+    setAnnualSelectedDateKeys(getSelectedVacationDateKeys(myMonthRequests, "연차"));
+    setCompensatorySelectedDateKeys(getSelectedVacationDateKeys(myMonthRequests, "대휴"));
+  }, [myMonthRequests]);
 
   const handleSubmit = () => {
     if (isReadOnlyUser) {
@@ -212,8 +235,6 @@ export default function VacationPage() {
     });
 
     if (result.ok) {
-      setAnnualSelectedDateKeys([]);
-      setCompensatorySelectedDateKeys([]);
       void loadRequests();
     }
   };
