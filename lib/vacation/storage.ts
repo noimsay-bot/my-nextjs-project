@@ -574,7 +574,6 @@ export function parseRequestedVacationDates(year: number, month: number, rawInpu
 
   const valid: string[] = [];
   const invalid: string[] = [];
-  const monthKey = getMonthKey(year, month);
   const monthDays = daysInMonth(year, month);
 
   tokens.forEach((token) => {
@@ -594,7 +593,7 @@ export function parseRequestedVacationDates(year: number, month: number, rawInpu
     }
 
     if (/^\d{4}-\d{2}-\d{2}$/.test(token)) {
-      if (token.startsWith(`${monthKey}-`) && !isWeekendDateKey(token)) {
+      if (!isWeekendDateKey(token)) {
         valid.push(token);
       } else {
         invalid.push(token);
