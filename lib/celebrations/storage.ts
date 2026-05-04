@@ -32,6 +32,12 @@ export interface CelebrationEventDraft {
 
 const CELEBRATION_COLUMNS =
   "id, title, message, button_label, effect, intensity, is_active, starts_at, ends_at, created_by, created_at, updated_at";
+export const CELEBRATION_EVENT_CHANGED_EVENT = "portal-celebration-event-changed";
+
+function emitCelebrationEventChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(CELEBRATION_EVENT_CHANGED_EVENT));
+}
 
 function normalizeIntensity(value: unknown): CelebrationIntensity {
   return value === "light" || value === "strong" ? value : "normal";
@@ -152,6 +158,7 @@ export async function createCelebrationEvent(
     }
   }
 
+  emitCelebrationEventChanged();
   return normalizeRow(data);
 }
 
@@ -170,6 +177,8 @@ export async function updateCelebrationEventActive(id: string, isActive: boolean
   if (error) {
     throw new Error(error.message || "축하 현수막 상태 변경에 실패했습니다.");
   }
+
+  emitCelebrationEventChanged();
 }
 
 export async function deleteCelebrationEvent(id: string) {
@@ -187,4 +196,6 @@ export async function deleteCelebrationEvent(id: string) {
   if (error) {
     throw new Error(error.message || "축하 현수막 삭제에 실패했습니다.");
   }
+
+  emitCelebrationEventChanged();
 }

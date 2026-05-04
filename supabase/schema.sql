@@ -1419,6 +1419,24 @@ for delete
 to authenticated
 using (public.is_admin());
 
+do $$
+begin
+  if exists (
+    select 1
+    from pg_publication
+    where pubname = 'supabase_realtime'
+  ) and not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'portal_celebration_events'
+  ) then
+    execute 'alter publication supabase_realtime add table public.portal_celebration_events';
+  end if;
+end
+$$;
+
 create or replace function public.current_profile_has_review_access()
 returns boolean
 language sql
