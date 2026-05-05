@@ -410,8 +410,15 @@ function parseStorePayload(row: HomePopupNoticeStateRow | null | undefined) {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<HomeNoticeStorePayload>;
-    if ((parsed?.version !== 2 && parsed?.version !== 3 && parsed?.version !== 4 && parsed?.version !== 5) || !Array.isArray(parsed.notices)) {
+    const parsed = JSON.parse(raw) as Partial<HomeNoticeStorePayload> | null;
+    const parsedNotices = Array.isArray(parsed?.notices) ? parsed.notices : null;
+    if (
+      (parsed?.version !== 2 &&
+        parsed?.version !== 3 &&
+        parsed?.version !== 4 &&
+        parsed?.version !== 5) ||
+      !parsedNotices
+    ) {
       return {
         notices: rowToLegacyNotice(row),
         ddays: [] as HomeDdayItem[],
@@ -422,7 +429,7 @@ function parseStorePayload(row: HomePopupNoticeStateRow | null | undefined) {
 
     return {
       notices: sortNotices(
-        parsed.notices
+        parsedNotices
           .filter((item): item is HomeNotice => Boolean(item && typeof item.id === "string"))
           .map((item) =>
             normalizeHomeNotice({
