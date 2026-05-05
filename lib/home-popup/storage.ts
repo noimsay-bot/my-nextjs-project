@@ -746,6 +746,61 @@ export function hasAppliedToCurrentHomePopupNotice() {
   return currentUserAppliedCache;
 }
 
+async function fetchHomePublicWorkspaceFallback(
+  session: NonNullable<Awaited<ReturnType<typeof getPortalSession>>>,
+): Promise<HomePublicWorkspaceResponse> {
+  const supabase = await getPortalSupabaseClient();
+  const { data: noticeRow, error: noticeError } = await selectHomePopupNoticeRow(supabase);
+  if (noticeError) {
+    throw new Error(getSupabaseStorageErrorMessage(noticeError, "home_popup_notice_state"));
+  }
+
+  const workspace = parseStorePayload(noticeRow ?? null);
+  const activePopup = getActivePopupNotice(workspace.notices);
+  let ownApplied = false;
+  let applications: HomePopupNoticeApplication[] = [];
+
+  if (activePopup?.applicationEnabled) {
+    const { data: ownApplicationRow, error: ownApplicationError } = await supabase
+      .from("home_popup_notice_applications")
+      .select("id")
+      .eq("notice_id", activePopup.id)
+      .eq("applicant_id", session.id)
+      .maybeSingle<{ id: string }>();
+
+    if (ownApplicationError) {
+      throw new Error(getSupabaseStorageErrorMessage(ownApplicationError, "home_popup_notice_applications"));
+    }
+
+    ownApplied = Boolean(ownApplicationRow?.id);
+
+    if (isManagerRole(session.role)) {
+      const { data: applicationRows, error: applicationError } = await supabase
+        .from("home_popup_notice_applications")
+        .select("id, notice_id, applicant_id, applicant_name, created_at")
+        .eq("notice_id", activePopup.id)
+        .order("created_at", { ascending: false })
+        .returns<HomePopupNoticeApplicationRow[]>();
+
+      if (applicationError) {
+        throw new Error(getSupabaseStorageErrorMessage(applicationError, "home_popup_notice_applications"));
+      }
+
+      applications = (applicationRows ?? []).map(rowToApplication);
+    }
+  }
+
+  return {
+    notice: activePopup,
+    notices: workspace.notices,
+    ddays: workspace.ddays,
+    communityPosts: workspace.communityPosts,
+    communityComments: workspace.communityComments,
+    applications,
+    ownApplied,
+  };
+}
+
 async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspaceOptions = {}) {
   const searchParams = new URLSearchParams();
   if (options.includeTrips === false) {
@@ -760,6 +815,7 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
   const timeoutId = window.setTimeout(() => controller.abort(), HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS);
 
   try {
+    const session = await getPortalSession();
     const response = await fetch(requestUrl, {
       method: "GET",
       cache: "no-store",
@@ -769,6 +825,9 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
 
     const payload = (await response.json().catch(() => null)) as { message?: string } | HomePublicWorkspaceResponse | null;
     if (!response.ok) {
+      if ((response.status === 401 || response.status === 403) && options.includeTrips === false && session?.approved) {
+        return fetchHomePublicWorkspaceFallback(session);
+      }
       throw new Error(payload && "message" in payload && typeof payload.message === "string"
         ? payload.message
         : "홈 데이터를 불러오지 못했습니다.");
