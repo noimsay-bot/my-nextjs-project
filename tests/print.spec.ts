@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { AUTH_CACHE_KEY, seedSupabaseAuthCookie } from "./e2e-auth";
 
-const SESSION_KEY = "j-special-force-session-v1";
-const SCHEDULE_KEY = "j-schedule-integrated-react-v1";
-const PUBLISHED_SCHEDULES_KEY = "j-special-force-published-schedules-v1";
+const SCHEDULE_SEED_KEY = "codex-e2e-schedule-state";
+const PUBLISHED_SCHEDULES_SEED_KEY = "codex-e2e-published-schedules";
 const DISABLE_AUTO_PRINT_KEY = "codex-disable-auto-print";
 
 function createDay(year: number, month: number, day: number, assignments: Record<string, string[]> = {}) {
@@ -146,26 +146,49 @@ test.beforeEach(async ({ page }) => {
       schedule,
     },
   ];
+  const { supabaseAuthTokenKey, supabaseSession, supabaseCookieValue } = await seedSupabaseAuthCookie(page);
 
   await page.addInitScript(
-    ({ sessionKey, scheduleKey, publishedKey, disableAutoPrintKey, scheduleState, publishedItems }) => {
+    ({
+      authCacheKey,
+      supabaseAuthTokenKey,
+      supabaseSession,
+      supabaseCookieValue,
+      scheduleSeedKey,
+      publishedSeedKey,
+      disableAutoPrintKey,
+      scheduleState,
+      publishedItems,
+    }) => {
+      document.cookie = `${supabaseAuthTokenKey}=${supabaseCookieValue}; path=/; max-age=3600; SameSite=Lax`;
       window.localStorage.setItem(disableAutoPrintKey, "1");
       window.localStorage.setItem(
-        sessionKey,
+        authCacheKey,
         JSON.stringify({
           id: "admin-seed",
+          email: "admin@example.com",
+          loginId: "admin",
           username: "관리자",
           role: "admin",
+          actualRole: "admin",
+          experienceRole: null,
+          approved: true,
           mustChangePassword: false,
+          canReview: true,
+          actualCanReview: true,
         }),
       );
-      window.localStorage.setItem(scheduleKey, JSON.stringify(scheduleState));
-      window.localStorage.setItem(publishedKey, JSON.stringify(publishedItems));
+      window.localStorage.setItem(supabaseAuthTokenKey, JSON.stringify(supabaseSession));
+      window.localStorage.setItem(scheduleSeedKey, JSON.stringify(scheduleState));
+      window.localStorage.setItem(publishedSeedKey, JSON.stringify(publishedItems));
     },
     {
-      sessionKey: SESSION_KEY,
-      scheduleKey: SCHEDULE_KEY,
-      publishedKey: PUBLISHED_SCHEDULES_KEY,
+      authCacheKey: AUTH_CACHE_KEY,
+      supabaseAuthTokenKey,
+      supabaseSession,
+      supabaseCookieValue,
+      scheduleSeedKey: SCHEDULE_SEED_KEY,
+      publishedSeedKey: PUBLISHED_SCHEDULES_SEED_KEY,
       disableAutoPrintKey: DISABLE_AUTO_PRINT_KEY,
       scheduleState: createSampleState(schedule),
       publishedItems: published,
@@ -174,7 +197,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("home print popup shows schedule print sheet", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/work-schedule");
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "출력" }).click();
   const popup = await popupPromise;
@@ -186,7 +209,7 @@ test("home print popup shows schedule print sheet", async ({ page }) => {
 });
 
 test("home print highlights my name when my-work view is enabled", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/work-schedule");
   await page.getByRole("button", { name: "내 근무 보기" }).click();
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "출력" }).click();
@@ -197,7 +220,7 @@ test("home print highlights my name when my-work view is enabled", async ({ page
 });
 
 test("desk print popup shows landscape print table", async ({ page }) => {
-  await page.goto("/schedule");
+  await page.goto("/schedule/write");
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "출력" }).first().click();
   const popup = await popupPromise;
@@ -205,11 +228,11 @@ test("desk print popup shows landscape print table", async ({ page }) => {
 
   await expect(popup.getByText("7월 근무표")).toBeVisible();
   await expect(popup.locator(".schedule-print-table th")).toHaveCount(7);
-  await expect(popup.locator(".schedule-print-assignment strong", { hasText: "뉴스대기" }).first()).toBeVisible();
+  await expect(popup.locator(".schedule-print-assignment strong", { hasText: "조근" }).first()).toBeVisible();
 });
 
 test("original snapshot print popup shows original title", async ({ page }) => {
-  await page.goto("/schedule");
+  await page.goto("/schedule/write");
   const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "출력" }).nth(1).click();
   const popup = await popupPromise;

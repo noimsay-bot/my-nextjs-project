@@ -657,7 +657,7 @@ export function ScheduleApp() {
       const routeMonthKey = resolveRouteMonthKey(nextState, preferredMonthKey);
       await Promise.all([
         routeMonthKey ? refreshTeamLeadAssignmentMonth(routeMonthKey) : Promise.resolve(),
-        refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey] } : undefined),
+        refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: false } : { repair: false }),
         includeRequests
           ? refreshScheduleChangeRequests({
               statuses: REQUEST_VISIBLE_STATUSES,
@@ -697,7 +697,7 @@ export function ScheduleApp() {
 
   const loadPublishedItems = async () => {
     const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
-    await refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey] } : undefined);
+    await refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: false } : { repair: false });
     syncPublishedItemsFromCache();
   };
 

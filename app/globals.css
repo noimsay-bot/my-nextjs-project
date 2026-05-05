@@ -847,6 +847,9 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
 .schedule-calendar-scroll {
   overflow-x: auto;
   overflow-y: visible;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .schedule-calendar-scroll--daily {
@@ -1076,11 +1079,16 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.02);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .schedule-order-sheet__table {
   width: 100%;
+  min-width: 1540px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -1109,8 +1117,7 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
   position: sticky;
   left: 0;
   z-index: 2;
-  background: color-mix(in srgb, var(--panel) 92%, transparent) !important;
-  backdrop-filter: blur(10px);
+  background: var(--panel) !important;
 }
 
 .schedule-order-sheet__row-label {
@@ -2717,8 +2724,10 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
 
 .schedule-published-panel--fit .schedule-calendar-scroll--daily {
   overflow-x: auto !important;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .schedule-published-panel--fit .schedule-calendar-zoom--daily,
@@ -2762,6 +2771,9 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   font-size: 10px;
   border-radius: 0 !important;
   min-height: 30px;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: center;
 }
 
 .schedule-published-panel--fit .schedule-name-chip--compact {
@@ -2770,10 +2782,84 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
 
 .schedule-published-panel--fit .schedule-name-chip__text {
   white-space: nowrap;
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  text-overflow: ellipsis;
   word-break: keep-all;
   text-align: center;
+}
+
+.schedule-published-panel--three-day .schedule-calendar-scroll--daily {
+  overflow-x: hidden !important;
+}
+
+.schedule-published-panel--three-day .schedule-calendar-zoom--daily,
+.schedule-published-panel--three-day .schedule-calendar-grid--daily,
+.schedule-published-panel--three-day .schedule-calendar-grid--home-mobile-three-day {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.schedule-published-panel--three-day .schedule-calendar-grid--home-mobile-three-day .schedule-day-card {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-home-preview-card,
+.schedule-published-panel--home-three-day .schedule-calendar-scroll--daily {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-scroll--daily {
+  overflow-x: hidden !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-zoom--daily,
+.schedule-published-panel--home-three-day .schedule-calendar-grid--daily,
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day {
+  width: 100% !important;
+  max-width: 760px;
+  min-width: 0 !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-day-card {
+  padding: 4px !important;
+}
+
+.schedule-published-panel--page-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+}
+
+.schedule-published-panel--page-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-day-card {
+  padding: 4px !important;
+}
+
+.schedule-published-panel--three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-chip {
+  min-width: 0;
+  min-height: 18px;
+  font-size: 9px;
+  gap: 0 !important;
+}
+
+.schedule-published-panel--page-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-chip {
+  min-height: 18px !important;
+  font-size: 8px;
+  gap: 0 !important;
+}
+
+.schedule-published-panel--three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-chip__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
 }
 
 @media (max-width: 1100px) {

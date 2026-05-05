@@ -135,6 +135,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    const unsubscribe = subscribeToAuth((nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession);
+      setCheckingSession(false);
+    });
 
     const cachedSession = getSession();
     const cookieHint = hasSupabaseSessionCookie();
@@ -147,6 +152,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setRecoveryAttempted(false);
       return () => {
         mounted = false;
+        unsubscribe();
       };
     }
 
@@ -156,6 +162,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setRecoveryAttempted(false);
       return () => {
         mounted = false;
+        unsubscribe();
       };
     }
 
@@ -165,12 +172,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       source: "auth-gate",
       pathname,
       hasSessionCookie: cookieHint,
-    });
-
-    const unsubscribe = subscribeToAuth((nextSession) => {
-      if (!mounted) return;
-      setSession(nextSession);
-      setCheckingSession(false);
     });
 
     const latestSession = getSession();
@@ -225,7 +226,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname]);
+  }, []);
 
   const authPending = checkingSession && !session;
 

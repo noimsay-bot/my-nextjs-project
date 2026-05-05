@@ -493,6 +493,43 @@ export async function refreshVacationStore() {
   return vacationRefreshPromise;
 }
 
+export async function refreshVacationRequestOpenState() {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    vacationStoreCache = {
+      ...vacationStoreCache,
+      requestOpen: false,
+    };
+    emitVacationEvent();
+    return vacationStoreCache.requestOpen;
+  }
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("vacation_settings")
+      .select("id, is_request_open, updated_at")
+      .eq("id", VACATION_SETTINGS_ROW_ID)
+      .maybeSingle<VacationSettingsRow>();
+
+    if (error) {
+      if (isSupabaseSchemaMissingError(error) || isSupabaseRequestTimeoutError(error)) {
+        return vacationStoreCache.requestOpen;
+      }
+      throw new Error(error.message);
+    }
+
+    vacationStoreCache = {
+      ...vacationStoreCache,
+      requestOpen: Boolean(data?.is_request_open),
+    };
+    emitVacationEvent();
+    return vacationStoreCache.requestOpen;
+  } catch {
+    return vacationStoreCache.requestOpen;
+  }
+}
+
 function readScheduleState() {
   return readStoredScheduleState();
 }

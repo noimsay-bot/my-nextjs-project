@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { AUTH_CACHE_KEY, seedSupabaseAuthCookie } from "./e2e-auth";
 
-const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
 const SCHEDULE_SEED_KEY = "codex-e2e-schedule-state";
 
 function createDay(year: number, month: number, day: number, assignments: Record<string, string[]>) {
@@ -68,8 +68,10 @@ function createScheduleSeed() {
 }
 
 async function seedScheduleWritePage(page: Page) {
+  const { supabaseAuthTokenKey, supabaseSession, supabaseCookieValue } = await seedSupabaseAuthCookie(page);
   await page.addInitScript(
-    ({ authCacheKey, scheduleSeedKey, seedState }) => {
+    ({ authCacheKey, supabaseAuthTokenKey, supabaseSession, supabaseCookieValue, scheduleSeedKey, seedState }) => {
+      document.cookie = `${supabaseAuthTokenKey}=${supabaseCookieValue}; path=/; max-age=3600; SameSite=Lax`;
       window.localStorage.setItem(
         authCacheKey,
         JSON.stringify({
@@ -83,10 +85,14 @@ async function seedScheduleWritePage(page: Page) {
           canReview: true,
         }),
       );
+      window.localStorage.setItem(supabaseAuthTokenKey, JSON.stringify(supabaseSession));
       window.localStorage.setItem(scheduleSeedKey, JSON.stringify(seedState));
     },
     {
       authCacheKey: AUTH_CACHE_KEY,
+      supabaseAuthTokenKey,
+      supabaseSession,
+      supabaseCookieValue,
       scheduleSeedKey: SCHEDULE_SEED_KEY,
       seedState: createScheduleSeed(),
     },

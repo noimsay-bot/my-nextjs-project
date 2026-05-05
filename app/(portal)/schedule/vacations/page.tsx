@@ -184,7 +184,7 @@ export default function ScheduleVacationsPage() {
   const loadMonth = async () => {
     const [, , , loadedUsers] = await Promise.all([
       refreshScheduleState(),
-      refreshPublishedSchedules(),
+      refreshPublishedSchedules({ repair: false }),
       refreshVacationStore(),
       refreshUsers(),
     ]);

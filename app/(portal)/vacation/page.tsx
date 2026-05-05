@@ -17,7 +17,6 @@ import {
   VacationRequest,
 } from "@/lib/vacation/storage";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
-import { refreshScheduleState } from "@/lib/schedule/storage";
 
 const vacationWeekdayLabels = ["월", "화", "수", "목", "금"];
 
@@ -116,7 +115,7 @@ export default function VacationPage() {
   }, [month, session?.username, year]);
 
   const loadRequests = useCallback(async () => {
-    await Promise.all([refreshScheduleState(), refreshPublishedSchedules(), refreshVacationStore()]);
+    await Promise.all([refreshPublishedSchedules({ repair: false }), refreshVacationStore()]);
     syncFromCache();
   }, [syncFromCache]);
 

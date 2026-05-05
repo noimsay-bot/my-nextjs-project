@@ -357,12 +357,16 @@ export function syncGeneralAssignments(
     }
 
     const generalTeamOffSet = new Set(activeGeneralTeamOffPeople.map((name) => name.trim()).filter(Boolean));
+    const globalOffSet = new Set(normalizeEditableNameList(state.offPeople));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
+      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name) && !globalOffSet.has(name),
     );
     const manualGeneralAdditions = normalizeDayGeneralManualAdditions(day);
     const combinedGeneralNames = [...nextGeneralNames];
     manualGeneralAdditions.forEach((name) => {
+      if (globalOffSet.has(name) || generalTeamOffSet.has(name)) {
+        return;
+      }
       if (!combinedGeneralNames.includes(name)) {
         combinedGeneralNames.push(name);
       }
@@ -2171,6 +2175,15 @@ export function cycleVacationEntryType(
   return syncGeneratedSchedule(next, generated);
 }
 
+function replaceGeneralManualAddition(day: DaySchedule, removedName: string, addedName: string) {
+  const nextAdditions = normalizeDayGeneralManualAdditions(day).filter((item) => item !== removedName.trim());
+  const nextName = addedName.trim();
+  if (nextName && !nextAdditions.includes(nextName)) {
+    nextAdditions.push(nextName);
+  }
+  day.generalManualAdditions = nextAdditions;
+}
+
 export function movePerson(
   state: ScheduleState,
   source: { dateKey: string; category: string; index: number },
@@ -2224,6 +2237,12 @@ export function swapPersonSlots(
     const destinationName = destinationList[destination.index] ?? "";
     sourceList[source.index] = destinationName;
     destinationList[destination.index] = sourceName;
+    if (isGeneralAssignmentCategory(source.category)) {
+      replaceGeneralManualAddition(sourceDay, sourceName, destinationName);
+    }
+    if (isGeneralAssignmentCategory(destination.category)) {
+      replaceGeneralManualAddition(destinationDay, destinationName, sourceName);
+    }
   }
 
   next.selectedPerson = null;

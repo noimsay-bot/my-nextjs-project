@@ -24,11 +24,16 @@ interface ScheduleMonthPublishRow {
 export const PUBLISHED_SCHEDULES_EVENT = "j-special-force-published-schedules-updated";
 export const PUBLISHED_SCHEDULES_STATUS_EVENT = "j-special-force-published-schedules-status";
 
+const E2E_PUBLISHED_SCHEDULES_SEED_KEY = "codex-e2e-published-schedules";
+const E2E_PUBLISHED_SCHEDULES_SEED_ENABLED =
+  process.env.NEXT_PUBLIC_E2E === "1" || process.env.NODE_ENV !== "production";
+
 let publishedSchedulesCache: PublishedScheduleItem[] = [];
-let publishedRefreshPromise: Promise<PublishedScheduleItem[]> | null = null;
+const publishedRefreshPromises = new Map<string, Promise<PublishedScheduleItem[]>>();
 
 interface RefreshPublishedSchedulesOptions {
   monthKeys?: string[];
+  repair?: boolean;
 }
 
 function cloneItems(items: PublishedScheduleItem[]) {
@@ -40,6 +45,41 @@ function cloneItems(items: PublishedScheduleItem[]) {
 
 function createPublishedTitle(schedule: GeneratedSchedule) {
   return `${schedule.year}년 ${schedule.month}월 근무표`;
+}
+
+function readE2ePublishedSchedulesSeed() {
+  if (!E2E_PUBLISHED_SCHEDULES_SEED_ENABLED || typeof window === "undefined") return null;
+
+  const raw = window.localStorage.getItem(E2E_PUBLISHED_SCHEDULES_SEED_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PublishedScheduleItem>[];
+    if (!Array.isArray(parsed)) return null;
+
+    return parsed
+      .map((item) => {
+        if (!item?.schedule) return null;
+        const schedule = normalizePublishedSchedule(JSON.parse(JSON.stringify(item.schedule)) as GeneratedSchedule);
+        return {
+          monthKey: item.monthKey ?? schedule.monthKey,
+          title: item.title ?? createPublishedTitle(schedule),
+          publishedAt: item.publishedAt ?? "",
+          schedule,
+        } satisfies PublishedScheduleItem;
+      })
+      .filter((item): item is PublishedScheduleItem => Boolean(item))
+      .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  } catch {
+    return null;
+  }
+}
+
+function syncE2ePublishedSchedulesSeed() {
+  const seededItems = readE2ePublishedSchedulesSeed();
+  if (!seededItems) return null;
+  publishedSchedulesCache = cloneItems(seededItems);
+  return cloneItems(publishedSchedulesCache);
 }
 
 function normalizeAssignments(assignments: Record<string, string[]>) {
@@ -91,6 +131,11 @@ function normalizePublishedMonthKeys(monthKeys?: string[]) {
   return Array.from(new Set((monthKeys ?? []).map((item) => item.trim()).filter(Boolean))).sort((left, right) =>
     left.localeCompare(right),
   );
+}
+
+function getRefreshPublishedSchedulesKey(options: RefreshPublishedSchedulesOptions) {
+  const monthKeys = normalizePublishedMonthKeys(options.monthKeys);
+  return `${options.repair === true ? "repair" : "read"}:${monthKeys.join(",") || "all"}`;
 }
 
 function applyPublishedItemsToCache(items: PublishedScheduleItem[], monthKeys?: string[]) {
@@ -169,17 +214,26 @@ async function repairPublishedItems(items: PublishedScheduleItem[]) {
 }
 
 export function getPublishedSchedules(monthKeys?: string[]): PublishedScheduleItem[] {
+  syncE2ePublishedSchedulesSeed();
   const normalizedMonthKeys = normalizePublishedMonthKeys(monthKeys);
   const monthKeySet = normalizedMonthKeys.length > 0 ? new Set(normalizedMonthKeys) : null;
   return cloneItems(publishedSchedulesCache).filter((item) => !monthKeySet || monthKeySet.has(item.monthKey));
 }
 
 export async function refreshPublishedSchedules(options: RefreshPublishedSchedulesOptions = {}) {
-  if (publishedRefreshPromise) {
-    return publishedRefreshPromise;
+  const refreshKey = getRefreshPublishedSchedulesKey(options);
+  const existingPromise = publishedRefreshPromises.get(refreshKey);
+  if (existingPromise) {
+    return existingPromise;
   }
 
-  publishedRefreshPromise = (async () => {
+  const refreshPromise = (async () => {
+    const seededItems = syncE2ePublishedSchedulesSeed();
+    if (seededItems) {
+      emitPublishedSchedulesEvent();
+      return getPublishedSchedules(options.monthKeys);
+    }
+
     const session = await getPortalSession();
     if (!session?.approved) {
       publishedSchedulesCache = [];
@@ -214,7 +268,9 @@ export async function refreshPublishedSchedules(options: RefreshPublishedSchedul
       throw new Error(error.message);
     }
 
-    const repaired = await repairPublishedItems(rowsToItems(data ?? []));
+    const repaired = options.repair === true
+      ? await repairPublishedItems(rowsToItems(data ?? []))
+      : { items: rowsToItems(data ?? []), changed: false, changedMonthKeys: [] as string[] };
     applyPublishedItemsToCache(repaired.items, monthKeys);
     emitPublishedSchedulesEvent();
     if (repaired.changed) {
@@ -231,10 +287,11 @@ export async function refreshPublishedSchedules(options: RefreshPublishedSchedul
     }
     return getPublishedSchedules(monthKeys);
   })().finally(() => {
-    publishedRefreshPromise = null;
+    publishedRefreshPromises.delete(refreshKey);
   });
 
-  return publishedRefreshPromise;
+  publishedRefreshPromises.set(refreshKey, refreshPromise);
+  return refreshPromise;
 }
 
 async function persistPublishedItem(monthKey: string, payload: { published_state: GeneratedSchedule | null; published_at: string | null }) {

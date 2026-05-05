@@ -1,25 +1,7 @@
 import { expect, test, type BrowserContextOptions, type Page } from "@playwright/test";
-import fs from "node:fs";
-import path from "node:path";
+import { AUTH_CACHE_KEY, seedSupabaseAuthCookie } from "./e2e-auth";
 
-const AUTH_CACHE_KEY = "j-special-force-auth-cache-v3";
 const E2E_PUBLISHED_SEED_KEY = "codex-e2e-published-schedules";
-
-function getSupabaseAuthTokenKey() {
-  for (const envFile of [".env.local", ".env"]) {
-    const fullPath = path.join(process.cwd(), envFile);
-    if (!fs.existsSync(fullPath)) continue;
-    const text = fs.readFileSync(fullPath, "utf8");
-    const match = text.match(/NEXT_PUBLIC_SUPABASE_URL\s*=\s*(.+)/);
-    if (!match) continue;
-    const value = match[1].trim().replace(/^['"]|['"]$/g, "");
-    const host = new URL(value).hostname.split(".")[0];
-    return `sb-${host}-auth-token`;
-  }
-  return "sb-local-auth-token";
-}
-
-const SUPABASE_AUTH_TOKEN_KEY = getSupabaseAuthTokenKey();
 
 type DeviceCase = {
   name: string;
@@ -55,6 +37,7 @@ function createDensePublishedSchedule() {
   const denseAssignments: Record<string, string[]> = {
     조근: ["정철원", "반일훈"],
     일반: ["김진광", "유연경"],
+    석근: ["정상원", "정재우", "조용희"],
     뉴스대기: ["박재현", "최무룡"],
     청와대: ["장후원", "신동환"],
     국회: ["이학진", "정상원"],
@@ -98,8 +81,10 @@ function createDensePublishedSchedule() {
 
 async function seedHomePage(page: Page) {
   const publishedItems = createDensePublishedSchedule();
+  const { supabaseAuthTokenKey, supabaseSession, supabaseCookieValue } = await seedSupabaseAuthCookie(page);
   await page.addInitScript(
-    ({ authCacheKey, supabaseAuthTokenKey, publishedSeedKey, publishedItems }) => {
+    ({ authCacheKey, supabaseAuthTokenKey, supabaseSession, supabaseCookieValue, publishedSeedKey, publishedItems }) => {
+      document.cookie = `${supabaseAuthTokenKey}=${supabaseCookieValue}; path=/; max-age=3600; SameSite=Lax`;
       window.localStorage.setItem(
         authCacheKey,
         JSON.stringify({
@@ -115,28 +100,15 @@ async function seedHomePage(page: Page) {
       );
       window.localStorage.setItem(
         supabaseAuthTokenKey,
-        JSON.stringify({
-          access_token: "test-access-token",
-          refresh_token: "test-refresh-token",
-          token_type: "bearer",
-          expires_in: 3600,
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          user: {
-            id: "admin-seed",
-            email: "admin@example.com",
-            user_metadata: {
-              role: "admin",
-              login_id: "admin",
-              name: "관리자",
-            },
-          },
-        }),
+        JSON.stringify(supabaseSession),
       );
       window.localStorage.setItem(publishedSeedKey, JSON.stringify(publishedItems));
     },
     {
       authCacheKey: AUTH_CACHE_KEY,
-      supabaseAuthTokenKey: SUPABASE_AUTH_TOKEN_KEY,
+      supabaseAuthTokenKey,
+      supabaseSession,
+      supabaseCookieValue,
       publishedSeedKey: E2E_PUBLISHED_SEED_KEY,
       publishedItems,
     },
@@ -217,6 +189,28 @@ for (const deviceCase of deviceCases) {
     const panel = page.locator(`.schedule-published-panel--${deviceCase.expectedMode}`);
     await expect(panel).toBeVisible();
 
+    await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day")).toBeVisible();
+    await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day .schedule-day-card")).toHaveCount(6);
+
+    const homeRows = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div"))
+        .map((row) => row.querySelectorAll(".schedule-day-card").length),
+    );
+    expect(homeRows).toEqual([3, 3]);
+
+    const threePersonGrid = await page.evaluate(() => {
+      const grid = Array.from(document.querySelectorAll<HTMLElement>(".schedule-published-panel--home-three-day .schedule-name-grid"))
+        .find((candidate) => candidate.querySelectorAll(".schedule-name-chip").length === 3);
+      const columns = grid
+        ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length
+        : 0;
+      return {
+        chipCount: grid?.querySelectorAll(".schedule-name-chip").length ?? 0,
+        columns,
+      };
+    });
+    expect(threePersonGrid).toEqual({ chipCount: 3, columns: 2 });
+
     const diagnostics = await page.evaluate(() => {
       const chips = Array.from(document.querySelectorAll<HTMLElement>(".schedule-day-card .schedule-name-chip"));
       const overlaps: Array<{ a: string; b: string; left: number; top: number }> = [];
@@ -268,3 +262,100 @@ for (const deviceCase of deviceCases) {
     await context.close();
   });
 }
+
+test("home published schedule stays compact instead of stretching wide on desktop", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+  });
+  const page = await context.newPage();
+  await seedHomePage(page);
+
+  await page.goto("/");
+  await page.waitForSelector(".schedule-calendar-grid--home-mobile-three-day");
+
+  await expect(page.locator(".schedule-published-panel--desktop")).toBeVisible();
+  await expect(page.locator(".schedule-published-panel--home-three-day")).toBeVisible();
+  await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day .schedule-day-card")).toHaveCount(6);
+
+  const metrics = await page.evaluate(() => {
+    const scroll = document.querySelector<HTMLElement>(".schedule-published-panel--home-three-day .schedule-calendar-scroll--daily");
+    const grid = document.querySelector<HTMLElement>(".schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day");
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div"))
+      .map((row) => row.querySelectorAll(".schedule-day-card").length);
+    return {
+      gridWidth: grid?.getBoundingClientRect().width ?? 0,
+      scrollClientWidth: scroll?.clientWidth ?? 0,
+      scrollWidth: scroll?.scrollWidth ?? 0,
+      rows,
+    };
+  });
+
+  expect(metrics.rows).toEqual([3, 3]);
+  expect(metrics.gridWidth).toBeLessThanOrEqual(761);
+  expect(metrics.scrollWidth - metrics.scrollClientWidth).toBeLessThanOrEqual(1);
+
+  await context.close();
+});
+
+test("mobile work schedule defaults to full fit and toggles to three-day rows", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  const page = await context.newPage();
+  await seedHomePage(page);
+
+  await page.goto("/work-schedule");
+  await page.waitForSelector(".schedule-calendar-grid--daily");
+
+  await expect(page.locator(".schedule-published-panel--mobile-full-fit")).toBeVisible();
+  await expect(page.locator(".schedule-published-zoom-controls")).toBeVisible();
+  await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day")).toHaveCount(0);
+  await expect(page.locator(".schedule-calendar-grid--daily .schedule-day-card")).toHaveCount(33);
+
+  await page.waitForFunction(() => {
+    const zoom = document.querySelector<HTMLElement>(".schedule-published-panel--mobile-full-fit .schedule-calendar-zoom--daily");
+    return Boolean(zoom?.style.transform?.startsWith("scale("));
+  });
+
+  await page.getByRole("button", { name: "보기 변경" }).click();
+
+  await expect(page.locator(".schedule-published-panel--three-day")).toBeVisible();
+  await expect(page.locator(".schedule-published-zoom-controls")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "전체 보기" })).toBeVisible();
+
+  const threeDayMetrics = await page.evaluate(() => {
+    const scroll = document.querySelector<HTMLElement>(".schedule-published-panel--three-day .schedule-calendar-scroll--daily");
+    const row = document.querySelector<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div");
+    const firstNameGrid = document.querySelector<HTMLElement>(".schedule-published-panel--page-three-day .schedule-name-grid");
+    const scrollRect = scroll?.getBoundingClientRect();
+    const firstRowCardRects = Array.from(row?.querySelectorAll<HTMLElement>(".schedule-day-card") ?? []).map((card) =>
+      card.getBoundingClientRect(),
+    );
+    const allCardRects = Array.from(document.querySelectorAll<HTMLElement>(".schedule-published-panel--page-three-day .schedule-day-card")).map((card) =>
+      card.getBoundingClientRect(),
+    );
+    const maxCardRight = Math.max(...firstRowCardRects.map((rect) => rect.right));
+    const maxCardHeight = Math.max(...allCardRects.map((rect) => rect.height));
+    const nameGridColumns = firstNameGrid
+      ? window.getComputedStyle(firstNameGrid).gridTemplateColumns.split(" ").filter(Boolean).length
+      : 0;
+    return {
+      totalCardCount: allCardRects.length,
+      rowCardCount: firstRowCardRects.length,
+      rightOverflow: scrollRect ? maxCardRight - scrollRect.right : 0,
+      maxCardHeight,
+      nameGridColumns,
+    };
+  });
+
+  expect(threeDayMetrics.totalCardCount).toBe(33);
+  expect(threeDayMetrics.rowCardCount).toBe(3);
+  expect(threeDayMetrics.rightOverflow).toBeLessThanOrEqual(1);
+  expect(threeDayMetrics.nameGridColumns).toBe(2);
+  expect(threeDayMetrics.maxCardHeight).toBeLessThanOrEqual(360);
+
+  await context.close();
+});

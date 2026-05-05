@@ -1,6 +1,6 @@
 import {
   isVacationRequestOpen,
-  refreshVacationStore,
+  refreshVacationRequestOpenState,
   VACATION_EVENT,
 } from "@/lib/vacation/storage";
 import {
@@ -90,7 +90,7 @@ export async function refreshPortalAccessState(options?: { force?: boolean }) {
   }
 
   portalAccessRefreshPromise = Promise.all([
-    refreshVacationStore(),
+    refreshVacationRequestOpenState(),
     refreshTeamLeadSubmissionAccessState(),
   ])
     .then(() => {

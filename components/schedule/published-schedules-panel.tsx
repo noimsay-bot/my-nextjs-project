@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
+  hasDeskAccess,
   subscribeToAuth,
 } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
@@ -60,6 +61,8 @@ const TOUCH_SCHEDULE_ZOOM_MAX = 3;
 const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON = 0.01;
+const HOME_PREVIEW_DAY_COUNT = 6;
+const MOBILE_THREE_DAY_ROW_SIZE = 3;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
 function isVisualViewportPinchZoomActive() {
@@ -144,7 +147,7 @@ function getPublishedScheduleLayoutMode(
   hasCoarsePointer: boolean,
 ): PublishedScheduleLayoutMode {
   const shortSide = Math.min(viewportWidth, viewportHeight);
-  if (viewportWidth <= 820 || shortSide <= 420) return "mobile";
+  if (viewportWidth <= 480 || shortSide <= 420) return "mobile";
   if (viewportWidth <= 1180 || shortSide <= 900 || (hasCoarsePointer && viewportWidth <= 1400)) return "tablet";
   return "desktop";
 }
@@ -666,7 +669,7 @@ function getWeeklyPreviewDays(days: DisplayDay[], todayKey: string) {
   return previewDays.length > 0 ? previewDays : days;
 }
 
-function getHomeMobilePreviewDays(days: DisplayDay[], todayKey: string) {
+function getHomePreviewDays(days: DisplayDay[], todayKey: string) {
   if (days.length === 0) return [];
 
   const anchorIndex = days.findIndex(
@@ -681,7 +684,7 @@ function getHomeMobilePreviewDays(days: DisplayDay[], todayKey: string) {
           ? days.findIndex((day) => !day.isOverflowMonth)
           : 0;
 
-  return days.slice(resolvedAnchorIndex, resolvedAnchorIndex + 6);
+  return days.slice(resolvedAnchorIndex, resolvedAnchorIndex + HOME_PREVIEW_DAY_COUNT);
 }
 
 function getPreviousDateKey(dateKey: string) {
@@ -869,8 +872,11 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const loadItems = async () => {
     setItemsLoading(true);
     try {
-      const publishedItems = await refreshPublishedSchedules();
-      await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));
+      const publishedItems = await refreshPublishedSchedules({ repair: false });
+      const activeSession = getSession();
+      if (activeSession?.approved && hasDeskAccess(activeSession.actualRole)) {
+        await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));
+      }
       syncItemsFromCache();
     } finally {
       setItemsLoading(false);
@@ -893,6 +899,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   };
 
   const loadScheduleHistory = async () => {
+    const activeSession = getSession();
+    if (!activeSession?.approved || !hasDeskAccess(activeSession.actualRole)) {
+      setScheduleHistory([]);
+      return;
+    }
+
     const nextState = await refreshScheduleState();
     await refreshTeamLeadAssignmentMonths(nextState.generatedHistory.map((schedule) => schedule.monthKey));
     syncScheduleHistory();
@@ -908,6 +920,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
     const runDeferredLoads = () => {
       if (cancelled) return;
+      if (isHomePreview) return;
       void loadScheduleHistory();
     };
 
@@ -1039,12 +1052,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     };
   }, []);
 
+  const isPageMobileFullScheduleView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "full";
+
   useEffect(() => {
-    const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
-    if (!shouldAutoFitSchedule) {
+    if (!isPageMobileFullScheduleView) {
       setScheduleZoomFactor(1);
     }
-  }, [scheduleLayoutMode]);
+  }, [isPageMobileFullScheduleView]);
 
   const activeHiddenMonthKeys = hideMode ? draftHiddenPublishedMonthKeys : hiddenPublishedMonthKeys;
   const activeItems = useMemo(() => {
@@ -1090,9 +1104,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const isHomeMobileThreeDayView = isHomePreview && scheduleLayoutMode === "mobile";
+  const isHomeThreeDayView = isHomePreview;
   const isPageMobileThreeDayView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "three-day";
-  const isMobileThreeDayView = isHomeMobileThreeDayView || isPageMobileThreeDayView;
+  const isMobileThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
+  const isCompactThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
@@ -1115,30 +1130,30 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const visibleDisplayDays = useMemo(
     () =>
       isHomePreview
-        ? isHomeMobileThreeDayView
-          ? getHomeMobilePreviewDays(homeMobileDisplayDays, todayKey)
-          : getWeeklyPreviewDays(displayDays, todayKey)
+          ? isHomeThreeDayView
+            ? getHomePreviewDays(homeMobileDisplayDays, todayKey)
+            : getWeeklyPreviewDays(displayDays, todayKey)
         : displayDays,
-    [displayDays, homeMobileDisplayDays, isHomeMobileThreeDayView, isHomePreview, todayKey],
+    [displayDays, homeMobileDisplayDays, isHomeThreeDayView, isHomePreview, todayKey],
   );
   const mobileThreeDayDisplayDays = useMemo(() => {
     if (!isMobileThreeDayView) return [] as DisplayDay[];
-    if (isHomeMobileThreeDayView) return getHomeMobilePreviewDays(homeMobileDisplayDays, todayKey);
+    if (isHomeThreeDayView) return getHomePreviewDays(homeMobileDisplayDays, todayKey);
     return visibleDisplayDays;
-  }, [homeMobileDisplayDays, isHomeMobileThreeDayView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
+  }, [homeMobileDisplayDays, isHomeThreeDayView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
   const mobileThreeDayRows = useMemo(() => {
     if (!isMobileThreeDayView) return [];
 
     const rows: DisplayDay[][] = [];
-    for (let index = 0; index < mobileThreeDayDisplayDays.length; index += 3) {
-      rows.push(mobileThreeDayDisplayDays.slice(index, index + 3));
+    for (let index = 0; index < mobileThreeDayDisplayDays.length; index += MOBILE_THREE_DAY_ROW_SIZE) {
+      rows.push(mobileThreeDayDisplayDays.slice(index, index + MOBILE_THREE_DAY_ROW_SIZE));
     }
     return rows;
   }, [isMobileThreeDayView, mobileThreeDayDisplayDays]);
   const homePreviewTitle = "이번주 근무표";
   const homePreviewRangeLabel =
     visibleDisplayDays.length > 0
-      ? isHomeMobileThreeDayView
+      ? isHomeThreeDayView
         ? `오늘 기준 ${visibleDisplayDays.length}일`
         : `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
       : null;
@@ -1226,21 +1241,29 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const shouldAutoFitSchedule = scheduleLayoutMode !== "desktop";
-  const schedulePanelLayoutClassName =
+  const shouldAutoFitSchedule = isPageMobileFullScheduleView;
+  const schedulePanelLayoutBaseClassName =
     scheduleLayoutMode === "mobile"
-      ? "schedule-published-panel--fit schedule-published-panel--mobile-layout"
+      ? "schedule-published-panel--mobile schedule-published-panel--fit schedule-published-panel--mobile-layout"
       : scheduleLayoutMode === "tablet"
-        ? "schedule-published-panel--fit schedule-published-panel--mobile-layout"
+        ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
+  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayView ? " schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit" : ""}`;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
-  const canControlScheduleZoom = false;
+  const canControlScheduleZoom = isPageMobileFullScheduleView;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!selectedItem) return;
+    if (!shouldAutoFitSchedule) {
+      setScheduleScale(1);
+      setScheduleContentSize((current) => (
+        current.width === 0 && current.height === 0 ? current : { width: 0, height: 0 }
+      ));
+      return;
+    }
 
     let frameId = 0;
     const visualViewport = window.visualViewport;
@@ -1838,11 +1861,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         {scheduleLayoutMode === "mobile" && !isHomePreview ? (
                           <button
                             className={`btn ${isPageMobileThreeDayView ? "white" : ""}`}
+                            aria-pressed={isPageMobileThreeDayView}
                             onClick={() =>
                               setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"))
                             }
                           >
-                            보기 변경
+                            {isPageMobileThreeDayView ? "전체 보기" : "보기 변경"}
                           </button>
                         ) : null}
                         <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
@@ -2094,12 +2118,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                               </div>
                               <div className="schedule-day-body" style={{ display: "grid", gap: 1 }}>
                                 {visibleAssignments.map(([category, names]) => (
-                                  <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
+                                  <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: isCompactThreeDayView ? 8 : 10, padding: isCompactThreeDayView ? 4 : 6, background: "rgba(9,17,30,.34)" }}>
                                     <div
                                       style={{
                                         display: "grid",
-                                        gridTemplateColumns: "44px minmax(0, 1fr)",
-                                        columnGap: 8,
+                                        gridTemplateColumns: isCompactThreeDayView ? "32px minmax(0, 1fr)" : "44px minmax(0, 1fr)",
+                                        columnGap: isCompactThreeDayView ? 4 : 8,
                                         alignItems: "stretch",
                                       }}
                                     >
@@ -2111,9 +2135,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           justifyContent: "center",
                                           alignSelf: "stretch",
                                           marginBottom: 0,
-                                          fontSize: 14,
-                                          lineHeight: 1.1,
-                                          minHeight: 38,
+                                          fontSize: isCompactThreeDayView ? 10 : 14,
+                                          lineHeight: isCompactThreeDayView ? 1.05 : 1.1,
+                                          minHeight: isCompactThreeDayView ? 24 : 38,
                                           textAlign: "center",
                                           whiteSpace: "pre-line",
                                         }}
@@ -2186,8 +2210,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                               data-swap-recommendation-root={firstSelected ? "true" : undefined}
                                               style={{
                                                 position: "relative",
+                                                minWidth: 0,
                                                 width: "100%",
-                                                overflow: "visible",
+                                                overflow: isMobileThreeDayView ? "hidden" : "visible",
                                                 zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
                                               }}
                                             >
@@ -2203,11 +2228,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                   justifySelf: "stretch",
                                                   alignItems: "center",
                                                   justifyContent: "center",
+                                                  minWidth: 0,
                                                   width: "100%",
                                                   maxWidth: "100%",
-                                                  gap: personObject.pending ? 0 : 5,
-                                                  minHeight: 28,
-                                                  padding: "3px 4px",
+                                                  overflow: isMobileThreeDayView ? "hidden" : "visible",
+                                                  gap: isCompactThreeDayView ? 0 : personObject.pending ? 0 : 5,
+                                                  minHeight: isCompactThreeDayView ? 18 : 28,
+                                                  padding: isCompactThreeDayView ? "2px" : "3px 4px",
                                                   borderRadius: 0,
                                                   background: personObject.pending
                                                     ? "rgba(245,158,11,.18)"
@@ -2283,15 +2310,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 <FittedNameText
                                                   text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                                   className="schedule-name-chip__text"
-                                                  minFontSize={shouldAutoFitSchedule ? 5 : 9}
-                                                  maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                                  minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 5 : 9}
+                                                  maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                                   style={{
                                                     display: "inline-block",
                                                     flex: "0 1 auto",
+                                                    minWidth: 0,
                                                     width: "100%",
                                                     margin: "0 auto",
-                                                    overflow: "visible",
-                                                    textOverflow: "clip",
+                                                    overflow: isMobileThreeDayView ? "hidden" : "visible",
+                                                    textOverflow: isMobileThreeDayView ? "ellipsis" : "clip",
                                                   }}
                                                 />
                                                 {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
@@ -2469,12 +2497,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       </div>
                       <div className="schedule-day-body" style={{ display: "grid", gap: 1 }}>
                         {visibleAssignments.map(([category, names]) => (
-                          <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: 10, padding: 6, background: "rgba(9,17,30,.34)" }}>
+                                  <div key={`${day.dateKey}-${category}`} style={{ border: "1px solid rgba(255,255,255,.16)", borderRadius: isCompactThreeDayView ? 8 : 10, padding: isCompactThreeDayView ? 4 : 6, background: "rgba(9,17,30,.34)" }}>
                             <div
                               style={{
                                 display: "grid",
-                                gridTemplateColumns: "44px minmax(0, 1fr)",
-                                columnGap: 8,
+                                gridTemplateColumns: isCompactThreeDayView ? "32px minmax(0, 1fr)" : "44px minmax(0, 1fr)",
+                                columnGap: isCompactThreeDayView ? 4 : 8,
                                 alignItems: "stretch",
                               }}
                             >
@@ -2486,9 +2514,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                   justifyContent: "center",
                                   alignSelf: "stretch",
                                   marginBottom: 0,
-                                  fontSize: 14,
-                                  lineHeight: 1.1,
-                                  minHeight: 38,
+                                  fontSize: isCompactThreeDayView ? 10 : 14,
+                                  lineHeight: isCompactThreeDayView ? 1.05 : 1.1,
+                                  minHeight: isCompactThreeDayView ? 24 : 38,
                                   textAlign: "center",
                                   whiteSpace: "pre-line",
                                 }}
@@ -2561,11 +2589,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                       data-swap-recommendation-root={firstSelected ? "true" : undefined}
                                       style={{
                                         position: "relative",
+                                        minWidth: 0,
                                         width: "100%",
-                                      overflow: "visible",
-                                      zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
-                                    }}
-                                  >
+                                        overflow: isMobileThreeDayView ? "hidden" : "visible",
+                                        zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
+                                      }}
+                                    >
                                       <button
                                         type="button"
                                         className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
@@ -2578,11 +2607,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           justifySelf: "stretch",
                                           alignItems: "center",
                                           justifyContent: "center",
+                                          minWidth: 0,
                                           width: "100%",
                                           maxWidth: "100%",
-                                          gap: personObject.pending ? 0 : 5,
-                                          minHeight: isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
-                                          padding: isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
+                                          overflow: isMobileThreeDayView ? "hidden" : "visible",
+                                          gap: isCompactThreeDayView ? 0 : personObject.pending ? 0 : 5,
+                                          minHeight: isCompactThreeDayView ? 18 : isCompactMonthlyView ? 28 : isCompactDailyLandscapeView ? 38 : isCompactDailyView ? 30 : 30,
+                                          padding: isCompactThreeDayView ? "2px" : isCompactMonthlyView ? "3px 4px" : isCompactDailyView ? "4px 4px" : "3px 4px",
                                           borderRadius: 0,
                                           background: personObject.pending
                                             ? "rgba(245,158,11,.18)"
@@ -2658,15 +2689,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                         <FittedNameText
                                           text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                           className="schedule-name-chip__text"
-                                          minFontSize={shouldAutoFitSchedule ? 5 : 9}
-                                          maxFontSize={isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                          minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 5 : 9}
+                                          maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                           style={{
                                             display: "inline-block",
                                             flex: "0 1 auto",
+                                            minWidth: 0,
                                             width: "100%",
                                             margin: "0 auto",
-                                            overflow: "visible",
-                                            textOverflow: "clip",
+                                            overflow: isMobileThreeDayView ? "hidden" : "visible",
+                                            textOverflow: isMobileThreeDayView ? "ellipsis" : "clip",
                                           }}
                                         />
                                         {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}

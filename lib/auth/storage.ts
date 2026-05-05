@@ -67,6 +67,7 @@ const LOGIN_EMAIL_CACHE_KEY = "j-special-force-login-email-cache-v1";
 const PROFILE_COLUMNS = "id, email, login_id, name, role, approved, created_at, updated_at";
 const REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 const AUTH_REQUEST_TIMEOUT_MS = 4_000;
+const AUTH_REFRESH_STALE_MS = 60_000;
 const AUTH_FAILURE_COOLDOWN_MS = 10_000;
 const APPROVAL_REQUIRED_MESSAGE = "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.";
 const PROFILE_SYNC_FAILED_MESSAGE = "계정 정보를 확인하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.";
@@ -91,6 +92,7 @@ let lastAuthBlockReason: "approval" | "profile_sync" | null = null;
 let realtimeChannelSequence = 0;
 let lastAuthCheckStatus: AuthCheckStatus = cachedSession ? "ok" : "idle";
 let lastAuthFailureAt = 0;
+let lastAuthRefreshAt = cachedSession ? Date.now() : 0;
 let sessionSyncPromise: Promise<SessionUser | null> | null = null;
 let sessionSyncPromiseUserId: string | null = null;
 
@@ -112,6 +114,7 @@ function setLastAuthCheckStatus(status: AuthCheckStatus) {
 
 function markAuthCheckHealthy() {
   lastAuthFailureAt = 0;
+  lastAuthRefreshAt = Date.now();
   setLastAuthCheckStatus("ok");
 }
 
@@ -123,6 +126,16 @@ function markAuthCheckFailure(status: Exclude<AuthCheckStatus, "idle" | "ok">) {
 function shouldShortCircuitAuthRetry() {
   if (!lastAuthFailureAt) return false;
   return Date.now() - lastAuthFailureAt < AUTH_FAILURE_COOLDOWN_MS;
+}
+
+function canUseFreshCachedSession(force: boolean) {
+  return (
+    !force &&
+    Boolean(cachedSession) &&
+    hasSupabaseSessionCookie() &&
+    lastAuthCheckStatus === "ok" &&
+    Date.now() - lastAuthRefreshAt < AUTH_REFRESH_STALE_MS
+  );
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -965,7 +978,11 @@ export async function initializeAuth() {
 
 export async function refreshSession(options?: { force?: boolean }) {
   if (typeof window === "undefined") return null;
+  const force = options?.force ?? false;
   if (refreshPromise) return refreshPromise;
+  if (canUseFreshCachedSession(force)) {
+    return cachedSession;
+  }
   if (shouldShortCircuitAuthRetry()) {
     authLog("session.check.complete", {
       source: "refreshSession",
@@ -979,7 +996,7 @@ export async function refreshSession(options?: { force?: boolean }) {
     try {
       authLog("session.check.start", {
         source: "refreshSession",
-        force: options?.force ?? false,
+        force,
         hasCachedSession: Boolean(cachedSession),
       });
       const supabase = getSupabaseClient();
