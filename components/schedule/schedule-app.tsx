@@ -1,7 +1,7 @@
 ﻿﻿﻿﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
@@ -97,6 +97,79 @@ const REQUEST_VISIBLE_STATUSES: ScheduleChangeRequest["status"][] = ["pending", 
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
+function renderScheduleWeekdayCards(keyPrefix: string) {
+  return weekdayLabels.map((label) => {
+    const isWeekendLabel = label === "토" || label === "일";
+    return (
+      <div
+        key={`${keyPrefix}-${label}`}
+        className="schedule-weekday"
+        style={{
+          textAlign: "center",
+          padding: "6px 4px",
+          borderRadius: 12,
+          border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)",
+          background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)",
+          color: isWeekendLabel ? "#ffffff" : undefined,
+          fontWeight: 900,
+          fontSize: 14,
+        }}
+      >
+        {label}
+      </div>
+    );
+  });
+}
+
+function buildWeeklyCalendarItems<T>(
+  days: T[],
+  leadingPlaceholderCount: number,
+  keyPrefix: string,
+  renderDay: (day: T) => ReactNode,
+) {
+  const items: ReactNode[] = [];
+  if (days.length === 0) return items;
+
+  let dayIndex = 0;
+  let weekIndex = 0;
+
+  while (dayIndex < days.length) {
+    items.push(...renderScheduleWeekdayCards(`${keyPrefix}-weekdays-${weekIndex}`));
+
+    for (let weekdayIndex = 0; weekdayIndex < 7; weekdayIndex += 1) {
+      if (weekIndex === 0 && weekdayIndex < leadingPlaceholderCount) {
+        items.push(
+          <div
+            key={`${keyPrefix}-leading-placeholder-${weekIndex}-${weekdayIndex}`}
+            aria-hidden="true"
+            style={{ minHeight: 1 }}
+          />,
+        );
+        continue;
+      }
+
+      const day = days[dayIndex];
+      if (!day) {
+        items.push(
+          <div
+            key={`${keyPrefix}-trailing-placeholder-${weekIndex}-${weekdayIndex}`}
+            aria-hidden="true"
+            style={{ minHeight: 1 }}
+          />,
+        );
+        continue;
+      }
+
+      items.push(renderDay(day));
+      dayIndex += 1;
+    }
+
+    weekIndex += 1;
+  }
+
+  return items;
 }
 
 function getAssignmentChipTag(category: string, name: string, day: DaySchedule) {
@@ -1886,21 +1959,7 @@ export function ScheduleApp() {
               </div>
               <div className="schedule-calendar-scroll">
               <div className="schedule-calendar-grid">
-                {weekdayLabels.map((label) => {
-                  const isWeekendLabel = label === "토" || label === "일";
-                  return (
-                  <div key={label} className="schedule-weekday" style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
-                    {label}
-                  </div>
-                )})}
-                {Array.from({ length: visibleLeadingPlaceholderCount }, (_, index) => (
-                  <div
-                    key={`visible-leading-placeholder-${index}`}
-                    aria-hidden="true"
-                    style={{ minHeight: 1 }}
-                  />
-                ))}
-                {visibleDays.map((day) => {
+                {buildWeeklyCalendarItems(visibleDays, visibleLeadingPlaceholderCount, "visible", (day) => {
                   const dayOwnerMonthKey = visibleDayOwnerMonthKeyMap.get(day.dateKey) ?? visibleSchedule.monthKey;
                   const isEditingVisibleMonth = activeEditMonthKey === dayOwnerMonthKey && isEditingDate;
                   const editMode =
@@ -2884,21 +2943,11 @@ export function ScheduleApp() {
               </div>
               <div className="schedule-calendar-scroll">
                 <div className="schedule-calendar-grid">
-                  {weekdayLabels.map((label) => {
-                    const isWeekendLabel = label === "토" || label === "일";
-                    return (
-                    <div key={`preview-${label}`} className="schedule-weekday" style={{ textAlign: "center", padding: "8px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
-                      {label}
-                    </div>
-                  )})}
-                  {Array.from({ length: originalLeadingPlaceholderCount }, (_, index) => (
-                    <div
-                      key={`preview-leading-placeholder-${originalPreviewSnapshot.id}-${index}`}
-                      aria-hidden="true"
-                      style={{ minHeight: 1 }}
-                    />
-                  ))}
-                  {originalVisibleDays.map((day) => {
+                  {buildWeeklyCalendarItems(
+                    originalVisibleDays,
+                    originalLeadingPlaceholderCount,
+                    `preview-${originalPreviewSnapshot.id}`,
+                    (day) => {
                     const dayCardStyle = getDayCardStyle(day);
                     const centeredDayLabel = getCenteredDayLabel(day);
                     const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));

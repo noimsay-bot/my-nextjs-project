@@ -1,7 +1,7 @@
 ﻿﻿﻿﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import {
   getSession,
@@ -70,6 +70,63 @@ function isVisualViewportPinchZoomActive() {
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
+}
+
+function renderPublishedWeekdayCards(keyPrefix: string, isCompactMonthlyView: boolean) {
+  return weekdayLabels.map((label) => {
+    const isWeekendLabel = label === "토" || label === "일";
+    return (
+      <div
+        key={`${keyPrefix}-${label}`}
+        className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`}
+        style={{
+          textAlign: "center",
+          padding: "6px 4px",
+          borderRadius: 12,
+          border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)",
+          background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)",
+          color: isWeekendLabel ? "#ffffff" : undefined,
+          fontWeight: 900,
+          fontSize: 14,
+        }}
+      >
+        {label}
+      </div>
+    );
+  });
+}
+
+function buildPublishedWeeklyCalendarItems<T>(
+  days: T[],
+  keyPrefix: string,
+  isCompactMonthlyView: boolean,
+  renderDay: (day: T) => ReactNode,
+) {
+  const items: ReactNode[] = [];
+  if (days.length === 0) return items;
+
+  for (let weekStart = 0; weekStart < days.length; weekStart += 7) {
+    const weekIndex = Math.floor(weekStart / 7);
+    const weekDays = days.slice(weekStart, weekStart + 7);
+    items.push(...renderPublishedWeekdayCards(`${keyPrefix}-weekdays-${weekIndex}`, isCompactMonthlyView));
+
+    for (let weekdayIndex = 0; weekdayIndex < 7; weekdayIndex += 1) {
+      const day = weekDays[weekdayIndex];
+      if (!day) {
+        items.push(
+          <div
+            key={`${keyPrefix}-trailing-placeholder-${weekIndex}-${weekdayIndex}`}
+            aria-hidden="true"
+            style={{ minHeight: 1 }}
+          />,
+        );
+        continue;
+      }
+      items.push(renderDay(day));
+    }
+  }
+
+  return items;
 }
 
 function getAssignmentChipTag(category: string, name: string, day: DaySchedule) {
@@ -1879,6 +1936,35 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         }}
                       >
                         {row.map((day) => {
+                          const label = getWeekdayLabel(day.dow);
+                          const isWeekendLabel = label === "토" || label === "일";
+                          return (
+                            <div
+                              key={`home-mobile-row-${rowIndex}-weekday-${day.dateKey}`}
+                              className="schedule-weekday"
+                              style={{
+                                textAlign: "center",
+                                padding: "6px 4px",
+                                borderRadius: 12,
+                                border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)",
+                                background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)",
+                                color: isWeekendLabel ? "#ffffff" : undefined,
+                                fontWeight: 900,
+                                fontSize: 14,
+                              }}
+                            >
+                              {label}
+                            </div>
+                          );
+                        })}
+                        {row.length < 3 ? Array.from({ length: 3 - row.length }).map((_, fillerIndex) => (
+                          <div
+                            key={`home-mobile-row-${rowIndex}-weekday-filler-${fillerIndex}`}
+                            aria-hidden="true"
+                            style={{ minHeight: 0 }}
+                          />
+                        )) : null}
+                        {row.map((day) => {
                           const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
                           const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                           const isTodayInHomePreview = isHomePreview && day.dateKey === todayKey;
@@ -2248,14 +2334,11 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                   </div>
                 ) : (
                   <>
-                    {weekdayLabels.map((label) => {
-                      const isWeekendLabel = label === "토" || label === "일";
-                      return (
-                      <div key={label} className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`} style={{ textAlign: "center", padding: "6px 4px", borderRadius: 12, border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)", background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)", color: isWeekendLabel ? "#ffffff" : undefined, fontWeight: 900, fontSize: 14 }}>
-                        {label}
-                      </div>
-                    )})}
-                    {visibleDisplayDays.map((day) => {
+                    {buildPublishedWeeklyCalendarItems(
+                      visibleDisplayDays,
+                      selectedItem.monthKey,
+                      isCompactMonthlyView,
+                      (day) => {
                   const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
                   const isTodayInHomePreview = isHomePreview && day.dateKey === todayKey;
@@ -2613,7 +2696,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       </div>
                     </article>
                   );
-                })}
+                    })}
                   </>
                 )}
               </div>

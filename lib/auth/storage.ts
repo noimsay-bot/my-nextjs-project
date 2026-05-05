@@ -794,7 +794,12 @@ function initAuthListener() {
     });
 
     if (!session?.user) {
-      if (event === "INITIAL_SESSION" && cachedSession) {
+      if (event === "INITIAL_SESSION") {
+        clearProfileSubscription();
+        clearReviewAccessSubscription();
+        invalidateReviewAccessCache();
+        setCachedSession(null);
+        setCachedUsers([]);
         return;
       }
       if (event !== "SIGNED_OUT" && cachedSession) {
@@ -810,6 +815,7 @@ function initAuthListener() {
     }
 
     if (event === "INITIAL_SESSION" && cachedSession?.id === session.user.id) {
+      void syncSessionFromUser(session.user, { force: false });
       return;
     }
 
@@ -891,7 +897,22 @@ export async function initializeAuth() {
     });
     initAuthListener();
     if (cachedSession) {
+      if (!hasSupabaseSessionCookie()) {
+        clearProfileSubscription();
+        clearReviewAccessSubscription();
+        invalidateReviewAccessCache();
+        setCachedSession(null);
+        setCachedUsers([]);
+        markAuthCheckFailure("missing_session");
+        authLog("session.check.complete", {
+          source: "initializeAuth",
+          status: "missing-session-cookie-cleared-cache",
+        });
+        return null;
+      }
+
       markAuthCheckHealthy();
+      void refreshSession({ force: false });
       authLog("session.check.complete", {
         source: "initializeAuth",
         status: "cached-session",
