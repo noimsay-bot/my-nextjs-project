@@ -942,7 +942,10 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
     }
 
     try {
-      const workspace = await fetchHomePublicWorkspace(options);
+      const workspace =
+        options.includeTrips === false
+          ? await fetchHomePublicWorkspaceFallback(session)
+          : await fetchHomePublicWorkspace(options);
 
       syncCaches(
         workspace.notices,
