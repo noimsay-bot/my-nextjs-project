@@ -263,7 +263,7 @@ for (const deviceCase of deviceCases) {
   });
 }
 
-test("home published schedule stays compact instead of stretching wide on desktop", async ({ browser }) => {
+test("desktop home published schedule shows the current Monday-Sunday week", async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
   });
@@ -271,28 +271,29 @@ test("home published schedule stays compact instead of stretching wide on deskto
   await seedHomePage(page);
 
   await page.goto("/");
-  await page.waitForSelector(".schedule-calendar-grid--home-mobile-three-day");
+  await page.waitForSelector(".schedule-calendar-grid--daily");
 
   await expect(page.locator(".schedule-published-panel--desktop")).toBeVisible();
-  await expect(page.locator(".schedule-published-panel--home-three-day")).toBeVisible();
-  await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day .schedule-day-card")).toHaveCount(6);
+  await expect(page.locator(".schedule-published-panel--home-three-day")).toHaveCount(0);
+  await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day")).toHaveCount(0);
+  await expect(page.locator(".schedule-calendar-grid--daily .schedule-day-card")).toHaveCount(7);
 
   const metrics = await page.evaluate(() => {
-    const scroll = document.querySelector<HTMLElement>(".schedule-published-panel--home-three-day .schedule-calendar-scroll--daily");
-    const grid = document.querySelector<HTMLElement>(".schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day");
-    const rows = Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div"))
-      .map((row) => row.querySelectorAll(".schedule-day-card").length);
+    const dayLabels = Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--daily > .schedule-day-card .schedule-day-date span"))
+      .map((node) => node.textContent?.trim() ?? "");
+    const weekdayLabels = Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--daily > .schedule-weekday"))
+      .map((node) => node.textContent?.trim() ?? "");
+    const grid = document.querySelector<HTMLElement>(".schedule-calendar-grid--daily");
     return {
-      gridWidth: grid?.getBoundingClientRect().width ?? 0,
-      scrollClientWidth: scroll?.clientWidth ?? 0,
-      scrollWidth: scroll?.scrollWidth ?? 0,
-      rows,
+      dayLabels,
+      weekdayLabels,
+      gridColumns: grid ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length : 0,
     };
   });
 
-  expect(metrics.rows).toEqual([3, 3]);
-  expect(metrics.gridWidth).toBeLessThanOrEqual(761);
-  expect(metrics.scrollWidth - metrics.scrollClientWidth).toBeLessThanOrEqual(1);
+  expect(metrics.weekdayLabels).toEqual(["월", "화", "수", "목", "금", "토", "일"]);
+  expect(metrics.dayLabels).toEqual(["6/29", "6/30", "7/1", "7/2", "7/3", "7/4", "7/5"]);
+  expect(metrics.gridColumns).toBe(7);
 
   await context.close();
 });

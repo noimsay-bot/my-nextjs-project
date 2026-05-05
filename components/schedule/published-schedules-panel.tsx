@@ -1104,7 +1104,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const isHomeThreeDayView = isHomePreview;
+  const isHomeThreeDayView = isHomePreview && scheduleLayoutMode !== "desktop";
   const isPageMobileThreeDayView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "three-day";
   const isMobileThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
   const isCompactThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
