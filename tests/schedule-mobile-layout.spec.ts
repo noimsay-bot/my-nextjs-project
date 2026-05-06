@@ -213,8 +213,12 @@ for (const deviceCase of deviceCases) {
 
     const diagnostics = await page.evaluate(() => {
       const chips = Array.from(document.querySelectorAll<HTMLElement>(".schedule-day-card .schedule-name-chip"));
+      const nameTexts = Array.from(document.querySelectorAll<HTMLElement>(".schedule-day-card .schedule-name-chip__text"));
       const overlaps: Array<{ a: string; b: string; left: number; top: number }> = [];
       const overflows: Array<{ name: string; side: string; amount: number }> = [];
+      const ellipsizedTexts = nameTexts
+        .filter((node) => window.getComputedStyle(node).textOverflow === "ellipsis")
+        .map((node) => node.textContent?.trim() ?? "");
 
       for (const chip of chips) {
         const chipRect = chip.getBoundingClientRect();
@@ -250,12 +254,14 @@ for (const deviceCase of deviceCases) {
       return {
         className: panel?.className ?? "",
         chipCount: chips.length,
+        ellipsizedTexts,
         overlaps,
         overflows,
       };
     });
 
     expect(diagnostics.chipCount).toBeGreaterThan(20);
+    expect.soft(diagnostics.ellipsizedTexts, `${deviceCase.name} ellipsis diagnostics: ${JSON.stringify(diagnostics)}`).toEqual([]);
     expect.soft(diagnostics.overlaps, `${deviceCase.name} overlap diagnostics: ${JSON.stringify(diagnostics)}`).toEqual([]);
     expect.soft(diagnostics.overflows, `${deviceCase.name} overflow diagnostics: ${JSON.stringify(diagnostics)}`).toEqual([]);
 
@@ -320,6 +326,24 @@ test("mobile work schedule defaults to full fit and toggles to three-day rows", 
     const zoom = document.querySelector<HTMLElement>(".schedule-published-panel--mobile-full-fit .schedule-calendar-zoom--daily");
     return Boolean(zoom?.style.transform?.startsWith("scale("));
   });
+  await expect(page.locator(".schedule-published-mobile-view-controls")).toBeVisible();
+
+  const fullFitMetrics = await page.evaluate(() => {
+    const scroll = document.querySelector<HTMLElement>(".schedule-published-panel--mobile-full-fit .schedule-calendar-scroll--daily");
+    const zoom = document.querySelector<HTMLElement>(".schedule-published-panel--mobile-full-fit .schedule-calendar-zoom--daily");
+    const nameTexts = Array.from(document.querySelectorAll<HTMLElement>(".schedule-published-panel--mobile-full-fit .schedule-name-chip__text"));
+    const scrollRect = scroll?.getBoundingClientRect();
+    const zoomRect = zoom?.getBoundingClientRect();
+    return {
+      rightOverflow: scrollRect && zoomRect ? zoomRect.right - scrollRect.right : 0,
+      bottomOverflow: zoomRect ? zoomRect.bottom - window.innerHeight : 0,
+      ellipsizedTextCount: nameTexts.filter((node) => window.getComputedStyle(node).textOverflow === "ellipsis").length,
+    };
+  });
+
+  expect(fullFitMetrics.rightOverflow).toBeLessThanOrEqual(1);
+  expect(fullFitMetrics.bottomOverflow).toBeLessThanOrEqual(1);
+  expect(fullFitMetrics.ellipsizedTextCount).toBe(0);
 
   await page.getByRole("button", { name: "보기 변경" }).click();
 
@@ -331,6 +355,7 @@ test("mobile work schedule defaults to full fit and toggles to three-day rows", 
     const scroll = document.querySelector<HTMLElement>(".schedule-published-panel--three-day .schedule-calendar-scroll--daily");
     const row = document.querySelector<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div");
     const firstNameGrid = document.querySelector<HTMLElement>(".schedule-published-panel--page-three-day .schedule-name-grid");
+    const nameTexts = Array.from(document.querySelectorAll<HTMLElement>(".schedule-published-panel--page-three-day .schedule-name-chip__text"));
     const scrollRect = scroll?.getBoundingClientRect();
     const firstRowCardRects = Array.from(row?.querySelectorAll<HTMLElement>(".schedule-day-card") ?? []).map((card) =>
       card.getBoundingClientRect(),
@@ -349,6 +374,7 @@ test("mobile work schedule defaults to full fit and toggles to three-day rows", 
       rightOverflow: scrollRect ? maxCardRight - scrollRect.right : 0,
       maxCardHeight,
       nameGridColumns,
+      ellipsizedTextCount: nameTexts.filter((node) => window.getComputedStyle(node).textOverflow === "ellipsis").length,
     };
   });
 
@@ -356,6 +382,7 @@ test("mobile work schedule defaults to full fit and toggles to three-day rows", 
   expect(threeDayMetrics.rowCardCount).toBe(3);
   expect(threeDayMetrics.rightOverflow).toBeLessThanOrEqual(1);
   expect(threeDayMetrics.nameGridColumns).toBe(2);
+  expect(threeDayMetrics.ellipsizedTextCount).toBe(0);
   expect(threeDayMetrics.maxCardHeight).toBeLessThanOrEqual(360);
 
   await context.close();

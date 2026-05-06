@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   FinalCutDecision,
@@ -12,6 +13,7 @@ import {
   refreshTeamLeadAssignmentMonths,
   updateFinalCutDecision,
 } from "@/lib/team-lead/storage";
+import { getTeamLeadEvaluationMonthKeys } from "@/lib/team-lead/evaluation-year";
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
@@ -207,6 +209,7 @@ function reconcileDecisionDrafts(
 }
 
 export function FinalCutPage() {
+  const evaluationYear = useTeamLeadEvaluationYear();
   const [quarterGroups, setQuarterGroups] = useState<FinalCutQuarterGroup[]>([]);
   const [selectedQuarterKey, setSelectedQuarterKey] = useState("");
   const [cards, setCards] = useState<FinalCutPersonCard[]>([]);
@@ -217,13 +220,19 @@ export function FinalCutPage() {
 
   const refreshCards = useCallback(async () => {
     await refreshScheduleState();
-    await refreshTeamLeadAssignmentMonths(getTeamLeadSchedules().map((schedule) => schedule.monthKey));
-    const schedules = getTeamLeadSchedules();
+    const evaluationMonthKeys = getTeamLeadEvaluationMonthKeys(evaluationYear);
+    const initialScheduleMonthKeys = getTeamLeadSchedules().map((schedule) => schedule.monthKey);
     const generatedState = readStoredScheduleState();
     const generatedMonthKeys = generatedState.generatedHistory.map((schedule) => schedule.monthKey);
+    const refreshMonthKeys = Array.from(
+      new Set([...evaluationMonthKeys, ...initialScheduleMonthKeys, ...generatedMonthKeys]),
+    ).sort((left, right) => left.localeCompare(right));
+
+    await refreshTeamLeadAssignmentMonths(refreshMonthKeys);
+    const schedules = getTeamLeadSchedules();
     const baseMonthKeys = schedules.map((schedule) => schedule.monthKey);
-    const nextMonthKeys = Array.from(new Set([...baseMonthKeys, ...generatedMonthKeys])).sort((left, right) =>
-      left.localeCompare(right),
+    const nextMonthKeys = Array.from(new Set([...evaluationMonthKeys, ...baseMonthKeys, ...generatedMonthKeys])).sort(
+      (left, right) => left.localeCompare(right),
     );
     const nextQuarterGroups = buildQuarterGroups(nextMonthKeys);
     const fallbackQuarterKey = nextQuarterGroups[0]?.key ?? "";
@@ -236,7 +245,7 @@ export function FinalCutPage() {
     const nextCards = getFinalCutCards();
     setCards(nextCards);
     setDecisionDrafts((current) => reconcileDecisionDrafts(nextCards, current));
-  }, []);
+  }, [evaluationYear]);
 
   useEffect(() => {
     const onStatus = (event: Event) => {

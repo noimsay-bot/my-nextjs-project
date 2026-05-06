@@ -2396,6 +2396,29 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   gap: 8px;
 }
 
+.schedule-published-panel--mobile-layout .schedule-published-hero__user-actions {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-hero__user-actions > .btn {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-mobile-view-controls {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: -4px;
+}
+
+.schedule-published-panel--mobile-layout .schedule-published-mobile-view-controls > .btn {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
+}
+
 .schedule-published-panel--mobile-layout .schedule-published-hero__user > .muted {
   flex: 1 0 100%;
   margin-right: 0;
@@ -2573,6 +2596,10 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
+}
+
+.schedule-published-mobile-view-controls {
+  display: none;
 }
 
 .schedule-published-panel--mobile-layout .schedule-published-hero__months > .btn,
@@ -2782,8 +2809,8 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
 
 .schedule-published-panel--fit .schedule-name-chip__text {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   word-break: keep-all;
   text-align: center;
 }
@@ -2857,8 +2884,8 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
 
 .schedule-published-panel--three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-chip__text {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
   word-break: keep-all;
 }
 

@@ -52,6 +52,7 @@ export function FittedNameText({
 }: FittedNameTextProps) {
   const ref = useRef<HTMLSpanElement | null>(null);
   const [fontSize, setFontSize] = useState(maxFontSize);
+  const [scaleX, setScaleX] = useState(1);
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -64,6 +65,7 @@ export function FittedNameText({
       if (!node) return;
       if (!text.trim()) {
         setFontSize(maxFontSize);
+        setScaleX(1);
         return;
       }
       const availableWidth = Math.max(0, node.clientWidth);
@@ -72,12 +74,14 @@ export function FittedNameText({
       let low = minFontSize;
       let high = maxFontSize;
       let best = minFontSize;
+      let bestMeasuredWidth = measureTextWidth(text, minFontSize, node);
 
       for (let index = 0; index < 12; index += 1) {
         const mid = (low + high) / 2;
         const measuredWidth = measureTextWidth(text, mid, node);
         if (measuredWidth <= availableWidth) {
           best = mid;
+          bestMeasuredWidth = measuredWidth;
           low = mid;
         } else {
           high = mid;
@@ -85,6 +89,10 @@ export function FittedNameText({
       }
 
       setFontSize((current) => (Math.abs(current - best) < 0.2 ? current : Number(best.toFixed(2))));
+      const nextScaleX = bestMeasuredWidth > availableWidth && bestMeasuredWidth > 0
+        ? Math.max(0.72, availableWidth / bestMeasuredWidth)
+        : 1;
+      setScaleX((current) => (Math.abs(current - nextScaleX) < 0.01 ? current : Number(nextScaleX.toFixed(3))));
     };
 
     const scheduleUpdate = () => {
@@ -123,6 +131,8 @@ export function FittedNameText({
         overflow: "visible",
         textOverflow: "clip",
         textAlign: "center",
+        transform: scaleX < 1 ? `scaleX(${scaleX})` : undefined,
+        transformOrigin: "center",
         ...style,
       }}
     >

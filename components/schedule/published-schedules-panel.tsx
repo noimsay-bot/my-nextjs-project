@@ -1081,6 +1081,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   }, []);
 
   const isPageMobileFullScheduleView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "full";
+  const isMobilePageSchedule = !isHomePreview && scheduleLayoutMode === "mobile";
 
   useEffect(() => {
     if (!isPageMobileFullScheduleView) {
@@ -1281,6 +1282,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
   const canControlScheduleZoom = isPageMobileFullScheduleView;
+  const toggleMobilePageViewMode = () => {
+    setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"));
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1308,8 +1312,13 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       );
 
       const containerWidth = scrollNode.clientWidth;
+      const viewportHeight = visualViewport?.height ?? window.innerHeight;
+      const containerTop = scrollNode.getBoundingClientRect().top;
+      const availableHeight = Math.max(120, viewportHeight - containerTop - 14);
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, Math.max(0.15, widthFitScale)) : 1;
+      const heightFitScale = availableHeight > 0 ? availableHeight / nextHeight : 1;
+      const fitScale = Math.min(widthFitScale, heightFitScale);
+      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, Math.max(0.12, fitScale)) : 1;
       setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
     };
 
@@ -1886,17 +1895,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
                           {showMine ? "전체 보기" : "내 근무 보기"}
                         </button>
-                        {scheduleLayoutMode === "mobile" && !isHomePreview ? (
-                          <button
-                            className={`btn ${isPageMobileThreeDayView ? "white" : ""}`}
-                            aria-pressed={isPageMobileThreeDayView}
-                            onClick={() =>
-                              setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"))
-                            }
-                          >
-                            {isPageMobileThreeDayView ? "전체 보기" : "보기 변경"}
-                          </button>
-                        ) : null}
                         <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
                           {editMode ? "근무 수정 완료" : "근무 수정"}
                         </button>
@@ -1924,6 +1922,18 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                   </div>
                 </div>
               )}
+
+              {isMobilePageSchedule ? (
+                <div className="schedule-published-mobile-view-controls">
+                  <button
+                    className={`btn ${isPageMobileThreeDayView ? "white" : ""}`}
+                    aria-pressed={isPageMobileThreeDayView}
+                    onClick={toggleMobilePageViewMode}
+                  >
+                    {isPageMobileThreeDayView ? "전체 보기" : "보기 변경"}
+                  </button>
+                </div>
+              ) : null}
 
               {canControlScheduleZoom ? (
                 <div className="schedule-published-zoom-controls">
@@ -2338,7 +2348,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 <FittedNameText
                                                   text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                                   className="schedule-name-chip__text"
-                                                  minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 5 : 9}
+                                                  minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
                                                   maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                                   style={{
                                                     display: "inline-block",
@@ -2346,8 +2356,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                     minWidth: 0,
                                                     width: "100%",
                                                     margin: "0 auto",
-                                                    overflow: isMobileThreeDayView ? "hidden" : "visible",
-                                                    textOverflow: isMobileThreeDayView ? "ellipsis" : "clip",
+                                                    overflow: "visible",
+                                                    textOverflow: "clip",
                                                   }}
                                                 />
                                                 {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
@@ -2717,7 +2727,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                         <FittedNameText
                                           text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                           className="schedule-name-chip__text"
-                                          minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 5 : 9}
+                                          minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
                                           maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
                                           style={{
                                             display: "inline-block",
@@ -2725,8 +2735,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                             minWidth: 0,
                                             width: "100%",
                                             margin: "0 auto",
-                                            overflow: isMobileThreeDayView ? "hidden" : "visible",
-                                            textOverflow: isMobileThreeDayView ? "ellipsis" : "clip",
+                                            overflow: "visible",
+                                            textOverflow: "clip",
                                           }}
                                         />
                                         {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
