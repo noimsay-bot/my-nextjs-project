@@ -611,6 +611,7 @@ export function ScheduleApp() {
   const lastFocusRefreshAtRef = useRef(0);
   const lastLoadedAssignmentMonthRef = useRef("");
   const session = getSession();
+  const todayKey = useMemo(() => formatLocalDateKey(new Date()), []);
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
   const isEditingDate = Boolean(state.editDateKey);
   const activeEditMonthKey = state.editingMonthKey ?? state.generated?.monthKey ?? null;
@@ -1983,6 +1984,7 @@ export function ScheduleApp() {
                   const editLocked = Boolean(state.editDateKey && !isAllDaysEditMode && state.editDateKey !== day.dateKey);
                   const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
                   const dayCardStyle = getDayCardStyle(day);
+                  const isToday = day.dateKey === todayKey;
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const duplicateNameSet = getDayDuplicateNameSet(day);
@@ -2006,7 +2008,8 @@ export function ScheduleApp() {
                         minHeight: 216,
                         opacity: day.isOverflowMonth ? 0.55 : 1,
                         background: dayCardStyle.background,
-                        border: dayCardStyle.border,
+                        border: isToday ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+                        boxShadow: isToday ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
                       }}
                     >
                       <div
@@ -2962,6 +2965,7 @@ export function ScheduleApp() {
                     `preview-${originalPreviewSnapshot.id}`,
                     (day) => {
                     const dayCardStyle = getDayCardStyle(day);
+                    const isToday = day.dateKey === todayKey;
                     const centeredDayLabel = getCenteredDayLabel(day);
                     const conflictSet = new Set(day.conflicts.map((item) => `${item.category}-${item.name}`));
                     const duplicateNameSet = getDayDuplicateNameSet(day);
@@ -2977,7 +2981,8 @@ export function ScheduleApp() {
                           minHeight: 232,
                           opacity: day.isOverflowMonth ? 0.55 : 1,
                           background: dayCardStyle.background,
-                          border: dayCardStyle.border,
+                          border: isToday ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+                          boxShadow: isToday ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
                         }}
                       >
                         <div className="schedule-day-head" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "center", gap: 8, marginBottom: 8 }}>

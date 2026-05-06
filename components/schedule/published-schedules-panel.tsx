@@ -1997,7 +1997,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         {row.map((day) => {
                           const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
                           const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
-                          const isTodayInHomePreview = isHomePreview && day.dateKey === todayKey;
+                          const isToday = day.dateKey === todayKey;
                           const centeredDayLabel = getCenteredDayLabel(day);
                           const isWeekendLike = day.isWeekend || day.isHoliday;
                           const dayHasInlineRecommendations =
@@ -2037,10 +2037,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                 minHeight: 0,
                                 opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                                 background: dayCardStyle.background,
-                                border: isTodayInHomePreview ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+                                border: isToday ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
                                 overflow: "visible",
                                 zIndex: dayHasInlineRecommendations ? 80 : dayHasRouteSelection ? 12 : 1,
-                                boxShadow: isTodayInHomePreview ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
+                                boxShadow: isToday ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
                               }}
                             >
                               <div
@@ -2375,7 +2375,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                       (day) => {
                   const isCurrentSheetDay = day.ownerMonthKey === selectedItem.monthKey;
                   const dayCardStyle = getDayCardStyle(day, isCurrentSheetDay);
-                  const isTodayInHomePreview = isHomePreview && day.dateKey === todayKey;
+                  const isToday = day.dateKey === todayKey;
                   const centeredDayLabel = getCenteredDayLabel(day);
                   const isWeekendLike = day.isWeekend || day.isHoliday;
                   const dayHasInlineRecommendations =
@@ -2416,10 +2416,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         height: isCompactMonthlyView && compactMonthCardHeight ? compactMonthCardHeight : undefined,
                         opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
                         background: dayCardStyle.background,
-                        border: isTodayInHomePreview ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+                        border: isToday ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
                         overflow: "visible",
                         zIndex: dayHasInlineRecommendations ? 80 : dayHasRouteSelection ? 12 : 1,
-                        boxShadow: isTodayInHomePreview ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
+                        boxShadow: isToday ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
                       }}
                     >
                         <div

@@ -33,6 +33,21 @@ import styles from "./Equipment.module.css";
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type ConfirmMode = "borrow" | "return";
 type EquipmentItemCardTone = "default" | "live";
+type BorrowSelection =
+  | {
+      kind: "item";
+      id: string;
+      category: EquipmentCategory;
+      label: string;
+      isTvu: boolean;
+    }
+  | {
+      kind: "eng_profile";
+      id: string;
+      category: "eng_set";
+      label: string;
+      isTvu: false;
+    };
 
 const liveDetailEmpty: LiveLoanDetails = {
   trs: "",
@@ -41,6 +56,98 @@ const liveDetailEmpty: LiveLoanDetails = {
   location: "",
   note: "",
 };
+const EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX = "jtbc-equipment-borrow-selection-v1";
+const EQUIPMENT_BORROW_SELECTION_EVENT = "jtbc-equipment-borrow-selection-change";
+
+function getBorrowSelectionStorageKey(profileId: string | null | undefined) {
+  return `${EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX}:${profileId || "anonymous"}`;
+}
+
+function getBorrowSelectionKey(selection: Pick<BorrowSelection, "kind" | "id">) {
+  return `${selection.kind}:${selection.id}`;
+}
+
+function normalizeBorrowSelections(value: unknown): BorrowSelection[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const selections: BorrowSelection[] = [];
+
+  value.forEach((entry) => {
+    if (!entry || typeof entry !== "object") return;
+    const item = entry as Partial<BorrowSelection>;
+    if (typeof item.id !== "string" || typeof item.label !== "string" || typeof item.kind !== "string") return;
+    if (item.kind === "item") {
+      if (!["camera_lens", "light", "live"].includes(String(item.category))) return;
+      const selection: BorrowSelection = {
+        kind: "item",
+        id: item.id,
+        category: item.category as EquipmentCategory,
+        label: item.label,
+        isTvu: item.isTvu === true,
+      };
+      const key = getBorrowSelectionKey(selection);
+      if (seen.has(key)) return;
+      seen.add(key);
+      selections.push(selection);
+      return;
+    }
+    if (item.kind === "eng_profile" && item.category === "eng_set") {
+      const selection: BorrowSelection = {
+        kind: "eng_profile",
+        id: item.id,
+        category: "eng_set",
+        label: item.label,
+        isTvu: false,
+      };
+      const key = getBorrowSelectionKey(selection);
+      if (seen.has(key)) return;
+      seen.add(key);
+      selections.push(selection);
+    }
+  });
+
+  return selections;
+}
+
+function readBorrowSelections(profileId: string | null | undefined) {
+  if (typeof window === "undefined") return [] as BorrowSelection[];
+  try {
+    const raw = window.localStorage.getItem(getBorrowSelectionStorageKey(profileId));
+    return normalizeBorrowSelections(raw ? JSON.parse(raw) : []);
+  } catch {
+    return [];
+  }
+}
+
+function writeBorrowSelections(profileId: string | null | undefined, selections: BorrowSelection[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(getBorrowSelectionStorageKey(profileId), JSON.stringify(selections));
+  window.dispatchEvent(new CustomEvent(EQUIPMENT_BORROW_SELECTION_EVENT));
+}
+
+function itemToBorrowSelection(item: EquipmentItem): BorrowSelection {
+  return {
+    kind: "item",
+    id: item.id,
+    category: item.category,
+    label: item.name,
+    isTvu: isTvuItem(item),
+  };
+}
+
+function profileToBorrowSelection(profile: EquipmentProfile): BorrowSelection {
+  return {
+    kind: "eng_profile",
+    id: profile.id,
+    category: "eng_set",
+    label: `ENG SET - ${profile.name}`,
+    isTvu: false,
+  };
+}
+
+function formatBorrowSelectionLabel(selection: BorrowSelection) {
+  return `${equipmentCategoryLabels[selection.category]} · ${selection.label}`;
+}
 
 function getTodayDateKey() {
   const today = new Date();
@@ -112,6 +219,14 @@ function getEquipmentGroupDisplayName(groupName: string) {
 function getMetadataString(item: EquipmentItem, key: string) {
   const value = item.metadata[key];
   return typeof value === "string" ? value : "";
+}
+
+function getVariantParentLabel(item: EquipmentItem) {
+  return getMetadataString(item, "variant_parent");
+}
+
+function getVariantLabel(item: EquipmentItem) {
+  return getMetadataString(item, "variant_label") || item.name;
 }
 
 function isStandaloneBatteryItem(item: EquipmentItem) {
@@ -203,6 +318,7 @@ function StatusPill({ borrowed }: { borrowed: boolean }) {
 
 function EquipmentItemCard({
   item,
+  displayName,
   selected,
   loanItem,
   onToggle,
@@ -210,6 +326,7 @@ function EquipmentItemCard({
   tone = "default",
 }: {
   item: EquipmentItem;
+  displayName?: string;
   selected: boolean;
   loanItem?: EquipmentLoanItem;
   onToggle: () => void;
@@ -232,7 +349,7 @@ function EquipmentItemCard({
       aria-pressed={selected}
     >
       <span className={styles.itemCardTop}>
-        <strong>{item.name}</strong>
+        <strong>{displayName ?? item.name}</strong>
         {borrowed ? <StatusPill borrowed /> : null}
       </span>
     </button>
@@ -315,7 +432,7 @@ function ConfirmDialog({
 }: {
   mode: ConfirmMode;
   title: string;
-  itemLabels: string[];
+  itemLabels: { id: string; label: string }[];
   liveDetails: LiveLoanDetails;
   showLiveFields: boolean;
   returnIds: string[];
@@ -349,13 +466,13 @@ function ConfirmDialog({
                         );
                       }}
                     />
-                    <span>{item.item.name}</span>
+                    <span>{equipmentCategoryLabels[item.item.category]} · {item.item.name}</span>
                     <small>{formatDateTime(item.borrowedAt)}</small>
                   </label>
                 ))
-              : itemLabels.map((label) => (
-                  <div key={label} className={styles.modalListItem}>
-                    <span>{label}</span>
+              : itemLabels.map((item) => (
+                  <div key={item.id} className={styles.modalListItem}>
+                    <span>{item.label}</span>
                   </div>
                 ))}
           </div>
@@ -475,25 +592,140 @@ function renderGroupedItems({
   );
 
   return groups.map(([groupName, groupItems]) => (
-    <section key={groupName} className={styles.equipmentGroup}>
+    <EquipmentGroupSection
+      key={groupName}
+      groupName={groupName}
+      groupItems={groupItems}
+      selectedIds={selectedIds}
+      currentByItemId={currentByItemId}
+      onToggle={onToggle}
+      itemTone={itemTone}
+    />
+  ));
+}
+
+function EquipmentGroupSection({
+  groupName,
+  groupItems,
+  selectedIds,
+  currentByItemId,
+  onToggle,
+  itemTone = "default",
+}: {
+  groupName: string;
+  groupItems: EquipmentItem[];
+  selectedIds: string[];
+  currentByItemId: Map<string, EquipmentLoanItem>;
+  onToggle: (itemId: string) => void;
+  itemTone?: EquipmentItemCardTone;
+}) {
+  const [expandedVariantKeys, setExpandedVariantKeys] = useState<string[]>([]);
+  const entries = useMemo(() => {
+    const variantGroups = new Map<string, EquipmentItem[]>();
+    const displayEntries: Array<
+      | { type: "item"; key: string; sortOrder: number; item: EquipmentItem }
+      | { type: "variant"; key: string; sortOrder: number; parentLabel: string; items: EquipmentItem[] }
+    > = [];
+
+    groupItems.forEach((item) => {
+      const parentLabel = getVariantParentLabel(item);
+      if (!parentLabel) {
+        displayEntries.push({ type: "item", key: item.id, sortOrder: item.sortOrder, item });
+        return;
+      }
+      const existing = variantGroups.get(parentLabel) ?? [];
+      existing.push(item);
+      variantGroups.set(parentLabel, existing);
+    });
+
+    variantGroups.forEach((items, parentLabel) => {
+      const sortedItems = [...items].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ko"));
+      displayEntries.push({
+        type: "variant",
+        key: `${groupName}:${parentLabel}`,
+        sortOrder: sortedItems[0]?.sortOrder ?? 0,
+        parentLabel,
+        items: sortedItems,
+      });
+    });
+
+    return displayEntries.sort((left, right) => left.sortOrder - right.sortOrder || left.key.localeCompare(right.key, "ko"));
+  }, [groupItems, groupName]);
+
+  const toggleVariant = (key: string) => {
+    setExpandedVariantKeys((current) => (
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+    ));
+  };
+
+  return (
+    <section className={styles.equipmentGroup}>
       <div className={styles.groupHead}>
         <h3>{getEquipmentGroupDisplayName(groupName)}</h3>
         <span>{groupItems.length}개</span>
       </div>
       <div className={styles.itemGrid}>
-        {groupItems.map((item) => (
-          <EquipmentItemCard
-            key={item.id}
-            item={item}
-            selected={selectedIds.includes(item.id)}
-            loanItem={currentByItemId.get(item.id)}
-            onToggle={() => onToggle(item.id)}
-            tone={itemTone}
-          />
-        ))}
+        {entries.map((entry) => {
+          if (entry.type === "item") {
+            return (
+              <EquipmentItemCard
+                key={entry.key}
+                item={entry.item}
+                selected={selectedIds.includes(entry.item.id)}
+                loanItem={currentByItemId.get(entry.item.id)}
+                onToggle={() => onToggle(entry.item.id)}
+                tone={itemTone}
+              />
+            );
+          }
+
+          const expanded = expandedVariantKeys.includes(entry.key);
+          const selected = entry.items.some((item) => selectedIds.includes(item.id));
+          const borrowedCount = entry.items.filter((item) => currentByItemId.has(item.id)).length;
+          return (
+            <Fragment key={entry.key}>
+              <button
+                type="button"
+                className={[
+                  styles.itemCard,
+                  itemTone === "live" ? styles.itemCardLive : "",
+                  selected ? styles.itemCardSelected : "",
+                ].join(" ").trim()}
+                onClick={() => toggleVariant(entry.key)}
+                aria-expanded={expanded}
+              >
+                <span className={styles.itemCardTop}>
+                  <strong>{entry.parentLabel}</strong>
+                  {borrowedCount > 0 ? <StatusPill borrowed /> : null}
+                </span>
+              </button>
+              {expanded ? (
+                <div className={styles.inlineBatteryPanel}>
+                  <div className={styles.inlineBatteryHead}>
+                    <h4>{entry.parentLabel}</h4>
+                    <span>{entry.items.length}개</span>
+                  </div>
+                  <div className={styles.inlineBatteryGrid}>
+                    {entry.items.map((item) => (
+                      <EquipmentItemCard
+                        key={item.id}
+                        item={item}
+                        displayName={getVariantLabel(item)}
+                        selected={selectedIds.includes(item.id)}
+                        loanItem={currentByItemId.get(item.id)}
+                        onToggle={() => onToggle(item.id)}
+                        tone={itemTone}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </Fragment>
+          );
+        })}
       </div>
     </section>
-  ));
+  );
 }
 
 function CameraGroups({
@@ -761,7 +993,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [items, setItems] = useState<EquipmentItem[]>([]);
   const [profiles, setProfiles] = useState<EquipmentProfile[]>([]);
   const [currentLoanItems, setCurrentLoanItems] = useState<EquipmentLoanItem[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedEntries, setSelectedEntries] = useState<BorrowSelection[]>(() => readBorrowSelections(getSession()?.id));
   const [returnIds, setReturnIds] = useState<string[]>([]);
   const [engHighlights, setEngHighlights] = useState<EngScheduleHighlightMap>(() => new Map());
   const [loading, setLoading] = useState(true);
@@ -771,7 +1003,6 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [liveDetails, setLiveDetails] = useState<LiveLoanDetails>(liveDetailEmpty);
 
   const isEngSetPage = category === "eng_set";
-  const isLivePage = category === "live";
   const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
   const highlightDateKey = useMemo(() => getTodayDateKey(), []);
 
@@ -780,7 +1011,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     setMessage(null);
     try {
       const [nextCurrent, nextItems, nextProfiles, nextHighlights] = await Promise.all([
-        fetchEquipmentLoanItems({ categories: [category], status: "borrowed" }),
+        fetchEquipmentLoanItems({ status: "borrowed" }),
         isEngSetPage ? Promise.resolve([]) : fetchEquipmentItems([category]),
         isEngSetPage ? fetchEquipmentProfiles() : Promise.resolve([]),
         isEngSetPage ? loadEngScheduleHighlights(highlightDateKey) : Promise.resolve(new Map() as EngScheduleHighlightMap),
@@ -801,6 +1032,23 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setSelectedEntries(readBorrowSelections(session?.id));
+  }, [session?.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncSelections = () => {
+      setSelectedEntries(readBorrowSelections(session?.id));
+    };
+    window.addEventListener(EQUIPMENT_BORROW_SELECTION_EVENT, syncSelections);
+    window.addEventListener("storage", syncSelections);
+    return () => {
+      window.removeEventListener(EQUIPMENT_BORROW_SELECTION_EVENT, syncSelections);
+      window.removeEventListener("storage", syncSelections);
+    };
+  }, [session?.id]);
+
   const currentByItemId = useMemo(
     () => new Map(currentLoanItems.map((loanItem) => [loanItem.equipmentItemId, loanItem] as const)),
     [currentLoanItems],
@@ -817,23 +1065,70 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     return map;
   }, [currentLoanItems]);
 
-  const selectedItems = useMemo(() => {
-    if (isEngSetPage) {
-      return profiles
-        .filter((profile) => selectedIds.includes(profile.id))
-        .map((profile) => ({ id: profile.id, label: `ENG SET - ${profile.name}` }));
-    }
-    return items.filter((item) => selectedIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name }));
-  }, [isEngSetPage, items, profiles, selectedIds]);
+  useEffect(() => {
+    if (selectedEntries.length === 0 || currentLoanItems.length === 0) return;
+    const borrowedItemIds = new Set(currentLoanItems.map((loanItem) => loanItem.equipmentItemId));
+    const borrowedEngProfileIds = new Set(
+      currentLoanItems
+        .map(getEngTargetProfileId)
+        .filter(Boolean),
+    );
+    const nextSelections = selectedEntries.filter((selection) => (
+      selection.kind === "item" ? !borrowedItemIds.has(selection.id) : !borrowedEngProfileIds.has(selection.id)
+    ));
+    if (nextSelections.length === selectedEntries.length) return;
+    setSelectedEntries(nextSelections);
+    writeBorrowSelections(session?.id, nextSelections);
+  }, [currentLoanItems, selectedEntries, session?.id]);
+
+  const selectedIds = useMemo(() => selectedEntries.map((selection) => selection.id), [selectedEntries]);
+  const selectedItemSelections = useMemo(
+    () => selectedEntries.filter((selection): selection is Extract<BorrowSelection, { kind: "item" }> => selection.kind === "item"),
+    [selectedEntries],
+  );
+  const selectedEngSelections = useMemo(
+    () => selectedEntries.filter((selection): selection is Extract<BorrowSelection, { kind: "eng_profile" }> => selection.kind === "eng_profile"),
+    [selectedEntries],
+  );
+  const hasSelectedTvu = useMemo(() => selectedItemSelections.some((selection) => selection.isTvu), [selectedItemSelections]);
+  const hasSelectedLiveItem = useMemo(
+    () => selectedItemSelections.some((selection) => selection.category === "live"),
+    [selectedItemSelections],
+  );
+  const selectedItems = useMemo(
+    () => selectedEntries.map((selection) => ({ id: getBorrowSelectionKey(selection), label: formatBorrowSelectionLabel(selection) })),
+    [selectedEntries],
+  );
+  const itemSelectionById = useMemo(() => new Map(items.map((item) => [item.id, itemToBorrowSelection(item)] as const)), [items]);
+  const profileSelectionById = useMemo(
+    () => new Map(profiles.map((profile) => [profile.id, profileToBorrowSelection(profile)] as const)),
+    [profiles],
+  );
+
+  useEffect(() => {
+    if (loading || selectedEntries.length === 0) return;
+    const nextSelections = selectedEntries.filter((selection) => {
+      if (selection.kind === "item" && selection.category === category) {
+        return itemSelectionById.has(selection.id);
+      }
+      if (selection.kind === "eng_profile" && isEngSetPage) {
+        return profileSelectionById.has(selection.id);
+      }
+      return true;
+    });
+    if (nextSelections.length === selectedEntries.length) return;
+    setSelectedEntries(nextSelections);
+    writeBorrowSelections(session?.id, nextSelections);
+  }, [category, isEngSetPage, itemSelectionById, loading, profileSelectionById, selectedEntries, session?.id]);
 
   const returnableItems = useMemo(() => {
     return currentLoanItems.filter((loanItem) => canReturnLoanItem(loanItem));
   }, [currentLoanItems]);
 
   const showLiveFields = useMemo(() => {
-    if (!isLivePage || confirmMode !== "borrow") return false;
-    return items.some((item) => selectedIds.includes(item.id) && isTvuItem(item));
-  }, [confirmMode, isLivePage, items, selectedIds]);
+    if (confirmMode !== "borrow") return false;
+    return hasSelectedTvu;
+  }, [confirmMode, hasSelectedTvu]);
 
   const sortedEngProfiles = useMemo(() => (
     profiles
@@ -849,10 +1144,24 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       .sort((left, right) => left.sortRank - right.sortRank || left.index - right.index)
   ), [engHighlights, profiles]);
 
+  const updateBorrowSelections = useCallback((updater: (current: BorrowSelection[]) => BorrowSelection[]) => {
+    setSelectedEntries((current) => {
+      const next = updater(current);
+      writeBorrowSelections(session?.id, next);
+      return next;
+    });
+  }, [session?.id]);
+
   const toggleSelection = (itemId: string) => {
-    setSelectedIds((current) => (
-      current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]
-    ));
+    const selection = isEngSetPage ? profileSelectionById.get(itemId) : itemSelectionById.get(itemId);
+    if (!selection) return;
+    const selectionKey = getBorrowSelectionKey(selection);
+    updateBorrowSelections((current) => {
+      if (current.some((entry) => getBorrowSelectionKey(entry) === selectionKey)) {
+        return current.filter((entry) => getBorrowSelectionKey(entry) !== selectionKey);
+      }
+      return [...current, selection];
+    });
   };
 
   const openBorrowDialog = () => {
@@ -860,13 +1169,13 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       setMessage({ tone: "warn", text: "읽기 전용 계정은 장비 대여/반납을 할 수 없습니다." });
       return;
     }
-    if (selectedIds.length === 0) {
+    if (selectedEntries.length === 0) {
       setMessage({ tone: "note", text: "대여할 장비를 선택해 주세요." });
       return;
     }
     setLiveDetails({
       ...liveDetailEmpty,
-      cameraReporter: isLivePage ? session?.username ?? "" : "",
+      cameraReporter: hasSelectedTvu ? session?.username ?? "" : "",
     });
     setConfirmMode("borrow");
   };
@@ -883,17 +1192,23 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const confirmBorrow = async () => {
     setActionPending(true);
     try {
-      if (isEngSetPage) {
-        await borrowEngSets(selectedIds);
-      } else {
-        await borrowEquipmentItems(selectedIds, {
-          loanType: isLivePage ? "live" : "normal",
+      const itemIds = selectedItemSelections.map((selection) => selection.id);
+      const engProfileIds = selectedEngSelections.map((selection) => selection.id);
+      if (itemIds.length > 0) {
+        await borrowEquipmentItems(itemIds, {
+          loanType: hasSelectedLiveItem ? "live" : "normal",
           liveDetails: showLiveFields ? liveDetails : undefined,
         });
       }
+      if (engProfileIds.length > 0) {
+        await borrowEngSets(engProfileIds);
+      }
+      if (itemIds.length === 0 && engProfileIds.length === 0) {
+        throw new Error("대여할 장비를 선택해 주세요.");
+      }
       setMessage({ tone: "ok", text: "선택한 장비를 대여 처리했습니다." });
       setConfirmMode(null);
-      setSelectedIds([]);
+      updateBorrowSelections(() => []);
       await load();
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "대여 처리에 실패했습니다." });
@@ -989,7 +1304,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
         <ConfirmDialog
           mode={confirmMode}
           title={confirmMode === "borrow" ? "선택한 장비를 대여하시겠습니까?" : "선택한 장비를 반납하시겠습니까?"}
-          itemLabels={selectedItems.map((item) => item.label)}
+          itemLabels={selectedItems}
           liveDetails={liveDetails}
           showLiveFields={showLiveFields}
           returnIds={returnIds}

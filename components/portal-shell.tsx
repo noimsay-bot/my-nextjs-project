@@ -100,6 +100,10 @@ function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
   };
 }
 
+function hasEquipmentAccessRole(role: UserRole | null | undefined) {
+  return role === "desk" || role === "team_lead" || role === "admin";
+}
+
 type PortalTheme = "dark" | "light" | "pink" | "green";
 
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
@@ -154,6 +158,11 @@ function getVisibleLinks(
   submissionAccessOpen: boolean,
   reviewLocked: boolean,
 ) {
+  const canAccessEquipment =
+    Boolean(session) &&
+    hasEquipmentAccessRole(session?.role) &&
+    hasEquipmentAccessRole(session?.actualRole);
+
   switch (session?.role) {
     case "member":
     case "outlet":
@@ -185,6 +194,7 @@ function getVisibleLinks(
           link.href === "/restaurants" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
+          (link.href === "/equipment" && canAccessEquipment) ||
           link.href === "/schedule" ||
           (link.href === "/review" && session.canReview),
       );
@@ -197,6 +207,7 @@ function getVisibleLinks(
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !reviewLocked) ||
+          (link.href === "/equipment" && canAccessEquipment) ||
           link.href === "/schedule" ||
           link.href === "/team-lead" ||
           link.href === "/admin",
@@ -207,7 +218,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
-          (link.href === "/equipment" && session.actualRole === "admin") ||
+          (link.href === "/equipment" && canAccessEquipment) ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/schedule" ||
