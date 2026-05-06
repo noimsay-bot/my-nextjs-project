@@ -57,9 +57,6 @@ import {
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
-const TOUCH_SCHEDULE_ZOOM_MIN = 1;
-const TOUCH_SCHEDULE_ZOOM_MAX = 3;
-const TOUCH_SCHEDULE_ZOOM_STEP = 0.25;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON = 0.01;
 const HOME_PREVIEW_DAY_COUNT = 6;
@@ -858,7 +855,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [scheduleScale, setScheduleScale] = useState(1);
-  const [scheduleZoomFactor, setScheduleZoomFactor] = useState(1);
   const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
   const [session, setSession] = useState(() => getSession());
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
@@ -1043,6 +1039,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     if (typeof window === "undefined") return;
     const coarsePointerMediaQuery = window.matchMedia("(any-pointer: coarse)");
     const visualViewport = window.visualViewport;
+    let frameId = 0;
+    let settleTimeoutId = 0;
     const syncViewport = () => {
       isViewportPinchZoomActiveRef.current = isVisualViewportPinchZoomActive();
       if (isViewportPinchZoomActiveRef.current) return;
@@ -1064,6 +1062,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       }
     };
     syncViewport();
+    frameId = window.requestAnimationFrame(syncViewport);
+    settleTimeoutId = window.setTimeout(syncViewport, 150);
     coarsePointerMediaQuery.addEventListener?.("change", syncViewport);
     coarsePointerMediaQuery.addListener?.(syncViewport);
     window.addEventListener("resize", syncViewport);
@@ -1071,6 +1071,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     visualViewport?.addEventListener("resize", handleVisualViewportChange);
     visualViewport?.addEventListener("scroll", handleVisualViewportChange);
     return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(settleTimeoutId);
       coarsePointerMediaQuery.removeEventListener?.("change", syncViewport);
       coarsePointerMediaQuery.removeListener?.(syncViewport);
       window.removeEventListener("resize", syncViewport);
@@ -1082,12 +1084,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const isPageMobileFullScheduleView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "full";
   const isMobilePageSchedule = !isHomePreview && scheduleLayoutMode === "mobile";
-
-  useEffect(() => {
-    if (!isPageMobileFullScheduleView) {
-      setScheduleZoomFactor(1);
-    }
-  }, [isPageMobileFullScheduleView]);
 
   const activeHiddenMonthKeys = hideMode ? draftHiddenPublishedMonthKeys : hiddenPublishedMonthKeys;
   const activeItems = useMemo(() => {
@@ -1277,11 +1273,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       : scheduleLayoutMode === "tablet"
         ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
-  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayView ? " schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit" : ""}`;
-  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale * scheduleZoomFactor : 1;
+  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayView ? " schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
+  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
-  const canControlScheduleZoom = isPageMobileFullScheduleView;
   const toggleMobilePageViewMode = () => {
     setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"));
   };
@@ -1312,13 +1307,8 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       );
 
       const containerWidth = scrollNode.clientWidth;
-      const viewportHeight = visualViewport?.height ?? window.innerHeight;
-      const containerTop = scrollNode.getBoundingClientRect().top;
-      const availableHeight = Math.max(120, viewportHeight - containerTop - 14);
       const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const heightFitScale = availableHeight > 0 ? availableHeight / nextHeight : 1;
-      const fitScale = Math.min(widthFitScale, heightFitScale);
-      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, Math.max(0.12, fitScale)) : 1;
+      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, Math.max(0.12, widthFitScale)) : 1;
       setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
     };
 
@@ -1411,18 +1401,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
         highlightedName: showMine ? username : null,
       }),
     });
-  };
-
-  const zoomOutSchedule = () => {
-    setScheduleZoomFactor((current) =>
-      Math.max(TOUCH_SCHEDULE_ZOOM_MIN, Number((current - TOUCH_SCHEDULE_ZOOM_STEP).toFixed(2))),
-    );
-  };
-
-  const zoomInSchedule = () => {
-    setScheduleZoomFactor((current) =>
-      Math.min(TOUCH_SCHEDULE_ZOOM_MAX, Number((current + TOUCH_SCHEDULE_ZOOM_STEP).toFixed(2))),
-    );
   };
 
   const removeRouteEntry = (index: number) => {
@@ -1935,16 +1913,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                 </div>
               ) : null}
 
-              {canControlScheduleZoom ? (
-                <div className="schedule-published-zoom-controls">
-                  <button className="btn" disabled={scheduleZoomFactor <= TOUCH_SCHEDULE_ZOOM_MIN} onClick={zoomOutSchedule}>
-                    축소
-                  </button>
-                  <button className="btn" disabled={scheduleZoomFactor >= TOUCH_SCHEDULE_ZOOM_MAX} onClick={zoomInSchedule}>
-                    확대
-                  </button>
-                </div>
-              ) : null}
               <div
                 ref={scheduleScrollRef}
                 className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}

@@ -29,6 +29,7 @@ import {
   type MemberLevelSnapshot,
 } from "@/lib/portal/member-level";
 import { recordPageVisit } from "@/lib/portal/page-visit-analytics";
+import { equipmentNavItems } from "@/lib/equipment/types";
 
 type PortalNavChild = {
   href: string;
@@ -48,6 +49,11 @@ const links: PortalNavLink[] = [
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/restaurants", label: "내 주변 맛집" },
+  {
+    href: "/equipment",
+    label: "라이브/장비",
+    children: equipmentNavItems.map((item) => ({ href: item.href, label: item.label })),
+  },
   {
     href: "/schedule",
     label: "DESK",
@@ -201,6 +207,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          (link.href === "/equipment" && session.actualRole === "admin") ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/schedule" ||
@@ -226,6 +233,7 @@ function isLinkActive(pathname: string, href: string) {
     (href === "/community" && (pathname.startsWith("/community") || pathname.startsWith("/notices"))) ||
     (href === "/work-schedule" && pathname.startsWith("/work-schedule")) ||
     (href === "/restaurants" && pathname.startsWith("/restaurants")) ||
+    (href === "/equipment" && pathname.startsWith("/equipment")) ||
     (href === "/schedule" && pathname.startsWith("/schedule")) ||
     (href === "/team-lead" && pathname.startsWith("/team-lead")) ||
     (href === "/admin" && pathname.startsWith("/admin"))

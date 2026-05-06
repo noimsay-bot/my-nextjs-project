@@ -51,6 +51,10 @@ function hasAccess(
     return true;
   }
 
+  if (pathname.startsWith("/equipment")) {
+    return session.role === "admin" && session.actualRole === "admin";
+  }
+
   if (pathname.startsWith("/community") || pathname.startsWith("/notices")) {
     return true;
   }
