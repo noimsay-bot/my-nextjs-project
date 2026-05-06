@@ -58,6 +58,14 @@ function hasAccess(
     return true;
   }
 
+  if (pathname.startsWith("/me")) {
+    return session.role === "admin" && session.actualRole === "admin";
+  }
+
+  if (pathname.startsWith("/partner")) {
+    return session.role === "partner" && session.actualRole === "partner";
+  }
+
   if (pathname.startsWith("/equipment")) {
     return hasEquipmentAccess(session);
   }
@@ -94,6 +102,8 @@ function hasAccess(
         (pathname === "/vacation" && Boolean(vacationRequestOpen)) ||
         (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen))
       );
+    case "partner":
+      return pathname === "/" || pathname.startsWith("/partner");
     case "reviewer":
       return (
         pathname === "/" ||

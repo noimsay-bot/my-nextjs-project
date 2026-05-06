@@ -6,7 +6,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 
 const HOME_PUBLIC_WORKSPACE_TIMEOUT_MS = 4_000;
 
-type AppRole = "member" | "outlet" | "reviewer" | "team_lead" | "admin" | "desk" | "observer";
+type AppRole = "member" | "outlet" | "reviewer" | "team_lead" | "admin" | "desk" | "observer" | "partner";
 type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
 type AssignmentTripTagPhase = "" | "departure" | "ongoing" | "return";
 

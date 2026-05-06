@@ -44,11 +44,16 @@ type PortalNavLink = {
 };
 
 const links: PortalNavLink[] = [
-  { href: "/community", label: "커뮤니티" },
+  {
+    href: "/me",
+    label: "마이페이지",
+  },
   { href: "/work-schedule", label: "근무표" },
+  { href: "/restaurants", label: "내 주변 맛집" },
+  { href: "/community", label: "커뮤니티" },
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
-  { href: "/restaurants", label: "내 주변 맛집" },
+  { href: "/partner/schedule", label: "일정" },
   {
     href: "/equipment",
     label: "라이브/장비",
@@ -109,12 +114,13 @@ type PortalTheme = "dark" | "light" | "pink" | "green";
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
 const MOBILE_SIDEBAR_TRIGGER_STORAGE_KEY = "jtbc-mobile-sidebar-trigger-top";
 const PORTAL_THEMES: PortalTheme[] = ["light", "dark", "pink", "green"];
-const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "outlet", "reviewer", "observer", "desk", "team_lead", "admin"];
+const ROLE_EXPERIENCE_OPTIONS: UserRole[] = ["member", "outlet", "reviewer", "observer", "partner", "desk", "team_lead", "admin"];
 const ROLE_EXPERIENCE_LABELS: Record<UserRole, string> = {
   member: "팀원",
   outlet: "출입처",
   reviewer: "평가자",
   observer: "Observer",
+  partner: "파트너",
   desk: "DESK",
   team_lead: "총괄팀장",
   admin: "관리자",
@@ -176,6 +182,8 @@ function getVisibleLinks(
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
       );
+    case "partner":
+      return links.filter((link) => link.href === "/partner/schedule");
     case "reviewer":
       return links.filter(
         (link) =>
@@ -218,6 +226,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          link.href === "/me" ||
           (link.href === "/equipment" && canAccessEquipment) ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
@@ -244,6 +253,8 @@ function isLinkActive(pathname: string, href: string) {
     (href === "/community" && (pathname.startsWith("/community") || pathname.startsWith("/notices"))) ||
     (href === "/work-schedule" && pathname.startsWith("/work-schedule")) ||
     (href === "/restaurants" && pathname.startsWith("/restaurants")) ||
+    (href === "/me" && pathname.startsWith("/me")) ||
+    (href === "/partner/schedule" && pathname.startsWith("/partner")) ||
     (href === "/equipment" && pathname.startsWith("/equipment")) ||
     (href === "/schedule" && pathname.startsWith("/schedule")) ||
     (href === "/team-lead" && pathname.startsWith("/team-lead")) ||

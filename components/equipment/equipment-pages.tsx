@@ -77,7 +77,7 @@ function normalizeBorrowSelections(value: unknown): BorrowSelection[] {
     const item = entry as Partial<BorrowSelection>;
     if (typeof item.id !== "string" || typeof item.label !== "string" || typeof item.kind !== "string") return;
     if (item.kind === "item") {
-      if (!["camera_lens", "light", "live"].includes(String(item.category))) return;
+      if (!["camera_lens", "light", "eng_set", "live"].includes(String(item.category))) return;
       const selection: BorrowSelection = {
         kind: "item",
         id: item.id,
@@ -191,6 +191,10 @@ function isTvuInlineAccessoryItem(item: EquipmentItem) {
 function getEngTargetProfileId(loanItem: EquipmentLoanItem) {
   const targetProfileId = loanItem.item.metadata.target_profile_id;
   return typeof targetProfileId === "string" ? targetProfileId : "";
+}
+
+function isSharedEngSetItem(item: EquipmentItem) {
+  return item.category === "eng_set" && getMetadataString(item, "kind") === "shared_eng_set";
 }
 
 function groupLoanItemsByBorrower(loanItems: EquipmentLoanItem[]) {
@@ -740,7 +744,7 @@ function CameraGroups({
   onToggle: (itemId: string) => void;
 }) {
   const [expandedBatteryAnchors, setExpandedBatteryAnchors] = useState<Record<string, string>>({});
-  const familyNames = ["5D", "GH4", "FX3"];
+  const familyNames = ["FX3", "5D", "GH4"];
   const familyGroups = familyNames.map((familyName) => ({
     familyName,
     items: items.filter((item) => item.groupName.startsWith(familyName)),
@@ -759,11 +763,11 @@ function CameraGroups({
     return map;
   }, new Map<string, EquipmentItem[]>());
 
-  const handleFamilyBodyToggle = (familyName: string, item: EquipmentItem, batteryItems: EquipmentItem[]) => {
+  const handleFamilyBodyToggle = (familyName: string, item: EquipmentItem, hasAccessoryItems: boolean) => {
     if (!currentByItemId.has(item.id)) {
       onToggle(item.id);
     }
-    if (batteryItems.length > 0) {
+    if (hasAccessoryItems) {
       const key = `family:${familyName}`;
       setExpandedBatteryAnchors((current) => {
         if (current[key] !== item.id) {
@@ -796,11 +800,14 @@ function CameraGroups({
     <div className={styles.sectionStack}>
       {familyGroups.map(({ familyName, items: matchedItems }) => {
         if (matchedItems.length === 0) return null;
+        const familyExpansionKey = `family:${familyName}`;
         const bodyGroupName = `${familyName} 바디`;
         const batteryGroupName = `${familyName} 배터리`;
         const bodyItems = matchedItems.filter((item) => item.groupName === bodyGroupName);
         const batteryItems = matchedItems.filter((item) => item.groupName === batteryGroupName);
         const otherItems = matchedItems.filter((item) => item.groupName !== bodyGroupName && item.groupName !== batteryGroupName);
+        const hasAccessoryItems = otherItems.length > 0 || batteryItems.length > 0;
+        const expandedBodyId = expandedBatteryAnchors[familyExpansionKey];
         return (
           <section key={familyName} className={styles.familyBlock}>
             <div className={styles.groupHead}>
@@ -816,42 +823,24 @@ function CameraGroups({
                   </div>
                   <div className={styles.itemGrid}>
                     {bodyItems.map((item) => {
-                      const showBatteries = expandedBatteryAnchors[`family:${familyName}`] === item.id && batteryItems.length > 0;
                       return (
                         <Fragment key={item.id}>
                           <EquipmentItemCard
                             item={item}
                             selected={selectedIds.includes(item.id)}
                             loanItem={currentByItemId.get(item.id)}
-                            onToggle={() => handleFamilyBodyToggle(familyName, item, batteryItems)}
-                            allowBorrowedClick={batteryItems.length > 0}
+                            onToggle={() => handleFamilyBodyToggle(familyName, item, hasAccessoryItems)}
+                            allowBorrowedClick={hasAccessoryItems}
                           />
-                          {showBatteries ? (
-                            <div className={styles.inlineBatteryPanel}>
-                              <div className={styles.inlineBatteryHead}>
-                                <h4>{batteryGroupName}</h4>
-                                <span>{batteryItems.length}개</span>
-                              </div>
-                              <div className={styles.inlineBatteryGrid}>
-                                {batteryItems.map((batteryItem) => (
-                                  <EquipmentItemCard
-                                    key={batteryItem.id}
-                                    item={batteryItem}
-                                    selected={selectedIds.includes(batteryItem.id)}
-                                    loanItem={currentByItemId.get(batteryItem.id)}
-                                    onToggle={() => onToggle(batteryItem.id)}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
                         </Fragment>
                       );
                     })}
                   </div>
                 </section>
               ) : null}
-              {otherItems.length > 0 ? renderGroupedItems({ items: otherItems, selectedIds, currentByItemId, onToggle }) : null}
+              {expandedBodyId && hasAccessoryItems
+                ? renderGroupedItems({ items: [...otherItems, ...batteryItems], selectedIds, currentByItemId, onToggle })
+                : null}
             </div>
           </section>
         );
@@ -1012,7 +1001,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     try {
       const [nextCurrent, nextItems, nextProfiles, nextHighlights] = await Promise.all([
         fetchEquipmentLoanItems({ status: "borrowed" }),
-        isEngSetPage ? Promise.resolve([]) : fetchEquipmentItems([category]),
+        fetchEquipmentItems([category]),
         isEngSetPage ? fetchEquipmentProfiles() : Promise.resolve([]),
         isEngSetPage ? loadEngScheduleHighlights(highlightDateKey) : Promise.resolve(new Map() as EngScheduleHighlightMap),
       ]);
@@ -1143,6 +1132,10 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       })
       .sort((left, right) => left.sortRank - right.sortRank || left.index - right.index)
   ), [engHighlights, profiles]);
+  const sharedEngSetItems = useMemo(
+    () => items.filter(isSharedEngSetItem).sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ko")),
+    [items],
+  );
 
   const updateBorrowSelections = useCallback((updater: (current: BorrowSelection[]) => BorrowSelection[]) => {
     setSelectedEntries((current) => {
@@ -1153,7 +1146,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   }, [session?.id]);
 
   const toggleSelection = (itemId: string) => {
-    const selection = isEngSetPage ? profileSelectionById.get(itemId) : itemSelectionById.get(itemId);
+    const selection = itemSelectionById.get(itemId) ?? (isEngSetPage ? profileSelectionById.get(itemId) : undefined);
     if (!selection) return;
     const selectionKey = getBorrowSelectionKey(selection);
     updateBorrowSelections((current) => {
@@ -1257,6 +1250,32 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             <LoadingBlocks />
           ) : isEngSetPage ? (
             <div className={styles.memberGrid}>
+              {sharedEngSetItems.map((item) => {
+                const loanItem = currentByItemId.get(item.id);
+                const selected = selectedIds.includes(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={[
+                      styles.memberCard,
+                      selected ? styles.itemCardSelected : "",
+                      loanItem ? styles.itemCardBorrowed : "",
+                    ].join(" ").trim()}
+                    disabled={Boolean(loanItem)}
+                    onClick={() => toggleSelection(item.id)}
+                    aria-pressed={selected}
+                  >
+                    <span className={styles.itemCardTop}>
+                      <strong>{item.name}</strong>
+                      <StatusPill borrowed={Boolean(loanItem)} />
+                    </span>
+                    {loanItem ? (
+                      <span className={styles.borrowedMeta}>{loanItem.loan.borrowerName} · {formatDateTime(loanItem.borrowedAt)}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
               {sortedEngProfiles.map(({ profile, badges }) => {
                 const loanItem = currentByEngProfileId.get(profile.id);
                 const selected = selectedIds.includes(profile.id);

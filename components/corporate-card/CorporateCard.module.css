@@ -1,0 +1,145 @@
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+.header {
+  display: grid;
+  gap: 10px;
+}
+
+.title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.description {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  font-weight: 800;
+}
+
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.dayBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.dayTitle {
+  margin: 0;
+  color: #bae6fd;
+  font-size: 18px;
+}
+
+.itemCard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+:global(html[data-theme="light"]) .itemCard {
+  border-color: rgba(96, 165, 250, 0.24);
+  background: #dbeafe;
+  color: #0f172a;
+}
+
+.itemHead {
+  display: grid;
+  gap: 4px;
+}
+
+.itemTitle {
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.metaGrid,
+.inputGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.metaItem {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.metaItem strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.memoBox {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.memoText {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pending {
+  width: fit-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  background: rgba(250, 204, 21, 0.13);
+  color: #fef3c7;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+@media (max-width: 640px) {
+  .title {
+    font-size: 24px;
+  }
+
+  .toolbar,
+  .field,
+  .actions {
+    width: 100%;
+  }
+
+  .actions > button {
+    flex: 1 1 130px;
+    min-height: 44px;
+  }
+}

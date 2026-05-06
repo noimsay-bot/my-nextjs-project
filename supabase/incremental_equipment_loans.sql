@@ -536,6 +536,9 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
   select 'camera_lens', '오스모 배터리', concat('오스모 배터리 ', n, '번'), concat('camera-osmo-battery-', lpad(n::text, 2, '0')), 4500 + n, '{"family":"standalone","kind":"battery","for":"osmo"}'::jsonb
   from generate_series(1, 10) as n
   union all
+  select 'eng_set', '공용 ENG', concat('공용ENG', shared_no), concat('eng-set-shared-', shared_no), shared_no, '{"kind":"shared_eng_set"}'::jsonb
+  from generate_series(1, 3) as shared_no
+  union all
   select 'live', 'TVU', concat('TVU-', tvu_no), concat('live-tvu-', tvu_no), 1000 + row_number() over (order by display_order), '{"kind":"tvu"}'::jsonb
   from (
     values

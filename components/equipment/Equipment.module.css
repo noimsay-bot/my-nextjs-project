@@ -318,6 +318,22 @@
   color: #0f172a;
 }
 
+.memberCard.itemCardSelected,
+.memberCard.itemCardSelected:hover {
+  border-color: rgba(52, 211, 153, 0.62);
+  background: rgba(16, 185, 129, 0.28);
+  color: #d1fae5;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+}
+
+:global(html[data-theme="light"]) .memberCard.itemCardSelected,
+:global(html[data-theme="light"]) .memberCard.itemCardSelected:hover {
+  border-color: rgba(52, 211, 153, 0.58);
+  background: rgba(16, 185, 129, 0.26);
+  color: #064e3b;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+}
+
 .itemCardTop {
   display: flex;
   align-items: flex-start;
@@ -384,19 +400,25 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .memberBadges small {
   display: inline-flex;
+  flex: 0 0 auto;
   min-height: 24px;
+  min-width: 44px;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
+  padding: 4px 12px;
   border-radius: 999px;
   border: 1px solid rgba(250, 204, 21, 0.32);
   background: rgba(250, 204, 21, 0.13);
   color: #fef3c7;
+  font-size: 12px;
   font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .dateFilter {

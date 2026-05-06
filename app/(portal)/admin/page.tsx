@@ -19,7 +19,7 @@ import {
   PageVisitRange,
 } from "@/lib/portal/page-visit-analytics";
 
-const roles = ["member", "outlet", "reviewer", "observer", "team_lead", "desk", "admin"] as const;
+const roles = ["member", "outlet", "reviewer", "observer", "partner", "team_lead", "desk", "admin"] as const;
 type RoleOption = (typeof roles)[number];
 
 const roleLabels: Record<RoleOption, string> = {
@@ -27,6 +27,7 @@ const roleLabels: Record<RoleOption, string> = {
   outlet: "출입처",
   reviewer: "평가자",
   observer: "Observer",
+  partner: "파트너",
   team_lead: "총괄팀장",
   desk: "DESK",
   admin: "관리자",
@@ -48,6 +49,11 @@ const roleToneStyles: Partial<Record<RoleOption, CSSProperties>> = {
     border: "1px solid rgba(56,189,248,.42)",
     background: "rgba(14,165,233,.12)",
   },
+  partner: {
+    color: "#ddd6fe",
+    border: "1px solid rgba(167,139,250,.42)",
+    background: "rgba(139,92,246,.14)",
+  },
   team_lead: {
     color: "#fbcfe8",
     border: "1px solid rgba(244,114,182,.42)",
@@ -66,8 +72,9 @@ const adminRoleOrder: Record<RoleOption, number> = {
   admin: 2,
   reviewer: 3,
   outlet: 4,
-  observer: 5,
-  member: 6,
+  partner: 5,
+  observer: 6,
+  member: 7,
 };
 
 const permissionGuides = [
@@ -101,6 +108,14 @@ const permissionGuides = [
     lines: [
       "팀원 접근 페이지를 조회만 할 수 있는 읽기 전용 등급입니다.",
       "휴가 신청, 베스트리포트 제출, 댓글 작성 같은 변경 작업은 모두 막힙니다.",
+    ],
+  },
+  {
+    title: "파트너",
+    tone: roleToneStyles.partner ?? {},
+    lines: [
+      "파트너 전용 일정 화면에서 일정별 오디오맨과 형님 이름만 입력할 수 있습니다.",
+      "휴가 신청, 베스트리포트 제출, 근무표, 개인 마이페이지 정보는 볼 수 없습니다.",
     ],
   },
   {

@@ -4,7 +4,7 @@ import {
   SUPABASE_ENV_ERROR_MESSAGE,
 } from "@/lib/supabase/client";
 
-export type UserRole = "member" | "outlet" | "reviewer" | "team_lead" | "admin" | "desk" | "observer";
+export type UserRole = "member" | "outlet" | "reviewer" | "team_lead" | "admin" | "desk" | "observer" | "partner";
 export type UserStatus = "ACTIVE" | "DISABLED";
 
 export interface UserAccount {
@@ -385,7 +385,8 @@ export function normalizeUserRole(value: string | null | undefined): UserRole {
     value === "team_lead" ||
     value === "admin" ||
     value === "desk" ||
-    value === "observer"
+    value === "observer" ||
+    value === "partner"
     ? value
     : "member";
 }
@@ -398,7 +399,8 @@ function normalizeExperienceRole(value: unknown): UserRole | null {
     value === "desk" ||
     value === "team_lead" ||
     value === "admin" ||
-    value === "observer"
+    value === "observer" ||
+    value === "partner"
   ) {
     return value;
   }
@@ -1502,5 +1504,5 @@ export function hasMemberPortalAccess(role: UserRole | null | undefined) {
 }
 
 export function isTeamLeadEvaluationExcludedRole(role: UserRole | string | null | undefined) {
-  return role === "team_lead" || role === "desk" || role === "outlet" || role === "observer";
+  return role === "team_lead" || role === "desk" || role === "outlet" || role === "observer" || role === "partner";
 }
