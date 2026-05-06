@@ -39,12 +39,13 @@ import {
   formatScheduleAssignmentDisplayName,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
+  getScheduleAssignmentGeneralDisplayNames,
   getScheduleAssignmentStore,
-  getScheduleAssignmentRows,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadAssignmentMonth,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   type ScheduleAssignmentDataStore,
+  type ScheduleAssignmentVisibleTripTag,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
 } from "@/lib/team-lead/storage";
 import {
@@ -375,7 +376,15 @@ function getDayAssignmentSortRank(day: DaySchedule, category: string) {
   return getVisibleAssignmentDisplayRank(category, isWeekendLike);
 }
 
-function getVisibleDayAssignments(day: DaySchedule, options?: { editMode?: boolean; assignmentStore?: ScheduleAssignmentDataStore; monthKey?: string | null }) {
+function getVisibleDayAssignments(
+  day: DaySchedule,
+  options?: {
+    editMode?: boolean;
+    assignmentStore?: ScheduleAssignmentDataStore;
+    monthKey?: string | null;
+    visibleTripTagMap?: Map<string, ScheduleAssignmentVisibleTripTag>;
+  },
+) {
   const isWeekendLike = day.isWeekend || day.isHoliday;
   const visibleMap = new Map<string, string[]>();
   const overrideOrder = (day.assignmentOrderOverrides ?? []).filter((category, index, array) => array.indexOf(category) === index);
@@ -411,14 +420,17 @@ function getVisibleDayAssignments(day: DaySchedule, options?: { editMode?: boole
 
   const monthKey = options?.monthKey ?? "";
   const dayRows = monthKey ? options?.assignmentStore?.rows[monthKey]?.[day.dateKey] : null;
-  if (!editMode && dayRows) {
+  if (!editMode && dayRows && options?.assignmentStore) {
     const generalCategory =
       Object.keys(day.assignments).find((category) => isGeneralAssignmentCategory(category)) ??
       (day.isWeekend ? "주말일반근무" : "일반");
-    const generalNames = getScheduleAssignmentRows(day, dayRows)
-      .filter((row) => getScheduleCategoryLabel(row.duty) === "일반")
-      .map((row) => row.name.trim())
-      .filter(Boolean);
+    const generalNames = getScheduleAssignmentGeneralDisplayNames(
+      day,
+      monthKey,
+      dayRows,
+      options.assignmentStore,
+      options.visibleTripTagMap,
+    );
     const hasGeneralAddedRow = dayRows.addedRows.some((row) => getScheduleCategoryLabel(row.duty) === "일반");
     const hasGeneralDeletedRow = dayRows.deletedRowKeys.some((rowKey) => {
       const [, category = ""] = rowKey.split("::");
@@ -1979,6 +1991,7 @@ export function ScheduleApp() {
                     editMode,
                     assignmentStore: scheduleAssignmentStore,
                     monthKey: dayOwnerMonthKey,
+                    visibleTripTagMap,
                   });
                   const canDragAssignmentCategories = canDragAssignments;
                   const canDropAssignmentCategories = canDropAssignments;

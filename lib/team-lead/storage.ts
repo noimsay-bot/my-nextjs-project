@@ -1548,6 +1548,38 @@ export function getScheduleAssignmentRows(
     .map(({ row }) => row) satisfies ScheduleAssignmentRow[];
 }
 
+function hasScheduleAssignmentTripDisplayForRow(
+  rowKey: string,
+  monthEntries: Record<string, ScheduleAssignmentEntry>,
+  visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag>,
+) {
+  const entry = monthEntries[rowKey] ?? null;
+  return Boolean(entry?.travelType || entry?.tripTagId || visibleTripTagMap.get(rowKey));
+}
+
+export function getScheduleAssignmentGeneralDisplayNames(
+  day: DaySchedule,
+  monthKey: string,
+  dayRows: ScheduleAssignmentDayRows,
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+  visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag> = new Map(),
+) {
+  const monthEntries = store.entries[monthKey] ?? {};
+
+  return getScheduleAssignmentRows(day, dayRows)
+    .filter((row) => {
+      if (getScheduleCategoryLabel(row.duty) === "일반") return true;
+      if (row.isCustom) return false;
+
+      const parsed = parseScheduleAssignmentRowKey(row.key);
+      if (!parsed || getScheduleCategoryLabel(parsed.category) !== "일반") return false;
+
+      return hasScheduleAssignmentTripDisplayForRow(row.key, monthEntries, visibleTripTagMap);
+    })
+    .map((row) => row.name.trim())
+    .filter(Boolean);
+}
+
 interface TripTimelineRow {
   personName: string;
   rowKey: string;

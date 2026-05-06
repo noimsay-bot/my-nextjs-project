@@ -1,9 +1,12 @@
 import { test, expect } from "@playwright/test";
 import {
+  createAssignmentRowKey,
   createCustomAssignmentRowKey,
   createDefaultScheduleAssignmentEntry,
   formatScheduleAssignmentDisplayName,
+  getScheduleAssignmentGeneralDisplayNames,
 } from "@/lib/team-lead/storage";
+import type { DaySchedule } from "@/lib/schedule/types";
 import type { ScheduleAssignmentDataStore } from "@/lib/team-lead/storage";
 
 test("trip display survives schedule row index drift", () => {
@@ -134,4 +137,52 @@ test("trip display works for custom general rows from schedule assignment", () =
       new Map(),
     ),
   ).toBe("박재현(출)");
+});
+
+test("general schedule display keeps original general row when assignment has a trip tag", () => {
+  const day = {
+    dateKey: "2026-05-02",
+    day: 2,
+    month: 5,
+    year: 2026,
+    dow: 6,
+    isWeekend: false,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: { 일반: ["박재현", "구본준"] },
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  } as DaySchedule;
+  const rowKey = createAssignmentRowKey(day.dateKey, "일반", 0, "박재현");
+  const dayRows = {
+    addedRows: [],
+    deletedRowKeys: [],
+    rowOverrides: {
+      [rowKey]: { name: "박재현", duty: "기타" },
+    },
+  };
+  const store: ScheduleAssignmentDataStore = {
+    entries: {
+      "2026-05": {
+        [rowKey]: {
+          ...createDefaultScheduleAssignmentEntry(),
+          travelType: "국내출장",
+          tripTagId: "trip-1",
+          tripTagLabel: "출장",
+          tripTagPhase: "ongoing",
+        },
+      },
+    },
+    rows: {
+      "2026-05": {
+        [day.dateKey]: dayRows,
+      },
+    },
+  };
+
+  expect(getScheduleAssignmentGeneralDisplayNames(day, "2026-05", dayRows, store)).toContain("박재현");
 });
