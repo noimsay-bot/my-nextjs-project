@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type C
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, useSidebar } from "@/components/sidebar";
-import { ScrollToTop } from "@/components/home/ScrollToTop";
 import { ShinyText } from "@/components/effects/ShinyText";
 import {
   getSession,
@@ -905,13 +904,10 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const normalizedPathname = pathname ? pathname.replace(/\/+$/, "") || "/" : "";
-  const shouldShowGlobalScrollTop = normalizedPathname !== "/" && !normalizedPathname.endsWith("/schedule-assignment");
 
   return (
     <SidebarProvider defaultOpen={false}>
       <PortalChrome pathname={pathname}>{children}</PortalChrome>
-      {shouldShowGlobalScrollTop ? <ScrollToTop /> : null}
     </SidebarProvider>
   );
 }
