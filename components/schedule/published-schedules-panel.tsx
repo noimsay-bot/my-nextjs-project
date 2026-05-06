@@ -16,6 +16,7 @@ import {
   getDayDuplicateNameSet,
   getScheduleCategoryLabel,
   getVisibleAssignmentDisplayRank,
+  isAutoManagedGeneralAssignment,
   isGeneralAssignmentCategory,
   scheduleAssignmentNameTagColors,
   scheduleAssignmentNameTagLabels,
@@ -453,13 +454,17 @@ function getRefKey(ref: SchedulePersonRef) {
   return `${ref.monthKey}:${ref.dateKey}:${ref.category}:${ref.index}:${ref.name}`;
 }
 
-function isAutoManagedGeneralCategory(category: string) {
-  return getScheduleCategoryLabel(category) === "일반";
+function isAutoManagedGeneralRef(ref: SchedulePersonRef, dayIndex: Map<string, DaySchedule>) {
+  return isAutoManagedGeneralAssignment(dayIndex.get(ref.dateKey), ref.category);
 }
 
-function isGeneralAssistRoute(route: SchedulePersonRef[]) {
+function isAutoManagedGeneralCategoryOnDay(day: DaySchedule | undefined, category: string) {
+  return isAutoManagedGeneralAssignment(day, category);
+}
+
+function isGeneralAssistRoute(route: SchedulePersonRef[], dayIndex: Map<string, DaySchedule>) {
   if (route.length !== 2) return false;
-  const generalCount = route.filter((ref) => isAutoManagedGeneralCategory(ref.category)).length;
+  const generalCount = route.filter((ref) => isAutoManagedGeneralRef(ref, dayIndex)).length;
   return generalCount === 1;
 }
 
@@ -516,6 +521,20 @@ function findRefSlot(
   return { day, list, index };
 }
 
+function findRefDayInScheduleMap(
+  scheduleMap: Map<string, PublishedScheduleItem["schedule"]>,
+  ref: SchedulePersonRef,
+) {
+  return scheduleMap.get(ref.monthKey)?.days.find((item) => item.dateKey === ref.dateKey);
+}
+
+function isAutoManagedGeneralRefInScheduleMap(
+  scheduleMap: Map<string, PublishedScheduleItem["schedule"]>,
+  ref: SchedulePersonRef,
+) {
+  return isAutoManagedGeneralAssignment(findRefDayInScheduleMap(scheduleMap, ref), ref.category);
+}
+
 function rotateRoutePreview(items: PublishedScheduleItem[], route: SchedulePersonRef[]) {
   const monthKeys = new Set(route.map((ref) => ref.monthKey));
   const scheduleMap = buildScheduleMap(items, monthKeys);
@@ -543,10 +562,12 @@ function applyGeneralAssistPreview(
   scheduleMap: Map<string, PublishedScheduleItem["schedule"]>,
   route: SchedulePersonRef[],
 ) {
-  if (!isGeneralAssistRoute(route)) return false;
+  if (route.length !== 2) return false;
+  const generalCount = route.filter((ref) => isAutoManagedGeneralRefInScheduleMap(scheduleMap, ref)).length;
+  if (generalCount !== 1) return false;
 
-  const workRef = route.find((ref) => !isAutoManagedGeneralCategory(ref.category)) ?? null;
-  const generalRef = route.find((ref) => isAutoManagedGeneralCategory(ref.category)) ?? null;
+  const workRef = route.find((ref) => !isAutoManagedGeneralRefInScheduleMap(scheduleMap, ref)) ?? null;
+  const generalRef = route.find((ref) => isAutoManagedGeneralRefInScheduleMap(scheduleMap, ref)) ?? null;
   if (!workRef || !generalRef) return false;
   if (workRef.category === "휴가" || generalRef.category === "휴가") return false;
 
@@ -573,7 +594,7 @@ function hasAssignmentElsewhereOnDay(day: DaySchedule | undefined, ref: Schedule
   const comparableName = getComparableAssignmentName(ref.category, name);
   if (!comparableName) return false;
   return Object.entries(day.assignments).some(([category, names]) =>
-    !isAutoManagedGeneralCategory(category) &&
+    !isAutoManagedGeneralCategoryOnDay(day, category) &&
     names.some((currentName, index) => {
       if (getComparableAssignmentName(category, currentName) !== comparableName) return false;
       return !(category === ref.category && index === ref.index);
@@ -587,7 +608,14 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
   if (!previewMap) return true;
   const sourceDayIndex = buildDayIndex(items);
 
-  if (isGeneralAssistRoute(route)) {
+  const previewDayIndex = new Map<string, DaySchedule>();
+  previewMap.forEach((schedule) => {
+    schedule.days.forEach((day) => {
+      previewDayIndex.set(day.dateKey, day);
+    });
+  });
+
+  if (isGeneralAssistRoute(route, previewDayIndex)) {
     const allDays = Array.from(previewMap.values())
       .flatMap((schedule) => schedule.days)
       .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
@@ -603,7 +631,7 @@ function routeWouldCreateConflict(items: PublishedScheduleItem[], route: Schedul
     for (const day of allDays) {
       const hasNightConflict = Object.entries(day.assignments).some(([category, names]) =>
         category !== "휴가" &&
-        !isAutoManagedGeneralCategory(category) &&
+        !isAutoManagedGeneralCategoryOnDay(day, category) &&
         names.some((name) => previousNight.includes(name.trim())),
       );
       if (hasNightConflict) return true;
@@ -716,7 +744,7 @@ function hasAssignmentOnDay(day: DaySchedule | undefined, name: string, category
   const comparableName = getComparableAssignmentName(category, name);
   if (!comparableName) return false;
   return Object.entries(day.assignments).some(([category, names]) =>
-    !isAutoManagedGeneralCategory(category) &&
+    !isAutoManagedGeneralCategoryOnDay(day, category) &&
     names.some((currentName) => getComparableAssignmentName(category, currentName) === comparableName),
   );
 }
@@ -773,8 +801,8 @@ function isSwapCandidateValid(
   todayKey: string,
 ) {
   const categoryLabel = getScheduleCategoryLabel(source.category);
-  if (isAutoManagedGeneralCategory(source.category)) return false;
-  if (isAutoManagedGeneralCategory(target.category)) return false;
+  if (isAutoManagedGeneralRef(source, dayIndex)) return false;
+  if (isAutoManagedGeneralRef(target, dayIndex)) return false;
   if (!hasCompatibleVacationType(source, target)) return false;
   if (source.name === target.name) return false;
   if (source.dateKey <= todayKey || target.dateKey <= todayKey) return false;
@@ -1420,7 +1448,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const handleNameClick = async (person: ScheduleNameObject) => {
     if (!editMode || !username) return;
 
-    if (isAutoManagedGeneralCategory(person.ref.category)) {
+    if (isAutoManagedGeneralRef(person.ref, publishedDayIndex)) {
       setRequestMessage("일반 근무는 교환 후보가 아닙니다. 실제 근무가 변경되면 일반 근무는 그 날짜 기준으로 자동 다시 계산됩니다.");
       setRequestMessageTone("warn");
       return;
@@ -2176,9 +2204,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                           const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                           const mineHighlighted =
-                                            isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
+                                            isMine && (showMine || (editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex)));
                                           const editModeMineHighlighted =
-                                            isMine && editMode && !isAutoManagedGeneralCategory(category);
+                                            isMine && editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex);
                                           const routeSelected = routeIncludes(selectedRoute, ref);
                                           const firstSelected = sameRef(firstSelectedRef, ref);
                                           const recommendedHighlighted =
@@ -2555,9 +2583,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                   const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                   const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                   const mineHighlighted =
-                                    isMine && (showMine || (editMode && !isAutoManagedGeneralCategory(category)));
+                                    isMine && (showMine || (editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex)));
                                   const editModeMineHighlighted =
-                                    isMine && editMode && !isAutoManagedGeneralCategory(category);
+                                    isMine && editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
                                   const firstSelected = sameRef(firstSelectedRef, ref);
                                   const recommendedHighlighted =

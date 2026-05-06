@@ -8,7 +8,7 @@ import {
   SchedulePersonRef,
   ScheduleState,
 } from "@/lib/schedule/types";
-import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
+import { isAutoManagedGeneralAssignment } from "@/lib/schedule/constants";
 import { sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import {
   getPortalSession,
@@ -235,28 +235,55 @@ function buildScheduleMap(items: GeneratedSchedule[], monthKeys: Set<string>) {
   );
 }
 
-function isAutoManagedGeneralCategory(category: string) {
-  return getScheduleCategoryLabel(category) === "일반";
+function findRefDay(scheduleMap: Map<string, GeneratedSchedule>, ref: SchedulePersonRef) {
+  return scheduleMap.get(ref.monthKey)?.days.find((item) => item.dateKey === ref.dateKey) ?? null;
 }
 
-function isGeneralAssistRoute(route: SchedulePersonRef[]) {
+function isAutoManagedGeneralRef(scheduleMap: Map<string, GeneratedSchedule>, ref: SchedulePersonRef) {
+  return isAutoManagedGeneralAssignment(findRefDay(scheduleMap, ref), ref.category);
+}
+
+function buildKnownScheduleMapForRoute(route: SchedulePersonRef[]) {
+  const monthKeys = new Set(route.map((ref) => ref.monthKey));
+  const state = readStoredScheduleState();
+  const schedules = [
+    ...state.generatedHistory,
+    ...(state.generated ? [state.generated] : []),
+    ...getPublishedSchedules().map((item) => item.schedule),
+  ];
+  return buildScheduleMap(schedules, monthKeys);
+}
+
+async function buildLatestScheduleMapForRoute(route: SchedulePersonRef[]) {
+  const firstKnownMap = buildKnownScheduleMapForRoute(route);
+  const hasUnknownPlainGeneralRef = route.some(
+    (ref) => ref.category === "일반" && !findRefDay(firstKnownMap, ref),
+  );
+  if (!hasUnknownPlainGeneralRef) return firstKnownMap;
+
+  await Promise.all([refreshScheduleState().catch(() => null), refreshPublishedSchedules().catch(() => null)]);
+  return buildKnownScheduleMapForRoute(route);
+}
+
+async function hasAutoManagedGeneralRef(route: SchedulePersonRef[]) {
+  const scheduleMap = await buildLatestScheduleMapForRoute(route);
+  return route.some((ref) => isAutoManagedGeneralRef(scheduleMap, ref));
+}
+
+function isGeneralAssistRoute(scheduleMap: Map<string, GeneratedSchedule>, route: SchedulePersonRef[]) {
   if (route.length !== 2) return false;
-  const generalCount = route.filter((ref) => isAutoManagedGeneralCategory(ref.category)).length;
+  const generalCount = route.filter((ref) => isAutoManagedGeneralRef(scheduleMap, ref)).length;
   return generalCount === 1;
-}
-
-function hasAutoManagedGeneralRef(route: SchedulePersonRef[]) {
-  return route.some((ref) => isAutoManagedGeneralCategory(ref.category));
 }
 
 function applyGeneralAssistRoute(
   scheduleMap: Map<string, GeneratedSchedule>,
   route: SchedulePersonRef[],
 ) {
-  if (!isGeneralAssistRoute(route)) return false;
+  if (!isGeneralAssistRoute(scheduleMap, route)) return false;
 
-  const workRef = route.find((ref) => !isAutoManagedGeneralCategory(ref.category)) ?? null;
-  const generalRef = route.find((ref) => isAutoManagedGeneralCategory(ref.category)) ?? null;
+  const workRef = route.find((ref) => !isAutoManagedGeneralRef(scheduleMap, ref)) ?? null;
+  const generalRef = route.find((ref) => isAutoManagedGeneralRef(scheduleMap, ref)) ?? null;
   if (!workRef || !generalRef) return false;
   if (workRef.category === "휴가" || generalRef.category === "휴가") return false;
 
@@ -550,7 +577,7 @@ export async function createScheduleChangeRequest(input: {
 
   const createdAt = nowStamp();
   const route = normalizeRoute(input.route ?? [input.source, input.target]);
-  if (hasAutoManagedGeneralRef(route)) {
+  if (await hasAutoManagedGeneralRef(route)) {
     throw new Error("일반 근무는 변경 요청 대상이 아닙니다. 실제 근무가 변경되면 일반 근무는 자동으로 다시 계산됩니다.");
   }
   const nextItem = normalizeRequest({
@@ -662,7 +689,7 @@ export async function resolveScheduleChangeRequest(
     if (target.status !== "pending") {
       return { ok: false as const, applied: false };
     }
-    if (hasAutoManagedGeneralRef(target.route)) {
+    if (await hasAutoManagedGeneralRef(target.route)) {
       emitChangeRequestStatus({
         ok: false,
         message: "일반 근무는 변경 요청 대상이 아닙니다. 실제 근무가 변경되면 일반 근무는 자동으로 다시 계산됩니다.",

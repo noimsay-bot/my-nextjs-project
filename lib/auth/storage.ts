@@ -220,7 +220,10 @@ export function hasSupabaseSessionCookie() {
     return false;
   }
 
-  return document.cookie.split(";").some((cookie) => cookie.includes("-auth-token="));
+  return document.cookie.split(";").some((cookie) => {
+    const cookieName = cookie.trim().split("=")[0] ?? "";
+    return cookieName.startsWith("sb-") && cookieName.includes("-auth-token");
+  });
 }
 
 function promiseWithTimeout<T>(promise: PromiseLike<T>, timeoutMs = AUTH_REQUEST_TIMEOUT_MS) {

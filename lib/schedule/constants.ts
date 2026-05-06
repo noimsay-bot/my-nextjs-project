@@ -65,6 +65,15 @@ export function isGeneralAssignmentCategory(category: string) {
   return getScheduleCategoryLabel(category) === "일반";
 }
 
+export function isAutoManagedGeneralAssignment(
+  day: Pick<DaySchedule, "isWeekend" | "isHoliday" | "isCustomHoliday" | "isWeekdayHoliday"> | null | undefined,
+  category: string,
+) {
+  if (category !== "일반") return false;
+  if (!day) return true;
+  return !(day.isWeekend || day.isHoliday || day.isCustomHoliday || day.isWeekdayHoliday);
+}
+
 export const scheduleAssignmentNameTagLabels: Record<ScheduleAssignmentNameTag, string> = {
   gov: "(국)",
   law: "(법)",

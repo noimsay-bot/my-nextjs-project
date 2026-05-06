@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { defaultScheduleState } from "@/lib/schedule/constants";
-import { moveAssignmentCategory, sanitizeScheduleState } from "@/lib/schedule/engine";
+import { defaultScheduleState, isAutoManagedGeneralAssignment } from "@/lib/schedule/constants";
+import { moveAssignmentCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import type { DaySchedule, GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 
 function createHolidayDay(): DaySchedule {
@@ -59,4 +59,30 @@ test("weekday holiday work-type card order can be moved", () => {
 
   expect(workTypeOrder).toEqual(["야근", "조근", "일반", "석근"]);
   expect(workTypeOverrideOrder).toEqual(["야근", "조근", "일반", "석근"]);
+});
+
+test("weekday holiday general assignment is not treated as auto-managed", () => {
+  const holidayDay = createHolidayDay();
+  const normalWeekday = {
+    ...holidayDay,
+    dateKey: "2026-05-04",
+    day: 4,
+    dow: 1,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+  };
+
+  expect(isAutoManagedGeneralAssignment(holidayDay, "일반")).toBe(false);
+  expect(isAutoManagedGeneralAssignment(holidayDay, "주말일반근무")).toBe(false);
+  expect(isAutoManagedGeneralAssignment(normalWeekday, "일반")).toBe(true);
+});
+
+test("weekday holiday general assignments survive general sync", () => {
+  const state = createState();
+  const day = state.generated?.days.find((item) => item.dateKey === "2026-05-01");
+
+  expect(day?.assignments["일반"]).toEqual(["구본준"]);
+  syncGeneralAssignments(state, state.generated?.days ?? [], state.generalTeamPeople);
+  expect(day?.assignments["일반"]).toEqual(["구본준"]);
 });
