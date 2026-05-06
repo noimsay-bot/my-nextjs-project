@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, useSidebar } from "@/components/sidebar";
 import { ScrollToTop } from "@/components/home/ScrollToTop";
+import { ShinyText } from "@/components/effects/ShinyText";
 import {
   getSession,
   hasAdminAccess,
@@ -879,14 +880,16 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
             <div className="panel-pad" style={{ display: "grid", gap: 18 }}>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <Link href="/" className="brand-logo" aria-label="홈으로 이동">
-                  <span
+                  <ShinyText
                     className="brand-logo-text"
-                    style={{
-                      fontWeight: 600,
-                    }}
-                  >
-                    JTBC NEWS CAMERA HUB
-                  </span>
+                    text="JTBC NEWS CAMERA HUB"
+                    speed={4.8}
+                    delay={0.8}
+                    color="var(--brand-shiny-base, var(--brand-text))"
+                    shineColor="var(--brand-shine-text, #ffffff)"
+                    spread={120}
+                    direction="left"
+                  />
                 </Link>
               </div>
             </div>

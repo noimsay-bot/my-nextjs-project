@@ -34,6 +34,8 @@
   --brand-surface: transparent;
   --brand-shadow: none;
   --brand-text: #ffffff;
+  --brand-shiny-base: #d9e8ff;
+  --brand-shine-text: #3b82f6;
   --chip-border: rgba(236, 246, 255, 0.2);
   --chip-bg: rgba(34, 49, 79, 0.24);
   --chip-text: #eefdfd;
@@ -88,6 +90,8 @@ html[data-theme="light"] {
   --brand-surface: transparent;
   --brand-shadow: none;
   --brand-text: #111827;
+  --brand-shiny-base: #111827;
+  --brand-shine-text: #3b82f6;
   --chip-border: rgba(59, 130, 246, 0.18);
   --chip-bg: rgba(219, 234, 254, 0.92);
   --chip-text: #1d4ed8;
@@ -151,6 +155,8 @@ html[data-theme="pink"] {
   --brand-surface: transparent;
   --brand-shadow: none;
   --brand-text: #ffffff;
+  --brand-shiny-base: #ffd7ef;
+  --brand-shine-text: #3b82f6;
   --chip-border: rgba(255, 231, 244, 0.18);
   --chip-bg: rgba(74, 24, 66, 0.28);
   --chip-text: #fff0f8;
@@ -213,6 +219,8 @@ html[data-theme="green"] {
   --brand-surface: transparent;
   --brand-shadow: none;
   --brand-text: #ffffff;
+  --brand-shiny-base: #d7f8e7;
+  --brand-shine-text: #3b82f6;
   --chip-border: rgba(234, 255, 246, 0.14);
   --chip-bg: rgba(32, 61, 51, 0.2);
   --chip-text: #f0fff7;
