@@ -233,6 +233,7 @@ function EquipmentItemCard({
     >
       <span className={styles.itemCardTop}>
         <strong>{item.name}</strong>
+        {borrowed ? <StatusPill borrowed /> : null}
       </span>
     </button>
   );
@@ -253,7 +254,7 @@ function DailyRecords({
         <div className={styles.sectionHead}>
           <div>
             <span className="chip">일별 기록</span>
-            <h2 className={styles.sectionTitle}>누적 대여 기록</h2>
+            <h2 className={styles.sectionTitle}>대여 기록</h2>
           </div>
           <label className={styles.dateFilter}>
             <span>날짜</span>
@@ -863,7 +864,10 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       setMessage({ tone: "note", text: "대여할 장비를 선택해 주세요." });
       return;
     }
-    setLiveDetails(liveDetailEmpty);
+    setLiveDetails({
+      ...liveDetailEmpty,
+      cameraReporter: isLivePage ? session?.username ?? "" : "",
+    });
     setConfirmMode("borrow");
   };
 
@@ -1141,8 +1145,6 @@ export function LiveEquipmentStatusPage() {
                     <th>오디오맨</th>
                     <th>장소</th>
                     <th>비고</th>
-                    <th>대여자</th>
-                    <th>대여시간</th>
                     <th>상태</th>
                   </tr>
                 </thead>
@@ -1157,8 +1159,6 @@ export function LiveEquipmentStatusPage() {
                         <td>{loanItem?.loan.liveAudioMan || "-"}</td>
                         <td>{loanItem?.loan.liveLocation || "-"}</td>
                         <td>{loanItem?.loan.liveNote || "-"}</td>
-                        <td>{loanItem?.loan.borrowerName || "-"}</td>
-                        <td>{formatDateTime(loanItem?.borrowedAt)}</td>
                         <td><StatusPill borrowed={Boolean(loanItem)} /></td>
                       </tr>
                     );

@@ -322,6 +322,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .itemCardTop strong {
@@ -353,6 +355,18 @@
   border: 1px solid rgba(248, 113, 113, 0.42);
   background: rgba(239, 68, 68, 0.15);
   color: #fee2e2;
+}
+
+:global(html[data-theme="light"]) .statusAvailable {
+  border-color: rgba(22, 163, 74, 0.34);
+  background: #dcfce7;
+  color: #166534;
+}
+
+:global(html[data-theme="light"]) .statusBorrowed {
+  border-color: rgba(220, 38, 38, 0.32);
+  background: #fecaca;
+  color: #7f1d1d;
 }
 
 .borrowedMeta,
@@ -428,6 +442,12 @@
   box-shadow: 0 24px 80px rgba(2, 6, 23, 0.34);
 }
 
+:global(html[data-theme="light"]) .modal {
+  border-color: rgba(148, 163, 184, 0.32);
+  background: #ffffff;
+  color: #0f172a;
+}
+
 .modalTitle {
   margin: 10px 0 0;
   font-size: 22px;
@@ -448,6 +468,12 @@
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.26);
+}
+
+:global(html[data-theme="light"]) .modalListItem {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 .modalListItem span {
