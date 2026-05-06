@@ -5,6 +5,8 @@ import { fetchMyScheduleAssignmentsWithPartnerInfo, type MyScheduleAssignmentIte
 import { formatDateLabel, getCurrentMonthKey } from "@/lib/corporate-card/schedule";
 import styles from "./CorporateCard.module.css";
 
+const FINAL_CUT_STATUS_STORAGE_KEY = "corporate-card-final-cut-status-v1";
+
 function groupByDate(items: MyScheduleAssignmentItem[]) {
   return items.reduce((map, item) => {
     const existing = map.get(item.scheduleDate) ?? [];
@@ -14,12 +16,40 @@ function groupByDate(items: MyScheduleAssignmentItem[]) {
   }, new Map<string, MyScheduleAssignmentItem[]>());
 }
 
+function readFinalCutStatus() {
+  if (typeof window === "undefined") return {} as Record<string, boolean>;
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FINAL_CUT_STATUS_STORAGE_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, value]) => value === true),
+    ) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+function writeFinalCutStatus(status: Record<string, boolean>) {
+  try {
+    window.localStorage.setItem(FINAL_CUT_STATUS_STORAGE_KEY, JSON.stringify(status));
+  } catch {
+    // Local status is convenience-only; storage failures should not block the page.
+  }
+}
+
 export function MyAssignmentsPage() {
   const [monthKey, setMonthKey] = useState(getCurrentMonthKey);
   const [items, setItems] = useState<MyScheduleAssignmentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [finalCutStatus, setFinalCutStatus] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setFinalCutStatus(readFinalCutStatus());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +80,19 @@ export function MyAssignmentsPage() {
     await navigator.clipboard.writeText(item.generatedText);
     setCopiedId(item.scheduleItemId);
     window.setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const toggleFinalCutStatus = (item: MyScheduleAssignmentItem, checked: boolean) => {
+    setFinalCutStatus((current) => {
+      const next = { ...current };
+      if (checked) {
+        next[item.scheduleItemId] = true;
+      } else {
+        delete next[item.scheduleItemId];
+      }
+      writeFinalCutStatus(next);
+      return next;
+    });
   };
 
   return (
@@ -83,6 +126,14 @@ export function MyAssignmentsPage() {
                   <article key={item.scheduleItemId} className={styles.itemCard}>
                     <div className={styles.itemHead}>
                       <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
+                      <label className={styles.finalCutToggle}>
+                        <span>{finalCutStatus[item.scheduleItemId] ? "정제본 생성완료" : "정제본"}</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(finalCutStatus[item.scheduleItemId])}
+                          onChange={(event) => toggleFinalCutStatus(item, event.target.checked)}
+                        />
+                      </label>
                     </div>
                     <div className={styles.metaGrid}>
                       <div className={styles.metaItem}>

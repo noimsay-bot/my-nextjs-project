@@ -68,12 +68,33 @@
 
 .itemHead {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .itemTitle {
   font-size: 17px;
   line-height: 1.35;
+}
+
+.finalCutToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.finalCutToggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #38bdf8;
 }
 
 .metaGrid,
@@ -141,5 +162,14 @@
   .actions > button {
     flex: 1 1 130px;
     min-height: 44px;
+  }
+
+  .itemHead {
+    grid-template-columns: 1fr;
+  }
+
+  .finalCutToggle {
+    justify-content: space-between;
+    width: 100%;
   }
 }
