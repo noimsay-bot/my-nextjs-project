@@ -16,6 +16,7 @@ import {
 } from "@/lib/auth/storage";
 import {
   getPortalAccessState,
+  isPortalAccessStateLoaded,
   subscribeToPortalAccessState,
 } from "@/lib/portal/access-state";
 import { hasSubmittedReviewLock } from "@/lib/portal/data";
@@ -153,6 +154,20 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     const accessState = getPortalAccessState();
     return accessState.submissionAccessOpen;
   });
+  const latestPortalAccessState = getPortalAccessState();
+  const portalAccessStateLoaded = isPortalAccessStateLoaded();
+  const effectiveVacationRequestOpen =
+    needsVacationAccessCheck && !portalAccessStateLoaded
+      ? null
+      : needsVacationAccessCheck
+        ? latestPortalAccessState.vacationRequestOpen
+        : vacationRequestOpen;
+  const effectiveSubmissionAccessOpen =
+    needsSubmissionAccessCheck && !portalAccessStateLoaded
+      ? null
+      : needsSubmissionAccessCheck
+        ? latestPortalAccessState.submissionAccessOpen
+        : submissionAccessOpen;
 
   useEffect(() => {
     let mounted = true;
@@ -316,16 +331,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
     if (
       needsVacationAccessCheck &&
-      vacationRequestOpen === null
+      effectiveVacationRequestOpen === null
     ) {
       return;
     }
 
-    if ((session.role === "member" || session.role === "outlet") && needsSubmissionAccessCheck && submissionAccessOpen === null) {
+    if ((session.role === "member" || session.role === "outlet") && needsSubmissionAccessCheck && effectiveSubmissionAccessOpen === null) {
       return;
     }
 
-    if (!hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)) {
+    if (!hasAccess(pathname, session, effectiveVacationRequestOpen, effectiveSubmissionAccessOpen)) {
       authLog("redirect", {
         pathname,
         reason: "forbidden",
@@ -341,16 +356,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     recoveryAttempted,
     router,
     session,
-    submissionAccessOpen,
-    vacationRequestOpen,
+    effectiveSubmissionAccessOpen,
+    effectiveVacationRequestOpen,
   ]);
 
   if (
     authPending ||
-    (needsVacationAccessCheck && vacationRequestOpen === null) ||
+    (needsVacationAccessCheck && effectiveVacationRequestOpen === null) ||
     ((session?.role === "member" || session?.role === "outlet") &&
       needsSubmissionAccessCheck &&
-      submissionAccessOpen === null)
+      effectiveSubmissionAccessOpen === null)
   ) {
     return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   }
@@ -359,7 +374,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     !session ||
     !session.approved ||
     session.mustChangePassword ||
-    !hasAccess(pathname, session, vacationRequestOpen, submissionAccessOpen)
+    !hasAccess(pathname, session, effectiveVacationRequestOpen, effectiveSubmissionAccessOpen)
   ) {
     return null;
   }

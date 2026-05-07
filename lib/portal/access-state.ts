@@ -75,6 +75,10 @@ export function getPortalAccessState() {
   return portalAccessState;
 }
 
+export function isPortalAccessStateLoaded() {
+  return portalAccessLoaded;
+}
+
 function shouldRefreshPortalAccessState() {
   if (portalAccessLastFailureAt && Date.now() - portalAccessLastFailureAt < PORTAL_ACCESS_FAILURE_COOLDOWN_MS) {
     return false;
@@ -100,6 +104,7 @@ export async function refreshPortalAccessState(options?: { force?: boolean }) {
       return syncPortalAccessState();
     })
     .catch((error) => {
+      portalAccessLoaded = true;
       portalAccessLastFailureAt = Date.now();
       console.warn(
         "포털 접근 상태를 새로고침하지 못했습니다.",
