@@ -55,13 +55,18 @@ export function omitParenthesizedPeople(value: string) {
 }
 
 export function buildCorporateCardMemo(input: CorporateCardMemoInput) {
-  return [
-    formatMemoDate(input.date),
-    omitParenthesizedPeople(normalizePart(input.scheduleContent)),
-    "일정식대",
+  const peopleText = [
     normalizePart(input.userName),
     normalizePart(input.audioManName),
     normalizePart(input.seniorName),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return [
+    formatMemoDate(input.date),
+    omitParenthesizedPeople(normalizePart(input.scheduleContent)),
+    `일정식대_${peopleText}_`,
   ]
     .filter(Boolean)
     .join(" ");

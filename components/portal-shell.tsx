@@ -172,6 +172,16 @@ function getVisibleLinks(
 
   switch (session?.role) {
     case "member":
+      return links.filter(
+        (link) =>
+          link.href === "/me" ||
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
+          (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
+      );
     case "outlet":
     case "observer":
       return links.filter(

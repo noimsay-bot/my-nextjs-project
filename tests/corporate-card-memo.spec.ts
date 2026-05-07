@@ -10,7 +10,7 @@ test("corporate card memo omits parenthesized people from schedule content", () 
       audioManName: "오디오맨",
       seniorName: "형님",
     }),
-  ).toBe("0502 2026 월드컵 멕시코 현지 답사 및 사전취재 일정식대 박재현 오디오맨 형님");
+  ).toBe("0502 2026 월드컵 멕시코 현지 답사 및 사전취재 일정식대_박재현 오디오맨 형님_");
 });
 
 test("parenthesized people cleanup supports placeholders and multiple names", () => {

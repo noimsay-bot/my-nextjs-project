@@ -804,12 +804,14 @@ function ScheduleDeleteConfirmButton({
 export function ScheduleAssignmentPage() {
   const session = getSession();
   const sessionUserId = session?.id ?? null;
+  const canAssignCoverageScore = session?.role === "team_lead";
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
   const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
   const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
+  const [visibleCoverageNoteRows, setVisibleCoverageNoteRows] = useState<Record<string, true>>({});
   const [importMessage, setImportMessage] = useState<ImportMessage | null>(null);
   const [cellLocks, setCellLocks] = useState<Record<string, ScheduleAssignmentCellLockRow>>({});
   const [cellLockClock, setCellLockClock] = useState(() => Date.now());
@@ -1974,6 +1976,19 @@ export function ScheduleAssignmentPage() {
     }, [selectedMonthKey], options);
   };
 
+  const setCoverageNoteVisible = (rowKey: string, visible: boolean) => {
+    setVisibleCoverageNoteRows((current) => {
+      if (visible) {
+        return current[rowKey] ? current : { ...current, [rowKey]: true };
+      }
+
+      if (!current[rowKey]) return current;
+      const next = { ...current };
+      delete next[rowKey];
+      return next;
+    });
+  };
+
   const updateDayRows = (dateKey: string, recipe: (dayRows: ScheduleAssignmentDayRows) => ScheduleAssignmentDayRows) => {
     updateStore((current) => {
       const currentMonthRows = current.rows[selectedMonthKey] ?? {};
@@ -2589,6 +2604,11 @@ export function ScheduleAssignmentPage() {
                         editingTripTag?.rowKey === row.key &&
                         editingTripTag.tripTagId === currentTripTagId;
                       const displayName = formatScheduleAssignmentDisplayName(row.name, hasTripTag);
+                      const visibleCoverageScore = canAssignCoverageScore ? coverageScore : 0;
+                      const showCoverageNote =
+                        (canAssignCoverageScore && coverageScore > 0) ||
+                        Boolean(entry.coverageNote.trim()) ||
+                        Boolean(visibleCoverageNoteRows[row.key]);
                       const coverageNoteReadOnly = false;
                       const tripTagReadOnly = false;
                       const clockInLockState = getActiveCellLock(selectedMonthKey, day.dateKey, row.key, "clockIn");
@@ -2615,9 +2635,14 @@ export function ScheduleAssignmentPage() {
                               <button
                                 type="button"
                                 className="btn"
-                                title="가산점"
+                                title={canAssignCoverageScore ? "기여도 점수" : "메모 열기"}
                                 disabled={isEditingPeople}
-                                onClick={() =>
+                                onClick={() => {
+                                  if (!canAssignCoverageScore) {
+                                    setCoverageNoteVisible(row.key, true);
+                                    return;
+                                  }
+
                                   updateMonthEntry(row.key, (current) => {
                                     const nextCoverageScore = cycleCoverageScore(current.coverageScore ?? 0);
                                     return {
@@ -2625,8 +2650,8 @@ export function ScheduleAssignmentPage() {
                                       coverageScore: nextCoverageScore,
                                       coverageNote: nextCoverageScore > 0 ? current.coverageNote : "",
                                     };
-                                  })
-                                }
+                                  });
+                                }}
                                 style={{
                                   display: "inline-flex",
                                   alignItems: "center",
@@ -2640,10 +2665,10 @@ export function ScheduleAssignmentPage() {
                                   fontSize: 13,
                                   fontWeight: 900,
                                   lineHeight: 1,
-                                  ...getCoverageScoreStyle(coverageScore),
+                                  ...getCoverageScoreStyle(visibleCoverageScore),
                                 }}
                               >
-                                {coverageScore === 0 ? "" : coverageScore}
+                                {visibleCoverageScore === 0 ? "" : visibleCoverageScore}
                               </button>
                               {isDraftCustomRow ? (
                                 <input
@@ -2698,11 +2723,11 @@ export function ScheduleAssignmentPage() {
                                   -
                                 </button>
                               ) : null}
-                            {coverageScore > 0 ? (
+                            {showCoverageNote ? (
                               <input
                                 className="field-input"
                                 value={entry.coverageNote}
-                                placeholder="가점 사유 입력"
+                                placeholder={canAssignCoverageScore ? "가점 사유 입력" : "메모 입력"}
                                 disabled={isEditingPeople}
                                 readOnly={coverageNoteReadOnly}
                                 style={{ gridColumn: "1 / -1" }}

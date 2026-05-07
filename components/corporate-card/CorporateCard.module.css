@@ -123,17 +123,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  min-height: 34px;
+  gap: 16px;
+  min-height: 68px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 26px;
   font-weight: 900;
   white-space: nowrap;
 }
 
 .finalCutToggle input {
-  width: 18px;
-  height: 18px;
+  width: 36px;
+  height: 36px;
   margin: 0;
   accent-color: #38bdf8;
 }

@@ -60,7 +60,7 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/me")) {
-    return session.role === "admin" && session.actualRole === "admin";
+    return session.role === "member" || (session.role === "admin" && session.actualRole === "admin");
   }
 
   if (pathname.startsWith("/partner")) {
