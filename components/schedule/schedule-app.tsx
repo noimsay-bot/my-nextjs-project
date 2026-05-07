@@ -89,7 +89,7 @@ import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
 import { deskEditableVacationTypes, vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
-import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
+import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleAssignmentNameTag, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
@@ -178,7 +178,7 @@ function getAssignmentChipTag(category: string, name: string, day: DaySchedule) 
   return day.assignmentNameTags?.[key] ?? null;
 }
 
-function getAssignmentChipText(name: string, tag: "gov" | "law" | null) {
+function getAssignmentChipText(name: string, tag: ScheduleAssignmentNameTag | null) {
   return tag ? `${name}${scheduleAssignmentNameTagLabels[tag]}` : name;
 }
 

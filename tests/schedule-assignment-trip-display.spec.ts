@@ -1,12 +1,13 @@
 import { test, expect } from "@playwright/test";
 import {
+  applyScheduleAssignmentNameTagsToSchedule,
   createAssignmentRowKey,
   createCustomAssignmentRowKey,
   createDefaultScheduleAssignmentEntry,
   formatScheduleAssignmentDisplayName,
   getScheduleAssignmentGeneralDisplayNames,
 } from "@/lib/team-lead/storage";
-import type { DaySchedule } from "@/lib/schedule/types";
+import type { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import type { ScheduleAssignmentDataStore } from "@/lib/team-lead/storage";
 
 test("trip display survives schedule row index drift", () => {
@@ -185,4 +186,51 @@ test("general schedule display keeps original general row when assignment has a 
   };
 
   expect(getScheduleAssignmentGeneralDisplayNames(day, "2026-05", dayRows, store)).toContain("박재현");
+});
+
+test("half-day assignment duty adds half-day tag to schedule display name", () => {
+  const day = {
+    dateKey: "2026-05-02",
+    day: 2,
+    month: 5,
+    year: 2026,
+    dow: 6,
+    isWeekend: false,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: { 일반: ["박재현"] },
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  } as DaySchedule;
+  const rowKey = createAssignmentRowKey(day.dateKey, "일반", 0, "박재현");
+  const schedule = {
+    year: 2026,
+    month: 5,
+    monthKey: "2026-05",
+    days: [day],
+    nextPointers: {},
+    nextStartDate: "2026-06-01",
+  } as GeneratedSchedule;
+  const store: ScheduleAssignmentDataStore = {
+    entries: {},
+    rows: {
+      "2026-05": {
+        [day.dateKey]: {
+          addedRows: [],
+          deletedRowKeys: [],
+          rowOverrides: {
+            [rowKey]: { name: "박재현", duty: "오전반차" },
+          },
+        },
+      },
+    },
+  };
+
+  const taggedSchedule = applyScheduleAssignmentNameTagsToSchedule(schedule, store);
+
+  expect(taggedSchedule.days[0]?.assignmentNameTags?.["일반::박재현"]).toBe("half");
 });

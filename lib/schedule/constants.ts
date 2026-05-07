@@ -77,6 +77,7 @@ export function isAutoManagedGeneralAssignment(
 export const scheduleAssignmentNameTagLabels: Record<ScheduleAssignmentNameTag, string> = {
   gov: "(국)",
   law: "(법)",
+  half: "(반)",
 };
 
 export const scheduleAssignmentNameTagColors: Record<
@@ -92,6 +93,11 @@ export const scheduleAssignmentNameTagColors: Record<
     background: "rgba(250,204,21,.18)",
     border: "1px solid rgba(250,204,21,.5)",
     color: "#fef3c7",
+  },
+  half: {
+    background: "rgba(16,185,129,.18)",
+    border: "1px solid rgba(52,211,153,.52)",
+    color: "#d1fae5",
   },
 };
 

@@ -20,7 +20,7 @@ export interface Conflict {
 }
 
 export type VacationType = "연차" | "대휴" | "기타";
-export type ScheduleAssignmentNameTag = "gov" | "law";
+export type ScheduleAssignmentNameTag = "gov" | "law" | "half";
 
 export interface DaySchedule {
   dateKey: string;

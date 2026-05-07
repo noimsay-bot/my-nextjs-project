@@ -61,10 +61,11 @@ function normalizeDayAssignments(day: DaySchedule) {
 function normalizeDayAssignmentNameTags(day: DaySchedule) {
   return Object.fromEntries(
     Object.entries(day.assignmentNameTags ?? {}).filter(([key, value]) => {
-      if (value !== "gov" && value !== "law") return false;
+      if (value !== "gov" && value !== "law" && value !== "half") return false;
       const [category, name] = key.split("::");
-      if (!category || !name || !isGeneralAssignmentCategory(category)) return false;
-      return (day.assignments[category] ?? []).includes(name);
+      if (!category || !name) return false;
+      if (!(day.assignments[category] ?? []).includes(name)) return false;
+      return value === "half" || isGeneralAssignmentCategory(category);
     }),
   ) as Record<string, ScheduleAssignmentNameTag>;
 }

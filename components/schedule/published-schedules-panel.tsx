@@ -42,7 +42,7 @@ import {
 } from "@/lib/schedule/published";
 import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
-import { DaySchedule, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, VacationType } from "@/lib/schedule/types";
+import { DaySchedule, ScheduleAssignmentNameTag, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, VacationType } from "@/lib/schedule/types";
 import {
   applyScheduleAssignmentNameTagsToSchedule,
   formatScheduleAssignmentDisplayName,
@@ -135,7 +135,7 @@ function getAssignmentChipTag(category: string, name: string, day: DaySchedule) 
   return day.assignmentNameTags?.[key] ?? null;
 }
 
-function getAssignmentChipText(name: string, tag: "gov" | "law" | null) {
+function getAssignmentChipText(name: string, tag: ScheduleAssignmentNameTag | null) {
   return tag ? `${name}${scheduleAssignmentNameTagLabels[tag]}` : name;
 }
 

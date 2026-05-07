@@ -1415,6 +1415,9 @@ function getScheduleAssignmentNameTagForDuty(duty: string): ScheduleAssignmentNa
       return "gov";
     case "법조지원":
       return "law";
+    case "오전반차":
+    case "오후반차":
+      return "half";
     default:
       return null;
   }
@@ -1442,7 +1445,7 @@ export function applyScheduleAssignmentNameTagsToSchedule(
       const nextTag = getScheduleAssignmentNameTagForDuty(row.duty);
       const currentTag = nextTags[tagKey] ?? null;
 
-      if (currentTag && (currentTag === "gov" || currentTag === "law")) {
+      if (currentTag && (currentTag === "gov" || currentTag === "law" || currentTag === "half")) {
         delete nextTags[tagKey];
         dayChanged = true;
       }
