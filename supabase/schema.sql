@@ -1061,28 +1061,118 @@ as $$
       and role <> 'partner'
       and role <> 'observer'
   ),
-  raw_items as (
+  assignment_month as (
     select
       t.month_key,
+      coalesce(t.entries, '{}'::jsonb) as entries,
+      coalesce(t.rows, '{}'::jsonb) as rows,
+      coalesce(sm.published_state, sm.draft_state) as schedule_state
+    from public.team_lead_schedule_assignments t
+    left join public.schedule_months sm on sm.month_key = t.month_key
+    where t.month_key = trim(coalesce(p_month_key, ''))
+  ),
+  schedule_days as (
+    select
+      assignment_month.month_key,
+      assignment_month.entries,
+      assignment_month.rows,
+      day_item.value as day_state
+    from assignment_month
+    cross join lateral jsonb_array_elements(coalesce(assignment_month.schedule_state -> 'days', '[]'::jsonb)) as day_item(value)
+    where day_item.value ->> 'dateKey' like assignment_month.month_key || '-__'
+  ),
+  base_rows as (
+    select
+      schedule_days.month_key,
+      row_identity.date_key,
+      row_identity.row_key,
+      coalesce(
+        nullif(trim(schedule_days.rows -> row_identity.date_key -> 'rowOverrides' -> row_identity.row_key ->> 'name'), ''),
+        row_identity.base_name
+      ) as photographer_name
+    from schedule_days
+    cross join lateral jsonb_each(coalesce(schedule_days.day_state -> 'assignments', '{}'::jsonb)) as assignment(category, names)
+    cross join lateral jsonb_array_elements_text(
+      case
+        when jsonb_typeof(assignment.names) = 'array' then assignment.names
+        else '[]'::jsonb
+      end
+    ) with ordinality as person(name, ordinality)
+    cross join lateral (
+      select
+        schedule_days.day_state ->> 'dateKey' as date_key,
+        concat(
+          schedule_days.day_state ->> 'dateKey',
+          '::',
+          assignment.category,
+          '::',
+          (person.ordinality - 1)::text,
+          '::',
+          person.name
+        ) as row_key,
+        trim(person.name) as base_name
+    ) as row_identity
+    where assignment.category <> '휴가'
+      and assignment.category <> '제크'
+      and not exists (
+        select 1
+        from jsonb_array_elements_text(coalesce(schedule_days.rows -> row_identity.date_key -> 'deletedRowKeys', '[]'::jsonb)) as deleted(row_key)
+        where deleted.row_key = row_identity.row_key
+      )
+  ),
+  custom_rows as (
+    select
+      assignment_month.month_key,
+      row_identity.date_key,
+      row_identity.row_key,
+      trim(custom_row.value ->> 'name') as photographer_name
+    from assignment_month
+    cross join lateral jsonb_each(assignment_month.rows) as day_rows(date_key, value)
+    cross join lateral jsonb_array_elements(
+      case
+        when jsonb_typeof(day_rows.value -> 'addedRows') = 'array' then day_rows.value -> 'addedRows'
+        else '[]'::jsonb
+      end
+    ) as custom_row(value)
+    cross join lateral (
+      select
+        day_rows.date_key,
+        concat(day_rows.date_key, '::custom::', custom_row.value ->> 'id') as row_key
+    ) as row_identity
+    where day_rows.date_key like assignment_month.month_key || '-__'
+      and trim(custom_row.value ->> 'id') <> ''
+      and not exists (
+        select 1
+        from jsonb_array_elements_text(coalesce(day_rows.value -> 'deletedRowKeys', '[]'::jsonb)) as deleted(row_key)
+        where deleted.row_key = row_identity.row_key
+      )
+  ),
+  visible_rows as (
+    select * from base_rows
+    union all
+    select * from custom_rows
+  ),
+  entry_items as (
+    select
+      assignment_month.month_key,
       entry_item.key as row_key,
-      matched.parts,
       schedule_item.content,
       schedule_item.ordinality
-    from public.team_lead_schedule_assignments t
-    cross join lateral jsonb_each(t.entries) as entry_item(key, value)
-    cross join lateral regexp_match(entry_item.key, '^([^:]+)::([^:]+)::([^:]+)::(.*)$') as matched(parts)
+    from assignment_month
+    cross join lateral jsonb_each(assignment_month.entries) as entry_item(key, value)
     cross join lateral jsonb_array_elements_text(coalesce(entry_item.value -> 'schedules', '[]'::jsonb)) with ordinality as schedule_item(content, ordinality)
-    where t.month_key = trim(coalesce(p_month_key, ''))
   )
   select
-    raw_items.parts[1]::date as schedule_date,
-    concat(raw_items.row_key, '::schedule::', raw_items.ordinality::text) as schedule_item_id,
+    visible_rows.date_key::date as schedule_date,
+    concat(visible_rows.row_key, '::schedule::', entry_items.ordinality::text) as schedule_item_id,
     current_profile.id as photographer_profile_id,
     current_profile.name as photographer_name,
-    trim(raw_items.content) as schedule_content
-  from raw_items
-  join current_profile on trim(raw_items.parts[4]) = current_profile.name
-  where trim(raw_items.content) <> ''
+    trim(entry_items.content) as schedule_content
+  from visible_rows
+  join entry_items on entry_items.month_key = visible_rows.month_key
+    and entry_items.row_key = visible_rows.row_key
+  join current_profile on visible_rows.photographer_name = current_profile.name
+  where trim(entry_items.content) <> ''
   order by schedule_date, schedule_item_id;
 $$;
 
@@ -1105,32 +1195,122 @@ as $$
     select public.current_profile_approved() = true
       and public.current_profile_role() = 'partner' as ok
   ),
-  raw_items as (
+  assignment_month as (
     select
-      entry_item.key as row_key,
-      matched.parts,
-      schedule_item.content,
-      schedule_item.ordinality
+      t.month_key,
+      coalesce(t.entries, '{}'::jsonb) as entries,
+      coalesce(t.rows, '{}'::jsonb) as rows,
+      coalesce(sm.published_state, sm.draft_state) as schedule_state
     from public.team_lead_schedule_assignments t
     cross join allowed
-    cross join lateral jsonb_each(t.entries) as entry_item(key, value)
-    cross join lateral regexp_match(entry_item.key, '^([^:]+)::([^:]+)::([^:]+)::(.*)$') as matched(parts)
-    cross join lateral jsonb_array_elements_text(coalesce(entry_item.value -> 'schedules', '[]'::jsonb)) with ordinality as schedule_item(content, ordinality)
+    left join public.schedule_months sm on sm.month_key = t.month_key
     where allowed.ok
       and t.month_key = to_char(p_schedule_date, 'YYYY-MM')
-      and matched.parts[1] = p_schedule_date::text
+  ),
+  schedule_days as (
+    select
+      assignment_month.month_key,
+      assignment_month.entries,
+      assignment_month.rows,
+      day_item.value as day_state
+    from assignment_month
+    cross join lateral jsonb_array_elements(coalesce(assignment_month.schedule_state -> 'days', '[]'::jsonb)) as day_item(value)
+    where day_item.value ->> 'dateKey' = p_schedule_date::text
+  ),
+  base_rows as (
+    select
+      schedule_days.month_key,
+      row_identity.date_key,
+      row_identity.row_key,
+      coalesce(
+        nullif(trim(schedule_days.rows -> row_identity.date_key -> 'rowOverrides' -> row_identity.row_key ->> 'name'), ''),
+        row_identity.base_name
+      ) as photographer_name
+    from schedule_days
+    cross join lateral jsonb_each(coalesce(schedule_days.day_state -> 'assignments', '{}'::jsonb)) as assignment(category, names)
+    cross join lateral jsonb_array_elements_text(
+      case
+        when jsonb_typeof(assignment.names) = 'array' then assignment.names
+        else '[]'::jsonb
+      end
+    ) with ordinality as person(name, ordinality)
+    cross join lateral (
+      select
+        schedule_days.day_state ->> 'dateKey' as date_key,
+        concat(
+          schedule_days.day_state ->> 'dateKey',
+          '::',
+          assignment.category,
+          '::',
+          (person.ordinality - 1)::text,
+          '::',
+          person.name
+        ) as row_key,
+        trim(person.name) as base_name
+    ) as row_identity
+    where assignment.category <> '휴가'
+      and assignment.category <> '제크'
+      and not exists (
+        select 1
+        from jsonb_array_elements_text(coalesce(schedule_days.rows -> row_identity.date_key -> 'deletedRowKeys', '[]'::jsonb)) as deleted(row_key)
+        where deleted.row_key = row_identity.row_key
+      )
+  ),
+  custom_rows as (
+    select
+      assignment_month.month_key,
+      row_identity.date_key,
+      row_identity.row_key,
+      trim(custom_row.value ->> 'name') as photographer_name
+    from assignment_month
+    cross join lateral jsonb_each(assignment_month.rows) as day_rows(date_key, value)
+    cross join lateral jsonb_array_elements(
+      case
+        when jsonb_typeof(day_rows.value -> 'addedRows') = 'array' then day_rows.value -> 'addedRows'
+        else '[]'::jsonb
+      end
+    ) as custom_row(value)
+    cross join lateral (
+      select
+        day_rows.date_key,
+        concat(day_rows.date_key, '::custom::', custom_row.value ->> 'id') as row_key
+    ) as row_identity
+    where day_rows.date_key = p_schedule_date::text
+      and trim(custom_row.value ->> 'id') <> ''
+      and not exists (
+        select 1
+        from jsonb_array_elements_text(coalesce(day_rows.value -> 'deletedRowKeys', '[]'::jsonb)) as deleted(row_key)
+        where deleted.row_key = row_identity.row_key
+      )
+  ),
+  visible_rows as (
+    select * from base_rows
+    union all
+    select * from custom_rows
+  ),
+  entry_items as (
+    select
+      assignment_month.month_key,
+      entry_item.key as row_key,
+      schedule_item.content,
+      schedule_item.ordinality
+    from assignment_month
+    cross join lateral jsonb_each(assignment_month.entries) as entry_item(key, value)
+    cross join lateral jsonb_array_elements_text(coalesce(entry_item.value -> 'schedules', '[]'::jsonb)) with ordinality as schedule_item(content, ordinality)
   )
   select
-    raw_items.parts[1]::date as schedule_date,
-    concat(raw_items.row_key, '::schedule::', raw_items.ordinality::text) as schedule_item_id,
+    visible_rows.date_key::date as schedule_date,
+    concat(visible_rows.row_key, '::schedule::', entry_items.ordinality::text) as schedule_item_id,
     photographer.id as photographer_profile_id,
-    trim(raw_items.parts[4]) as photographer_name,
-    trim(raw_items.content) as schedule_content
-  from raw_items
+    visible_rows.photographer_name as photographer_name,
+    trim(entry_items.content) as schedule_content
+  from visible_rows
+  join entry_items on entry_items.month_key = visible_rows.month_key
+    and entry_items.row_key = visible_rows.row_key
   left join public.profiles photographer
     on photographer.approved = true
-   and photographer.name = trim(raw_items.parts[4])
-  where trim(raw_items.content) <> ''
+   and photographer.name = visible_rows.photographer_name
+  where trim(entry_items.content) <> ''
   order by photographer_name, schedule_item_id;
 $$;
 
