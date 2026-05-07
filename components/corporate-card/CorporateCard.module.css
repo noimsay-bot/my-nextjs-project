@@ -112,6 +112,13 @@
   font-size: 15px;
 }
 
+.autoSaveStatus {
+  justify-self: end;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .finalCutToggle {
   display: inline-flex;
   align-items: center;
@@ -191,6 +198,10 @@
   .field,
   .actions {
     width: 100%;
+  }
+
+  .autoSaveStatus {
+    justify-self: start;
   }
 
   .actions > button {

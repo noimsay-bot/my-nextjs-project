@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchPartnerScheduleAssignments,
   savePartnerScheduleEntry,
@@ -14,18 +14,24 @@ function getTodayDateKey() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
+const AUTO_SAVE_DELAY_MS = 500;
+
 export function PartnerAssignmentsPage() {
   const [dateKey, setDateKey] = useState(getTodayDateKey);
   const [items, setItems] = useState<PartnerScheduleAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const itemsRef = useRef<PartnerScheduleAssignment[]>([]);
+  const autoSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const load = async (targetDateKey = dateKey) => {
     setLoading(true);
     setMessage("");
     try {
-      setItems(await fetchPartnerScheduleAssignments(targetDateKey));
+      const nextItems = await fetchPartnerScheduleAssignments(targetDateKey);
+      itemsRef.current = nextItems;
+      setItems(nextItems);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "파트너 일정을 불러오지 못했습니다.");
     } finally {
@@ -37,24 +43,61 @@ export function PartnerAssignmentsPage() {
     void load(dateKey);
   }, [dateKey]);
 
-  const updateItem = (scheduleItemId: string, patch: Partial<PartnerScheduleAssignment>) => {
-    setItems((current) =>
-      current.map((item) => (item.scheduleItemId === scheduleItemId ? { ...item, ...patch } : item)),
-    );
-  };
+  useEffect(() => {
+    return () => {
+      Object.values(autoSaveTimersRef.current).forEach((timer) => clearTimeout(timer));
+      autoSaveTimersRef.current = {};
+    };
+  }, []);
 
-  const saveItem = async (item: PartnerScheduleAssignment) => {
+  const persistItem = async (item: PartnerScheduleAssignment) => {
+    const existingTimer = autoSaveTimersRef.current[item.scheduleItemId];
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      delete autoSaveTimersRef.current[item.scheduleItemId];
+    }
+
     setSavingId(item.scheduleItemId);
     setMessage("");
     try {
       await savePartnerScheduleEntry(item);
-      setMessage("파트너 정보를 저장했습니다.");
-      await load(dateKey);
+      setMessage("파트너 정보를 자동 저장했습니다.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "파트너 정보를 저장하지 못했습니다.");
+      setMessage(error instanceof Error ? error.message : "파트너 정보를 자동 저장하지 못했습니다.");
     } finally {
-      setSavingId(null);
+      setSavingId((current) => (current === item.scheduleItemId ? null : current));
     }
+  };
+
+  const queueAutoSave = (item: PartnerScheduleAssignment) => {
+    const existingTimer = autoSaveTimersRef.current[item.scheduleItemId];
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    autoSaveTimersRef.current[item.scheduleItemId] = setTimeout(() => {
+      void persistItem(item);
+    }, AUTO_SAVE_DELAY_MS);
+  };
+
+  const updateItem = (scheduleItemId: string, patch: Partial<PartnerScheduleAssignment>) => {
+    const nextItems = itemsRef.current.map((item) =>
+      item.scheduleItemId === scheduleItemId ? { ...item, ...patch } : item,
+    );
+    const nextItem = nextItems.find((item) => item.scheduleItemId === scheduleItemId);
+
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+
+    if (nextItem) {
+      queueAutoSave(nextItem);
+    }
+  };
+
+  const saveImmediately = (scheduleItemId: string) => {
+    const item = itemsRef.current.find((currentItem) => currentItem.scheduleItemId === scheduleItemId);
+    if (!item) return;
+    void persistItem(item);
   };
 
   return (
@@ -100,6 +143,7 @@ export function PartnerAssignmentsPage() {
                           className="field-input"
                           value={item.audioManName}
                           onChange={(event) => updateItem(item.scheduleItemId, { audioManName: event.target.value })}
+                          onBlur={() => saveImmediately(item.scheduleItemId)}
                         />
                       </label>
                       <label className={styles.field}>
@@ -108,19 +152,13 @@ export function PartnerAssignmentsPage() {
                           className="field-input"
                           value={item.seniorName}
                           onChange={(event) => updateItem(item.scheduleItemId, { seniorName: event.target.value })}
+                          onBlur={() => saveImmediately(item.scheduleItemId)}
                         />
                       </label>
                     </div>
-                    <div className={styles.actions}>
-                      <button
-                        type="button"
-                        className="btn primary"
-                        disabled={savingId === item.scheduleItemId}
-                        onClick={() => saveItem(item)}
-                      >
-                        저장
-                      </button>
-                    </div>
+                    {savingId === item.scheduleItemId ? (
+                      <span className={styles.autoSaveStatus}>자동 저장 중</span>
+                    ) : null}
                   </div>
                 </div>
               </article>
