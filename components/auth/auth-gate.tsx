@@ -104,7 +104,7 @@ function hasAccess(
         (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen))
       );
     case "partner":
-      return pathname === "/" || pathname.startsWith("/partner");
+      return pathname === "/" || pathname.startsWith("/work-schedule") || pathname.startsWith("/partner");
     case "reviewer":
       return (
         pathname === "/" ||

@@ -83,37 +83,45 @@ export function PartnerAssignmentsPage() {
           <div className={styles.list}>
             {items.map((item) => (
               <article key={item.scheduleItemId} className={styles.itemCard}>
-                <div className={styles.itemHead}>
-                  <span className="muted">{formatDateLabel(item.scheduleDate)}</span>
-                  <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
-                </div>
-                <div className={styles.inputGrid}>
-                  <label className={styles.field}>
-                    <span>오디오맨</span>
-                    <input
-                      className="field-input"
-                      value={item.audioManName}
-                      onChange={(event) => updateItem(item.scheduleItemId, { audioManName: event.target.value })}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>형님</span>
-                    <input
-                      className="field-input"
-                      value={item.seniorName}
-                      onChange={(event) => updateItem(item.scheduleItemId, { seniorName: event.target.value })}
-                    />
-                  </label>
-                </div>
-                <div className={styles.actions}>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={savingId === item.scheduleItemId}
-                    onClick={() => saveItem(item)}
-                  >
-                    저장
-                  </button>
+                <div className={styles.partnerItemBody}>
+                  <div className={styles.partnerScheduleSummary}>
+                    <span className="muted">{formatDateLabel(item.scheduleDate)}</span>
+                    <div className={styles.photographerLine}>
+                      <span>촬영기자</span>
+                      <strong>{item.photographerName || "미지정"}</strong>
+                    </div>
+                    <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
+                  </div>
+                  <div className={styles.partnerInputPanel}>
+                    <div className={styles.inputGrid}>
+                      <label className={styles.field}>
+                        <span>오디오맨</span>
+                        <input
+                          className="field-input"
+                          value={item.audioManName}
+                          onChange={(event) => updateItem(item.scheduleItemId, { audioManName: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>형님</span>
+                        <input
+                          className="field-input"
+                          value={item.seniorName}
+                          onChange={(event) => updateItem(item.scheduleItemId, { seniorName: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={savingId === item.scheduleItemId}
+                        onClick={() => saveItem(item)}
+                      >
+                        저장
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </article>
             ))}

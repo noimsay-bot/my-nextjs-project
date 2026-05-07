@@ -44,6 +44,7 @@ type PortalNavLink = {
 };
 
 const links: PortalNavLink[] = [
+  { href: "/", label: "홈" },
   {
     href: "/me",
     label: "마이페이지",
@@ -183,7 +184,12 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
       );
     case "partner":
-      return links.filter((link) => link.href === "/partner/schedule");
+      return links.filter(
+        (link) =>
+          link.href === "/" ||
+          link.href === "/work-schedule" ||
+          link.href === "/partner/schedule",
+      );
     case "reviewer":
       return links.filter(
         (link) =>

@@ -78,6 +78,40 @@
   line-height: 1.35;
 }
 
+.partnerItemBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.82fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.partnerScheduleSummary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.partnerInputPanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.photographerLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.photographerLine strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
 .finalCutToggle {
   display: inline-flex;
   align-items: center;
@@ -165,6 +199,10 @@
   }
 
   .itemHead {
+    grid-template-columns: 1fr;
+  }
+
+  .partnerItemBody {
     grid-template-columns: 1fr;
   }
 
