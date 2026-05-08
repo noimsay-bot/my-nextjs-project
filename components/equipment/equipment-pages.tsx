@@ -56,6 +56,24 @@ const liveDetailEmpty: LiveLoanDetails = {
   location: "",
   note: "",
 };
+const LIVE_TRS_OPTIONS = [
+  "1755",
+  "1756",
+  "1761",
+  "1762",
+  "1767",
+  "1768",
+  "1769",
+  "1770",
+  "1771",
+  "1772",
+  "1773",
+  "1774",
+  "1775",
+  "1776",
+  "1779",
+  "1780",
+] as const;
 const EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX = "jtbc-equipment-borrow-selection-v1";
 const EQUIPMENT_BORROW_SELECTION_EVENT = "jtbc-equipment-borrow-selection-change";
 
@@ -186,6 +204,11 @@ function isTvuInlineAccessoryItem(item: EquipmentItem) {
   if (item.category !== "live") return false;
   const normalizedName = item.name.replace(/\s+/g, "").toLowerCase();
   return normalizedName === "tvu배터리" || normalizedName === "핀마이크";
+}
+
+function isTvuBatteryItem(item: EquipmentItem) {
+  if (item.category !== "live") return false;
+  return item.name.replace(/\s+/g, "").toLowerCase() === "tvu배터리";
 }
 
 function getEngTargetProfileId(loanItem: EquipmentLoanItem) {
@@ -484,7 +507,10 @@ function ConfirmDialog({
             <div className={styles.liveFields}>
               <label>
                 <span>TRS</span>
-                <input className="field-input" value={liveDetails.trs} onChange={(event) => onLiveDetailsChange({ ...liveDetails, trs: event.target.value })} />
+                <select className="field-select" value={liveDetails.trs} onChange={(event) => onLiveDetailsChange({ ...liveDetails, trs: event.target.value })}>
+                  <option value="">TRS 선택</option>
+                  {LIVE_TRS_OPTIONS.map((trs) => <option key={trs} value={trs}>{trs}</option>)}
+                </select>
               </label>
               <label>
                 <span>촬영기자</span>
@@ -906,15 +932,21 @@ function LiveEquipmentGroups({
   selectedIds,
   currentByItemId,
   onToggle,
+  selectedTrs,
+  onTrsSelect,
 }: {
   items: EquipmentItem[];
   selectedIds: string[];
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
+  selectedTrs: string;
+  onTrsSelect: (trs: string) => void;
 }) {
   const [expandedTvuId, setExpandedTvuId] = useState<string | null>(null);
+  const [expandedTrsTvuId, setExpandedTrsTvuId] = useState<string | null>(null);
   const tvuItems = items.filter(isTvuItem);
   const tvuAccessoryItems = items.filter(isTvuInlineAccessoryItem);
+  const visibleTvuAccessoryItems = tvuAccessoryItems.filter((item) => !isTvuBatteryItem(item));
   const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
@@ -922,6 +954,7 @@ function LiveEquipmentGroups({
       onToggle(item.id);
     }
     setExpandedTvuId((current) => (current === item.id ? null : item.id));
+    setExpandedTrsTvuId(null);
   };
 
   return (
@@ -934,7 +967,9 @@ function LiveEquipmentGroups({
           </div>
           <div className={styles.itemGrid}>
             {tvuItems.map((item) => {
-              const showAccessories = expandedTvuId === item.id && tvuAccessoryItems.length > 0;
+              const accessoryCount = visibleTvuAccessoryItems.length + 1;
+              const showAccessories = expandedTvuId === item.id;
+              const showTrsOptions = expandedTrsTvuId === item.id;
               return (
                 <Fragment key={item.id}>
                   <EquipmentItemCard
@@ -949,10 +984,25 @@ function LiveEquipmentGroups({
                     <div className={styles.inlineBatteryPanel}>
                       <div className={styles.inlineBatteryHead}>
                         <h4>{item.name} 부속 장비</h4>
-                        <span>{tvuAccessoryItems.length}개</span>
+                        <span>{accessoryCount}개</span>
                       </div>
                       <div className={styles.inlineBatteryGrid}>
-                        {tvuAccessoryItems.map((accessoryItem) => (
+                        <button
+                          type="button"
+                          className={[
+                            styles.itemCard,
+                            styles.itemCardLive,
+                            selectedTrs ? styles.itemCardSelectedLive : "",
+                          ].join(" ").trim()}
+                          onClick={() => setExpandedTrsTvuId((current) => (current === item.id ? null : item.id))}
+                          aria-expanded={showTrsOptions}
+                        >
+                          <span className={styles.itemCardTop}>
+                            <strong>TRS</strong>
+                            {selectedTrs ? <small>{selectedTrs}</small> : null}
+                          </span>
+                        </button>
+                        {visibleTvuAccessoryItems.map((accessoryItem) => (
                           <EquipmentItemCard
                             key={accessoryItem.id}
                             item={accessoryItem}
@@ -963,6 +1013,29 @@ function LiveEquipmentGroups({
                           />
                         ))}
                       </div>
+                      {showTrsOptions ? (
+                        <div className={styles.trsOptionPanel}>
+                          <div className={styles.trsOptionGrid}>
+                            {LIVE_TRS_OPTIONS.map((trs) => (
+                              <button
+                                key={trs}
+                                type="button"
+                                className={[
+                                  styles.trsOptionButton,
+                                  selectedTrs === trs ? styles.trsOptionButtonSelected : "",
+                                ].join(" ").trim()}
+                                onClick={() => {
+                                  onTrsSelect(trs);
+                                  setExpandedTrsTvuId(null);
+                                }}
+                                aria-pressed={selectedTrs === trs}
+                              >
+                                {trs}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </Fragment>
@@ -1089,6 +1162,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     [selectedEntries],
   );
   const itemSelectionById = useMemo(() => new Map(items.map((item) => [item.id, itemToBorrowSelection(item)] as const)), [items]);
+  const itemById = useMemo(() => new Map(items.map((item) => [item.id, item] as const)), [items]);
   const profileSelectionById = useMemo(
     () => new Map(profiles.map((profile) => [profile.id, profileToBorrowSelection(profile)] as const)),
     [profiles],
@@ -1098,7 +1172,9 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     if (loading || selectedEntries.length === 0) return;
     const nextSelections = selectedEntries.filter((selection) => {
       if (selection.kind === "item" && selection.category === category) {
-        return itemSelectionById.has(selection.id);
+        const item = itemById.get(selection.id);
+        if (!item) return false;
+        return !(category === "live" && isTvuBatteryItem(item));
       }
       if (selection.kind === "eng_profile" && isEngSetPage) {
         return profileSelectionById.has(selection.id);
@@ -1108,7 +1184,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     if (nextSelections.length === selectedEntries.length) return;
     setSelectedEntries(nextSelections);
     writeBorrowSelections(session?.id, nextSelections);
-  }, [category, isEngSetPage, itemSelectionById, loading, profileSelectionById, selectedEntries, session?.id]);
+  }, [category, isEngSetPage, itemById, loading, profileSelectionById, selectedEntries, session?.id]);
 
   const returnableItems = useMemo(() => {
     return currentLoanItems.filter((loanItem) => canReturnLoanItem(loanItem));
@@ -1118,6 +1194,11 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     if (confirmMode !== "borrow") return false;
     return hasSelectedTvu;
   }, [confirmMode, hasSelectedTvu]);
+
+  useEffect(() => {
+    if (hasSelectedTvu || !liveDetails.trs) return;
+    setLiveDetails((current) => ({ ...current, trs: "" }));
+  }, [hasSelectedTvu, liveDetails.trs]);
 
   const sortedEngProfiles = useMemo(() => (
     profiles
@@ -1166,10 +1247,11 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       setMessage({ tone: "note", text: "대여할 장비를 선택해 주세요." });
       return;
     }
-    setLiveDetails({
+    setLiveDetails((current) => ({
       ...liveDetailEmpty,
+      trs: hasSelectedTvu ? current.trs : "",
       cameraReporter: hasSelectedTvu ? session?.username ?? "" : "",
-    });
+    }));
     setConfirmMode("borrow");
   };
 
@@ -1310,7 +1392,14 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
           ) : category === "camera_lens" ? (
             <CameraGroups items={items} selectedIds={selectedIds} currentByItemId={currentByItemId} onToggle={toggleSelection} />
           ) : category === "live" ? (
-            <LiveEquipmentGroups items={items} selectedIds={selectedIds} currentByItemId={currentByItemId} onToggle={toggleSelection} />
+            <LiveEquipmentGroups
+              items={items}
+              selectedIds={selectedIds}
+              currentByItemId={currentByItemId}
+              selectedTrs={liveDetails.trs}
+              onTrsSelect={(trs) => setLiveDetails((current) => ({ ...current, trs }))}
+              onToggle={toggleSelection}
+            />
           ) : (
             <div className={styles.sectionStack}>
               {renderGroupedItems({ items, selectedIds, currentByItemId, onToggle: toggleSelection })}

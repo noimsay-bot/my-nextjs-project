@@ -198,6 +198,7 @@ function getVisibleLinks(
         (link) =>
           link.href === "/" ||
           link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
           link.href === "/partner/schedule",
       );
     case "reviewer":

@@ -97,7 +97,7 @@ test("general assignments do not drop 정상원 just because 석근 off is set",
   expect(day21?.assignments["일반"]).toContain("정상원");
 });
 
-test("general assignments exclude globally off names while keeping evening-only off names eligible", () => {
+test("general assignments ignore basic off names", () => {
   const aprilPreset = presetScheduleMonths.find((item) => item.monthKey === "2026-04");
   expect(aprilPreset).toBeTruthy();
 
@@ -106,17 +106,12 @@ test("general assignments exclude globally off names while keeping evening-only 
     ...defaultScheduleState,
     year: 2026,
     month: 4,
-    offPeople: ["변경태", "이완근"],
-    offByCategory: {
-      ...defaultScheduleState.offByCategory,
-      evening: ["정상원"],
-    },
+    offPeople: ["변경태", "이완근", "정상원"],
   };
 
   syncGeneralAssignments(state, days, state.generalTeamPeople);
 
   const day21 = days.find((day: { dateKey: string; assignments: Record<string, string[]> }) => day.dateKey === "2026-04-21");
-  expect(day21?.assignments["일반"]).not.toContain("변경태");
-  expect(day21?.assignments["일반"]).not.toContain("이완근");
+  expect(day21?.assignments["일반"]).toContain("변경태");
   expect(day21?.assignments["일반"]).toContain("정상원");
 });

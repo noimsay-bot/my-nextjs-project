@@ -157,6 +157,42 @@
   gap: 8px;
 }
 
+.trsOptionPanel {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.trsOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.trsOptionButton {
+  min-height: 42px;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.24);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.trsOptionButton:hover {
+  border-color: rgba(125, 211, 252, 0.5);
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.trsOptionButtonSelected,
+.trsOptionButtonSelected:hover {
+  border-color: rgba(52, 211, 153, 0.56);
+  background: rgba(16, 185, 129, 0.24);
+  color: #d1fae5;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+}
+
 .itemCard,
 .memberCard {
   display: grid;
@@ -278,6 +314,25 @@
 :global(html[data-theme="light"]) .itemCardLive:hover {
   border-color: rgba(96, 165, 250, 0.64);
   background: rgba(59, 130, 246, 0.28);
+}
+
+:global(html[data-theme="light"]) .trsOptionButton {
+  border-color: rgba(96, 165, 250, 0.24);
+  background: #dbeafe;
+  color: #0f172a;
+}
+
+:global(html[data-theme="light"]) .trsOptionButton:hover {
+  border-color: rgba(37, 99, 235, 0.34);
+  background: #bfdbfe;
+}
+
+:global(html[data-theme="light"]) .trsOptionButtonSelected,
+:global(html[data-theme="light"]) .trsOptionButtonSelected:hover {
+  border-color: rgba(52, 211, 153, 0.58);
+  background: rgba(16, 185, 129, 0.26);
+  color: #064e3b;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
 }
 
 :global(html[data-theme="light"]) .itemCardSelectedLive {

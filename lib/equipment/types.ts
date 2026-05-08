@@ -105,13 +105,12 @@ export const equipmentCategoryLabels: Record<EquipmentCategory, string> = {
 };
 
 export const equipmentNavItems = [
-  { href: "/equipment/camera", label: "카메라/렌즈" },
-  { href: "/equipment/light", label: "조명" },
-  { href: "/equipment/eng-set", label: "ENG SET" },
   { href: "/equipment/live", label: "라이브장비" },
+  { href: "/equipment/camera", label: "카메라/렌즈" },
+  { href: "/equipment/eng-set", label: "ENG SET" },
+  { href: "/equipment/light", label: "조명" },
   { href: "/equipment/status", label: "장비대여현황" },
   { href: "/equipment/live-status", label: "라이브장비현황" },
 ] as const;
 
 export const normalEquipmentCategories: EquipmentCategory[] = ["camera_lens", "light", "eng_set"];
-

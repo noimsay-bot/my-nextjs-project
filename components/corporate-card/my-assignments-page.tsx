@@ -103,7 +103,6 @@ export function MyAssignmentsPage() {
             <div className={styles.header}>
               <span className="chip">내 일정</span>
               <h1 className={styles.title}>{year}년 {Number(month)}월 내 일정</h1>
-              <p className={styles.description}>내 일정과 파트너 입력 정보를 확인하고 법인카드 자동문구를 바로 복사합니다.</p>
             </div>
             <label className={styles.field}>
               <span>월 선택</span>

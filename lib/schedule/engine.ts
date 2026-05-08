@@ -357,14 +357,13 @@ export function syncGeneralAssignments(
     }
 
     const generalTeamOffSet = new Set(activeGeneralTeamOffPeople.map((name) => name.trim()).filter(Boolean));
-    const globalOffSet = new Set(normalizeEditableNameList(state.offPeople));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name) && !globalOffSet.has(name),
+      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
     );
     const manualGeneralAdditions = normalizeDayGeneralManualAdditions(day);
     const combinedGeneralNames = [...nextGeneralNames];
     manualGeneralAdditions.forEach((name) => {
-      if (globalOffSet.has(name) || generalTeamOffSet.has(name)) {
+      if (generalTeamOffSet.has(name)) {
         return;
       }
       if (!combinedGeneralNames.includes(name)) {
