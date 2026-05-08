@@ -1,15 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-import { defaultScheduleState } from "@/lib/schedule/constants";
+import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
 import { generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import { canRepairPublishedGeneralAssignments } from "@/lib/schedule/published";
 
-test("2026 schedule months use the newsroom week-based ranges", () => {
+test("2026 schedule months use calendar month ranges", () => {
   const ranges = [
-    { month: 5, first: "2026-05-04", last: "2026-06-06" },
-    { month: 6, first: "2026-06-08", last: "2026-07-04" },
-    { month: 7, first: "2026-07-05", last: "2026-08-01" },
+    { month: 5, first: "2026-04-27", last: "2026-05-31" },
+    { month: 6, first: "2026-06-01", last: "2026-07-05" },
+    { month: 7, first: "2026-06-29", last: "2026-08-02" },
   ];
 
   ranges.forEach(({ month, first, last }) => {
@@ -24,6 +24,16 @@ test("2026 schedule months use the newsroom week-based ranges", () => {
   });
 });
 
+test("june 2026 schedule includes june 7", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated;
+
+  expect(generated?.days.some((day) => day.dateKey === "2026-06-07")).toBe(true);
+});
+
 test("general assignments are restored after an edit removes an eligible name", () => {
   const generated = generateSchedule({
     ...defaultScheduleState,
@@ -31,17 +41,44 @@ test("general assignments are restored after an edit removes an eligible name", 
     month: 5,
   }).state;
   const initialState = sanitizeScheduleState(generated);
-  const day21 = initialState.generated?.days.find((day) => day.dateKey === "2026-05-21");
+  const targetDateKey = "2026-05-27";
+  const targetDay = initialState.generated?.days.find((day) => day.dateKey === targetDateKey);
 
-  expect(day21?.assignments["일반"]).toContain("정상원");
-  const generalIndex = day21?.assignments["일반"]?.findIndex((name) => name === "정상원") ?? -1;
+  expect(targetDay?.assignments["일반"]).toContain("정상원");
+  const generalIndex = targetDay?.assignments["일반"]?.findIndex((name) => name === "정상원") ?? -1;
   expect(generalIndex).toBeGreaterThanOrEqual(0);
 
-  const editedState = removePersonFromCategory(initialState, "2026-05-21", "일반", generalIndex, "정상원");
-  const editedDay21 = editedState.generated?.days.find((day) => day.dateKey === "2026-05-21");
+  const editedState = removePersonFromCategory(initialState, targetDateKey, "일반", generalIndex, "정상원");
+  const editedTargetDay = editedState.generated?.days.find((day) => day.dateKey === targetDateKey);
 
-  expect(editedDay21?.assignments["일반"]).toContain("정상원");
-  expect(editedDay21?.assignments["석근"] ?? []).not.toContain("정상원");
+  expect(editedTargetDay?.assignments["일반"]).toContain("정상원");
+  expect(editedTargetDay?.assignments["석근"] ?? []).not.toContain("정상원");
+});
+
+test("vacation entries remove the same person from work assignments", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state;
+  const targetDateKey = "2026-06-01";
+  const targetDay = generated.generated?.days.find((day) => day.dateKey === targetDateKey);
+  const vacationName = targetDay?.assignments["조근"]?.[0] ?? "";
+
+  expect(vacationName).toBeTruthy();
+
+  const state = sanitizeScheduleState({
+    ...generated,
+    vacations: `${targetDateKey}: 연차:${vacationName}`,
+  });
+  const updatedDay = state.generated?.days.find((day) => day.dateKey === targetDateKey);
+  const workAssignments = Object.entries(updatedDay?.assignments ?? {})
+    .filter(([category]) => category !== "휴가")
+    .flatMap(([, names]) => names);
+
+  expect(updatedDay?.assignments["휴가"]).toContain(`연차:${vacationName}`);
+  expect(workAssignments).not.toContain(vacationName);
+  expect(getDayDuplicateNameSet(updatedDay!).has(vacationName)).toBe(false);
 });
 
 test("april 21 preset recomputes general assignments with 정상원", () => {
