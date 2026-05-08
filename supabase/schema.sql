@@ -557,6 +557,29 @@ with check (
   and public.current_profile_approved() = true
 );
 
+create table if not exists public.schedule_assembly_sync_logs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default timezone('utc', now()),
+  trigger_type text not null check (trigger_type in ('hub_publish', 'assembly_webhook')),
+  target_month text not null,
+  source text not null default 'assembly_export_api',
+  total_source_count integer not null default 0 check (total_source_count >= 0),
+  inserted_count integer not null default 0 check (inserted_count >= 0),
+  updated_count integer not null default 0 check (updated_count >= 0),
+  deleted_count integer not null default 0 check (deleted_count >= 0),
+  skipped_count integer not null default 0 check (skipped_count >= 0),
+  error_count integer not null default 0 check (error_count >= 0),
+  error_details jsonb
+);
+
+create index if not exists schedule_assembly_sync_logs_month_created_idx
+on public.schedule_assembly_sync_logs (target_month, created_at desc);
+
+create index if not exists schedule_assembly_sync_logs_trigger_created_idx
+on public.schedule_assembly_sync_logs (trigger_type, created_at desc);
+
+alter table public.schedule_assembly_sync_logs enable row level security;
+
 create table if not exists public.schedule_change_requests (
   id uuid primary key default gen_random_uuid(),
   month_key text not null,

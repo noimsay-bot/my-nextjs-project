@@ -312,6 +312,34 @@ async function persistPublishedItem(monthKey: string, payload: { published_state
   }
 }
 
+async function syncAssemblyDutiesAfterHubPublish(monthKey: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const response = await fetch("/api/schedule/assembly-sync-on-publish", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ month: monthKey }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      console.warn("[assembly-sync] 게시 후 국회 근무 동기화에 실패했습니다.", {
+        monthKey,
+        status: response.status,
+        message: payload?.message ?? response.statusText,
+      });
+    }
+  } catch (error) {
+    console.warn("[assembly-sync] 게시 후 국회 근무 동기화 요청에 실패했습니다.", {
+      monthKey,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
   const previous = cloneItems(publishedSchedulesCache);
   publishedSchedulesCache = cloneItems(items).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
@@ -371,6 +399,8 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
     await refreshPublishedSchedules();
     throw error;
   }
+
+  await syncAssemblyDutiesAfterHubPublish(schedule.monthKey);
 
   return nextItem;
 }
