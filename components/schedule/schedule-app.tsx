@@ -1509,7 +1509,7 @@ export function ScheduleApp() {
     if (!target) return;
     try {
       const published = await publishSchedule(target);
-      await loadPublishedItems();
+      await refreshRouteData({ includeRequests: false, preferredMonthKey: published.monthKey });
       setPublishOpen(false);
       setMessage({ tone: "ok", text: `${published.title}를 홈화면에 게시했습니다.` });
     } catch (error) {

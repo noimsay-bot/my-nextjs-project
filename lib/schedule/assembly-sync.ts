@@ -37,6 +37,7 @@ type AssemblySyncLogPayload = {
 
 type ScheduleMonthRow = {
   month_key: string;
+  draft_state: GeneratedSchedule | null;
   published_state: GeneratedSchedule | null;
   published_at: string | null;
 };
@@ -286,11 +287,11 @@ export async function getAssemblyHolidayAndWeekendDuties(month: string): Promise
   return (await fetchAssemblyDutyExport(month)).items;
 }
 
-async function getPublishedScheduleMonth(month: string) {
+async function getScheduleMonthForAssemblySync(month: string) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("schedule_months")
-    .select("month_key, published_state, published_at")
+    .select("month_key, draft_state, published_state, published_at")
     .eq("month_key", month)
     .maybeSingle<ScheduleMonthRow>();
 
@@ -446,12 +447,12 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
   }
 
   try {
-    const row = await getPublishedScheduleMonth(month);
-    if (!row?.published_state || !row.published_at) {
+    const row = await getScheduleMonthForAssemblySync(month);
+    if (!row?.draft_state && !row?.published_state) {
       const details: AssemblySyncErrorDetail[] = [
         {
           stage: "not_published",
-          message: "게시된 허브 근무표가 없어 국회 동기화를 건너뜁니다.",
+          message: "허브 근무표 초안 또는 게시본이 없어 국회 동기화를 건너뜁니다.",
         },
       ];
       const log = createBaseLog(month, triggerType, {
@@ -468,15 +469,27 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
     const errors = [...parsed.errors];
     const profileMap = await getApprovedProfileNameMap();
     const { desiredByDate, datesWithMatchErrors } = buildDesiredAssemblyNamesByDate(parsed.items, profileMap, errors);
-    const result = applyAssemblyDutiesToSchedule(row.published_state, month, desiredByDate, datesWithMatchErrors);
+    const draftResult = row.draft_state
+      ? applyAssemblyDutiesToSchedule(row.draft_state, month, desiredByDate, datesWithMatchErrors)
+      : null;
+    const publishedResult = row.published_state
+      ? applyAssemblyDutiesToSchedule(row.published_state, month, desiredByDate, datesWithMatchErrors)
+      : null;
+    const resultForLog = publishedResult ?? draftResult;
+    const changed = Boolean(draftResult?.changed || publishedResult?.changed);
 
-    if (result.changed) {
+    if (changed) {
       const supabase = createAdminClient();
+      const payload: Partial<ScheduleMonthRow> = {};
+      if (draftResult?.changed) {
+        payload.draft_state = draftResult.schedule;
+      }
+      if (publishedResult?.changed) {
+        payload.published_state = publishedResult.schedule;
+      }
       const { error } = await supabase
         .from("schedule_months")
-        .update({
-          published_state: result.schedule,
-        } as never)
+        .update(payload as never)
         .eq("month_key", month);
 
       if (error) {
@@ -486,10 +499,10 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
 
     const log = createBaseLog(month, triggerType, {
       total_source_count: parsed.items.length,
-      inserted_count: result.insertedCount,
-      updated_count: result.updatedCount,
-      deleted_count: result.deletedCount,
-      skipped_count: result.skippedCount,
+      inserted_count: resultForLog?.insertedCount ?? 0,
+      updated_count: resultForLog?.updatedCount ?? 0,
+      deleted_count: resultForLog?.deletedCount ?? 0,
+      skipped_count: resultForLog?.skippedCount ?? 0,
       error_count: errors.length,
       error_details: errors.length > 0 ? errors : null,
     });
@@ -503,10 +516,10 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       deletedCount: log.deleted_count,
       skippedCount: log.skipped_count,
       errorCount: log.error_count,
-      changed: result.changed,
+      changed,
     });
 
-    return { ok: true as const, ...log, changed: result.changed };
+    return { ok: true as const, ...log, changed };
   } catch (error) {
     const details = getErrorDetails(error);
     await insertAssemblySyncLog(
