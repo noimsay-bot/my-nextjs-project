@@ -74,6 +74,7 @@ const LIVE_TRS_OPTIONS = [
   "1779",
   "1780",
 ] as const;
+const LIVE_TRS_OPTION_SET = new Set<string>(LIVE_TRS_OPTIONS);
 const EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX = "jtbc-equipment-borrow-selection-v1";
 const EQUIPMENT_BORROW_SELECTION_EVENT = "jtbc-equipment-borrow-selection-change";
 
@@ -165,6 +166,35 @@ function profileToBorrowSelection(profile: EquipmentProfile): BorrowSelection {
 
 function formatBorrowSelectionLabel(selection: BorrowSelection) {
   return `${equipmentCategoryLabels[selection.category]} · ${selection.label}`;
+}
+
+function parseSelectedTrs(value: string) {
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  value.split(",").forEach((entry) => {
+    const trs = entry.trim();
+    if (!LIVE_TRS_OPTION_SET.has(trs) || seen.has(trs)) return;
+    seen.add(trs);
+    selected.push(trs);
+  });
+  return selected;
+}
+
+function formatSelectedTrs(selectedTrs: readonly string[]) {
+  return selectedTrs.join(", ");
+}
+
+function toggleSelectedTrs(currentValue: string, trs: string) {
+  const current = parseSelectedTrs(currentValue);
+  const next = current.includes(trs)
+    ? current.filter((entry) => entry !== trs)
+    : [...current, trs];
+  return formatSelectedTrs(next);
+}
+
+function formatTrsSummary(selectedTrs: readonly string[]) {
+  if (selectedTrs.length <= 2) return formatSelectedTrs(selectedTrs);
+  return `${selectedTrs[0]} 외 ${selectedTrs.length - 1}개`;
 }
 
 function getTodayDateKey() {
@@ -470,6 +500,8 @@ function ConfirmDialog({
   onLiveDetailsChange: (details: LiveLoanDetails) => void;
   onReturnIdsChange: (ids: string[]) => void;
 }) {
+  const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
+
   return (
     <div className={styles.modalBackdrop} role="presentation">
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="equipment-confirm-title">
@@ -505,13 +537,28 @@ function ConfirmDialog({
           </div>
           {showLiveFields ? (
             <div className={styles.liveFields}>
-              <label>
+              <div className={styles.liveFieldBlock}>
                 <span>TRS</span>
-                <select className="field-select" value={liveDetails.trs} onChange={(event) => onLiveDetailsChange({ ...liveDetails, trs: event.target.value })}>
-                  <option value="">TRS 선택</option>
-                  {LIVE_TRS_OPTIONS.map((trs) => <option key={trs} value={trs}>{trs}</option>)}
-                </select>
-              </label>
+                <div className={styles.trsOptionGrid} role="group" aria-label="TRS 선택">
+                  {LIVE_TRS_OPTIONS.map((trs) => {
+                    const selected = selectedTrsValues.includes(trs);
+                    return (
+                      <button
+                        key={trs}
+                        type="button"
+                        className={[
+                          styles.trsOptionButton,
+                          selected ? styles.trsOptionButtonSelected : "",
+                        ].join(" ").trim()}
+                        onClick={() => onLiveDetailsChange({ ...liveDetails, trs: toggleSelectedTrs(liveDetails.trs, trs) })}
+                        aria-pressed={selected}
+                      >
+                        {trs}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <label>
                 <span>촬영기자</span>
                 <input className="field-input" value={liveDetails.cameraReporter} onChange={(event) => onLiveDetailsChange({ ...liveDetails, cameraReporter: event.target.value })} />
@@ -932,15 +979,15 @@ function LiveEquipmentGroups({
   selectedIds,
   currentByItemId,
   onToggle,
-  selectedTrs,
-  onTrsSelect,
+  selectedTrsValues,
+  onTrsToggle,
 }: {
   items: EquipmentItem[];
   selectedIds: string[];
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
-  selectedTrs: string;
-  onTrsSelect: (trs: string) => void;
+  selectedTrsValues: string[];
+  onTrsToggle: (trs: string) => void;
 }) {
   const [expandedTvuId, setExpandedTvuId] = useState<string | null>(null);
   const [expandedTrsTvuId, setExpandedTrsTvuId] = useState<string | null>(null);
@@ -950,10 +997,11 @@ function LiveEquipmentGroups({
   const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
+    const selected = selectedIds.includes(item.id);
     if (!currentByItemId.has(item.id)) {
       onToggle(item.id);
     }
-    setExpandedTvuId((current) => (current === item.id ? null : item.id));
+    setExpandedTvuId((current) => (selected || current === item.id ? null : item.id));
     setExpandedTrsTvuId(null);
   };
 
@@ -992,14 +1040,14 @@ function LiveEquipmentGroups({
                           className={[
                             styles.itemCard,
                             styles.itemCardLive,
-                            selectedTrs ? styles.itemCardSelectedLive : "",
+                            selectedTrsValues.length > 0 ? styles.itemCardSelectedLive : "",
                           ].join(" ").trim()}
                           onClick={() => setExpandedTrsTvuId((current) => (current === item.id ? null : item.id))}
                           aria-expanded={showTrsOptions}
                         >
                           <span className={styles.itemCardTop}>
                             <strong>TRS</strong>
-                            {selectedTrs ? <small>{selectedTrs}</small> : null}
+                            {selectedTrsValues.length > 0 ? <small>{formatTrsSummary(selectedTrsValues)}</small> : null}
                           </span>
                         </button>
                         {visibleTvuAccessoryItems.map((accessoryItem) => (
@@ -1022,13 +1070,10 @@ function LiveEquipmentGroups({
                                 type="button"
                                 className={[
                                   styles.trsOptionButton,
-                                  selectedTrs === trs ? styles.trsOptionButtonSelected : "",
+                                  selectedTrsValues.includes(trs) ? styles.trsOptionButtonSelected : "",
                                 ].join(" ").trim()}
-                                onClick={() => {
-                                  onTrsSelect(trs);
-                                  setExpandedTrsTvuId(null);
-                                }}
-                                aria-pressed={selectedTrs === trs}
+                                onClick={() => onTrsToggle(trs)}
+                                aria-pressed={selectedTrsValues.includes(trs)}
                               >
                                 {trs}
                               </button>
@@ -1144,6 +1189,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   }, [currentLoanItems, selectedEntries, session?.id]);
 
   const selectedIds = useMemo(() => selectedEntries.map((selection) => selection.id), [selectedEntries]);
+  const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
   const selectedItemSelections = useMemo(
     () => selectedEntries.filter((selection): selection is Extract<BorrowSelection, { kind: "item" }> => selection.kind === "item"),
     [selectedEntries],
@@ -1396,8 +1442,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
               items={items}
               selectedIds={selectedIds}
               currentByItemId={currentByItemId}
-              selectedTrs={liveDetails.trs}
-              onTrsSelect={(trs) => setLiveDetails((current) => ({ ...current, trs }))}
+              selectedTrsValues={selectedTrsValues}
+              onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
               onToggle={toggleSelection}
             />
           ) : (

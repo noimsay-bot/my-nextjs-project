@@ -575,6 +575,13 @@
   font-weight: 800;
 }
 
+.liveFieldBlock {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  font-weight: 800;
+}
+
 .liveNoteField {
   grid-column: 1 / -1;
 }
