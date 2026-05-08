@@ -35,6 +35,7 @@ import {
 } from "@/lib/schedule/change-requests";
 import { syncVacationMonthSheetFromGeneratedSchedule } from "@/lib/vacation/storage";
 import {
+  applyScheduleAssignmentDutyCategoriesToSchedule,
   applyScheduleAssignmentNameTagsToSchedule,
   formatScheduleAssignmentDisplayName,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
@@ -95,6 +96,7 @@ const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const REQUEST_VISIBLE_STATUSES: ScheduleChangeRequest["status"][] = ["pending", "accepted", "rejected", "rolledBack"];
+const ASSEMBLY_SYNC_ROLES = new Set(["desk", "admin", "team_lead"]);
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
@@ -610,6 +612,7 @@ export function ScheduleApp() {
   const isEditingDateRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
   const lastLoadedAssignmentMonthRef = useRef("");
+  const syncedAssemblyMonthKeysRef = useRef(new Set<string>());
   const session = getSession();
   const todayKey = useMemo(() => formatLocalDateKey(new Date()), []);
   const isAllDaysEditMode = state.editDateKey === ALL_DAYS_EDIT_KEY;
@@ -622,8 +625,10 @@ export function ScheduleApp() {
   };
 
   const applyNameTagsToState = (input: ScheduleState) => {
-    const generated = input.generated ? applyScheduleAssignmentNameTagsToSchedule(input.generated) : null;
-    const generatedHistory = input.generatedHistory.map((schedule) => applyScheduleAssignmentNameTagsToSchedule(schedule));
+    const applyScheduleAssignmentDecorations = (schedule: GeneratedSchedule) =>
+      applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule));
+    const generated = input.generated ? applyScheduleAssignmentDecorations(input.generated) : null;
+    const generatedHistory = input.generatedHistory.map((schedule) => applyScheduleAssignmentDecorations(schedule));
     return {
       ...input,
       generated,
@@ -644,7 +649,7 @@ export function ScheduleApp() {
     setPublishedItems(
       getPublishedSchedules(routeMonthKey ? [routeMonthKey] : undefined).map((item) => ({
         ...item,
-        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+        schedule: applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(item.schedule)),
       })),
     );
   };
@@ -656,6 +661,55 @@ export function ScheduleApp() {
   const syncAssignmentDecorationsFromCache = (nextState: ScheduleState) => {
     setState(applyNameTagsToState(nextState));
     syncPublishedItemsFromCache();
+  };
+
+  const syncAssemblyDutiesForMonth = async (monthKey: string | null | undefined) => {
+    if (!monthKey || !session?.approved || !ASSEMBLY_SYNC_ROLES.has(session.role)) return null;
+    if (syncedAssemblyMonthKeysRef.current.has(monthKey)) return null;
+
+    syncedAssemblyMonthKeysRef.current.add(monthKey);
+    try {
+      const response = await fetch("/api/schedule/assembly-sync-on-publish", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ month: monthKey }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; result?: { changed?: boolean }; message?: string }
+        | null;
+
+      if (!response.ok || !payload?.ok) {
+        syncedAssemblyMonthKeysRef.current.delete(monthKey);
+        console.warn("[assembly-sync] 근무표 관리 국회 근무 동기화에 실패했습니다.", {
+          monthKey,
+          status: response.status,
+          message: payload?.message ?? response.statusText,
+        });
+        setMessage({
+          tone: "warn",
+          text: payload?.message
+            ? `국회 근무 동기화 실패: ${payload.message}`
+            : "국회 근무 동기화에 실패했습니다. 서버 설정을 확인해 주세요.",
+        });
+        return null;
+      }
+
+      if (!payload.result?.changed) return null;
+      return refreshScheduleState();
+    } catch (error) {
+      syncedAssemblyMonthKeysRef.current.delete(monthKey);
+      console.warn("[assembly-sync] 근무표 관리 국회 근무 동기화 요청에 실패했습니다.", {
+        monthKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? `국회 근무 동기화 실패: ${error.message}` : "국회 근무 동기화에 실패했습니다.",
+      });
+      return null;
+    }
   };
 
   const refreshRouteData = async ({
@@ -684,11 +738,12 @@ export function ScheduleApp() {
       editBackupRef.current = null;
       preGenerateBackupRef.current = null;
       setHasPreGenerateBackup(false);
-      syncAssignmentDecorationsFromCache(nextState);
+      const syncedState = await syncAssemblyDutiesForMonth(routeMonthKey);
+      syncAssignmentDecorationsFromCache(syncedState ?? nextState);
       if (includeRequests) {
         syncRequestsFromCache();
       }
-      return nextState;
+      return syncedState ?? nextState;
     } catch {
       editBackupRef.current = null;
       preGenerateBackupRef.current = null;
@@ -809,6 +864,14 @@ export function ScheduleApp() {
         lastLoadedAssignmentMonthRef.current = visibleMonthKey;
       })
       .catch(() => undefined);
+  }, [loaded, visibleMonthKey]);
+
+  useEffect(() => {
+    if (!loaded || !visibleMonthKey) return;
+    void syncAssemblyDutiesForMonth(visibleMonthKey).then((nextState) => {
+      if (!nextState) return;
+      syncAssignmentDecorationsFromCache(nextState);
+    });
   }, [loaded, visibleMonthKey]);
 
   useEffect(() => {

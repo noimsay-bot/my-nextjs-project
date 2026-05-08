@@ -1423,6 +1423,94 @@ function getScheduleAssignmentNameTagForDuty(duty: string): ScheduleAssignmentNa
   }
 }
 
+const scheduleAssignmentLinkedDutyCategoryMap: Record<string, string> = {
+  국회: "국회",
+  청와대: "청와대",
+  청사: "청사",
+  서울청사: "청사",
+};
+
+function getScheduleAssignmentLinkedDutyCategory(duty: string) {
+  return scheduleAssignmentLinkedDutyCategoryMap[normalizeDutyLabel(duty)] ?? null;
+}
+
+function addUniqueName(target: string[], name: string) {
+  const trimmed = name.trim();
+  if (!trimmed || target.includes(trimmed)) return;
+  target.push(trimmed);
+}
+
+export function applyScheduleAssignmentDutyCategoriesToSchedule(
+  schedule: GeneratedSchedule,
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+) {
+  const monthRows = store.rows[schedule.monthKey] ?? {};
+  let changed = false;
+
+  const days = schedule.days.map((day) => {
+    const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+    const desiredByCategory = new Map<string, string[]>();
+
+    Object.values(scheduleAssignmentLinkedDutyCategoryMap).forEach((category) => {
+      if (day.assignments[category]?.length) {
+        desiredByCategory.set(category, []);
+      }
+    });
+
+    getScheduleAssignmentRows(day, dayRows).forEach((row) => {
+      const category = getScheduleAssignmentLinkedDutyCategory(row.duty);
+      if (!category) return;
+      const names = desiredByCategory.get(category) ?? [];
+      addUniqueName(names, row.name);
+      desiredByCategory.set(category, names);
+    });
+
+    const nextAssignments = Object.fromEntries(
+      Object.entries(day.assignments).map(([category, names]) => [category, [...names]]),
+    ) as Record<string, string[]>;
+
+    desiredByCategory.forEach((desiredNames, category) => {
+      const desiredNameSet = new Set(desiredNames);
+      Object.entries(nextAssignments).forEach(([currentCategory, names]) => {
+        if (currentCategory === category || currentCategory === "휴가") return;
+        nextAssignments[currentCategory] = names.filter((name) => !desiredNameSet.has(name.trim()));
+      });
+
+      if (desiredNames.length > 0) {
+        nextAssignments[category] = desiredNames;
+      } else {
+        delete nextAssignments[category];
+      }
+    });
+
+    Object.entries(nextAssignments).forEach(([category, names]) => {
+      const nextNames = names.map((name) => name.trim()).filter(Boolean);
+      if (nextNames.length > 0) {
+        nextAssignments[category] = Array.from(new Set(nextNames));
+      } else {
+        delete nextAssignments[category];
+      }
+    });
+
+    if (JSON.stringify(day.assignments) === JSON.stringify(nextAssignments)) {
+      return day;
+    }
+
+    changed = true;
+    return {
+      ...day,
+      assignments: nextAssignments,
+      manualExtras: (day.manualExtras ?? []).filter((category) => Boolean(nextAssignments[category]?.length)),
+    };
+  });
+
+  if (!changed) return schedule;
+  return {
+    ...schedule,
+    days,
+  };
+}
+
 export function applyScheduleAssignmentNameTagsToSchedule(
   schedule: GeneratedSchedule,
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
@@ -1499,10 +1587,12 @@ export function getTeamLeadSchedules() {
     }
   });
 
+  const schedules = Array.from(merged.values())
+    .sort((left, right) => left.monthKey.localeCompare(right.monthKey))
+    .map((schedule) => applyScheduleAssignmentDutyCategoriesToSchedule(schedule, store));
+
   return applyScheduleAssignmentNameTagsToSchedules(
-    normalizeTeamLeadSchedules(
-      Array.from(merged.values()).sort((left, right) => left.monthKey.localeCompare(right.monthKey)),
-    ),
+    normalizeTeamLeadSchedules(schedules),
     store,
   );
 }

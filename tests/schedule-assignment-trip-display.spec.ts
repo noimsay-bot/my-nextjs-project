@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  applyScheduleAssignmentDutyCategoriesToSchedule,
   applyScheduleAssignmentNameTagsToSchedule,
   createAssignmentRowKey,
   createCustomAssignmentRowKey,
@@ -233,4 +234,53 @@ test("half-day assignment duty adds half-day tag to schedule display name", () =
   const taggedSchedule = applyScheduleAssignmentNameTagsToSchedule(schedule, store);
 
   expect(taggedSchedule.days[0]?.assignmentNameTags?.["일반::박재현"]).toBe("half");
+});
+
+test("assembly assignment duty is reflected in the schedule management assembly category", () => {
+  const day = {
+    dateKey: "2026-06-06",
+    day: 6,
+    month: 6,
+    year: 2026,
+    dow: 6,
+    isWeekend: true,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: { 일반: ["김재식", "이지수"], 국회: [] },
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  } as DaySchedule;
+  const rowKey = createAssignmentRowKey(day.dateKey, "일반", 0, "김재식");
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    days: [day],
+    nextPointers: {},
+    nextStartDate: "2026-07-01",
+  } as GeneratedSchedule;
+  const store: ScheduleAssignmentDataStore = {
+    entries: {},
+    rows: {
+      "2026-06": {
+        [day.dateKey]: {
+          addedRows: [],
+          deletedRowKeys: [],
+          rowOverrides: {
+            [rowKey]: { name: "김재식", duty: "국회" },
+          },
+        },
+      },
+    },
+  };
+
+  const linkedSchedule = applyScheduleAssignmentDutyCategoriesToSchedule(schedule, store);
+  const linkedDay = linkedSchedule.days[0]!;
+
+  expect(linkedDay.assignments["국회"]).toEqual(["김재식"]);
+  expect(linkedDay.assignments["일반"]).toEqual(["이지수"]);
 });

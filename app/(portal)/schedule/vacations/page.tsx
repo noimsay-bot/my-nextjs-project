@@ -375,7 +375,7 @@ export default function ScheduleVacationsPage() {
               className="btn primary"
               disabled={!hasGeneratedSchedule}
               onClick={async () => {
-                const result = applyVacationMonthToSchedule(year, month);
+                const result = await applyVacationMonthToSchedule(year, month);
                 setMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
                 const persistResult = await waitForVacationStoreWrite();
                 await loadMonth();

@@ -11,8 +11,9 @@ import {
   isDeskPriorityVacationEntry,
   parseVacationMap,
   parseVacationEntry,
+  syncGeneralAssignments,
 } from "@/lib/schedule/engine";
-import { getPublishedSchedules } from "@/lib/schedule/published";
+import { getPublishedSchedules, refreshPublishedSchedules, savePublishedSchedules } from "@/lib/schedule/published";
 import { readStoredScheduleState, saveScheduleState } from "@/lib/schedule/storage";
 import { DaySchedule, GeneratedSchedule, VacationType } from "@/lib/schedule/types";
 import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
@@ -1063,16 +1064,40 @@ function applyVacationEntriesToGeneratedSchedule(
     days: generated.days.map((day) => {
       if (!managedDates.has(day.dateKey)) return day;
       const nextEntries = uniqueNames(approvedMap[day.dateKey] ?? []);
+      const vacationNameSet = new Set(nextEntries.map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean));
+      const nextAssignments = Object.fromEntries(
+        Object.entries(day.assignments).map(([category, names]) => [
+          category,
+          category === "휴가" ? [...nextEntries] : names.filter((name) => !vacationNameSet.has(name.trim())),
+        ]),
+      ) as Record<string, string[]>;
+      if (nextEntries.length > 0) {
+        nextAssignments["휴가"] = [...nextEntries];
+      } else {
+        delete nextAssignments["휴가"];
+      }
       return {
         ...day,
         vacations: [...nextEntries],
-        assignments: {
-          ...day.assignments,
-          휴가: [...nextEntries],
-        },
+        assignments: nextAssignments,
       };
     }),
   };
+}
+
+function applyVacationEntriesAndRecomputeGeneralAssignments(
+  generated: GeneratedSchedule,
+  scheduleState: ReturnType<typeof readScheduleState>,
+  approvedMap: Record<string, string[]>,
+  managedDates: Set<string>,
+) {
+  const nextGenerated = applyVacationEntriesToGeneratedSchedule(
+    JSON.parse(JSON.stringify(generated)) as GeneratedSchedule,
+    approvedMap,
+    managedDates,
+  );
+  syncGeneralAssignments(scheduleState, nextGenerated.days, scheduleState.generalTeamPeople);
+  return nextGenerated;
 }
 
 function getApprovedEntriesForMonth(store: VacationStore, monthKey: string) {
@@ -1471,7 +1496,7 @@ export function runVacationLottery(year: number, month: number) {
   return monthState;
 }
 
-export function applyVacationMonthToSchedule(year: number, month: number) {
+export async function applyVacationMonthToSchedule(year: number, month: number) {
   if (typeof window === "undefined") {
     return { ok: false as const, message: "브라우저에서만 근무 반영이 가능합니다." };
   }
@@ -1504,22 +1529,62 @@ export function applyVacationMonthToSchedule(year: number, month: number) {
 
   scheduleState.vacations = serializeVacationMap(nextVacationMap);
   scheduleState.generatedHistory = scheduleState.generatedHistory.map((item) =>
-    applyVacationEntriesToGeneratedSchedule(item, approvedMap, scheduleMonthDateSet),
+    applyVacationEntriesAndRecomputeGeneralAssignments(item, scheduleState, approvedMap, scheduleMonthDateSet),
   );
 
   if (scheduleState.generated) {
     const matched = scheduleState.generatedHistory.find((item) => item.monthKey === scheduleState.generated?.monthKey);
     scheduleState.generated = matched
       ? matched
-      : applyVacationEntriesToGeneratedSchedule(scheduleState.generated, approvedMap, scheduleMonthDateSet);
+      : applyVacationEntriesAndRecomputeGeneralAssignments(
+          scheduleState.generated,
+          scheduleState,
+          approvedMap,
+          scheduleMonthDateSet,
+        );
   }
 
-  void saveScheduleState(scheduleState).catch((error) => {
+  const publishedItems = getPublishedSchedules();
+  const nextPublishedItems = publishedItems.map((item) =>
+    item.monthKey === monthState.monthKey
+      ? {
+          ...item,
+          schedule: applyVacationEntriesAndRecomputeGeneralAssignments(
+            item.schedule,
+            scheduleState,
+            approvedMap,
+            scheduleMonthDateSet,
+          ),
+        }
+      : item,
+  );
+  const shouldSavePublishedItems = JSON.stringify(publishedItems) !== JSON.stringify(nextPublishedItems);
+
+  try {
+    await saveScheduleState(scheduleState);
+    if (shouldSavePublishedItems) {
+      await savePublishedSchedules(nextPublishedItems);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "휴가 반영 후 근무표 저장에 실패했습니다. 다시 불러와 주세요.";
     emitVacationStatus({
       ok: false,
-      message: error instanceof Error ? error.message : "휴가 반영 후 근무표 저장에 실패했습니다. 다시 불러와 주세요.",
+      message,
     });
-  });
+    return {
+      ok: false as const,
+      message,
+    };
+  }
+
+  if (shouldSavePublishedItems) {
+    refreshPublishedSchedules({ monthKeys: [monthState.monthKey], repair: false }).catch((error) => {
+      emitVacationStatus({
+        ok: false,
+        message: error instanceof Error ? error.message : "휴가 반영 후 게시 근무표를 다시 불러오지 못했습니다.",
+      });
+    });
+  }
 
   monthState.appliedAt = nowLabel();
   monthState.updatedAt = nowLabel();

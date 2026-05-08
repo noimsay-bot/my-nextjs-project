@@ -142,8 +142,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const needsVacationAccessCheck = pathname === "/vacation";
   const needsSubmissionAccessCheck = pathname.startsWith("/submissions");
-  const [session, setSession] = useState<SessionUser | null>(() => getSession());
-  const [checkingSession, setCheckingSession] = useState(() => !getSession());
+  const [session, setSession] = useState<SessionUser | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [hadSessionCookie, setHadSessionCookie] = useState(false);
   const [recoveryAttempted, setRecoveryAttempted] = useState(false);
   const [vacationRequestOpen, setVacationRequestOpen] = useState<boolean | null>(() => {

@@ -1,5 +1,5 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
-import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
+import { normalizeGeneratedSchedule, parseVacationEntry } from "@/lib/schedule/engine";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
@@ -82,22 +82,50 @@ function syncE2ePublishedSchedulesSeed() {
   return cloneItems(publishedSchedulesCache);
 }
 
-function normalizeAssignments(assignments: Record<string, string[]>) {
-  return Object.fromEntries(
-    Object.entries(assignments).filter(([, names]) =>
-      Array.isArray(names) && names.some((name) => typeof name === "string" && name.trim().length > 0),
-    ),
+function normalizeAssignmentNames(names: string[] | undefined) {
+  return Array.from(
+    new Set((names ?? []).map((name) => (typeof name === "string" ? name.trim() : "")).filter(Boolean)),
   );
 }
 
-function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+function normalizeAssignments(assignments: Record<string, string[]>) {
+  return Object.fromEntries(
+    Object.entries(assignments)
+      .map(([category, names]) => [category, normalizeAssignmentNames(names)] as const)
+      .filter(([, names]) => names.length > 0),
+  );
+}
+
+function getPublishedVacationEntries(day: GeneratedSchedule["days"][number], assignments: Record<string, string[]>) {
+  return normalizeAssignmentNames([...(day.vacations ?? []), ...(assignments["휴가"] ?? [])]);
+}
+
+export function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
   const normalizedSchedule = normalizeGeneratedSchedule(schedule);
   return {
     ...normalizedSchedule,
     days: normalizedSchedule.days.map((day) => {
-      const assignments = normalizeAssignments(day.assignments ?? {});
+      const baseAssignments = normalizeAssignments(day.assignments ?? {});
+      const vacationEntries = getPublishedVacationEntries(day, baseAssignments);
+      const vacationNameSet = new Set(
+        vacationEntries.map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean),
+      );
+      const assignments = normalizeAssignments(
+        Object.fromEntries(
+          Object.entries(baseAssignments).map(([category, names]) => [
+            category,
+            category === "휴가" ? vacationEntries : names.filter((name) => !vacationNameSet.has(name.trim())),
+          ]),
+        ) as Record<string, string[]>,
+      );
+      if (vacationEntries.length > 0) {
+        assignments["휴가"] = vacationEntries;
+      } else {
+        delete assignments["휴가"];
+      }
       return {
         ...day,
+        vacations: vacationEntries,
         assignments,
         manualExtras: (day.manualExtras ?? []).filter((category) => Boolean(assignments[category]?.length)),
       };

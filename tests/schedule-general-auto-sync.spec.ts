@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
 import { generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
-import { canRepairPublishedGeneralAssignments } from "@/lib/schedule/published";
+import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule } from "@/lib/schedule/published";
 
 test("2026 schedule months use calendar month ranges", () => {
   const ranges = [
@@ -79,6 +79,29 @@ test("vacation entries remove the same person from work assignments", () => {
   expect(updatedDay?.assignments["휴가"]).toContain(`연차:${vacationName}`);
   expect(workAssignments).not.toContain(vacationName);
   expect(getDayDuplicateNameSet(updatedDay!).has(vacationName)).toBe(false);
+});
+
+test("published schedule normalization removes vacation people from work assignments", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const targetDateKey = "2026-06-01";
+  const source = JSON.parse(JSON.stringify(generated)) as typeof generated;
+  const targetDay = source.days.find((day) => day.dateKey === targetDateKey)!;
+  const vacationName = "휴가자";
+
+  targetDay.assignments["일반"] = [vacationName, "근무자"];
+  targetDay.assignments["휴가"] = [`연차:${vacationName}`];
+  targetDay.vacations = [`연차:${vacationName}`];
+
+  const normalized = normalizePublishedSchedule(source);
+  const updatedDay = normalized.days.find((day) => day.dateKey === targetDateKey)!;
+
+  expect(updatedDay.assignments["일반"]).toEqual(["근무자"]);
+  expect(updatedDay.assignments["휴가"]).toEqual([`연차:${vacationName}`]);
+  expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(false);
 });
 
 test("april 21 preset recomputes general assignments with 정상원", () => {
