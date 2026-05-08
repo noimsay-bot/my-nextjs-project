@@ -90,6 +90,42 @@ function normalizeDayGeneralManualAdditions(day: DaySchedule) {
   return Array.from(new Set((day.generalManualAdditions ?? []).map((name) => name.trim()).filter(Boolean)));
 }
 
+function normalizeDayVacationAssignments(day: DaySchedule) {
+  const assignments = Object.fromEntries(
+    Object.entries(day.assignments ?? {}).map(([category, names]) => [
+      category,
+      Array.from(new Set((names ?? []).map((name) => name.trim()).filter(Boolean))),
+    ]),
+  ) as Record<string, string[]>;
+  const vacationEntries = Array.from(
+    new Set([...(day.vacations ?? []), ...(assignments["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
+  );
+  const vacationNameSet = new Set(
+    vacationEntries
+      .map((entry) => parseVacationEntry(entry).name.trim())
+      .filter(Boolean),
+  );
+
+  if (vacationNameSet.size > 0) {
+    Object.entries(assignments).forEach(([category, names]) => {
+      if (category === "휴가") return;
+      assignments[category] = names.filter((name) => !vacationNameSet.has(name.trim()));
+    });
+  }
+
+  if (vacationEntries.length > 0) {
+    assignments["휴가"] = vacationEntries;
+  } else {
+    delete assignments["휴가"];
+  }
+
+  return {
+    ...day,
+    vacations: vacationEntries,
+    assignments: normalizeDayAssignments({ ...day, assignments }),
+  };
+}
+
 const REQUIRED_DAY_ASSIGNMENT_OVERRIDES: Record<
   string,
   {
@@ -155,20 +191,22 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
   if (isBlankTemplateSchedule(schedule)) {
     return {
       ...schedule,
-      days: schedule.days.map((day) => ({
-        ...day,
-        assignments: normalizeDayAssignments(day),
-        assignmentNameTags: normalizeDayAssignmentNameTags(day),
-        assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(day),
-        assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(day),
-        generalManualAdditions: normalizeDayGeneralManualAdditions(day),
-      })),
+      days: schedule.days.map((day) => {
+        const normalizedDay = normalizeDayVacationAssignments(day);
+        return {
+          ...normalizedDay,
+          assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
+          assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
+          assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
+          generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
+        };
+      }),
     };
   }
   return {
     ...schedule,
     days: schedule.days.map((day) => {
-      const normalizedDay = applyRequiredDayOverride(day);
+      const normalizedDay = normalizeDayVacationAssignments(applyRequiredDayOverride(day));
       return {
         ...normalizedDay,
         assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
@@ -238,6 +276,22 @@ function filterNonDeskPriorityVacationMap(map: Record<string, string[]>) {
       ])
       .filter(([, entries]) => entries.length > 0),
   ) as Record<string, string[]>;
+}
+
+function collectNonDeskPriorityVacationMapFromSchedules(schedules: Array<GeneratedSchedule | null | undefined>) {
+  const map: Record<string, string[]> = {};
+
+  schedules.forEach((schedule) => {
+    schedule?.days.forEach((day) => {
+      const entries = Array.from(
+        new Set([...(day.vacations ?? []), ...(day.assignments?.["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
+      ).filter((entry) => !isDeskPriorityVacationEntry(entry));
+      if (entries.length === 0) return;
+      map[day.dateKey] = entries;
+    });
+  });
+
+  return map;
 }
 
 function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
@@ -499,6 +553,11 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
       ]),
   ) as Record<string, string[]>;
 
+  const normalizedVacationMap = mergeVacationMaps(
+    filterNonDeskPriorityVacationMap(parseVacationMap(input.vacations ?? base.vacations)),
+    collectNonDeskPriorityVacationMapFromSchedules([generated, ...generatedHistory]),
+  );
+
   const nextState: ScheduleState = {
     ...base,
     ...input,
@@ -506,7 +565,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     month: nextMonth,
     jcheckCount: DEFAULT_JCHECK_COUNT,
     extraHolidays: normalizeExtraHolidaysText(input.extraHolidays ?? base.extraHolidays, nextYear, nextMonth),
-    vacations: serializeVacationMap(filterNonDeskPriorityVacationMap(parseVacationMap(input.vacations ?? base.vacations))),
+    vacations: serializeVacationMap(normalizedVacationMap),
     generalTeamPeople: generalTeamPeople,
     generalTeamRosterVersion: GENERAL_TEAM_ROSTER_VERSION,
     generalTeamOffPeople,

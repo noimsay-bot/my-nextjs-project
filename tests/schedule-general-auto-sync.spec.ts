@@ -61,7 +61,7 @@ test("vacation entries remove the same person from work assignments", () => {
     year: 2026,
     month: 6,
   }).state;
-  const targetDateKey = "2026-06-01";
+  const targetDateKey = "2026-06-04";
   const targetDay = generated.generated?.days.find((day) => day.dateKey === targetDateKey);
   const vacationName = targetDay?.assignments["조근"]?.[0] ?? "";
 
@@ -100,7 +100,40 @@ test("published schedule normalization removes vacation people from work assignm
   const updatedDay = normalized.days.find((day) => day.dateKey === targetDateKey)!;
 
   expect(updatedDay.assignments["일반"]).toEqual(["근무자"]);
-  expect(updatedDay.assignments["휴가"]).toEqual([`연차:${vacationName}`]);
+  expect(updatedDay.assignments["휴가"]).toContain(`연차:${vacationName}`);
+  expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(false);
+});
+
+test("schedule state normalization removes vacation people already stored on the day", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const targetDateKey = "2026-06-04";
+  const source = JSON.parse(JSON.stringify(generated)) as typeof generated;
+  const targetDay = source.days.find((day) => day.dateKey === targetDateKey)!;
+  const vacationName = "휴가자";
+
+  targetDay.assignments["조근"] = [vacationName, "조근자"];
+  targetDay.assignments["연장"] = [vacationName, "연장자"];
+  targetDay.assignments["일반"] = [vacationName, "일반자"];
+  targetDay.assignments["휴가"] = [`연차:${vacationName}`];
+
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    generated: source,
+    generatedHistory: [source],
+  });
+  const updatedDay = state.generated?.days.find((day) => day.dateKey === targetDateKey)!;
+  const workAssignments = Object.entries(updatedDay.assignments)
+    .filter(([category]) => category !== "휴가")
+    .flatMap(([, names]) => names);
+
+  expect(updatedDay.assignments["휴가"]).toContain(`연차:${vacationName}`);
+  expect(workAssignments).not.toContain(vacationName);
   expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(false);
 });
 

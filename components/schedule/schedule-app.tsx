@@ -1568,10 +1568,12 @@ export function ScheduleApp() {
   };
 
   const confirmPublish = async () => {
-    const target = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
+    const latestState = await refreshScheduleState().catch(() => null);
+    const target =
+      latestState?.generatedHistory.find((item) => item.monthKey === publishMonthKey) ??
+      state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
     try {
-      await saveScheduleState(state);
       const published = await publishSchedule(target);
       await refreshRouteData({ includeRequests: false, preferredMonthKey: published.monthKey });
       setPublishOpen(false);
