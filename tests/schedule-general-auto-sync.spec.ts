@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { defaultScheduleState } from "@/lib/schedule/constants";
 import { generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
+import { canRepairPublishedGeneralAssignments } from "@/lib/schedule/published";
 
 test("2026 schedule months use the newsroom week-based ranges", () => {
   const ranges = [
@@ -114,4 +115,25 @@ test("general assignments ignore basic off names", () => {
   const day21 = days.find((day: { dateKey: string; assignments: Record<string, string[]> }) => day.dateKey === "2026-04-21");
   expect(day21?.assignments["일반"]).toContain("변경태");
   expect(day21?.assignments["일반"]).toContain("정상원");
+});
+
+test("published repair allows general auto-sync when only vacation data changed", () => {
+  const mayPreset = presetScheduleMonths.find((item) => item.monthKey === "2026-05");
+  expect(mayPreset).toBeTruthy();
+
+  const published = JSON.parse(JSON.stringify(mayPreset!));
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 5,
+    generated: JSON.parse(JSON.stringify(mayPreset!)),
+    generatedHistory: [JSON.parse(JSON.stringify(mayPreset!))],
+  });
+  const generated = state.generated;
+  const generatedDay8 = generated?.days.find((day) => day.dateKey === "2026-05-08");
+
+  expect(published.days.find((day: { dateKey: string; assignments: Record<string, string[]> }) => day.dateKey === "2026-05-08")?.assignments["일반"]).toBeUndefined();
+  expect(generatedDay8?.assignments["일반"]).toContain("정상원");
+  expect(generatedDay8?.assignments["휴가"]).toContain("근속휴가:이완근");
+  expect(canRepairPublishedGeneralAssignments(published, generated!)).toBe(true);
 });

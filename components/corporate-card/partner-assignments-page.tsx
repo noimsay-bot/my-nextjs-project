@@ -108,7 +108,7 @@ export function PartnerAssignmentsPage() {
             <div className={styles.header}>
               <span className="chip">일정</span>
               <h1 className={styles.title}>{formatDateLabel(dateKey)} 일정</h1>
-              <p className={styles.description}>선택한 날짜의 일정에 오디오맨과 형님 이름을 입력합니다.</p>
+              <p className={styles.description}>선택한 날짜의 일정에 오디오맨과 수송부 이름을 입력합니다.</p>
             </div>
             <label className={styles.field}>
               <span>날짜</span>
@@ -147,7 +147,7 @@ export function PartnerAssignmentsPage() {
                         />
                       </label>
                       <label className={styles.field}>
-                        <span>형님</span>
+                        <span>수송부</span>
                         <input
                           className="field-input"
                           value={item.seniorName}

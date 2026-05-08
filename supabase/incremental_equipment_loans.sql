@@ -234,7 +234,8 @@ begin
     select distinct item_id
     from unnest(coalesce(p_equipment_item_ids, array[]::uuid[])) as item_id
   )
-    and is_active = true;
+    and is_active = true
+    and coalesce(metadata ->> 'is_under_repair', 'false') <> 'true';
 
   if v_active_count <> v_requested_count then
     raise exception '대여할 수 없는 장비가 포함되어 있습니다.';
@@ -369,7 +370,11 @@ begin
     set
       name = excluded.name,
       is_active = true,
-      metadata = excluded.metadata,
+      metadata = case
+        when coalesce(public.equipment_items.metadata ->> 'is_under_repair', 'false') = 'true'
+          then excluded.metadata || jsonb_build_object('is_under_repair', true)
+        else excluded.metadata
+      end,
       updated_at = timezone('utc', now())
     returning id
   )
@@ -378,6 +383,79 @@ begin
   from upserted_items;
 
   return public.borrow_equipment_items(v_item_ids, 'eng_set');
+end;
+$$;
+
+create or replace function public.set_equipment_items_repair_status(
+  p_equipment_item_ids uuid[],
+  p_is_under_repair boolean default true
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_requested_count integer;
+  v_updated_count integer := 0;
+  v_is_under_repair boolean := coalesce(p_is_under_repair, true);
+begin
+  if v_user_id is null then
+    raise exception '승인된 로그인 세션이 필요합니다.';
+  end if;
+
+  if public.current_profile_approved() is distinct from true
+     or public.current_profile_role() not in ('desk', 'admin', 'team_lead') then
+    raise exception '장비 수리 처리 권한이 없습니다.';
+  end if;
+
+  select count(distinct item_id)
+  into v_requested_count
+  from unnest(coalesce(p_equipment_item_ids, array[]::uuid[])) as item_id;
+
+  if coalesce(v_requested_count, 0) = 0 then
+    raise exception '수리 처리할 장비를 선택해 주세요.';
+  end if;
+
+  if v_is_under_repair and exists (
+    select 1
+    from public.equipment_loan_items
+    where equipment_item_id in (
+      select distinct item_id
+      from unnest(coalesce(p_equipment_item_ids, array[]::uuid[])) as item_id
+    )
+      and status = 'borrowed'
+  ) then
+    raise exception '대여중인 장비는 수리 처리할 수 없습니다.';
+  end if;
+
+  with requested_items as (
+    select distinct item_id
+    from unnest(coalesce(p_equipment_item_ids, array[]::uuid[])) as item_id
+  ),
+  updated_items as (
+    update public.equipment_items
+    set
+      metadata = case
+        when v_is_under_repair
+          then jsonb_set(coalesce(metadata, '{}'::jsonb), '{is_under_repair}', 'true'::jsonb, true)
+        else coalesce(metadata, '{}'::jsonb) - 'is_under_repair'
+      end,
+      updated_at = timezone('utc', now())
+    where id in (select item_id from requested_items)
+      and is_active = true
+    returning id
+  )
+  select count(*)
+  into v_updated_count
+  from updated_items;
+
+  if v_updated_count <> v_requested_count then
+    raise exception '수리 처리할 수 없는 장비가 포함되어 있습니다.';
+  end if;
+
+  return coalesce(v_updated_count, 0);
 end;
 $$;
 
@@ -445,9 +523,11 @@ $$;
 
 revoke execute on function public.borrow_equipment_items(uuid[], text, text, text, text, text, text) from public, anon;
 revoke execute on function public.borrow_eng_sets(uuid[]) from public, anon;
+revoke execute on function public.set_equipment_items_repair_status(uuid[], boolean) from public, anon;
 revoke execute on function public.return_equipment_loan_items(uuid[]) from public, anon;
 grant execute on function public.borrow_equipment_items(uuid[], text, text, text, text, text, text) to authenticated;
 grant execute on function public.borrow_eng_sets(uuid[]) to authenticated;
+grant execute on function public.set_equipment_items_repair_status(uuid[], boolean) to authenticated;
 grant execute on function public.return_equipment_loan_items(uuid[]) to authenticated;
 
 with seed(category, group_name, name, code, sort_order, metadata) as (
@@ -569,7 +649,11 @@ set
   name = excluded.name,
   sort_order = excluded.sort_order,
   is_active = true,
-  metadata = excluded.metadata,
+  metadata = case
+    when coalesce(public.equipment_items.metadata ->> 'is_under_repair', 'false') = 'true'
+      then excluded.metadata || jsonb_build_object('is_under_repair', true)
+    else excluded.metadata
+  end,
   updated_at = timezone('utc', now());
 
 update public.equipment_items

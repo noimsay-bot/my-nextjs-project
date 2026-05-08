@@ -76,6 +76,18 @@
   flex-wrap: wrap;
 }
 
+.repairButton {
+  border-color: rgba(251, 191, 36, 0.34);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fde68a;
+}
+
+:global(html[data-theme="light"]) .repairButton {
+  border-color: rgba(202, 138, 4, 0.34);
+  background: #fef3c7;
+  color: #78350f;
+}
+
 .familyBlock,
 .equipmentGroup {
   display: grid;
@@ -352,10 +364,32 @@
   background: rgba(127, 29, 29, 0.17);
 }
 
+.itemCardRepairing {
+  border-color: rgba(251, 191, 36, 0.42);
+  background: rgba(113, 63, 18, 0.2);
+  color: #fde68a;
+}
+
+.itemCardRepairing:hover {
+  border-color: rgba(251, 191, 36, 0.42);
+  background: rgba(113, 63, 18, 0.2);
+}
+
 :global(html[data-theme="light"]) .itemCardBorrowed {
   border-color: rgba(220, 38, 38, 0.28);
   background: #fee2e2;
   color: #7f1d1d;
+}
+
+:global(html[data-theme="light"]) .itemCardRepairing {
+  border-color: rgba(202, 138, 4, 0.36);
+  background: #fef3c7;
+  color: #78350f;
+}
+
+:global(html[data-theme="light"]) .itemCardRepairing:hover {
+  border-color: rgba(202, 138, 4, 0.36);
+  background: #fef3c7;
 }
 
 :global(html[data-theme="light"]) .itemCardBorrowed:hover {
@@ -428,6 +462,12 @@
   color: #fee2e2;
 }
 
+.statusRepairing {
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: rgba(245, 158, 11, 0.16);
+  color: #fef3c7;
+}
+
 :global(html[data-theme="light"]) .statusAvailable {
   border-color: rgba(22, 163, 74, 0.34);
   background: #dcfce7;
@@ -438,6 +478,12 @@
   border-color: rgba(220, 38, 38, 0.32);
   background: #fecaca;
   color: #7f1d1d;
+}
+
+:global(html[data-theme="light"]) .statusRepairing {
+  border-color: rgba(202, 138, 4, 0.36);
+  background: #fef3c7;
+  color: #78350f;
 }
 
 .borrowedMeta,

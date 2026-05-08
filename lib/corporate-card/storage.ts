@@ -167,7 +167,7 @@ export async function fetchMyScheduleAssignmentsWithPartnerInfo(monthKey: string
     });
     const missingFields = [
       audioManName ? "" : "오디오맨",
-      seniorName ? "" : "형님",
+      seniorName ? "" : "수송부",
     ].filter(Boolean);
 
     return {

@@ -10,6 +10,7 @@ export interface EquipmentItem {
   code: string;
   sortOrder: number;
   isActive: boolean;
+  isUnderRepair: boolean;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

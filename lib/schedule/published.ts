@@ -164,13 +164,13 @@ function applyPublishedItemsToCache(items: PublishedScheduleItem[], monthKeys?: 
 function normalizeComparableAssignments(assignments: Record<string, string[]>) {
   return Object.fromEntries(
     Object.entries(assignments ?? {})
-      .filter(([category]) => category !== "일반")
+      .filter(([category]) => category !== "일반" && category !== "휴가")
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([category, names]) => [category, [...names]]),
   );
 }
 
-function canRepairPublishedGeneralAssignments(
+export function canRepairPublishedGeneralAssignments(
   published: GeneratedSchedule,
   generated: GeneratedSchedule,
 ) {

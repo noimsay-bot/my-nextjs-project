@@ -140,7 +140,7 @@ export function MyAssignmentsPage() {
                         <strong>{item.audioManName || "파트너 입력 대기"}</strong>
                       </div>
                       <div className={styles.metaItem}>
-                        <span>형님</span>
+                        <span>수송부</span>
                         <strong>{item.seniorName || "파트너 입력 대기"}</strong>
                       </div>
                     </div>

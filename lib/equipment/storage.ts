@@ -1,4 +1,4 @@
-import { getSession, hasAdminAccess, isReadOnlyPortalRole } from "@/lib/auth/storage";
+import { getSession, hasAdminAccess, hasDeskAccess, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -84,6 +84,7 @@ function normalizeMetadata(value: unknown): Record<string, unknown> {
 }
 
 function rowToItem(row: EquipmentItemRow): EquipmentItem {
+  const metadata = normalizeMetadata(row.metadata);
   return {
     id: row.id,
     category: row.category,
@@ -92,7 +93,8 @@ function rowToItem(row: EquipmentItemRow): EquipmentItem {
     code: row.code,
     sortOrder: row.sort_order ?? 0,
     isActive: row.is_active ?? true,
-    metadata: normalizeMetadata(row.metadata),
+    isUnderRepair: metadata.is_under_repair === true || metadata.is_under_repair === "true",
+    metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -311,6 +313,14 @@ function assertCanMutate() {
   return session;
 }
 
+function assertCanManageRepair() {
+  const session = getSession();
+  if (!session?.approved || !hasDeskAccess(session.role)) {
+    throw new Error("장비 수리 처리 권한이 없습니다.");
+  }
+  return session;
+}
+
 export function canReturnLoanItem(loanItem: EquipmentLoanItem) {
   const session = getSession();
   if (!session?.approved) return false;
@@ -360,6 +370,24 @@ export async function borrowEngSets(profileIds: string[]) {
 
   if (error) {
     throw new Error(getEquipmentStorageErrorMessage(error, "ENG SET loan"));
+  }
+}
+
+export async function setEquipmentItemsRepairStatus(itemIds: string[], isUnderRepair: boolean) {
+  assertCanManageRepair();
+  const normalizedIds = Array.from(new Set(itemIds.map((item) => item.trim()).filter(Boolean)));
+  if (normalizedIds.length === 0) {
+    throw new Error("수리 처리할 장비를 선택해 주세요.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.rpc("set_equipment_items_repair_status", {
+    p_equipment_item_ids: normalizedIds,
+    p_is_under_repair: isUnderRepair,
+  });
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "equipment repair"));
   }
 }
 

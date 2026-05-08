@@ -896,7 +896,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const loadItems = async () => {
     setItemsLoading(true);
     try {
-      const publishedItems = await refreshPublishedSchedules({ repair: false });
+      const publishedItems = await refreshPublishedSchedules({ repair: true });
       const activeSession = getSession();
       if (activeSession?.approved && hasDeskAccess(activeSession.actualRole)) {
         await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));

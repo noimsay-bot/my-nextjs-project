@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   getSession,
+  hasDeskAccess,
   isReadOnlyPortalRole,
   type SessionUser,
 } from "@/lib/auth/storage";
@@ -16,6 +17,7 @@ import {
   fetchEquipmentLoanItems,
   fetchEquipmentProfiles,
   returnEquipmentLoanItems,
+  setEquipmentItemsRepairStatus,
 } from "@/lib/equipment/storage";
 import {
   equipmentCategoryConfigs,
@@ -365,10 +367,16 @@ function LoadingBlocks() {
   );
 }
 
-function StatusPill({ borrowed }: { borrowed: boolean }) {
+function StatusPill({ borrowed, repairing = false }: { borrowed: boolean; repairing?: boolean }) {
+  const statusClassName = borrowed
+    ? styles.statusBorrowed
+    : repairing
+      ? styles.statusRepairing
+      : styles.statusAvailable;
+  const label = borrowed ? "대여중" : repairing ? "수리중" : "대여가능";
   return (
-    <span className={`${styles.statusPill} ${borrowed ? styles.statusBorrowed : styles.statusAvailable}`.trim()}>
-      {borrowed ? "대여중" : "대여가능"}
+    <span className={`${styles.statusPill} ${statusClassName}`.trim()}>
+      {label}
     </span>
   );
 }
@@ -391,6 +399,7 @@ function EquipmentItemCard({
   tone?: EquipmentItemCardTone;
 }) {
   const borrowed = Boolean(loanItem);
+  const repairing = item.isUnderRepair;
   return (
     <button
       type="button"
@@ -400,14 +409,15 @@ function EquipmentItemCard({
         selected ? styles.itemCardSelected : "",
         selected && tone === "live" ? styles.itemCardSelectedLive : "",
         borrowed ? styles.itemCardBorrowed : "",
+        repairing ? styles.itemCardRepairing : "",
       ].join(" ").trim()}
-      disabled={borrowed && !allowBorrowedClick}
+      disabled={(borrowed && !allowBorrowedClick) || repairing}
       onClick={onToggle}
       aria-pressed={selected}
     >
       <span className={styles.itemCardTop}>
         <strong>{displayName ?? item.name}</strong>
-        {borrowed ? <StatusPill borrowed /> : null}
+        {borrowed || repairing ? <StatusPill borrowed={borrowed} repairing={repairing} /> : null}
       </span>
     </button>
   );
@@ -759,6 +769,7 @@ function EquipmentGroupSection({
           const expanded = expandedVariantKeys.includes(entry.key);
           const selected = entry.items.some((item) => selectedIds.includes(item.id));
           const borrowedCount = entry.items.filter((item) => currentByItemId.has(item.id)).length;
+          const repairingCount = entry.items.filter((item) => item.isUnderRepair).length;
           return (
             <Fragment key={entry.key}>
               <button
@@ -773,7 +784,7 @@ function EquipmentGroupSection({
               >
                 <span className={styles.itemCardTop}>
                   <strong>{entry.parentLabel}</strong>
-                  {borrowedCount > 0 ? <StatusPill borrowed /> : null}
+                  {borrowedCount > 0 || repairingCount > 0 ? <StatusPill borrowed={borrowedCount > 0} repairing={repairingCount > 0} /> : null}
                 </span>
               </button>
               {expanded ? (
@@ -1111,6 +1122,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   const isEngSetPage = category === "eng_set";
   const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
+  const canManageRepair = Boolean(session?.approved && hasDeskAccess(session.role));
   const highlightDateKey = useMemo(() => getTodayDateKey(), []);
 
   const load = useCallback(async () => {
@@ -1213,6 +1225,15 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     () => new Map(profiles.map((profile) => [profile.id, profileToBorrowSelection(profile)] as const)),
     [profiles],
   );
+  const selectedRepairableItemIds = useMemo(() => (
+    selectedItemSelections
+      .filter((selection) => {
+        if (currentByItemId.has(selection.id)) return false;
+        const item = itemById.get(selection.id);
+        return !item?.isUnderRepair;
+      })
+      .map((selection) => selection.id)
+  ), [currentByItemId, itemById, selectedItemSelections]);
 
   useEffect(() => {
     if (loading || selectedEntries.length === 0) return;
@@ -1220,6 +1241,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       if (selection.kind === "item" && selection.category === category) {
         const item = itemById.get(selection.id);
         if (!item) return false;
+        if (item.isUnderRepair) return false;
         return !(category === "live" && isTvuBatteryItem(item));
       }
       if (selection.kind === "eng_profile" && isEngSetPage) {
@@ -1310,6 +1332,32 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     setConfirmMode("return");
   };
 
+  const handleRepair = async () => {
+    if (!canManageRepair) {
+      setMessage({ tone: "warn", text: "장비 수리 처리 권한이 없습니다." });
+      return;
+    }
+
+    if (selectedRepairableItemIds.length === 0) {
+      setMessage({ tone: "note", text: "수리 처리할 장비를 선택해 주세요." });
+      return;
+    }
+
+    setActionPending(true);
+    try {
+      await setEquipmentItemsRepairStatus(selectedRepairableItemIds, true);
+      setMessage({ tone: "ok", text: "선택한 장비를 수리중으로 처리했습니다." });
+      updateBorrowSelections((current) => current.filter((selection) => (
+        selection.kind !== "item" || !selectedRepairableItemIds.includes(selection.id)
+      )));
+      await load();
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "수리 처리에 실패했습니다." });
+    } finally {
+      setActionPending(false);
+    }
+  };
+
   const confirmBorrow = async () => {
     setActionPending(true);
     try {
@@ -1362,12 +1410,17 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
           <div className={styles.actionBar}>
             <div className={styles.actionSummary}>
               <strong>{selectedIds.length}개 선택됨</strong>
-              <span className="muted">대여중 장비는 선택할 수 없습니다.</span>
+              <span className="muted">대여중/수리중 장비는 선택할 수 없습니다.</span>
             </div>
             <div className={styles.actionButtons}>
               <button type="button" className="btn primary" disabled={!canMutate || selectedIds.length === 0 || actionPending} onClick={openBorrowDialog}>
                 대여하기
               </button>
+              {canManageRepair ? (
+                <button type="button" className={`btn ${styles.repairButton}`} disabled={selectedRepairableItemIds.length === 0 || actionPending} onClick={handleRepair}>
+                  수리
+                </button>
+              ) : null}
               <button type="button" className="btn" disabled={!canMutate || returnableItems.length === 0 || actionPending} onClick={openReturnDialog}>
                 반납하기
               </button>
@@ -1381,6 +1434,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
               {sharedEngSetItems.map((item) => {
                 const loanItem = currentByItemId.get(item.id);
                 const selected = selectedIds.includes(item.id);
+                const repairing = item.isUnderRepair;
                 return (
                   <button
                     key={item.id}
@@ -1389,14 +1443,15 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                       styles.memberCard,
                       selected ? styles.itemCardSelected : "",
                       loanItem ? styles.itemCardBorrowed : "",
+                      repairing ? styles.itemCardRepairing : "",
                     ].join(" ").trim()}
-                    disabled={Boolean(loanItem)}
+                    disabled={Boolean(loanItem) || repairing}
                     onClick={() => toggleSelection(item.id)}
                     aria-pressed={selected}
                   >
                     <span className={styles.itemCardTop}>
                       <strong>{item.name}</strong>
-                      <StatusPill borrowed={Boolean(loanItem)} />
+                      <StatusPill borrowed={Boolean(loanItem)} repairing={repairing} />
                     </span>
                     {loanItem ? (
                       <span className={styles.borrowedMeta}>{loanItem.loan.borrowerName} · {formatDateTime(loanItem.borrowedAt)}</span>
@@ -1628,7 +1683,7 @@ export function LiveEquipmentStatusPage() {
                         <td>{loanItem?.loan.liveAudioMan || "-"}</td>
                         <td>{loanItem?.loan.liveLocation || "-"}</td>
                         <td>{loanItem?.loan.liveNote || "-"}</td>
-                        <td><StatusPill borrowed={Boolean(loanItem)} /></td>
+                        <td><StatusPill borrowed={Boolean(loanItem)} repairing={item.isUnderRepair} /></td>
                       </tr>
                     );
                   })}
