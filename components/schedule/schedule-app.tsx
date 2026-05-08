@@ -1571,6 +1571,7 @@ export function ScheduleApp() {
     const target = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
     try {
+      await saveScheduleState(state);
       const published = await publishSchedule(target);
       await refreshRouteData({ includeRequests: false, preferredMonthKey: published.monthKey });
       setPublishOpen(false);

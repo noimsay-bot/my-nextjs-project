@@ -341,7 +341,7 @@ async function persistPublishedItem(monthKey: string, payload: { published_state
 }
 
 async function syncAssemblyDutiesAfterHubPublish(monthKey: string) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return { ok: true as const, changed: false };
 
   try {
     const response = await fetch("/api/schedule/assembly-sync-on-publish", {
@@ -359,12 +359,30 @@ async function syncAssemblyDutiesAfterHubPublish(monthKey: string) {
         status: response.status,
         message: payload?.message ?? response.statusText,
       });
+      return {
+        ok: false as const,
+        changed: false,
+        message: payload?.message ?? response.statusText,
+      };
     }
+
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; result?: { changed?: boolean }; message?: string }
+      | null;
+    return {
+      ok: true as const,
+      changed: Boolean(payload?.result?.changed),
+    };
   } catch (error) {
     console.warn("[assembly-sync] 게시 후 국회 근무 동기화 요청에 실패했습니다.", {
       monthKey,
       message: error instanceof Error ? error.message : String(error),
     });
+    return {
+      ok: false as const,
+      changed: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -428,9 +446,20 @@ export async function publishSchedule(schedule: GeneratedSchedule) {
     throw error;
   }
 
-  await syncAssemblyDutiesAfterHubPublish(schedule.monthKey);
+  const assemblySyncResult = await syncAssemblyDutiesAfterHubPublish(schedule.monthKey);
+  if (!assemblySyncResult.ok) {
+    emitPublishedSchedulesStatus({
+      ok: false,
+      message: assemblySyncResult.message
+        ? `근무표는 게시했지만 국회 근무 자동연동에 실패했습니다. ${assemblySyncResult.message}`
+        : "근무표는 게시했지만 국회 근무 자동연동에 실패했습니다.",
+    });
+    return nextItem;
+  }
 
-  return nextItem;
+  const [syncedItem] = await refreshPublishedSchedules({ monthKeys: [schedule.monthKey], repair: false });
+
+  return syncedItem ?? nextItem;
 }
 
 export function removePublishedSchedule(monthKey: string) {

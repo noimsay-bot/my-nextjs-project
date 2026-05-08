@@ -78,6 +78,32 @@ function isValidDateKey(value: string, month: string) {
   );
 }
 
+function getMonthKeyFromDateKey(dateKey: string) {
+  return DATE_PATTERN.test(dateKey) ? dateKey.slice(0, 7) : "";
+}
+
+function getScheduleDateKeysForAssemblySync(row: ScheduleMonthRow) {
+  const dateKeys = new Set<string>();
+  [row.draft_state, row.published_state].forEach((schedule) => {
+    (schedule?.days ?? []).forEach((day) => {
+      if (DATE_PATTERN.test(day.dateKey)) {
+        dateKeys.add(day.dateKey);
+      }
+    });
+  });
+  return dateKeys;
+}
+
+function getSourceMonthsForScheduleDateKeys(dateKeys: Set<string>) {
+  return Array.from(
+    new Set(
+      Array.from(dateKeys)
+        .map(getMonthKeyFromDateKey)
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+}
+
 function normalizeName(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -283,6 +309,20 @@ async function fetchAssemblyDutyExport(month: string): Promise<ParsedAssemblyDut
   return parseAssemblyDutyExportPayload(payload, month);
 }
 
+async function fetchAssemblyDutyExports(months: string[], targetDateKeys: Set<string>): Promise<ParsedAssemblyDutyExport> {
+  const results = await Promise.all(months.map((month) => fetchAssemblyDutyExport(month)));
+  return results.reduce(
+    (accumulator, result) => {
+      accumulator.items.push(...result.items.filter((item) => targetDateKeys.has(item.date)));
+      accumulator.errors.push(
+        ...result.errors.filter((item) => !item.date || targetDateKeys.has(item.date)),
+      );
+      return accumulator;
+    },
+    { items: [] as AssemblyDutyItem[], errors: [] as AssemblySyncErrorDetail[] },
+  );
+}
+
 export async function getAssemblyHolidayAndWeekendDuties(month: string): Promise<AssemblyDutyItem[]> {
   return (await fetchAssemblyDutyExport(month)).items;
 }
@@ -356,7 +396,7 @@ function buildDesiredAssemblyNamesByDate(
 
 function applyAssemblyDutiesToSchedule(
   schedule: GeneratedSchedule,
-  month: string,
+  targetDateKeys: Set<string>,
   desiredByDate: Map<string, string[]>,
   datesWithMatchErrors: Set<string>,
 ) {
@@ -367,7 +407,7 @@ function applyAssemblyDutiesToSchedule(
   let skippedCount = 0;
 
   nextSchedule.days.forEach((day) => {
-    if (!day.dateKey.startsWith(`${month}-`)) return;
+    if (!targetDateKeys.has(day.dateKey)) return;
 
     const currentNames = (day.assignments[ASSEMBLY_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
     const desiredNames = desiredByDate.get(day.dateKey) ?? [];
@@ -465,15 +505,17 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       return { ok: true as const, ...log, changed: false };
     }
 
-    const parsed = await fetchAssemblyDutyExport(month);
+    const targetDateKeys = getScheduleDateKeysForAssemblySync(row);
+    const sourceMonths = getSourceMonthsForScheduleDateKeys(targetDateKeys);
+    const parsed = await fetchAssemblyDutyExports(sourceMonths.length > 0 ? sourceMonths : [month], targetDateKeys);
     const errors = [...parsed.errors];
     const profileMap = await getApprovedProfileNameMap();
     const { desiredByDate, datesWithMatchErrors } = buildDesiredAssemblyNamesByDate(parsed.items, profileMap, errors);
     const draftResult = row.draft_state
-      ? applyAssemblyDutiesToSchedule(row.draft_state, month, desiredByDate, datesWithMatchErrors)
+      ? applyAssemblyDutiesToSchedule(row.draft_state, targetDateKeys, desiredByDate, datesWithMatchErrors)
       : null;
     const publishedResult = row.published_state
-      ? applyAssemblyDutiesToSchedule(row.published_state, month, desiredByDate, datesWithMatchErrors)
+      ? applyAssemblyDutiesToSchedule(row.published_state, targetDateKeys, desiredByDate, datesWithMatchErrors)
       : null;
     const resultForLog = publishedResult ?? draftResult;
     const changed = Boolean(draftResult?.changed || publishedResult?.changed);
