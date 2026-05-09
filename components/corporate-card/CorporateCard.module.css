@@ -131,8 +131,9 @@
   gap: 10px;
   min-height: 34px;
   color: var(--text);
-  font-size: 15px;
+  font-size: 26px;
   font-weight: 900;
+  line-height: 1;
   white-space: nowrap;
 }
 
