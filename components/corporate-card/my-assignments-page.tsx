@@ -122,7 +122,7 @@ export function MyAssignmentsPage() {
               <section key={dateKey} className={styles.dayBlock}>
                 <h2 className={styles.dayTitle}>{formatDateLabel(dateKey)}</h2>
                 {dayItems.map((item) => (
-                  <article key={item.scheduleItemId} className={styles.itemCard}>
+                  <article key={item.scheduleItemId} className={`${styles.itemCard} ${styles.myItemCard}`}>
                     <div className={styles.itemHead}>
                       <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
                       <label className={styles.finalCutToggle}>
@@ -148,11 +148,13 @@ export function MyAssignmentsPage() {
                       <span className={styles.pending}>누락: {item.missingFields.join(", ")}</span>
                     ) : null}
                     <div className={styles.memoBox}>
-                      <strong>자동문구</strong>
-                      <p className={styles.memoText}>{item.generatedText}</p>
-                    </div>
-                    <div className={styles.actions}>
-                      <button type="button" className="btn primary" onClick={() => copyMemo(item)} disabled={!item.generatedText}>
+                      <p className={styles.memoText} title={item.generatedText}>{item.generatedText}</p>
+                      <button
+                        type="button"
+                        className={`btn primary ${styles.memoCopyButton}`}
+                        onClick={() => copyMemo(item)}
+                        disabled={!item.generatedText}
+                      >
                         {copiedId === item.scheduleItemId ? "복사됨" : "복사"}
                       </button>
                     </div>

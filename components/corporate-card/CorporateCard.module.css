@@ -66,6 +66,11 @@
   color: #0f172a;
 }
 
+.myItemCard {
+  gap: 8px;
+  padding: 10px;
+}
+
 .itemHead {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -123,17 +128,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 16px;
-  min-height: 68px;
+  gap: 10px;
+  min-height: 34px;
   color: var(--text);
-  font-size: 26px;
+  font-size: 15px;
   font-weight: 900;
   white-space: nowrap;
 }
 
 .finalCutToggle input {
-  width: 36px;
-  height: 36px;
+  width: 20px;
+  height: 20px;
   margin: 0;
   accent-color: #38bdf8;
 }
@@ -159,8 +164,10 @@
 
 .memoBox {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
   border: 1px solid rgba(125, 211, 252, 0.2);
   border-radius: 8px;
   background: rgba(14, 165, 233, 0.08);
@@ -168,8 +175,16 @@
 
 .memoText {
   margin: 0;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoCopyButton {
+  min-height: 34px;
+  padding: 0 12px;
 }
 
 .actions {

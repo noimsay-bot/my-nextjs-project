@@ -2016,7 +2016,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                           const visibleAssignments = Object.entries(day.assignments)
                             .filter(([category, names]) => {
                               if (!Array.isArray(names) || names.length === 0) return false;
-                              if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
+                              if (isWeekendLike) return category !== "휴가" && category !== "제크";
                               return !["국회", "청사", "청와대"].includes(category);
                             })
                             .sort(
@@ -2394,7 +2394,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                   const visibleAssignments = Object.entries(day.assignments)
                     .filter(([category, names]) => {
                       if (!Array.isArray(names) || names.length === 0) return false;
-                      if (isWeekendLike) return category !== "휴가" && category !== "제크" && category !== "청사";
+                      if (isWeekendLike) return category !== "휴가" && category !== "제크";
                       return !["국회", "청사", "청와대"].includes(category);
                     })
                     .sort(

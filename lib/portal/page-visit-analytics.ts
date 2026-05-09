@@ -7,7 +7,7 @@ import {
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
 
-export type PageVisitKey = "community" | "work_schedule" | "restaurants";
+export type PageVisitKey = "me" | "community" | "work_schedule" | "restaurants";
 export type PageVisitRange = "week" | "month";
 
 export interface PageVisitMetric {
@@ -47,6 +47,10 @@ interface PageVisitProfileRow {
 const PAGE_VISIT_TABLE = "page_visit_events";
 const PAGE_VISIT_THROTTLE_MS = 5 * 60 * 1000;
 const PAGE_VISIT_META: Record<PageVisitKey, { label: string; pathPrefixes: string[] }> = {
+  me: {
+    label: "마이페이지",
+    pathPrefixes: ["/me"],
+  },
   community: {
     label: "커뮤니티",
     pathPrefixes: ["/community", "/notices"],

@@ -12,3 +12,5 @@ tsconfig.tsbuildinfo
 .env.local
 .env.production.local
 .env.development.local
+
+.vercel

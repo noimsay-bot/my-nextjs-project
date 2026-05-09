@@ -111,7 +111,7 @@ export function getNextScheduleAssignmentNameTag(tag?: ScheduleAssignmentNameTag
   return "gov";
 }
 
-export const weekendScheduleAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "야근"] as const;
+export const weekendScheduleAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 export const weekdayStoredAssignmentOrder = ["조근", "일반", "연장", "석근", "야근", "제크", "휴가", "청와대", "국회", "청사"] as const;
 export const weekendStoredAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "야근", "휴가", "청사"] as const;
 

@@ -137,6 +137,83 @@ test("schedule state normalization removes vacation people already stored on the
   expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(false);
 });
 
+test("general manual additions do not re-add jcheck assignees", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const targetDateKey = "2026-06-08";
+  const source = JSON.parse(JSON.stringify(generated)) as typeof generated;
+  const targetDay = source.days.find((day) => day.dateKey === targetDateKey)!;
+  const jcheckName = "제크자";
+
+  targetDay.assignments["제크"] = [jcheckName];
+  targetDay.assignments["일반"] = ["일반자", jcheckName];
+  targetDay.generalManualAdditions = [jcheckName];
+
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    generated: source,
+    generatedHistory: [source],
+  });
+  const updatedDay = state.generated?.days.find((day) => day.dateKey === targetDateKey)!;
+
+  expect(updatedDay.assignments["제크"]).toContain(jcheckName);
+  expect(updatedDay.assignments["일반"] ?? []).not.toContain(jcheckName);
+  expect(getDayDuplicateNameSet(updatedDay).has(jcheckName)).toBe(false);
+});
+
+test("general assignments exclude every same-day non-general category", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const targetDateKey = "2026-06-09";
+  const source = JSON.parse(JSON.stringify(generated)) as typeof generated;
+  const targetDay = source.days.find((day) => day.dateKey === targetDateKey)!;
+  const blockedNamesByCategory = {
+    조근: "구본준",
+    연장: "김재식",
+    석근: "변경태",
+    야근: "유규열",
+    제크: "김진광",
+    국회: "이학진",
+    청사: "황현우",
+    청와대: "조용희",
+  };
+  const vacationName = "방극철";
+  const blockedNames = [...Object.values(blockedNamesByCategory), vacationName];
+
+  Object.entries(blockedNamesByCategory).forEach(([category, name]) => {
+    targetDay.assignments[category] = [name];
+  });
+  targetDay.assignments["일반"] = [...blockedNames, "일반자"];
+  targetDay.assignments["휴가"] = [`연차:${vacationName}`];
+  targetDay.vacations = [`연차:${vacationName}`];
+  targetDay.generalManualAdditions = [...blockedNames, "수동일반자"];
+
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    generated: source,
+    generatedHistory: [source],
+  });
+  const updatedDay = state.generated?.days.find((day) => day.dateKey === targetDateKey)!;
+
+  blockedNames.forEach((name) => {
+    expect(updatedDay.assignments["일반"] ?? []).not.toContain(name);
+    expect(updatedDay.generalManualAdditions ?? []).not.toContain(name);
+  });
+  expect(updatedDay.assignments["일반"] ?? []).toContain("수동일반자");
+  expect(updatedDay.generalManualAdditions ?? []).toEqual(["수동일반자"]);
+  expect(getDayDuplicateNameSet(updatedDay).size).toBe(0);
+});
+
 test("april 21 preset recomputes general assignments with 정상원", () => {
   const aprilPreset = presetScheduleMonths.find((item) => item.monthKey === "2026-04");
   expect(aprilPreset).toBeTruthy();

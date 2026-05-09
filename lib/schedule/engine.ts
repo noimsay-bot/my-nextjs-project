@@ -86,8 +86,30 @@ function normalizeDayAssignmentOrderOverrides(day: DaySchedule) {
   });
 }
 
-function normalizeDayGeneralManualAdditions(day: DaySchedule) {
-  return Array.from(new Set((day.generalManualAdditions ?? []).map((name) => name.trim()).filter(Boolean)));
+function getGeneralAssignmentBlockedNames(day: DaySchedule) {
+  const blockedNames = new Set<string>();
+
+  Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
+    if (category === "일반") return;
+
+    (names ?? []).forEach((name) => {
+      const trimmed = category === "휴가" ? parseVacationEntry(name).name.trim() : name.trim();
+      if (trimmed) blockedNames.add(trimmed);
+    });
+  });
+
+  (day.vacations ?? []).forEach((entry) => {
+    const vacationName = parseVacationEntry(entry).name.trim();
+    if (vacationName) blockedNames.add(vacationName);
+  });
+
+  return blockedNames;
+}
+
+function normalizeDayGeneralManualAdditions(day: DaySchedule, blockedNames = getGeneralAssignmentBlockedNames(day)) {
+  return Array.from(new Set((day.generalManualAdditions ?? []).map((name) => name.trim()).filter(Boolean))).filter(
+    (name) => !blockedNames.has(name),
+  );
 }
 
 function normalizeDayVacationAssignments(day: DaySchedule) {
@@ -100,11 +122,14 @@ function normalizeDayVacationAssignments(day: DaySchedule) {
   const vacationEntries = Array.from(
     new Set([...(day.vacations ?? []), ...(assignments["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
   );
-  const vacationNameSet = new Set(
-    vacationEntries
-      .map((entry) => parseVacationEntry(entry).name.trim())
-      .filter(Boolean),
-  );
+  if (vacationEntries.length > 0) {
+    assignments["휴가"] = vacationEntries;
+  } else {
+    delete assignments["휴가"];
+  }
+
+  const blockedGeneralNames = getGeneralAssignmentBlockedNames({ ...day, vacations: vacationEntries, assignments });
+  const vacationNameSet = new Set(vacationEntries.map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean));
 
   if (vacationNameSet.size > 0) {
     Object.entries(assignments).forEach(([category, names]) => {
@@ -113,10 +138,8 @@ function normalizeDayVacationAssignments(day: DaySchedule) {
     });
   }
 
-  if (vacationEntries.length > 0) {
-    assignments["휴가"] = vacationEntries;
-  } else {
-    delete assignments["휴가"];
+  if (assignments["일반"] && blockedGeneralNames.size > 0) {
+    assignments["일반"] = assignments["일반"].filter((name) => !blockedGeneralNames.has(name.trim()));
   }
 
   return {
@@ -389,24 +412,7 @@ export function syncGeneralAssignments(
       return;
     }
 
-    const assignedNames = new Set<string>();
-    Object.entries(day.assignments).forEach(([category, names]) => {
-      if (category === "일반") return;
-      names.forEach((name) => {
-        if (category === "휴가") {
-          const vacationName = parseVacationEntry(name).name.trim();
-          if (vacationName) assignedNames.add(vacationName);
-          return;
-        }
-
-        const trimmed = name.trim();
-        if (trimmed) assignedNames.add(trimmed);
-      });
-    });
-    day.vacations.forEach((entry) => {
-      const vacationName = parseVacationEntry(entry).name.trim();
-      if (vacationName) assignedNames.add(vacationName);
-    });
+    const generalBlockedNames = getGeneralAssignmentBlockedNames(day);
 
     while (generalTeamOffEntryIndex < datedGeneralTeamOffEntries.length) {
       const [entryDateKey, entryNames] = datedGeneralTeamOffEntries[generalTeamOffEntryIndex] ?? [];
@@ -420,12 +426,13 @@ export function syncGeneralAssignments(
 
     const generalTeamOffSet = new Set(activeGeneralTeamOffPeople.map((name) => name.trim()).filter(Boolean));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !assignedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
+      (name) => !generalBlockedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
     );
-    const manualGeneralAdditions = normalizeDayGeneralManualAdditions(day);
+    const manualGeneralAdditions = normalizeDayGeneralManualAdditions(day, generalBlockedNames);
+    day.generalManualAdditions = manualGeneralAdditions;
     const combinedGeneralNames = [...nextGeneralNames];
     manualGeneralAdditions.forEach((name) => {
-      if (generalTeamOffSet.has(name)) {
+      if (generalBlockedNames.has(name) || previousNight.includes(name) || generalTeamOffSet.has(name)) {
         return;
       }
       if (!combinedGeneralNames.includes(name)) {
