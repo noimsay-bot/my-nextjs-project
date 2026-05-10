@@ -42,13 +42,7 @@
 
 .dayBlock {
   display: grid;
-  gap: 10px;
-}
-
-.dayTitle {
-  margin: 0;
-  color: #bae6fd;
-  font-size: 18px;
+  gap: 8px;
 }
 
 .itemCard {
@@ -67,20 +61,36 @@
 }
 
 .myItemCard {
-  gap: 8px;
-  padding: 10px;
+  gap: 7px;
+  padding: 9px 10px;
 }
 
 .itemHead {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
 
+.itemDate {
+  color: #bae6fd;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+:global(html[data-theme="light"]) .itemDate {
+  color: #1d4ed8;
+}
+
 .itemTitle {
-  font-size: 17px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 16px;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .partnerItemBody {
@@ -128,23 +138,29 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  min-height: 34px;
+  gap: 7px;
+  min-height: 28px;
   color: var(--text);
-  font-size: 26px;
+  font-size: 16px;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
 }
 
 .finalCutToggle input {
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   margin: 0;
   accent-color: #38bdf8;
 }
 
-.metaGrid,
+.metaGrid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .inputGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -152,8 +168,9 @@
 }
 
 .metaItem {
-  display: grid;
-  gap: 4px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   color: var(--muted);
   font-size: 13px;
 }
@@ -226,7 +243,8 @@
   }
 
   .itemHead {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px;
   }
 
   .partnerItemBody {
@@ -234,7 +252,21 @@
   }
 
   .finalCutToggle {
-    justify-content: space-between;
-    width: 100%;
+    justify-content: flex-end;
+    width: auto;
+    font-size: 14px;
+  }
+
+  .finalCutToggle input {
+    width: 16px;
+    height: 16px;
+  }
+
+  .itemDate {
+    font-size: 12px;
+  }
+
+  .itemTitle {
+    font-size: 15px;
   }
 }

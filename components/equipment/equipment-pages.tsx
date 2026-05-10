@@ -35,6 +35,7 @@ import styles from "./Equipment.module.css";
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type ConfirmMode = "borrow" | "return";
 type EquipmentItemCardTone = "default" | "live";
+type RepairDraftByItemId = Record<string, boolean>;
 type BorrowSelection =
   | {
       kind: "item";
@@ -389,6 +390,8 @@ function EquipmentItemCard({
   onToggle,
   allowBorrowedClick = false,
   tone = "default",
+  repairMode = false,
+  repairDraftByItemId,
 }: {
   item: EquipmentItem;
   displayName?: string;
@@ -397,9 +400,13 @@ function EquipmentItemCard({
   onToggle: () => void;
   allowBorrowedClick?: boolean;
   tone?: EquipmentItemCardTone;
+  repairMode?: boolean;
+  repairDraftByItemId?: RepairDraftByItemId;
 }) {
   const borrowed = Boolean(loanItem);
-  const repairing = item.isUnderRepair;
+  const repairTarget = repairDraftByItemId?.[item.id] ?? item.isUnderRepair;
+  const repairing = repairMode ? repairTarget : item.isUnderRepair;
+  const repairChanged = repairMode && repairTarget !== item.isUnderRepair;
   return (
     <button
       type="button"
@@ -410,14 +417,21 @@ function EquipmentItemCard({
         selected && tone === "live" ? styles.itemCardSelectedLive : "",
         borrowed ? styles.itemCardBorrowed : "",
         repairing ? styles.itemCardRepairing : "",
+        repairChanged ? styles.itemCardRepairPending : "",
       ].join(" ").trim()}
-      disabled={(borrowed && !allowBorrowedClick) || repairing}
+      disabled={repairMode ? borrowed : (borrowed && !allowBorrowedClick) || repairing}
       onClick={onToggle}
-      aria-pressed={selected}
+      aria-pressed={repairMode ? repairChanged : selected}
     >
       <span className={styles.itemCardTop}>
         <strong>{displayName ?? item.name}</strong>
-        {borrowed || repairing ? <StatusPill borrowed={borrowed} repairing={repairing} /> : null}
+        {repairChanged ? (
+          <span className={`${styles.statusPill} ${repairing ? styles.statusRepairing : styles.statusAvailable}`.trim()}>
+            {repairing ? "수리 예정" : "해제 예정"}
+          </span>
+        ) : borrowed || repairing ? (
+          <StatusPill borrowed={borrowed} repairing={repairing} />
+        ) : null}
       </span>
     </button>
   );
@@ -662,12 +676,16 @@ function renderGroupedItems({
   currentByItemId,
   onToggle,
   itemTone = "default",
+  repairMode = false,
+  repairDraftByItemId,
 }: {
   items: EquipmentItem[];
   selectedIds: string[];
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
   itemTone?: EquipmentItemCardTone;
+  repairMode?: boolean;
+  repairDraftByItemId?: RepairDraftByItemId;
 }) {
   const groups = Array.from(
     items.reduce((map, item) => {
@@ -687,6 +705,8 @@ function renderGroupedItems({
       currentByItemId={currentByItemId}
       onToggle={onToggle}
       itemTone={itemTone}
+      repairMode={repairMode}
+      repairDraftByItemId={repairDraftByItemId}
     />
   ));
 }
@@ -698,6 +718,8 @@ function EquipmentGroupSection({
   currentByItemId,
   onToggle,
   itemTone = "default",
+  repairMode = false,
+  repairDraftByItemId,
 }: {
   groupName: string;
   groupItems: EquipmentItem[];
@@ -705,6 +727,8 @@ function EquipmentGroupSection({
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
   itemTone?: EquipmentItemCardTone;
+  repairMode?: boolean;
+  repairDraftByItemId?: RepairDraftByItemId;
 }) {
   const [expandedVariantKeys, setExpandedVariantKeys] = useState<string[]>([]);
   const entries = useMemo(() => {
@@ -762,6 +786,8 @@ function EquipmentGroupSection({
                 loanItem={currentByItemId.get(entry.item.id)}
                 onToggle={() => onToggle(entry.item.id)}
                 tone={itemTone}
+                repairMode={repairMode}
+                repairDraftByItemId={repairDraftByItemId}
               />
             );
           }
@@ -803,6 +829,8 @@ function EquipmentGroupSection({
                         loanItem={currentByItemId.get(item.id)}
                         onToggle={() => onToggle(item.id)}
                         tone={itemTone}
+                        repairMode={repairMode}
+                        repairDraftByItemId={repairDraftByItemId}
                       />
                     ))}
                   </div>
@@ -821,11 +849,15 @@ function CameraGroups({
   selectedIds,
   currentByItemId,
   onToggle,
+  repairMode = false,
+  repairDraftByItemId,
 }: {
   items: EquipmentItem[];
   selectedIds: string[];
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
+  repairMode?: boolean;
+  repairDraftByItemId?: RepairDraftByItemId;
 }) {
   const [expandedBatteryAnchors, setExpandedBatteryAnchors] = useState<Record<string, string>>({});
   const familyNames = ["FX3", "5D", "GH4"];
@@ -848,6 +880,10 @@ function CameraGroups({
   }, new Map<string, EquipmentItem[]>());
 
   const handleFamilyBodyToggle = (familyName: string, item: EquipmentItem, hasAccessoryItems: boolean) => {
+    if (repairMode) {
+      onToggle(item.id);
+      return;
+    }
     if (!currentByItemId.has(item.id)) {
       onToggle(item.id);
     }
@@ -864,6 +900,10 @@ function CameraGroups({
   };
 
   const handleStandaloneToggle = (item: EquipmentItem) => {
+    if (repairMode) {
+      onToggle(item.id);
+      return;
+    }
     const batteryKey = getStandaloneCameraBatteryKey(item);
     const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) : undefined;
     if (!currentByItemId.has(item.id)) {
@@ -915,6 +955,8 @@ function CameraGroups({
                             loanItem={currentByItemId.get(item.id)}
                             onToggle={() => handleFamilyBodyToggle(familyName, item, hasAccessoryItems)}
                             allowBorrowedClick={hasAccessoryItems}
+                            repairMode={repairMode}
+                            repairDraftByItemId={repairDraftByItemId}
                           />
                         </Fragment>
                       );
@@ -923,7 +965,7 @@ function CameraGroups({
                 </section>
               ) : null}
               {expandedBodyId && hasAccessoryItems
-                ? renderGroupedItems({ items: [...otherItems, ...batteryItems], selectedIds, currentByItemId, onToggle })
+                ? renderGroupedItems({ items: [...otherItems, ...batteryItems], selectedIds, currentByItemId, onToggle, repairMode, repairDraftByItemId })
                 : null}
             </div>
           </section>
@@ -950,6 +992,8 @@ function CameraGroups({
                         loanItem={currentByItemId.get(item.id)}
                         onToggle={() => handleStandaloneToggle(item)}
                         allowBorrowedClick={batteryItems.length > 0}
+                        repairMode={repairMode}
+                        repairDraftByItemId={repairDraftByItemId}
                       />
                       {showBatteries ? (
                         <div key={`${item.id}-batteries`} className={styles.inlineBatteryPanel}>
@@ -965,6 +1009,8 @@ function CameraGroups({
                                 selected={selectedIds.includes(batteryItem.id)}
                                 loanItem={currentByItemId.get(batteryItem.id)}
                                 onToggle={() => onToggle(batteryItem.id)}
+                                repairMode={repairMode}
+                                repairDraftByItemId={repairDraftByItemId}
                               />
                             ))}
                           </div>
@@ -976,7 +1022,7 @@ function CameraGroups({
               </div>
             </section>
             {leftoverItems.length > 0
-              ? renderGroupedItems({ items: leftoverItems, selectedIds, currentByItemId, onToggle })
+              ? renderGroupedItems({ items: leftoverItems, selectedIds, currentByItemId, onToggle, repairMode, repairDraftByItemId })
               : null}
           </div>
         </section>
@@ -992,6 +1038,8 @@ function LiveEquipmentGroups({
   onToggle,
   selectedTrsValues,
   onTrsToggle,
+  repairMode = false,
+  repairDraftByItemId,
 }: {
   items: EquipmentItem[];
   selectedIds: string[];
@@ -999,6 +1047,8 @@ function LiveEquipmentGroups({
   onToggle: (itemId: string) => void;
   selectedTrsValues: string[];
   onTrsToggle: (trs: string) => void;
+  repairMode?: boolean;
+  repairDraftByItemId?: RepairDraftByItemId;
 }) {
   const [expandedTvuId, setExpandedTvuId] = useState<string | null>(null);
   const [expandedTrsTvuId, setExpandedTrsTvuId] = useState<string | null>(null);
@@ -1008,6 +1058,10 @@ function LiveEquipmentGroups({
   const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
+    if (repairMode) {
+      onToggle(item.id);
+      return;
+    }
     const selected = selectedIds.includes(item.id);
     if (!currentByItemId.has(item.id)) {
       onToggle(item.id);
@@ -1038,6 +1092,8 @@ function LiveEquipmentGroups({
                     onToggle={() => handleTvuToggle(item)}
                     allowBorrowedClick={tvuAccessoryItems.length > 0}
                     tone="live"
+                    repairMode={repairMode}
+                    repairDraftByItemId={repairDraftByItemId}
                   />
                   {showAccessories ? (
                     <div className={styles.inlineBatteryPanel}>
@@ -1069,6 +1125,8 @@ function LiveEquipmentGroups({
                             loanItem={currentByItemId.get(accessoryItem.id)}
                             onToggle={() => onToggle(accessoryItem.id)}
                             tone="live"
+                            repairMode={repairMode}
+                            repairDraftByItemId={repairDraftByItemId}
                           />
                         ))}
                       </div>
@@ -1100,7 +1158,7 @@ function LiveEquipmentGroups({
           </div>
         </section>
       ) : null}
-      {otherItems.length > 0 ? renderGroupedItems({ items: otherItems, selectedIds, currentByItemId, onToggle, itemTone: "live" }) : null}
+      {otherItems.length > 0 ? renderGroupedItems({ items: otherItems, selectedIds, currentByItemId, onToggle, itemTone: "live", repairMode, repairDraftByItemId }) : null}
     </div>
   );
 }
@@ -1119,6 +1177,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [confirmMode, setConfirmMode] = useState<ConfirmMode | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
   const [liveDetails, setLiveDetails] = useState<LiveLoanDetails>(liveDetailEmpty);
+  const [repairMode, setRepairMode] = useState(false);
+  const [repairDraftByItemId, setRepairDraftByItemId] = useState<RepairDraftByItemId>({});
 
   const isEngSetPage = category === "eng_set";
   const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
@@ -1225,15 +1285,19 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     () => new Map(profiles.map((profile) => [profile.id, profileToBorrowSelection(profile)] as const)),
     [profiles],
   );
-  const selectedRepairableItemIds = useMemo(() => (
-    selectedItemSelections
-      .filter((selection) => {
-        if (currentByItemId.has(selection.id)) return false;
-        const item = itemById.get(selection.id);
-        return !item?.isUnderRepair;
+  const repairChangeEntries = useMemo(() => (
+    Object.entries(repairDraftByItemId)
+      .map(([itemId, targetRepairStatus]) => {
+        const item = itemById.get(itemId);
+        if (!item) return null;
+        if (currentByItemId.has(itemId)) return null;
+        if (item.isUnderRepair === targetRepairStatus) return null;
+        return { itemId, targetRepairStatus };
       })
-      .map((selection) => selection.id)
-  ), [currentByItemId, itemById, selectedItemSelections]);
+      .filter((entry): entry is { itemId: string; targetRepairStatus: boolean } => Boolean(entry))
+  ), [currentByItemId, itemById, repairDraftByItemId]);
+
+  const repairChangeCount = repairChangeEntries.length;
 
   useEffect(() => {
     if (loading || selectedEntries.length === 0) return;
@@ -1306,6 +1370,44 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     });
   };
 
+  const toggleRepairDraft = (itemId: string) => {
+    const item = itemById.get(itemId);
+    if (!item) return;
+    if (currentByItemId.has(itemId)) {
+      setMessage({ tone: "note", text: "대여중인 장비는 수리 상태를 변경할 수 없습니다." });
+      return;
+    }
+
+    setRepairDraftByItemId((current) => {
+      const currentTarget = current[itemId] ?? item.isUnderRepair;
+      const nextTarget = !currentTarget;
+      const next = { ...current };
+      if (nextTarget === item.isUnderRepair) {
+        delete next[itemId];
+        return next;
+      }
+      next[itemId] = nextTarget;
+      return next;
+    });
+  };
+
+  const openRepairMode = () => {
+    if (!canManageRepair) {
+      setMessage({ tone: "warn", text: "장비 수리 처리 권한이 없습니다." });
+      return;
+    }
+    setRepairMode(true);
+    setRepairDraftByItemId({});
+    setConfirmMode(null);
+    setMessage({ tone: "note", text: "수리 상태를 바꿀 장비를 선택한 뒤 확인을 누르세요." });
+  };
+
+  const cancelRepairMode = () => {
+    setRepairMode(false);
+    setRepairDraftByItemId({});
+    setMessage(null);
+  };
+
   const openBorrowDialog = () => {
     if (!canMutate) {
       setMessage({ tone: "warn", text: "읽기 전용 계정은 장비 대여/반납을 할 수 없습니다." });
@@ -1332,24 +1434,31 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     setConfirmMode("return");
   };
 
-  const handleRepair = async () => {
+  const confirmRepair = async () => {
     if (!canManageRepair) {
       setMessage({ tone: "warn", text: "장비 수리 처리 권한이 없습니다." });
       return;
     }
 
-    if (selectedRepairableItemIds.length === 0) {
-      setMessage({ tone: "note", text: "수리 처리할 장비를 선택해 주세요." });
+    if (repairChangeEntries.length === 0) {
+      setMessage({ tone: "note", text: "변경할 수리 상태가 없습니다." });
       return;
     }
 
+    const repairItemIds = repairChangeEntries.filter((entry) => entry.targetRepairStatus).map((entry) => entry.itemId);
+    const releaseItemIds = repairChangeEntries.filter((entry) => !entry.targetRepairStatus).map((entry) => entry.itemId);
+
     setActionPending(true);
     try {
-      await setEquipmentItemsRepairStatus(selectedRepairableItemIds, true);
-      setMessage({ tone: "ok", text: "선택한 장비를 수리중으로 처리했습니다." });
-      updateBorrowSelections((current) => current.filter((selection) => (
-        selection.kind !== "item" || !selectedRepairableItemIds.includes(selection.id)
-      )));
+      if (repairItemIds.length > 0) {
+        await setEquipmentItemsRepairStatus(repairItemIds, true);
+      }
+      if (releaseItemIds.length > 0) {
+        await setEquipmentItemsRepairStatus(releaseItemIds, false);
+      }
+      setMessage({ tone: "ok", text: "선택한 장비의 수리 상태를 저장했습니다." });
+      setRepairMode(false);
+      setRepairDraftByItemId({});
       await load();
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "수리 처리에 실패했습니다." });
@@ -1409,21 +1518,36 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
         <div className={`panel-pad ${styles.sectionStack}`}>
           <div className={styles.actionBar}>
             <div className={styles.actionSummary}>
-              <strong>{selectedIds.length}개 선택됨</strong>
-              <span className="muted">대여중/수리중 장비는 선택할 수 없습니다.</span>
+              <strong>{repairMode ? `${repairChangeCount}개 변경 예정` : `${selectedIds.length}개 선택됨`}</strong>
+              <span className="muted">
+                {repairMode ? "장비를 클릭해 수리중/해제를 선택한 뒤 확인을 누르세요." : "대여중/수리중 장비는 선택할 수 없습니다."}
+              </span>
             </div>
             <div className={styles.actionButtons}>
-              <button type="button" className="btn primary" disabled={!canMutate || selectedIds.length === 0 || actionPending} onClick={openBorrowDialog}>
-                대여하기
-              </button>
-              {canManageRepair ? (
-                <button type="button" className={`btn ${styles.repairButton}`} disabled={selectedRepairableItemIds.length === 0 || actionPending} onClick={handleRepair}>
-                  수리
-                </button>
-              ) : null}
-              <button type="button" className="btn" disabled={!canMutate || returnableItems.length === 0 || actionPending} onClick={openReturnDialog}>
-                반납하기
-              </button>
+              {repairMode ? (
+                <>
+                  <button type="button" className="btn primary" disabled={repairChangeCount === 0 || actionPending} onClick={confirmRepair}>
+                    확인
+                  </button>
+                  <button type="button" className="btn" disabled={actionPending} onClick={cancelRepairMode}>
+                    취소
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="btn primary" disabled={!canMutate || selectedIds.length === 0 || actionPending} onClick={openBorrowDialog}>
+                    대여하기
+                  </button>
+                  {canManageRepair ? (
+                    <button type="button" className={`btn ${styles.repairButton}`} disabled={actionPending} onClick={openRepairMode}>
+                      수리
+                    </button>
+                  ) : null}
+                  <button type="button" className="btn" disabled={!canMutate || returnableItems.length === 0 || actionPending} onClick={openReturnDialog}>
+                    반납하기
+                  </button>
+                </>
+              )}
             </div>
           </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
@@ -1434,24 +1558,33 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
               {sharedEngSetItems.map((item) => {
                 const loanItem = currentByItemId.get(item.id);
                 const selected = selectedIds.includes(item.id);
-                const repairing = item.isUnderRepair;
+                const repairTarget = repairDraftByItemId[item.id] ?? item.isUnderRepair;
+                const repairChanged = repairMode && repairTarget !== item.isUnderRepair;
+                const repairing = repairMode ? repairTarget : item.isUnderRepair;
                 return (
                   <button
                     key={item.id}
                     type="button"
                     className={[
                       styles.memberCard,
-                      selected ? styles.itemCardSelected : "",
+                      selected && !repairMode ? styles.itemCardSelected : "",
                       loanItem ? styles.itemCardBorrowed : "",
                       repairing ? styles.itemCardRepairing : "",
+                      repairChanged ? styles.itemCardRepairPending : "",
                     ].join(" ").trim()}
-                    disabled={Boolean(loanItem) || repairing}
-                    onClick={() => toggleSelection(item.id)}
-                    aria-pressed={selected}
+                    disabled={Boolean(loanItem) || (!repairMode && repairing)}
+                    onClick={() => (repairMode ? toggleRepairDraft(item.id) : toggleSelection(item.id))}
+                    aria-pressed={repairMode ? repairChanged : selected}
                   >
                     <span className={styles.itemCardTop}>
                       <strong>{item.name}</strong>
-                      <StatusPill borrowed={Boolean(loanItem)} repairing={repairing} />
+                      {repairChanged ? (
+                        <span className={`${styles.statusPill} ${repairing ? styles.statusRepairing : styles.statusAvailable}`.trim()}>
+                          {repairing ? "수리 예정" : "해제 예정"}
+                        </span>
+                      ) : (
+                        <StatusPill borrowed={Boolean(loanItem)} repairing={repairing} />
+                      )}
                     </span>
                     {loanItem ? (
                       <span className={styles.borrowedMeta}>{loanItem.loan.borrowerName} · {formatDateTime(loanItem.borrowedAt)}</span>
@@ -1472,7 +1605,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                       loanItem ? styles.itemCardBorrowed : "",
                       badges.length > 0 ? styles.memberCardHighlighted : "",
                     ].join(" ").trim()}
-                    disabled={Boolean(loanItem)}
+                    disabled={repairMode || Boolean(loanItem)}
                     onClick={() => toggleSelection(profile.id)}
                     aria-pressed={selected}
                   >
@@ -1491,19 +1624,35 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
               })}
             </div>
           ) : category === "camera_lens" ? (
-            <CameraGroups items={items} selectedIds={selectedIds} currentByItemId={currentByItemId} onToggle={toggleSelection} />
+            <CameraGroups
+              items={items}
+              selectedIds={repairMode ? [] : selectedIds}
+              currentByItemId={currentByItemId}
+              onToggle={repairMode ? toggleRepairDraft : toggleSelection}
+              repairMode={repairMode}
+              repairDraftByItemId={repairDraftByItemId}
+            />
           ) : category === "live" ? (
             <LiveEquipmentGroups
               items={items}
-              selectedIds={selectedIds}
+              selectedIds={repairMode ? [] : selectedIds}
               currentByItemId={currentByItemId}
               selectedTrsValues={selectedTrsValues}
               onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
-              onToggle={toggleSelection}
+              onToggle={repairMode ? toggleRepairDraft : toggleSelection}
+              repairMode={repairMode}
+              repairDraftByItemId={repairDraftByItemId}
             />
           ) : (
             <div className={styles.sectionStack}>
-              {renderGroupedItems({ items, selectedIds, currentByItemId, onToggle: toggleSelection })}
+              {renderGroupedItems({
+                items,
+                selectedIds: repairMode ? [] : selectedIds,
+                currentByItemId,
+                onToggle: repairMode ? toggleRepairDraft : toggleSelection,
+                repairMode,
+                repairDraftByItemId,
+              })}
             </div>
           )}
         </div>

@@ -375,6 +375,11 @@
   background: rgba(113, 63, 18, 0.2);
 }
 
+.itemCardRepairPending {
+  outline: 2px solid rgba(96, 165, 250, 0.42);
+  outline-offset: 2px;
+}
+
 :global(html[data-theme="light"]) .itemCardBorrowed {
   border-color: rgba(220, 38, 38, 0.28);
   background: #fee2e2;

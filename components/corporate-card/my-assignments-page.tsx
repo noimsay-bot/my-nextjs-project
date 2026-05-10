@@ -120,10 +120,10 @@ export function MyAssignmentsPage() {
           <div className={styles.list}>
             {Array.from(grouped.entries()).map(([dateKey, dayItems]) => (
               <section key={dateKey} className={styles.dayBlock}>
-                <h2 className={styles.dayTitle}>{formatDateLabel(dateKey)}</h2>
                 {dayItems.map((item) => (
                   <article key={item.scheduleItemId} className={`${styles.itemCard} ${styles.myItemCard}`}>
                     <div className={styles.itemHead}>
+                      <span className={styles.itemDate}>{formatDateLabel(dateKey)}</span>
                       <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
                       <label className={styles.finalCutToggle}>
                         <span>{finalCutStatus[item.scheduleItemId] ? "정제본 생성완료" : "정제본"}</span>
