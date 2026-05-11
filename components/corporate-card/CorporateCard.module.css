@@ -167,6 +167,12 @@
   gap: 10px;
 }
 
+.myEditGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .metaItem {
   display: inline-flex;
   align-items: baseline;
@@ -205,6 +211,29 @@
   padding: 0 12px;
 }
 
+.memoEditor {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.memoTextarea {
+  min-height: 62px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.memoActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -233,11 +262,16 @@
     width: 100%;
   }
 
+  .myEditGrid {
+    grid-template-columns: 1fr;
+  }
+
   .autoSaveStatus {
     justify-self: start;
   }
 
-  .actions > button {
+  .actions > button,
+  .memoActions > button {
     flex: 1 1 130px;
     min-height: 44px;
   }
