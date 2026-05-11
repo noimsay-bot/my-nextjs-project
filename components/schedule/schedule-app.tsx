@@ -578,6 +578,13 @@ function describeRequestSummary(request: ScheduleChangeRequest) {
   return `${labels.join(" → ")} → ${labels[0]}`;
 }
 
+function formatRequestHistoryMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split("-");
+  const monthNumber = Number(month);
+  if (!year || !Number.isFinite(monthNumber)) return monthKey;
+  return `${year}년 ${monthNumber}월`;
+}
+
 export function ScheduleApp() {
   const [state, setState] = useState<ScheduleState>(defaultScheduleState);
   const [message, setMessage] = useState<MessageState | null>(null);
@@ -592,6 +599,8 @@ export function ScheduleApp() {
   const [hasPreGenerateBackup, setHasPreGenerateBackup] = useState(false);
   const [originalPreviewSnapshot, setOriginalPreviewSnapshot] = useState<SnapshotItem | null>(null);
   const [requests, setRequests] = useState<ScheduleChangeRequest[]>([]);
+  const [requestHistoryOpen, setRequestHistoryOpen] = useState(false);
+  const [requestHistoryMonthKey, setRequestHistoryMonthKey] = useState("");
   const [addPersonDialog, setAddPersonDialog] = useState<AddPersonDialogState | null>(null);
   const [addPersonName, setAddPersonName] = useState("");
   const [addPersonVacationType, setAddPersonVacationType] = useState<VacationType>("연차");
@@ -1032,6 +1041,28 @@ export function ScheduleApp() {
     () => requests.filter((item) => item.status !== "pending"),
     [requests],
   );
+  const requestHistoryMonthOptions = useMemo(
+    () => Array.from(new Set(resolvedRequests.map((item) => item.monthKey))).sort((left, right) => right.localeCompare(left)),
+    [resolvedRequests],
+  );
+  const activeRequestHistoryMonthKey = requestHistoryMonthKey || requestHistoryMonthOptions[0] || "";
+  const visibleResolvedRequests = useMemo(
+    () => resolvedRequests.filter((item) => !activeRequestHistoryMonthKey || item.monthKey === activeRequestHistoryMonthKey),
+    [activeRequestHistoryMonthKey, resolvedRequests],
+  );
+
+  useEffect(() => {
+    if (requestHistoryMonthOptions.length === 0) {
+      setRequestHistoryMonthKey("");
+      return;
+    }
+
+    setRequestHistoryMonthKey((current) => {
+      if (current && requestHistoryMonthOptions.includes(current)) return current;
+      if (visibleMonthKey && requestHistoryMonthOptions.includes(visibleMonthKey)) return visibleMonthKey;
+      return requestHistoryMonthOptions[0];
+    });
+  }, [requestHistoryMonthOptions, visibleMonthKey]);
 
   const printVisibleSchedule = () => {
     if (!visibleSchedule) return;
@@ -1775,19 +1806,20 @@ export function ScheduleApp() {
                                 const result = await resolveScheduleChangeRequest(request.id, "accepted", session?.username ?? "관리자");
                                 await refreshRouteData({ includeRequests: true });
                                 if (!result.ok) {
-                                  setMessage({ tone: "warn", text: "근무 변경 요청 승인에 실패했습니다." });
+                                  setMessage({ tone: "warn", text: "근무 변경 요청 수락에 실패했습니다." });
                                   return;
                                 }
+                                setRequestHistoryOpen(false);
                                 setMessage({
                                   tone: result.applied ? "ok" : "warn",
                                   text: result.applied
-                                    ? "근무 변경 요청을 승인했고 적용 기록도 저장했습니다."
-                                    : "근무 변경 요청은 승인했지만 실제 반영은 실패했습니다.",
+                                    ? "근무 변경 요청을 수락했고 처리 기록에 저장했습니다."
+                                    : "근무 변경 요청은 수락했지만 실제 반영은 실패했습니다.",
                                 });
                               })();
                             }}
                           >
-                            승인
+                            수락
                           </button>
                           <button
                             className="btn"
@@ -1796,14 +1828,15 @@ export function ScheduleApp() {
                                 const result = await resolveScheduleChangeRequest(request.id, "rejected", session?.username ?? "관리자");
                                 await loadRequests();
                                 if (!result.ok) {
-                                  setMessage({ tone: "warn", text: "근무 변경 요청 거절에 실패했습니다." });
+                                  setMessage({ tone: "warn", text: "근무 변경 요청 거부에 실패했습니다." });
                                   return;
                                 }
-                                setMessage({ tone: "note", text: "근무 변경 요청을 거절했습니다." });
+                                setRequestHistoryOpen(false);
+                                setMessage({ tone: "note", text: "근무 변경 요청을 거부하고 처리 기록에 저장했습니다." });
                               })();
                             }}
                           >
-                            거절
+                            거부
                           </button>
                           <button
                             className="btn"
@@ -1832,110 +1865,146 @@ export function ScheduleApp() {
                 )}
 
                 <div style={{ display: "grid", gap: 10 }}>
-                  <strong>처리 기록</strong>
-                  {resolvedRequests.length > 0 ? (
-                    resolvedRequests.map((request) => (
-                      <div
-                        key={`history-${request.id}`}
-                        style={{
-                          display: "grid",
-                          gap: 10,
-                          padding: 12,
-                          borderRadius: 16,
-                          border: "1px solid var(--line)",
-                          background: "rgba(255,255,255,.03)",
-                        }}
-                      >
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <strong>
-                            {request.requesterName} ·{" "}
-                            {request.status === "accepted"
-                              ? "승인"
-                              : request.status === "rolledBack"
-                                ? "수락 취소"
-                                : "거절"}
-                          </strong>
-                          <span className="muted">{describeRequestSummary(request)}</span>
-                          {request.hasConflictWarning ? (
-                            <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 12 }}>
-                              변경시 충돌이 발생합니다.
-                            </span>
-                          ) : null}
-                          <span className="muted">
-                            요청 {request.createdAt}
-                            {request.resolvedAt ? ` / 처리 ${request.resolvedAt}` : ""}
-                            {request.rolledBackAt ? ` / 롤백 ${request.rolledBackAt}` : ""}
-                          </span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                    <strong>처리 기록</strong>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => setRequestHistoryOpen((current) => !current)}
+                    >
+                      {requestHistoryOpen ? "기록 닫기" : "기록보기"}
+                      {resolvedRequests.length > 0 ? ` (${resolvedRequests.length})` : ""}
+                    </button>
+                  </div>
+
+                  {requestHistoryOpen ? (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {requestHistoryMonthOptions.length > 0 ? (
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span className="muted" style={{ fontWeight: 800 }}>월 선택</span>
+                          <select
+                            className="field-select"
+                            value={activeRequestHistoryMonthKey}
+                            onChange={(event) => setRequestHistoryMonthKey(event.target.value)}
+                          >
+                            {requestHistoryMonthOptions.map((monthKey) => (
+                              <option key={monthKey} value={monthKey}>
+                                {formatRequestHistoryMonthLabel(monthKey)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+
+                      {visibleResolvedRequests.length > 0 ? (
+                        visibleResolvedRequests.map((request) => (
+                          <div
+                            key={`history-${request.id}`}
+                            style={{
+                              display: "grid",
+                              gap: 10,
+                              padding: 12,
+                              borderRadius: 16,
+                              border: "1px solid var(--line)",
+                              background: "rgba(255,255,255,.03)",
+                            }}
+                          >
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <strong>
+                                {request.requesterName} ·{" "}
+                                {request.status === "accepted"
+                                  ? "수락"
+                                  : request.status === "rolledBack"
+                                    ? "수락 취소"
+                                    : "거부"}
+                              </strong>
+                              <span className="muted">{describeRequestSummary(request)}</span>
+                              {request.hasConflictWarning ? (
+                                <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 12 }}>
+                                  변경시 충돌이 발생합니다.
+                                </span>
+                              ) : null}
+                              <span className="muted">
+                                요청 {request.createdAt}
+                                {request.resolvedAt ? ` / 처리 ${request.resolvedAt}` : ""}
+                                {request.rolledBackAt ? ` / 롤백 ${request.rolledBackAt}` : ""}
+                              </span>
+                            </div>
+                            {request.status === "accepted" ? (
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  className="btn"
+                                  onClick={() => {
+                                    void (async () => {
+                                      const result = await resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
+                                      await refreshRouteData({ includeRequests: true });
+                                      if (!result.ok) {
+                                        setMessage({ tone: "warn", text: "근무 변경 수락 취소에 실패했습니다." });
+                                        return;
+                                      }
+                                      setMessage({
+                                        tone: result.applied ? "note" : "warn",
+                                        text: result.applied
+                                          ? "수락된 근무 변경을 취소하고 원래 상태로 되돌렸습니다."
+                                          : "수락 취소 기록은 남겼지만 실제 롤백은 실패했습니다.",
+                                      });
+                                    })();
+                                  }}
+                                >
+                                  수락 취소
+                                </button>
+                                <button
+                                  className="btn"
+                                  onClick={() => {
+                                    const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
+                                    if (!ok) return;
+                                    void (async () => {
+                                      const result = await deleteScheduleChangeRequest(request.id);
+                                      await loadRequests();
+                                      if (!result.ok) {
+                                        setMessage({ tone: "warn", text: "근무 변경 요청 기록 삭제에 실패했습니다." });
+                                        return;
+                                      }
+                                      setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                                    })();
+                                  }}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  className="btn"
+                                  onClick={() => {
+                                    const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
+                                    if (!ok) return;
+                                    void (async () => {
+                                      const result = await deleteScheduleChangeRequest(request.id);
+                                      await loadRequests();
+                                      if (!result.ok) {
+                                        setMessage({ tone: "warn", text: "근무 변경 요청 기록 삭제에 실패했습니다." });
+                                        return;
+                                      }
+                                      setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
+                                    })();
+                                  }}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="status note">
+                          {activeRequestHistoryMonthKey
+                            ? `${formatRequestHistoryMonthLabel(activeRequestHistoryMonthKey)} 처리 기록은 없습니다.`
+                            : "처리 기록은 아직 없습니다."}
                         </div>
-                        {request.status === "accepted" ? (
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            <button
-                              className="btn"
-                              onClick={() => {
-                                void (async () => {
-                                  const result = await resolveScheduleChangeRequest(request.id, "rolledBack", session?.username ?? "관리자");
-                                  await refreshRouteData({ includeRequests: true });
-                                  if (!result.ok) {
-                                    setMessage({ tone: "warn", text: "근무 변경 수락 취소에 실패했습니다." });
-                                    return;
-                                  }
-                                  setMessage({
-                                    tone: result.applied ? "note" : "warn",
-                                    text: result.applied
-                                      ? "승인된 근무 변경을 취소하고 원래 상태로 되돌렸습니다."
-                                      : "수락 취소 기록은 남겼지만 실제 롤백은 실패했습니다.",
-                                  });
-                                })();
-                              }}
-                            >
-                              수락 취소
-                            </button>
-                            <button
-                              className="btn"
-                              onClick={() => {
-                                const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
-                                if (!ok) return;
-                                void (async () => {
-                                  const result = await deleteScheduleChangeRequest(request.id);
-                                  await loadRequests();
-                                  if (!result.ok) {
-                                    setMessage({ tone: "warn", text: "근무 변경 요청 기록 삭제에 실패했습니다." });
-                                    return;
-                                  }
-                                  setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
-                                })();
-                              }}
-                            >
-                              삭제
-                            </button>
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            <button
-                              className="btn"
-                              onClick={() => {
-                                const ok = window.confirm("이 근무 수정 요청 기록을 삭제하시겠습니까?");
-                                if (!ok) return;
-                                void (async () => {
-                                  const result = await deleteScheduleChangeRequest(request.id);
-                                  await loadRequests();
-                                  if (!result.ok) {
-                                    setMessage({ tone: "warn", text: "근무 변경 요청 기록 삭제에 실패했습니다." });
-                                    return;
-                                  }
-                                  setMessage({ tone: "note", text: "근무 변경 요청 기록을 삭제했습니다." });
-                                })();
-                              }}
-                            >
-                              삭제
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="status note">처리 기록은 아직 없습니다.</div>
-                  )}
+                      )}
+                    </div>
+                  ) : null}
                 </div>
             </div>
           </div>
