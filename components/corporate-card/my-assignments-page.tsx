@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   fetchMyScheduleAssignmentsWithPartnerInfo,
   saveMyScheduleAssignmentEntry,
@@ -11,7 +11,6 @@ import { formatDateLabel, getCurrentMonthKey } from "@/lib/corporate-card/schedu
 import styles from "./CorporateCard.module.css";
 
 const FINAL_CUT_STATUS_STORAGE_KEY = "corporate-card-final-cut-status-v1";
-const AUTO_SAVE_DELAY_MS = 500;
 
 type MessageState = {
   tone: "note" | "warn";
@@ -88,8 +87,8 @@ export function MyAssignmentsPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [finalCutStatus, setFinalCutStatus] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<MessageState | null>(null);
-  const itemsRef = useRef<MyScheduleAssignmentItem[]>([]);
-  const autoSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftItem, setDraftItem] = useState<MyScheduleAssignmentItem | null>(null);
 
   useEffect(() => {
     setFinalCutStatus(readFinalCutStatus());
@@ -99,10 +98,11 @@ export function MyAssignmentsPage() {
     let cancelled = false;
     setLoading(true);
     setMessage(null);
+    setEditingId(null);
+    setDraftItem(null);
     fetchMyScheduleAssignmentsWithPartnerInfo(monthKey)
       .then((nextItems) => {
         if (cancelled) return;
-        itemsRef.current = nextItems;
         setItems(nextItems);
       })
       .catch((error) => {
@@ -118,13 +118,6 @@ export function MyAssignmentsPage() {
     };
   }, [monthKey]);
 
-  useEffect(() => {
-    return () => {
-      Object.values(autoSaveTimersRef.current).forEach((timer) => clearTimeout(timer));
-      autoSaveTimersRef.current = {};
-    };
-  }, []);
-
   const grouped = useMemo(() => groupByDate(items), [items]);
   const [year, month] = monthKey.split("-");
 
@@ -134,64 +127,53 @@ export function MyAssignmentsPage() {
     window.setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const persistItem = async (item: MyScheduleAssignmentItem) => {
-    const existingTimer = autoSaveTimersRef.current[item.scheduleItemId];
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      delete autoSaveTimersRef.current[item.scheduleItemId];
-    }
+  const startEdit = (item: MyScheduleAssignmentItem) => {
+    setEditingId(item.scheduleItemId);
+    setDraftItem(item);
+    setMessage(null);
+  };
 
+  const cancelEdit = () => {
+    setEditingId(null);
+    setDraftItem(null);
+  };
+
+  const updateDraft = (
+    patch: Partial<MyScheduleAssignmentItem>,
+    options: { memoEdited?: boolean; resetMemo?: boolean } = {},
+  ) => {
+    setDraftItem((current) => {
+      if (!current) return current;
+      const nextMemoCustom = options.resetMemo ? false : options.memoEdited ? true : current.isMemoCustom;
+      return normalizeMyScheduleItem({
+        ...current,
+        ...patch,
+        isMemoCustom: nextMemoCustom,
+      });
+    });
+  };
+
+  const saveDraft = async () => {
+    if (!draftItem) return;
+    const item = draftItem;
     setSavingId(item.scheduleItemId);
     setMessage(null);
     try {
       await saveMyScheduleAssignmentEntry(item);
+      const savedItem = normalizeMyScheduleItem(item);
+      setItems((currentItems) =>
+        currentItems.map((currentItem) =>
+          currentItem.scheduleItemId === savedItem.scheduleItemId ? savedItem : currentItem,
+        ),
+      );
+      setEditingId(null);
+      setDraftItem(null);
       setMessage({ tone: "note", text: "내 일정을 저장했습니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "내 일정을 저장하지 못했습니다." });
     } finally {
       setSavingId((current) => (current === item.scheduleItemId ? null : current));
     }
-  };
-
-  const queueAutoSave = (item: MyScheduleAssignmentItem) => {
-    const existingTimer = autoSaveTimersRef.current[item.scheduleItemId];
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-
-    autoSaveTimersRef.current[item.scheduleItemId] = setTimeout(() => {
-      void persistItem(item);
-    }, AUTO_SAVE_DELAY_MS);
-  };
-
-  const updateItem = (
-    scheduleItemId: string,
-    patch: Partial<MyScheduleAssignmentItem>,
-    options: { memoEdited?: boolean; resetMemo?: boolean } = {},
-  ) => {
-    const nextItems = itemsRef.current.map((item) => {
-      if (item.scheduleItemId !== scheduleItemId) return item;
-      const nextMemoCustom = options.resetMemo ? false : options.memoEdited ? true : item.isMemoCustom;
-      return normalizeMyScheduleItem({
-        ...item,
-        ...patch,
-        isMemoCustom: nextMemoCustom,
-      });
-    });
-    const nextItem = nextItems.find((item) => item.scheduleItemId === scheduleItemId);
-
-    itemsRef.current = nextItems;
-    setItems(nextItems);
-
-    if (nextItem) {
-      queueAutoSave(nextItem);
-    }
-  };
-
-  const saveImmediately = (scheduleItemId: string) => {
-    const item = itemsRef.current.find((currentItem) => currentItem.scheduleItemId === scheduleItemId);
-    if (!item) return;
-    void persistItem(item);
   };
 
   const toggleFinalCutStatus = (item: MyScheduleAssignmentItem, checked: boolean) => {
@@ -232,73 +214,116 @@ export function MyAssignmentsPage() {
           <div className={styles.list}>
             {Array.from(grouped.entries()).map(([dateKey, dayItems]) => (
               <section key={dateKey} className={styles.dayBlock}>
-                {dayItems.map((item) => (
-                  <article key={item.scheduleItemId} className={`${styles.itemCard} ${styles.myItemCard}`}>
-                    <div className={styles.itemHead}>
-                      <span className={styles.itemDate}>{formatDateLabel(dateKey)}</span>
-                      <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
-                      <label className={styles.finalCutToggle}>
-                        <span>{finalCutStatus[item.scheduleItemId] ? "정제본 생성완료" : "정제본"}</span>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(finalCutStatus[item.scheduleItemId])}
-                          onChange={(event) => toggleFinalCutStatus(item, event.target.checked)}
-                        />
-                      </label>
-                    </div>
-                    <div className={styles.myEditGrid}>
-                      <label className={styles.field}>
-                        <span>오디오맨</span>
-                        <input
-                          className="field-input"
-                          value={item.audioManName}
-                          onChange={(event) => updateItem(item.scheduleItemId, { audioManName: event.target.value })}
-                          onBlur={() => saveImmediately(item.scheduleItemId)}
-                        />
-                      </label>
-                      <label className={styles.field}>
-                        <span>수송부</span>
-                        <input
-                          className="field-input"
-                          value={item.seniorName}
-                          onChange={(event) => updateItem(item.scheduleItemId, { seniorName: event.target.value })}
-                          onBlur={() => saveImmediately(item.scheduleItemId)}
-                        />
-                      </label>
-                    </div>
-                    {item.missingFields.length > 0 ? (
-                      <span className={styles.pending}>누락: {item.missingFields.join(", ")}</span>
-                    ) : null}
-                    <div className={styles.memoEditor}>
-                      <textarea
-                        className={`field-input ${styles.memoTextarea}`}
-                        value={item.memoText}
-                        onChange={(event) => updateItem(item.scheduleItemId, { memoText: event.target.value }, { memoEdited: true })}
-                        onBlur={() => saveImmediately(item.scheduleItemId)}
-                        rows={2}
-                      />
-                      <div className={styles.memoActions}>
-                        {savingId === item.scheduleItemId ? <span className={styles.autoSaveStatus}>자동 저장 중</span> : null}
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => updateItem(item.scheduleItemId, {}, { resetMemo: true })}
-                          disabled={!item.isMemoCustom}
-                        >
-                          자동문구
-                        </button>
-                        <button
-                          type="button"
-                          className={`btn primary ${styles.memoCopyButton}`}
-                          onClick={() => copyMemo(item)}
-                          disabled={!item.generatedText}
-                        >
-                          {copiedId === item.scheduleItemId ? "복사됨" : "복사"}
-                        </button>
+                {dayItems.map((item) => {
+                  const isEditing = editingId === item.scheduleItemId;
+                  const displayItem = isEditing && draftItem?.scheduleItemId === item.scheduleItemId ? draftItem : item;
+                  const isSaving = savingId === item.scheduleItemId;
+
+                  return (
+                    <article key={item.scheduleItemId} className={`${styles.itemCard} ${styles.myItemCard}`}>
+                      <div className={styles.itemHead}>
+                        <span className={styles.itemDate}>{formatDateLabel(dateKey)}</span>
+                        <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
+                        <label className={styles.finalCutToggle}>
+                          <span>{finalCutStatus[item.scheduleItemId] ? "정제본 생성완료" : "정제본"}</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(finalCutStatus[item.scheduleItemId])}
+                            onChange={(event) => toggleFinalCutStatus(item, event.target.checked)}
+                          />
+                        </label>
                       </div>
-                    </div>
-                  </article>
-                ))}
+
+                      {isEditing ? (
+                        <>
+                          <div className={styles.myEditGrid}>
+                            <label className={styles.field}>
+                              <span>오디오맨</span>
+                              <input
+                                className="field-input"
+                                value={displayItem.audioManName}
+                                onChange={(event) => updateDraft({ audioManName: event.target.value })}
+                              />
+                            </label>
+                            <label className={styles.field}>
+                              <span>수송부</span>
+                              <input
+                                className="field-input"
+                                value={displayItem.seniorName}
+                                onChange={(event) => updateDraft({ seniorName: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                          {displayItem.missingFields.length > 0 ? (
+                            <span className={styles.pending}>누락: {displayItem.missingFields.join(", ")}</span>
+                          ) : null}
+                          <div className={styles.memoEditor}>
+                            <textarea
+                              className={`field-input ${styles.memoTextarea}`}
+                              value={displayItem.memoText}
+                              onChange={(event) => updateDraft({ memoText: event.target.value }, { memoEdited: true })}
+                              rows={2}
+                            />
+                            <div className={styles.memoActions}>
+                              {isSaving ? <span className={styles.autoSaveStatus}>저장 중</span> : null}
+                              <button
+                                type="button"
+                                className="btn"
+                                onClick={() => updateDraft({}, { resetMemo: true })}
+                                disabled={!displayItem.isMemoCustom || isSaving}
+                              >
+                                자동문구
+                              </button>
+                              <button type="button" className="btn" onClick={cancelEdit} disabled={isSaving}>
+                                취소
+                              </button>
+                              <button type="button" className="btn primary" onClick={saveDraft} disabled={isSaving}>
+                                저장
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className={styles.metaGrid}>
+                            <span className={styles.metaItem}>
+                              오디오맨 <strong>{displayItem.audioManName || "입력 대기"}</strong>
+                            </span>
+                            <span className={styles.metaItem}>
+                              수송부 <strong>{displayItem.seniorName || "입력 대기"}</strong>
+                            </span>
+                          </div>
+                          {displayItem.missingFields.length > 0 ? (
+                            <span className={styles.pending}>누락: {displayItem.missingFields.join(", ")}</span>
+                          ) : null}
+                          <div className={styles.memoBox}>
+                            <p className={styles.memoText} title={displayItem.generatedText}>
+                              {displayItem.generatedText}
+                            </p>
+                            <div className={styles.memoBoxActions}>
+                              <button
+                                type="button"
+                                className="btn"
+                                onClick={() => startEdit(item)}
+                                disabled={Boolean(editingId) || isSaving}
+                              >
+                                수정
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn primary ${styles.memoCopyButton}`}
+                                onClick={() => copyMemo(displayItem)}
+                                disabled={!displayItem.generatedText}
+                              >
+                                {copiedId === item.scheduleItemId ? "복사됨" : "복사"}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </article>
+                  );
+                })}
               </section>
             ))}
           </div>

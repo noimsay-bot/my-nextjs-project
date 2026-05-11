@@ -211,6 +211,14 @@
   padding: 0 12px;
 }
 
+.memoBoxActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .memoEditor {
   display: grid;
   gap: 8px;
@@ -271,6 +279,7 @@
   }
 
   .actions > button,
+  .memoBoxActions > button,
   .memoActions > button {
     flex: 1 1 130px;
     min-height: 44px;
