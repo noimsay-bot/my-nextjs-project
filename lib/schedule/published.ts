@@ -1,5 +1,5 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
-import { normalizeGeneratedSchedule, parseVacationEntry } from "@/lib/schedule/engine";
+import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
@@ -107,14 +107,11 @@ export function normalizePublishedSchedule(schedule: GeneratedSchedule): Generat
     days: normalizedSchedule.days.map((day) => {
       const baseAssignments = normalizeAssignments(day.assignments ?? {});
       const vacationEntries = getPublishedVacationEntries(day, baseAssignments);
-      const vacationNameSet = new Set(
-        vacationEntries.map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean),
-      );
       const assignments = normalizeAssignments(
         Object.fromEntries(
           Object.entries(baseAssignments).map(([category, names]) => [
             category,
-            category === "휴가" ? vacationEntries : names.filter((name) => !vacationNameSet.has(name.trim())),
+            category === "휴가" ? vacationEntries : names,
           ]),
         ) as Record<string, string[]>,
       );

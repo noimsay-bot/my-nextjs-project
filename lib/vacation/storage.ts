@@ -1064,11 +1064,10 @@ function applyVacationEntriesToGeneratedSchedule(
     days: generated.days.map((day) => {
       if (!managedDates.has(day.dateKey)) return day;
       const nextEntries = uniqueNames(approvedMap[day.dateKey] ?? []);
-      const vacationNameSet = new Set(nextEntries.map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean));
       const nextAssignments = Object.fromEntries(
         Object.entries(day.assignments).map(([category, names]) => [
           category,
-          category === "휴가" ? [...nextEntries] : names.filter((name) => !vacationNameSet.has(name.trim())),
+          category === "휴가" ? [...nextEntries] : [...names],
         ]),
       ) as Record<string, string[]>;
       if (nextEntries.length > 0) {

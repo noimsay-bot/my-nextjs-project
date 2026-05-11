@@ -55,7 +55,7 @@ test("general assignments are restored after an edit removes an eligible name", 
   expect(editedTargetDay?.assignments["석근"] ?? []).not.toContain("정상원");
 });
 
-test("vacation entries remove the same person from work assignments", () => {
+test("vacation entries keep same-day fixed work assignments and mark conflicts", () => {
   const generated = generateSchedule({
     ...defaultScheduleState,
     year: 2026,
@@ -77,11 +77,12 @@ test("vacation entries remove the same person from work assignments", () => {
     .flatMap(([, names]) => names);
 
   expect(updatedDay?.assignments["휴가"]).toContain(`연차:${vacationName}`);
-  expect(workAssignments).not.toContain(vacationName);
-  expect(getDayDuplicateNameSet(updatedDay!).has(vacationName)).toBe(false);
+  expect(workAssignments).toContain(vacationName);
+  expect(updatedDay?.conflicts).toContainEqual({ category: "조근", name: vacationName });
+  expect(getDayDuplicateNameSet(updatedDay!).has(vacationName)).toBe(true);
 });
 
-test("published schedule normalization removes vacation people from work assignments", () => {
+test("published schedule normalization removes vacation people from general assignments", () => {
   const generated = generateSchedule({
     ...defaultScheduleState,
     year: 2026,
@@ -104,7 +105,30 @@ test("published schedule normalization removes vacation people from work assignm
   expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(false);
 });
 
-test("schedule state normalization removes vacation people already stored on the day", () => {
+test("published schedule normalization keeps vacation people in fixed work assignments", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const targetDateKey = "2026-06-01";
+  const source = JSON.parse(JSON.stringify(generated)) as typeof generated;
+  const targetDay = source.days.find((day) => day.dateKey === targetDateKey)!;
+  const vacationName = "휴가자";
+
+  targetDay.assignments["연장"] = [vacationName, "근무자"];
+  targetDay.assignments["휴가"] = [`연차:${vacationName}`];
+  targetDay.vacations = [`연차:${vacationName}`];
+
+  const normalized = normalizePublishedSchedule(source);
+  const updatedDay = normalized.days.find((day) => day.dateKey === targetDateKey)!;
+
+  expect(updatedDay.assignments["연장"]).toEqual([vacationName, "근무자"]);
+  expect(updatedDay.assignments["휴가"]).toContain(`연차:${vacationName}`);
+  expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(true);
+});
+
+test("schedule state normalization keeps fixed work conflicts and removes vacation people from general", () => {
   const generated = generateSchedule({
     ...defaultScheduleState,
     year: 2026,
@@ -133,8 +157,17 @@ test("schedule state normalization removes vacation people already stored on the
     .flatMap(([, names]) => names);
 
   expect(updatedDay.assignments["휴가"]).toContain(`연차:${vacationName}`);
-  expect(workAssignments).not.toContain(vacationName);
-  expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(false);
+  expect(updatedDay.assignments["조근"]).toContain(vacationName);
+  expect(updatedDay.assignments["연장"]).toContain(vacationName);
+  expect(updatedDay.assignments["일반"] ?? []).not.toContain(vacationName);
+  expect(workAssignments).toContain(vacationName);
+  expect(updatedDay.conflicts).toEqual(
+    expect.arrayContaining([
+      { category: "조근", name: vacationName },
+      { category: "연장", name: vacationName },
+    ]),
+  );
+  expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(true);
 });
 
 test("general manual additions do not re-add jcheck assignees", () => {

@@ -129,14 +129,6 @@ function normalizeDayVacationAssignments(day: DaySchedule) {
   }
 
   const blockedGeneralNames = getGeneralAssignmentBlockedNames({ ...day, vacations: vacationEntries, assignments });
-  const vacationNameSet = new Set(vacationEntries.map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean));
-
-  if (vacationNameSet.size > 0) {
-    Object.entries(assignments).forEach(([category, names]) => {
-      if (category === "휴가") return;
-      assignments[category] = names.filter((name) => !vacationNameSet.has(name.trim()));
-    });
-  }
 
   if (assignments["일반"] && blockedGeneralNames.size > 0) {
     assignments["일반"] = assignments["일반"].filter((name) => !blockedGeneralNames.has(name.trim()));
@@ -325,15 +317,7 @@ function syncDayVacationsFromState(state: ScheduleState, days: DaySchedule[]) {
 
   days.forEach((day) => {
     const nextVacations = [...(vacationMap[day.dateKey] ?? [])];
-    const vacationNameSet = new Set(getVacationNames(nextVacations));
     day.vacations = nextVacations;
-
-    if (vacationNameSet.size > 0) {
-      Object.entries(day.assignments).forEach(([category, names]) => {
-        if (category === "휴가") return;
-        day.assignments[category] = names.filter((name) => !vacationNameSet.has(name.trim()));
-      });
-    }
 
     if (nextVacations.length > 0) {
       day.assignments["휴가"] = nextVacations;
@@ -962,6 +946,19 @@ function collectConflicts(
       }
     });
   });
+
+  const vacationNameSet = new Set((assignments["휴가"] ?? []).map((entry) => parseVacationEntry(entry).name.trim()).filter(Boolean));
+  if (vacationNameSet.size > 0) {
+    Object.entries(assignments).forEach(([category, names]) => {
+      if (category === "휴가" || category === "일반") return;
+      names.forEach((name) => {
+        const trimmed = name.trim();
+        if (trimmed && vacationNameSet.has(trimmed)) {
+          pushConflict(category, trimmed);
+        }
+      });
+    });
+  }
 
   const categoriesByName = new Map<string, string[]>();
   Object.entries(assignments).forEach(([category, names]) => {
