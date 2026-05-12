@@ -612,8 +612,7 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
     ('camera_lens', 'FX3 렌즈', '24-70mm', 'camera-fx3-lens-24-70mm', 3130, '{"family":"FX3","kind":"lens"}'::jsonb),
     ('camera_lens', 'FX3 렌즈', '70-200mm', 'camera-fx3-lens-70-200mm', 3140, '{"family":"FX3","kind":"lens"}'::jsonb),
     ('camera_lens', 'FX3 렌즈', '28-300mm', 'camera-fx3-lens-28-300mm', 3150, '{"family":"FX3","kind":"lens"}'::jsonb),
-    ('camera_lens', '단독 카메라', 'rx100 1번', 'camera-standalone-rx100-01', 4018, '{"family":"standalone","kind":"camera"}'::jsonb),
-    ('camera_lens', '단독 카메라', '와이어리스', 'camera-standalone-wireless', 4040, '{"family":"standalone","kind":"audio"}'::jsonb),
+    ('camera_lens', '단독 카메라', 'rx100', 'camera-standalone-rx100-01', 4018, '{"family":"standalone","kind":"camera"}'::jsonb),
     ('camera_lens', '단독 카메라', '기타 장비', 'camera-standalone-etc', 4090, '{"family":"standalone","kind":"etc"}'::jsonb),
     ('camera_lens', '드론', '매빅2 프로', 'camera-drone-mavic-2-pro', 4604, '{"family":"drone","kind":"drone"}'::jsonb),
     ('camera_lens', '드론', '매빅 에어', 'camera-drone-mavic-air', 4605, '{"family":"drone","kind":"drone"}'::jsonb),
@@ -656,6 +655,15 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
     4029 + n,
     '{"family":"standalone","kind":"camera","variant_parent":"360"}'::jsonb || jsonb_build_object('variant_label', concat(n, '번'))
   from generate_series(1, 2) as n
+  union all
+  select
+    'camera_lens',
+    '단독 카메라',
+    concat('공용와이어리스 ', n, '번'),
+    case when n = 1 then 'camera-standalone-wireless' else concat('camera-standalone-wireless-', lpad(n::text, 2, '0')) end,
+    4039 + n,
+    '{"family":"standalone","kind":"audio","for":"z-90","variant_parent":"공용와이어리스"}'::jsonb || jsonb_build_object('variant_label', concat(n, '번'))
+  from generate_series(1, 4) as n
   union all
   select
     'camera_lens',

@@ -73,7 +73,6 @@ export interface EquipmentCategoryConfig {
   category: EquipmentCategory;
   title: string;
   eyebrow: string;
-  description: string;
   route: string;
 }
 
@@ -82,28 +81,24 @@ export const equipmentCategoryConfigs = {
     category: "camera_lens",
     title: "카메라/렌즈",
     eyebrow: "CAMERA",
-    description: "바디, 렌즈, 배터리와 단독 카메라를 대여/반납합니다.",
     route: "/equipment/camera",
   },
   light: {
     category: "light",
     title: "조명",
     eyebrow: "LIGHT",
-    description: "조명 장비의 현재 대여 상태와 일별 기록을 확인합니다.",
     route: "/equipment/light",
   },
   eng_set: {
     category: "eng_set",
     title: "ENG SET",
     eyebrow: "ENG SET",
-    description: "회원별 ENG SET을 대여하고 근무표 기준 상태를 함께 확인합니다.",
     route: "/equipment/eng-set",
   },
   live: {
     category: "live",
     title: "라이브장비",
     eyebrow: "LIVE",
-    description: "TVU와 기타 라이브 장비를 대여/반납합니다.",
     route: "/equipment/live",
   },
 } satisfies Record<EquipmentCategory, EquipmentCategoryConfig>;

@@ -44,6 +44,9 @@ type EquipmentItemCardTone = "default" | "live";
 type RepairDraftByItemId = Record<string, boolean>;
 type LiveStatusDraftByItemId = Record<string, LiveLoanDetails>;
 type LiveAccessoryGroupKey = "pin_mic" | "distributor";
+type StandaloneInlineAccessoryEntry =
+  | { type: "item"; key: string; sortOrder: number; item: EquipmentItem }
+  | { type: "variant"; key: string; sortOrder: number; parentLabel: string; items: EquipmentItem[] };
 type BorrowSelection =
   | {
       kind: "item";
@@ -445,13 +448,13 @@ function getStandaloneVariantOptionLabel(item: EquipmentItem) {
   return Number.isFinite(optionNumber) ? `${optionNumber}번` : getVariantLabel(item);
 }
 
-function isStandaloneBatteryItem(item: EquipmentItem) {
-  return getMetadataString(item, "family") === "standalone" && getMetadataString(item, "kind") === "battery";
+function getStandaloneInlineAccessoryKey(item: EquipmentItem) {
+  if (getMetadataString(item, "family") !== "standalone") return "";
+  return getMetadataString(item, "for").toLowerCase();
 }
 
-function getStandaloneBatteryKey(item: EquipmentItem) {
-  const key = getMetadataString(item, "for");
-  return key ? key.toLowerCase() : "";
+function isStandaloneInlineAccessoryItem(item: EquipmentItem) {
+  return getStandaloneInlineAccessoryKey(item) !== "" && getMetadataString(item, "kind") !== "camera";
 }
 
 function getStandaloneCameraBatteryKey(item: EquipmentItem) {
@@ -492,12 +495,10 @@ function EquipmentNav({ activeHref }: { activeHref: string }) {
 function PageHeader({
   eyebrow,
   title,
-  description,
   activeHref,
 }: {
   eyebrow: string;
   title: string;
-  description: string;
   activeHref: string;
 }) {
   return (
@@ -506,7 +507,6 @@ function PageHeader({
         <div className={styles.headerText}>
           <span className="chip">{eyebrow}</span>
           <h1 className="page-title">{title}</h1>
-          <p className={styles.description}>{description}</p>
         </div>
         <EquipmentNav activeHref={activeHref} />
       </div>
@@ -1032,17 +1032,57 @@ function CameraGroups({
   }));
   const familyItemIds = new Set(familyGroups.flatMap((group) => group.items.map((item) => item.id)));
   const nonFamilyItems = items.filter((item) => !familyItemIds.has(item.id));
-  const standaloneBatteryItems = nonFamilyItems.filter(isStandaloneBatteryItem);
-  const standalonePrimaryItems = nonFamilyItems.filter((item) => item.groupName === "단독 카메라");
-  const leftoverItems = nonFamilyItems.filter((item) => item.groupName !== "단독 카메라" && !isStandaloneBatteryItem(item));
-  const batteriesByKey = standaloneBatteryItems.reduce((map, item) => {
-    const key = getStandaloneBatteryKey(item);
-    if (!key) return map;
-    const existing = map.get(key) ?? [];
-    existing.push(item);
-    map.set(key, existing);
-    return map;
-  }, new Map<string, EquipmentItem[]>());
+  const standaloneInlineAccessoryItems = nonFamilyItems.filter(isStandaloneInlineAccessoryItem);
+  const visibleStandaloneInlineAccessoryItems = repairMode ? [] : standaloneInlineAccessoryItems;
+  const standalonePrimaryItems = nonFamilyItems.filter((item) => (
+    item.groupName === "단독 카메라" && (repairMode || !isStandaloneInlineAccessoryItem(item))
+  ));
+  const leftoverItems = nonFamilyItems.filter((item) => item.groupName !== "단독 카메라" && !isStandaloneInlineAccessoryItem(item));
+  const standaloneAccessoryEntriesByKey = useMemo(() => {
+    const entriesByKey = new Map<string, StandaloneInlineAccessoryEntry[]>();
+    const variantGroups = new Map<string, { accessoryKey: string; parentLabel: string; items: EquipmentItem[] }>();
+    const addEntry = (accessoryKey: string, entry: StandaloneInlineAccessoryEntry) => {
+      const existing = entriesByKey.get(accessoryKey) ?? [];
+      existing.push(entry);
+      entriesByKey.set(accessoryKey, existing);
+    };
+
+    visibleStandaloneInlineAccessoryItems.forEach((item) => {
+      const key = getStandaloneInlineAccessoryKey(item);
+      if (!key) return;
+      const parentLabel = getVariantParentLabel(item);
+      if (!parentLabel) {
+        addEntry(key, { type: "item", key: item.id, sortOrder: item.sortOrder, item });
+        return;
+      }
+
+      const variantGroupKey = `${key}:${parentLabel}`;
+      const group = variantGroups.get(variantGroupKey) ?? { accessoryKey: key, parentLabel, items: [] };
+      group.items.push(item);
+      variantGroups.set(variantGroupKey, group);
+    });
+
+    variantGroups.forEach((group) => {
+      const sortedItems = [...group.items].sort((left, right) => (
+        getLiveAccessoryOptionNumber(left) - getLiveAccessoryOptionNumber(right)
+        || left.sortOrder - right.sortOrder
+        || left.name.localeCompare(right.name, "ko")
+      ));
+      addEntry(group.accessoryKey, {
+        type: "variant",
+        key: `standalone-accessory:${group.accessoryKey}:${group.parentLabel}`,
+        sortOrder: sortedItems[0]?.sortOrder ?? 0,
+        parentLabel: group.parentLabel,
+        items: sortedItems,
+      });
+    });
+
+    entriesByKey.forEach((entries, key) => {
+      entriesByKey.set(key, entries.sort((left, right) => left.sortOrder - right.sortOrder || left.key.localeCompare(right.key, "ko")));
+    });
+
+    return entriesByKey;
+  }, [visibleStandaloneInlineAccessoryItems]);
   const standaloneEntries = useMemo(() => {
     const variantGroups = new Map<string, EquipmentItem[]>();
     const entries: Array<
@@ -1110,21 +1150,94 @@ function CameraGroups({
       onToggle(item.id);
       return;
     }
-    const batteryKey = getStandaloneCameraBatteryKey(item);
-    const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) : undefined;
+    const accessoryKey = getStandaloneCameraBatteryKey(item);
+    const accessoryEntries = accessoryKey ? standaloneAccessoryEntriesByKey.get(accessoryKey) : undefined;
     if (!currentByItemId.has(item.id)) {
       onToggle(item.id);
     }
-    if (batteryKey && batteryItems && batteryItems.length > 0) {
+    if (accessoryKey && accessoryEntries && accessoryEntries.length > 0) {
       setExpandedBatteryAnchors((current) => {
-        if (current[batteryKey] !== item.id) {
-          return { ...current, [batteryKey]: item.id };
+        if (current[accessoryKey] !== item.id) {
+          return { ...current, [accessoryKey]: item.id };
         }
-        const { [batteryKey]: _removed, ...next } = current;
+        const { [accessoryKey]: _removed, ...next } = current;
         return next;
       });
     }
   };
+
+  const renderStandaloneAccessoryPanel = (anchorItem: EquipmentItem, entries: StandaloneInlineAccessoryEntry[]) => (
+    <div key={`${anchorItem.id}-accessories`} className={styles.inlineBatteryPanel}>
+      <div className={styles.inlineBatteryHead}>
+        <h4>{anchorItem.name} 옵션</h4>
+        <span>{entries.reduce((total, entry) => total + (entry.type === "variant" ? entry.items.length : 1), 0)}개</span>
+      </div>
+      <div className={styles.inlineBatteryGrid}>
+        {entries.map((entry) => {
+          if (entry.type === "item") {
+            return (
+              <EquipmentItemCard
+                key={entry.key}
+                item={entry.item}
+                selected={selectedIds.includes(entry.item.id)}
+                loanItem={currentByItemId.get(entry.item.id)}
+                onToggle={() => onToggle(entry.item.id)}
+                repairMode={repairMode}
+                repairDraftByItemId={repairDraftByItemId}
+              />
+            );
+          }
+
+          const expanded = expandedStandaloneVariantKeys.includes(entry.key);
+          const selected = entry.items.some((item) => selectedIds.includes(item.id));
+          const summary = getLiveAccessorySummary(entry.items, selectedIds);
+          const borrowedCount = entry.items.filter((item) => currentByItemId.has(item.id)).length;
+          const repairingCount = entry.items.filter((item) => item.isUnderRepair).length;
+          return (
+            <Fragment key={entry.key}>
+              <button
+                type="button"
+                className={[
+                  styles.itemCard,
+                  selected ? styles.itemCardSelected : "",
+                ].join(" ").trim()}
+                onClick={() => toggleStandaloneVariant(entry.key)}
+                aria-expanded={expanded}
+              >
+                <span className={styles.itemCardTop}>
+                  <strong>{entry.parentLabel}</strong>
+                  {summary ? <small>{summary}</small> : null}
+                  {borrowedCount > 0 || repairingCount > 0 ? <StatusPill borrowed={borrowedCount > 0} repairing={repairingCount > 0} /> : null}
+                </span>
+              </button>
+              {expanded ? (
+                <div className={styles.inlineBatteryPanel}>
+                  <div className={styles.inlineBatteryHead}>
+                    <h4>{entry.parentLabel}</h4>
+                    <span>{entry.items.length}개</span>
+                  </div>
+                  <div className={styles.inlineBatteryGrid}>
+                    {entry.items.map((item) => (
+                      <EquipmentItemCard
+                        key={item.id}
+                        item={item}
+                        displayName={getStandaloneVariantOptionLabel(item)}
+                        selected={selectedIds.includes(item.id)}
+                        loanItem={currentByItemId.get(item.id)}
+                        onToggle={() => onToggle(item.id)}
+                        repairMode={repairMode}
+                        repairDraftByItemId={repairDraftByItemId}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <div className={styles.sectionStack}>
@@ -1188,9 +1301,9 @@ function CameraGroups({
               <div className={styles.itemGrid}>
                 {standaloneEntries.map((entry) => {
                   if (entry.type === "item") {
-                    const batteryKey = getStandaloneCameraBatteryKey(entry.item);
-                    const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) ?? [] : [];
-                    const showBatteries = Boolean(batteryKey && expandedBatteryAnchors[batteryKey] === entry.item.id && batteryItems.length > 0);
+                    const accessoryKey = getStandaloneCameraBatteryKey(entry.item);
+                    const accessoryEntries = accessoryKey ? standaloneAccessoryEntriesByKey.get(accessoryKey) ?? [] : [];
+                    const showAccessories = Boolean(accessoryKey && expandedBatteryAnchors[accessoryKey] === entry.item.id && accessoryEntries.length > 0);
                     return (
                       <Fragment key={entry.key}>
                         <EquipmentItemCard
@@ -1198,31 +1311,11 @@ function CameraGroups({
                           selected={selectedIds.includes(entry.item.id)}
                           loanItem={currentByItemId.get(entry.item.id)}
                           onToggle={() => handleStandaloneToggle(entry.item)}
-                          allowBorrowedClick={batteryItems.length > 0}
+                          allowBorrowedClick={accessoryEntries.length > 0}
                           repairMode={repairMode}
                           repairDraftByItemId={repairDraftByItemId}
                         />
-                        {showBatteries ? (
-                          <div key={`${entry.item.id}-batteries`} className={styles.inlineBatteryPanel}>
-                            <div className={styles.inlineBatteryHead}>
-                              <h4>{entry.item.name} 배터리</h4>
-                              <span>{batteryItems.length}개</span>
-                            </div>
-                            <div className={styles.inlineBatteryGrid}>
-                              {batteryItems.map((batteryItem) => (
-                                <EquipmentItemCard
-                                  key={batteryItem.id}
-                                  item={batteryItem}
-                                  selected={selectedIds.includes(batteryItem.id)}
-                                  loanItem={currentByItemId.get(batteryItem.id)}
-                                  onToggle={() => onToggle(batteryItem.id)}
-                                  repairMode={repairMode}
-                                  repairDraftByItemId={repairDraftByItemId}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
+                        {showAccessories ? renderStandaloneAccessoryPanel(entry.item, accessoryEntries) : null}
                       </Fragment>
                     );
                   }
@@ -1257,9 +1350,9 @@ function CameraGroups({
                           </div>
                           <div className={styles.inlineBatteryGrid}>
                             {entry.items.map((item) => {
-                              const batteryKey = getStandaloneCameraBatteryKey(item);
-                              const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) ?? [] : [];
-                              const showBatteries = Boolean(batteryKey && expandedBatteryAnchors[batteryKey] === item.id && batteryItems.length > 0);
+                              const accessoryKey = getStandaloneCameraBatteryKey(item);
+                              const accessoryEntries = accessoryKey ? standaloneAccessoryEntriesByKey.get(accessoryKey) ?? [] : [];
+                              const showAccessories = Boolean(accessoryKey && expandedBatteryAnchors[accessoryKey] === item.id && accessoryEntries.length > 0);
                               return (
                                 <Fragment key={item.id}>
                                   <EquipmentItemCard
@@ -1268,31 +1361,11 @@ function CameraGroups({
                                     selected={selectedIds.includes(item.id)}
                                     loanItem={currentByItemId.get(item.id)}
                                     onToggle={() => handleStandaloneToggle(item)}
-                                    allowBorrowedClick={batteryItems.length > 0}
+                                    allowBorrowedClick={accessoryEntries.length > 0}
                                     repairMode={repairMode}
                                     repairDraftByItemId={repairDraftByItemId}
                                   />
-                                  {showBatteries ? (
-                                    <div key={`${item.id}-batteries`} className={styles.inlineBatteryPanel}>
-                                      <div className={styles.inlineBatteryHead}>
-                                        <h4>{item.name} 배터리</h4>
-                                        <span>{batteryItems.length}개</span>
-                                      </div>
-                                      <div className={styles.inlineBatteryGrid}>
-                                        {batteryItems.map((batteryItem) => (
-                                          <EquipmentItemCard
-                                            key={batteryItem.id}
-                                            item={batteryItem}
-                                            selected={selectedIds.includes(batteryItem.id)}
-                                            loanItem={currentByItemId.get(batteryItem.id)}
-                                            onToggle={() => onToggle(batteryItem.id)}
-                                            repairMode={repairMode}
-                                            repairDraftByItemId={repairDraftByItemId}
-                                          />
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ) : null}
+                                  {showAccessories ? renderStandaloneAccessoryPanel(item, accessoryEntries) : null}
                                 </Fragment>
                               );
                             })}
@@ -1869,7 +1942,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   return (
     <section className={styles.page}>
-      <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} activeHref={config.route} />
+      <PageHeader eyebrow={config.eyebrow} title={config.title} activeHref={config.route} />
 
       <article className="panel">
         <div className={`panel-pad ${styles.sectionStack}`}>
@@ -2084,7 +2157,6 @@ export function EquipmentStatusPage() {
       <PageHeader
         eyebrow="STATUS"
         title="장비대여현황"
-        description="현재 대여 중인 장비를 대여자별로 확인하고 일별 전체 기록을 봅니다."
         activeHref="/equipment/status"
       />
       <article className="panel">
@@ -2246,7 +2318,7 @@ export function LiveEquipmentStatusPage() {
           <EquipmentNav activeHref="/equipment/live-status" />
         </div>
         <div className={styles.liveStatusToolbar}>
-          <p>{editMode ? (hasDirtyDrafts ? "확인 전 변경사항이 있습니다." : "수정할 값을 입력한 뒤 확인하세요.") : "대여 정보와 수동 입력값을 함께 표시합니다."}</p>
+          {editMode ? <p>{hasDirtyDrafts ? "확인 전 변경사항이 있습니다." : "수정할 값을 입력한 뒤 확인하세요."}</p> : null}
           {canManageLiveStatus ? (
             <div className={styles.liveStatusActions}>
               {editMode ? (
