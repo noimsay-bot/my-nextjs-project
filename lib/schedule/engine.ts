@@ -22,6 +22,8 @@ import {
   GeneratedSchedule,
   GenerationResult,
   PointerState,
+  ScheduleBigEvent,
+  ScheduleBigEventAssignment,
   ScheduleAssignmentNameTag,
   ScheduleState,
   SnapshotItem,
@@ -203,9 +205,11 @@ function isBlankTemplateSchedule(schedule: GeneratedSchedule | null | undefined)
 }
 
 export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+  const normalizedBigEvents = normalizeScheduleBigEvents(schedule.big_events);
   if (isBlankTemplateSchedule(schedule)) {
-    return {
+    return applyBigEventsToGeneratedSchedule({
       ...schedule,
+      big_events: normalizedBigEvents,
       days: schedule.days.map((day) => {
         const normalizedDay = normalizeDayVacationAssignments(day);
         return {
@@ -216,10 +220,11 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
           generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
         };
       }),
-    };
+    }, normalizedBigEvents, normalizedBigEvents);
   }
-  return {
+  return applyBigEventsToGeneratedSchedule({
     ...schedule,
+    big_events: normalizedBigEvents,
     days: schedule.days.map((day) => {
       const normalizedDay = normalizeDayVacationAssignments(applyRequiredDayOverride(day));
       return {
@@ -230,7 +235,7 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
         generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
       };
     }),
-  };
+  }, normalizedBigEvents, normalizedBigEvents);
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number) {
@@ -241,6 +246,231 @@ function clampNumber(value: number, min: number, max: number, fallback: number) 
 function normalizeEditableNameList(value: unknown) {
   if (!Array.isArray(value)) return [] as string[];
   return Array.from(new Set(value.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)));
+}
+
+function normalizeNullableString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeDateKeyString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function normalizeScheduleBigEvents(value: unknown): ScheduleBigEvent[] {
+  const source = Array.isArray(value) ? value : [];
+
+  return source.map((event, eventIndex) => {
+    const rawEvent = event as Partial<ScheduleBigEvent> | null | undefined;
+    const eventName = typeof rawEvent?.name === "string" ? rawEvent.name.trim() : "";
+    const eventId = typeof rawEvent?.id === "string" && rawEvent.id.trim()
+      ? rawEvent.id.trim()
+      : `big-event-${eventIndex + 1}-${eventName || "untitled"}`;
+    const assignmentsSource = Array.isArray(rawEvent?.assignments) ? rawEvent.assignments : [];
+    const assignments = assignmentsSource.map((assignment, assignmentIndex) => {
+      const rawAssignment = assignment as Partial<ScheduleBigEventAssignment> | null | undefined;
+      const name = typeof rawAssignment?.name === "string" ? rawAssignment.name.trim() : "";
+      const startDate = normalizeDateKeyString(rawAssignment?.start_date);
+      const endDate = normalizeDateKeyString(rawAssignment?.end_date);
+      const id = typeof rawAssignment?.id === "string" && rawAssignment.id.trim()
+        ? rawAssignment.id.trim()
+        : `${eventId}-assignment-${assignmentIndex + 1}-${name || "blank"}`;
+
+      return {
+        id,
+        name,
+        profile_id: normalizeNullableString(rawAssignment?.profile_id),
+        start_date: startDate,
+        end_date: endDate,
+      };
+    });
+
+    return {
+      id: eventId,
+      name: eventName,
+      assignments,
+    };
+  });
+}
+
+function getScheduleBigEventNames(events: ScheduleBigEvent[] | null | undefined) {
+  return Array.from(new Set((events ?? []).map((event) => event.name.trim()).filter(Boolean)));
+}
+
+function isValidDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day;
+}
+
+function isDateKeyInAssignmentRange(dateKey: string, assignment: ScheduleBigEventAssignment) {
+  const startDate = assignment.start_date.trim();
+  const endDate = assignment.end_date.trim();
+  return isValidDateKey(startDate) && isValidDateKey(endDate) && startDate <= endDate && dateKey >= startDate && dateKey <= endDate;
+}
+
+function getScheduleMonthContext(schedule: Pick<GeneratedSchedule, "year" | "month" | "monthKey">) {
+  return {
+    year: schedule.year,
+    month: schedule.month,
+    monthKey: schedule.monthKey,
+  };
+}
+
+function getDayScheduleMonthContext(days: DaySchedule[], fallbackYear?: number, fallbackMonth?: number) {
+  const ownedDay = days.find((day) => !day.isOverflowMonth) ?? days[0];
+  const year = fallbackYear ?? ownedDay?.year ?? defaultScheduleState.year;
+  const month = fallbackMonth ?? ownedDay?.month ?? defaultScheduleState.month;
+  return {
+    year,
+    month,
+    monthKey: getMonthKey(year, month),
+  };
+}
+
+function collectBigEventAssignmentsForDay(
+  dateKey: string,
+  monthKey: string,
+  bigEvents: ScheduleBigEvent[],
+) {
+  const assignmentsByEventName = new Map<string, string[]>();
+  if (!dateKey.startsWith(`${monthKey}-`)) return assignmentsByEventName;
+
+  bigEvents.forEach((event) => {
+    const eventName = event.name.trim();
+    if (!eventName) return;
+
+    const names = Array.from(
+      new Set(
+        event.assignments
+          .filter((assignment) => assignment.name.trim() && isDateKeyInAssignmentRange(dateKey, assignment))
+          .map((assignment) => assignment.name.trim()),
+      ),
+    );
+    if (names.length > 0) {
+      assignmentsByEventName.set(eventName, [...(assignmentsByEventName.get(eventName) ?? []), ...names]);
+    }
+  });
+
+  return new Map(
+    Array.from(assignmentsByEventName.entries()).map(([eventName, names]) => [
+      eventName,
+      Array.from(new Set(names)),
+    ]),
+  );
+}
+
+function removeBigEventNamesFromGeneralAssignments(day: DaySchedule, blockedNames: Set<string>) {
+  if (blockedNames.size === 0) return day;
+
+  const assignments = { ...(day.assignments ?? {}) };
+  Object.keys(assignments).forEach((category) => {
+    if (!isGeneralAssignmentCategory(category)) return;
+    assignments[category] = (assignments[category] ?? []).filter((name) => !blockedNames.has(name.trim()));
+    if (assignments[category].length === 0) {
+      delete assignments[category];
+    }
+  });
+
+  return {
+    ...day,
+    assignments,
+    generalManualAdditions: (day.generalManualAdditions ?? []).filter((name) => !blockedNames.has(name.trim())),
+  };
+}
+
+function applyBigEventsToDay(
+  day: DaySchedule,
+  bigEvents: ScheduleBigEvent[],
+  monthKey: string,
+  categoriesToScrub: Set<string>,
+) {
+  const assignments = Object.fromEntries(
+    Object.entries(day.assignments ?? {})
+      .filter(([category]) => !categoriesToScrub.has(category))
+      .map(([category, names]) => [category, [...(names ?? [])]]),
+  ) as Record<string, string[]>;
+  const bigEventAssignments = collectBigEventAssignmentsForDay(day.dateKey, monthKey, bigEvents);
+  const bigEventNamesForDay = new Set<string>();
+
+  bigEventAssignments.forEach((names, eventName) => {
+    assignments[eventName] = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
+    assignments[eventName].forEach((name) => bigEventNamesForDay.add(name));
+  });
+
+  const withEvents = removeBigEventNamesFromGeneralAssignments(
+    {
+      ...day,
+      assignments,
+      manualExtras: (day.manualExtras ?? []).filter((category) => !categoriesToScrub.has(category)),
+      assignmentLabelOverrides: Object.fromEntries(
+        Object.entries(day.assignmentLabelOverrides ?? {}).filter(([category]) => !categoriesToScrub.has(category)),
+      ),
+      assignmentOrderOverrides: (day.assignmentOrderOverrides ?? []).filter((category) => !categoriesToScrub.has(category)),
+    },
+    bigEventNamesForDay,
+  );
+  const normalizedDay = normalizeDayVacationAssignments(withEvents);
+
+  return {
+    ...normalizedDay,
+    assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
+    assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
+    assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
+    generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
+  };
+}
+
+export function buildBigEventBlockedByDate(
+  bigEvents: ScheduleBigEvent[] | null | undefined,
+  monthKey: string,
+) {
+  const normalizedEvents = normalizeScheduleBigEvents(bigEvents);
+  const blockedByDate: Record<string, Set<string>> = {};
+
+  normalizedEvents.forEach((event) => {
+    event.assignments.forEach((assignment) => {
+      const name = assignment.name.trim();
+      if (!name || !isValidDateKey(assignment.start_date) || !isValidDateKey(assignment.end_date)) return;
+      if (assignment.start_date > assignment.end_date) return;
+
+      const start = assignment.start_date > `${monthKey}-01` ? assignment.start_date : `${monthKey}-01`;
+      const endOfMonth = fmtDate(Number(monthKey.slice(0, 4)), Number(monthKey.slice(5, 7)), daysInMonth(Number(monthKey.slice(0, 4)), Number(monthKey.slice(5, 7))));
+      const end = assignment.end_date < endOfMonth ? assignment.end_date : endOfMonth;
+      if (start > end) return;
+
+      const cursor = new Date(Number(start.slice(0, 4)), Number(start.slice(5, 7)) - 1, Number(start.slice(8, 10)));
+      const endDate = new Date(Number(end.slice(0, 4)), Number(end.slice(5, 7)) - 1, Number(end.slice(8, 10)));
+      for (; cursor <= endDate; cursor.setDate(cursor.getDate() + 1)) {
+        const dateKey = fmtDate(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate());
+        blockedByDate[dateKey] = blockedByDate[dateKey] ?? new Set<string>();
+        blockedByDate[dateKey].add(name);
+      }
+    });
+  });
+
+  return blockedByDate;
+}
+
+export function applyBigEventsToGeneratedSchedule(
+  schedule: GeneratedSchedule,
+  bigEvents: ScheduleBigEvent[] | null | undefined = schedule.big_events,
+  previousBigEvents: ScheduleBigEvent[] | null | undefined = schedule.big_events,
+) {
+  const normalizedBigEvents = normalizeScheduleBigEvents(bigEvents);
+  const categoriesToScrub = new Set([
+    ...getScheduleBigEventNames(previousBigEvents),
+    ...getScheduleBigEventNames(normalizedBigEvents),
+  ]);
+  const monthContext = getScheduleMonthContext(schedule);
+
+  return {
+    ...schedule,
+    big_events: normalizedBigEvents,
+    days: schedule.days.map((day) =>
+      applyBigEventsToDay(day, normalizedBigEvents, monthContext.monthKey, categoriesToScrub),
+    ),
+  };
 }
 
 const REQUIRED_EXTRA_HOLIDAYS = ["2026-05-01"];
@@ -363,11 +593,23 @@ export function syncGeneralAssignments(
   state: ScheduleState,
   days: DaySchedule[],
   generalTeamPeople: string[],
-  initialPreviousNight = getPreviousNightSeedForDays(state, days),
+  optionsOrInitialPreviousNight?: string[] | SyncGeneralAssignmentsOptions,
 ) {
+  const options = normalizeSyncGeneralAssignmentsOptions(optionsOrInitialPreviousNight);
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   syncDayVacationsFromState(state, orderedDays);
-  let previousNight = [...initialPreviousNight];
+  const monthContext = getDayScheduleMonthContext(orderedDays, options.scheduleYear, options.scheduleMonth);
+  const normalizedBigEvents = normalizeScheduleBigEvents(options.bigEvents);
+  const categoriesToScrub = new Set([
+    ...getScheduleBigEventNames(options.previousBigEvents),
+    ...getScheduleBigEventNames(normalizedBigEvents),
+  ]);
+  if (categoriesToScrub.size > 0 || normalizedBigEvents.length > 0) {
+    orderedDays.forEach((day) => {
+      Object.assign(day, applyBigEventsToDay(day, normalizedBigEvents, monthContext.monthKey, categoriesToScrub));
+    });
+  }
+  let previousNight = [...(options.initialPreviousNight ?? getPreviousNightSeedForDays(state, orderedDays))];
   const datedGeneralTeamOffEntries = Object.entries(state.generalTeamOffPeopleByDate ?? {})
     .filter(([dateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
     .sort(([left], [right]) => left.localeCompare(right));
@@ -383,6 +625,9 @@ export function syncGeneralAssignments(
       day.isWeekdayHoliday = overriddenDay.isWeekdayHoliday;
       day.assignments = overriddenDay.assignments;
       day.manualExtras = overriddenDay.manualExtras;
+      if (categoriesToScrub.size > 0 || normalizedBigEvents.length > 0) {
+        Object.assign(day, applyBigEventsToDay(day, normalizedBigEvents, monthContext.monthKey, categoriesToScrub));
+      }
       day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
       day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
       previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
@@ -456,6 +701,23 @@ export function getGeneralTeamOffPeopleForDate(state: ScheduleState, dateKey: st
   }
 
   return activeGeneralTeamOffPeople;
+}
+
+interface SyncGeneralAssignmentsOptions {
+  initialPreviousNight?: string[];
+  bigEvents?: ScheduleBigEvent[] | null;
+  previousBigEvents?: ScheduleBigEvent[] | null;
+  scheduleYear?: number;
+  scheduleMonth?: number;
+}
+
+function normalizeSyncGeneralAssignmentsOptions(
+  value: string[] | SyncGeneralAssignmentsOptions | undefined,
+): SyncGeneralAssignmentsOptions {
+  if (Array.isArray(value)) {
+    return { initialPreviousNight: value };
+  }
+  return value ?? {};
 }
 
 export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): ScheduleState {
@@ -594,12 +856,22 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
 
   if (nextState.generated) {
     if (!isBlankTemplateSchedule(nextState.generated)) {
-      syncGeneralAssignments(nextState, nextState.generated.days, generalTeamPeople);
+      syncGeneralAssignments(nextState, nextState.generated.days, generalTeamPeople, {
+        bigEvents: nextState.generated.big_events,
+        previousBigEvents: nextState.generated.big_events,
+        scheduleYear: nextState.generated.year,
+        scheduleMonth: nextState.generated.month,
+      });
     }
   }
   nextState.generatedHistory.forEach((item) => {
     if (!isBlankTemplateSchedule(item)) {
-      syncGeneralAssignments(nextState, item.days, generalTeamPeople);
+      syncGeneralAssignments(nextState, item.days, generalTeamPeople, {
+        bigEvents: item.big_events,
+        previousBigEvents: item.big_events,
+        scheduleYear: item.year,
+        scheduleMonth: item.month,
+      });
     }
   });
 
@@ -1042,6 +1314,10 @@ function ensureMonthlyJcheckCoverage(state: ScheduleState, days: DaySchedule[]) 
 export function generateSchedule(state: ScheduleState): GenerationResult {
   const nextState = cloneScheduleState(state);
   const monthKey = getMonthKey(nextState.year, nextState.month);
+  const previousSameMonthSchedule =
+    nextState.generatedHistory.find((item) => item.monthKey === monthKey) ??
+    (nextState.generated?.monthKey === monthKey ? nextState.generated : null);
+  const preservedBigEvents = normalizeScheduleBigEvents(previousSameMonthSchedule?.big_events);
   const holidaySet = parseHolidaySet(nextState.extraHolidays, nextState.year, nextState.month);
   const vacationMap = mergeVacationMaps(getDeskPriorityVacationMap(), parseVacationMap(nextState.vacations));
   const range = getScheduleRange(nextState.year, nextState.month);
@@ -1185,7 +1461,12 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
   const nextMonthKey = getMonthKey(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1);
   const nextMonthStartNames = buildMonthStartNamesFromPointers(nextState, pointers);
 
-  syncGeneralAssignments(nextState, days, nextState.generalTeamPeople);
+  syncGeneralAssignments(nextState, days, nextState.generalTeamPeople, {
+    bigEvents: preservedBigEvents,
+    previousBigEvents: preservedBigEvents,
+    scheduleYear: nextState.year,
+    scheduleMonth: nextState.month,
+  });
 
   const generated: GeneratedSchedule = {
     year: nextState.year,
@@ -1194,6 +1475,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
     days,
     nextPointers: pointers,
     nextStartDate: fmtDate(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1, nextMonthStart.getDate()),
+    big_events: preservedBigEvents,
   };
 
   nextState.generated = generated;
@@ -1226,6 +1508,10 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
 export function generateEmptySchedule(state: ScheduleState): GenerationResult {
   const nextState = cloneScheduleState(state);
   const monthKey = getMonthKey(nextState.year, nextState.month);
+  const previousSameMonthSchedule =
+    nextState.generatedHistory.find((item) => item.monthKey === monthKey) ??
+    (nextState.generated?.monthKey === monthKey ? nextState.generated : null);
+  const preservedBigEvents = normalizeScheduleBigEvents(previousSameMonthSchedule?.big_events);
   const holidaySet = parseHolidaySet(nextState.extraHolidays, nextState.year, nextState.month);
   const range = getScheduleRange(nextState.year, nextState.month);
   const startPointers = getMonthStartPointers(nextState, monthKey);
@@ -1317,7 +1603,7 @@ export function generateEmptySchedule(state: ScheduleState): GenerationResult {
   const nextMonthKey = getMonthKey(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1);
   const nextMonthStartNames = buildMonthStartNamesFromPointers(nextState, startPointers);
 
-  const generated: GeneratedSchedule = {
+  const generated: GeneratedSchedule = applyBigEventsToGeneratedSchedule({
     year: nextState.year,
     month: nextState.month,
     monthKey,
@@ -1325,7 +1611,8 @@ export function generateEmptySchedule(state: ScheduleState): GenerationResult {
     nextPointers: { ...startPointers },
     nextStartDate: fmtDate(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1, nextMonthStart.getDate()),
     isBlankTemplate: true,
-  };
+    big_events: preservedBigEvents,
+  }, preservedBigEvents, preservedBigEvents);
 
   nextState.generated = generated;
   nextState.monthStartPointers = {
@@ -1971,7 +2258,12 @@ function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule
 
   next.vacations = serializeVacationMap(nextVacationMap);
   if (!isBlankTemplateSchedule(normalizedGenerated)) {
-    syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople);
+    syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople, {
+      bigEvents: normalizedGenerated.big_events,
+      previousBigEvents: normalizedGenerated.big_events,
+      scheduleYear: normalizedGenerated.year,
+      scheduleMonth: normalizedGenerated.month,
+    });
   }
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   let previousNight: string[] = [];
@@ -1987,6 +2279,38 @@ function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule
     item.monthKey === normalizedGenerated.monthKey ? normalizedGenerated : item,
   );
   return next;
+}
+
+export function updateScheduleBigEvents(state: ScheduleState, monthKey: string, bigEvents: ScheduleBigEvent[]) {
+  const targetSchedule =
+    state.generatedHistory.find((item) => item.monthKey === monthKey) ??
+    (state.generated?.monthKey === monthKey ? state.generated : null);
+  if (!targetSchedule) return state;
+
+  const next = cloneScheduleState(state);
+  const nextTarget =
+    next.generatedHistory.find((item) => item.monthKey === monthKey) ??
+    (next.generated?.monthKey === monthKey ? next.generated : null);
+  if (!nextTarget) return state;
+
+  const updatedSchedule = applyBigEventsToGeneratedSchedule(nextTarget, bigEvents, nextTarget.big_events);
+  if (!isBlankTemplateSchedule(updatedSchedule)) {
+    syncGeneralAssignments(next, updatedSchedule.days, next.generalTeamPeople, {
+      bigEvents: updatedSchedule.big_events,
+      previousBigEvents: nextTarget.big_events,
+      scheduleYear: updatedSchedule.year,
+      scheduleMonth: updatedSchedule.month,
+    });
+  }
+
+  next.generatedHistory = next.generatedHistory.map((item) =>
+    item.monthKey === monthKey ? updatedSchedule : item,
+  );
+  if (next.generated?.monthKey === monthKey) {
+    next.generated = updatedSchedule;
+  }
+
+  return sanitizeScheduleState(next);
 }
 
 export function updateDayHeaderName(state: ScheduleState, dateKey: string, value: string) {

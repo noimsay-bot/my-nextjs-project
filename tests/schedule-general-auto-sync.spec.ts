@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
-import { generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
+import { buildBigEventBlockedByDate, generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule } from "@/lib/schedule/published";
 
@@ -32,6 +32,116 @@ test("june 2026 schedule includes june 7", () => {
   }).state.generated;
 
   expect(generated?.days.some((day) => day.dateKey === "2026-06-07")).toBe(true);
+});
+
+test("big event assignments create dynamic duty columns and remove people from general auto assignments", () => {
+  const baseState = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state;
+  const withBigEvents = updateScheduleBigEvents(baseState, "2026-06", [
+    {
+      id: "event-worldcup",
+      name: "월드컵",
+      assignments: [
+        {
+          id: "event-worldcup-kim",
+          name: "김재식",
+          profile_id: null,
+          start_date: "2026-06-04",
+          end_date: "2026-06-25",
+        },
+        {
+          id: "event-worldcup-park",
+          name: "박재현",
+          profile_id: null,
+          start_date: "2026-06-10",
+          end_date: "2026-06-18",
+        },
+      ],
+    },
+  ]);
+
+  const day4 = withBigEvents.generated?.days.find((day) => day.dateKey === "2026-06-04");
+  const day10 = withBigEvents.generated?.days.find((day) => day.dateKey === "2026-06-10");
+  const day26 = withBigEvents.generated?.days.find((day) => day.dateKey === "2026-06-26");
+
+  expect(day4?.assignments["월드컵"]).toEqual(["김재식"]);
+  expect(day10?.assignments["월드컵"]).toEqual(["김재식", "박재현"]);
+  expect(day4?.assignments["일반"] ?? []).not.toContain("김재식");
+  expect(day10?.assignments["일반"] ?? []).not.toContain("김재식");
+  expect(day10?.assignments["일반"] ?? []).not.toContain("박재현");
+  expect(day26?.assignments["월드컵"]).toBeUndefined();
+});
+
+test("big event date ranges are clamped to the schedule month", () => {
+  const blockedByDate = buildBigEventBlockedByDate(
+    [
+      {
+        id: "event-worldcup",
+        name: "월드컵",
+        assignments: [
+          {
+            id: "event-worldcup-kim",
+            name: "김재식",
+            profile_id: null,
+            start_date: "2026-05-20",
+            end_date: "2026-06-03",
+          },
+        ],
+      },
+    ],
+    "2026-06",
+  );
+
+  expect(blockedByDate["2026-05-31"]).toBeUndefined();
+  expect(Array.from(blockedByDate["2026-06-01"] ?? [])).toEqual(["김재식"]);
+  expect(Array.from(blockedByDate["2026-06-03"] ?? [])).toEqual(["김재식"]);
+  expect(blockedByDate["2026-06-04"]).toBeUndefined();
+});
+
+test("big event people keep manual special assignments and get conflict warnings only", () => {
+  const baseState = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state;
+  const source = JSON.parse(JSON.stringify(baseState.generated!)) as typeof baseState.generated;
+  const targetDay = source!.days.find((day) => day.dateKey === "2026-06-10")!;
+  targetDay.assignments["국회"] = ["김재식"];
+
+  const state = sanitizeScheduleState({
+    ...baseState,
+    generated: source,
+    generatedHistory: [source!],
+  });
+  const withBigEvents = updateScheduleBigEvents(state, "2026-06", [
+    {
+      id: "event-worldcup",
+      name: "월드컵",
+      assignments: [
+        {
+          id: "event-worldcup-kim",
+          name: "김재식",
+          profile_id: null,
+          start_date: "2026-06-10",
+          end_date: "2026-06-10",
+        },
+      ],
+    },
+  ]);
+  const updatedDay = withBigEvents.generated?.days.find((day) => day.dateKey === "2026-06-10");
+
+  expect(updatedDay?.assignments["국회"]).toEqual(["김재식"]);
+  expect(updatedDay?.assignments["월드컵"]).toEqual(["김재식"]);
+  expect(updatedDay?.assignments["일반"] ?? []).not.toContain("김재식");
+  expect(updatedDay?.conflicts).toEqual(
+    expect.arrayContaining([
+      { category: "국회", name: "김재식" },
+      { category: "월드컵", name: "김재식" },
+    ]),
+  );
 });
 
 test("general assignments are restored after an edit removes an eligible name", () => {

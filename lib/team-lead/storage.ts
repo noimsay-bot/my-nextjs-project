@@ -1445,6 +1445,7 @@ export function applyScheduleAssignmentDutyCategoriesToSchedule(
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
 ) {
   const monthRows = store.rows[schedule.monthKey] ?? {};
+  const bigEventCategorySet = new Set((schedule.big_events ?? []).map((event) => event.name.trim()).filter(Boolean));
   let changed = false;
 
   const days = schedule.days.map((day) => {
@@ -1473,6 +1474,7 @@ export function applyScheduleAssignmentDutyCategoriesToSchedule(
       const desiredNameSet = new Set(desiredNames);
       Object.entries(nextAssignments).forEach(([currentCategory, names]) => {
         if (currentCategory === category || currentCategory === "휴가") return;
+        if (bigEventCategorySet.has(currentCategory)) return;
         nextAssignments[currentCategory] = names.filter((name) => !desiredNameSet.has(name.trim()));
       });
 

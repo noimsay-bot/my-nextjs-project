@@ -22,6 +22,20 @@ export interface Conflict {
 export type VacationType = "연차" | "대휴" | "기타";
 export type ScheduleAssignmentNameTag = "gov" | "law" | "half";
 
+export interface ScheduleBigEventAssignment {
+  id: string;
+  name: string;
+  profile_id: string | null;
+  start_date: string;
+  end_date: string;
+}
+
+export interface ScheduleBigEvent {
+  id: string;
+  name: string;
+  assignments: ScheduleBigEventAssignment[];
+}
+
 export interface DaySchedule {
   dateKey: string;
   day: number;
@@ -52,6 +66,7 @@ export interface GeneratedSchedule {
   nextPointers: PointerState;
   nextStartDate: string;
   isBlankTemplate?: boolean;
+  big_events?: ScheduleBigEvent[];
 }
 
 export interface SnapshotItem {

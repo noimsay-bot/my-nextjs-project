@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
+import { ScheduleBigEventsSection, type BigEventValidationMessage } from "@/components/schedule/schedule-big-events-section";
 import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
@@ -77,6 +78,7 @@ import {
   updateDayAssignmentLabel,
   updateDayHeaderName,
   updateManualAssignment,
+  updateScheduleBigEvents,
 } from "@/lib/schedule/engine";
 import {
   getPublishedSchedules,
@@ -90,7 +92,7 @@ import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
 import { deskEditableVacationTypes, vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
-import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleAssignmentNameTag, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
+import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleAssignmentNameTag, ScheduleBigEvent, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
@@ -463,6 +465,119 @@ function canEditAssignmentLabel(day: DaySchedule, category: string) {
   return ["청와대", "국회", "청사"].includes(category);
 }
 
+function isValidScheduleDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day;
+}
+
+function eachDateKeyInRange(startDate: string, endDate: string, visit: (dateKey: string) => void) {
+  if (!isValidScheduleDateKey(startDate) || !isValidScheduleDateKey(endDate) || startDate > endDate) return;
+  const cursor = new Date(Number(startDate.slice(0, 4)), Number(startDate.slice(5, 7)) - 1, Number(startDate.slice(8, 10)));
+  const end = new Date(Number(endDate.slice(0, 4)), Number(endDate.slice(5, 7)) - 1, Number(endDate.slice(8, 10)));
+
+  for (; cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    visit(formatLocalDateKey(cursor));
+  }
+}
+
+function getBigEventValidationMessages(schedule: GeneratedSchedule | null | undefined): BigEventValidationMessage[] {
+  if (!schedule) return [];
+
+  const messages: BigEventValidationMessage[] = [];
+  const bigEvents = schedule.big_events ?? [];
+  const bigEventNameSet = new Set(bigEvents.map((event) => event.name.trim()).filter(Boolean));
+  const dayMap = new Map(schedule.days.map((day) => [day.dateKey, day] as const));
+  const exactRangeKeys = new Set<string>();
+  const warnedSpecialOverlapKeys = new Set<string>();
+
+  bigEvents.forEach((event, eventIndex) => {
+    const eventName = event.name.trim();
+    if (!eventName) {
+      messages.push({
+        id: `${event.id || eventIndex}-empty-name`,
+        tone: "error",
+        text: "빅이벤트명이 비어 있으면 저장할 수 없습니다.",
+      });
+    }
+
+    event.assignments.forEach((assignment, assignmentIndex) => {
+      const assignmentName = assignment.name.trim();
+      const messagePrefix = eventName || `빅이벤트 ${eventIndex + 1}`;
+      if (!assignmentName) {
+        messages.push({
+          id: `${event.id || eventIndex}-${assignment.id || assignmentIndex}-empty-person`,
+          tone: "error",
+          text: `${messagePrefix}: 이름이 비어 있으면 저장할 수 없습니다.`,
+        });
+      }
+      if (!isValidScheduleDateKey(assignment.start_date) || !isValidScheduleDateKey(assignment.end_date)) {
+        messages.push({
+          id: `${event.id || eventIndex}-${assignment.id || assignmentIndex}-invalid-date`,
+          tone: "error",
+          text: `${messagePrefix}: 시작일과 종료일을 모두 입력해 주세요.`,
+        });
+      } else if (assignment.start_date > assignment.end_date) {
+        messages.push({
+          id: `${event.id || eventIndex}-${assignment.id || assignmentIndex}-date-order`,
+          tone: "error",
+          text: `${messagePrefix}: 시작일이 종료일보다 늦을 수 없습니다.`,
+        });
+      }
+
+      const exactRangeKey = [eventName, assignmentName, assignment.start_date, assignment.end_date].join("::");
+      if (eventName && assignmentName && exactRangeKeys.has(exactRangeKey)) {
+        messages.push({
+          id: `${event.id || eventIndex}-${assignment.id || assignmentIndex}-duplicate-range`,
+          tone: "warn",
+          text: `${eventName}: ${assignmentName}의 동일 날짜 범위가 중복 등록되어 있습니다.`,
+        });
+      }
+      if (eventName && assignmentName) {
+        exactRangeKeys.add(exactRangeKey);
+      }
+
+      if (!eventName || !assignmentName) return;
+      eachDateKeyInRange(assignment.start_date, assignment.end_date, (dateKey) => {
+        if (!dateKey.startsWith(`${schedule.monthKey}-`)) return;
+        const day = dayMap.get(dateKey);
+        if (!day) return;
+
+        Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
+          if (category === eventName || isGeneralAssignmentCategory(category)) return;
+          const categoryIsOtherBigEvent = bigEventNameSet.has(category);
+          const matched = (names ?? []).some((name) => {
+            const normalizedName = category === "휴가" ? parseVacationEntry(name).name.trim() : name.trim();
+            return normalizedName === assignmentName;
+          });
+          if (!matched) return;
+
+          const overlapKey = `${dateKey}::${eventName}::${assignmentName}::${category}`;
+          if (warnedSpecialOverlapKeys.has(overlapKey)) return;
+          warnedSpecialOverlapKeys.add(overlapKey);
+          messages.push({
+            id: overlapKey,
+            tone: "warn",
+            text: `${dateKey} ${assignmentName}: ${eventName}와 ${categoryIsOtherBigEvent ? "다른 빅이벤트" : getScheduleCategoryLabel(category)}가 겹칩니다. 기존 수동 배정은 삭제하지 않습니다.`,
+          });
+        });
+      });
+    });
+  });
+
+  return messages;
+}
+
+function hasBlockingBigEventValidationInState(state: ScheduleState) {
+  const schedules = new Map<string, GeneratedSchedule>();
+  state.generatedHistory.forEach((schedule) => schedules.set(schedule.monthKey, schedule));
+  if (state.generated) schedules.set(state.generated.monthKey, state.generated);
+  return Array.from(schedules.values()).some((schedule) =>
+    getBigEventValidationMessages(schedule).some((item) => item.tone === "error"),
+  );
+}
+
 function parseScheduleDragPayload(value: string): ScheduleDragPayload | null {
   try {
     return JSON.parse(value) as ScheduleDragPayload;
@@ -793,6 +908,7 @@ export function ScheduleApp() {
 
   useEffect(() => {
     if (!loaded || typeof window === "undefined") return;
+    if (hasBlockingBigEventValidationInState(state)) return;
     void saveScheduleState(state).catch(() => undefined);
   }, [loaded, state]);
 
@@ -1015,6 +1131,22 @@ export function ScheduleApp() {
     () => publishedItems.find((item) => item.monthKey === visibleSchedule?.monthKey) ?? null,
     [publishedItems, visibleSchedule?.monthKey],
   );
+  const visibleBigEvents = useMemo(
+    () => visibleSchedule?.big_events ?? [],
+    [visibleSchedule?.big_events],
+  );
+  const visibleBigEventNameSet = useMemo(
+    () => new Set(visibleBigEvents.map((event) => event.name.trim()).filter(Boolean)),
+    [visibleBigEvents],
+  );
+  const visibleBigEventValidationMessages = useMemo(
+    () => getBigEventValidationMessages(visibleSchedule),
+    [visibleSchedule],
+  );
+  const hasBlockingBigEventValidation = useMemo(
+    () => visibleBigEventValidationMessages.some((item) => item.tone === "error"),
+    [visibleBigEventValidationMessages],
+  );
   const hasUnpublishedChanges = useMemo(() => {
     if (!visibleSchedule || !visiblePublishedItem) return false;
     return JSON.stringify(visibleSchedule) !== JSON.stringify(visiblePublishedItem.schedule);
@@ -1091,6 +1223,13 @@ export function ScheduleApp() {
         days: getOriginalSnapshotPrintDays(snapshot),
       }),
     });
+  };
+
+  const updateVisibleBigEvents = (nextEvents: ScheduleBigEvent[]) => {
+    if (!visibleSchedule) return;
+    const targetMonthKey = visibleSchedule.monthKey;
+    setState((current) => updateScheduleBigEvents(current, targetMonthKey, nextEvents));
+    markVisibleMonthAsLocallyFresh(targetMonthKey);
   };
 
   const updateEditingState = (recipe: (current: ScheduleState) => ScheduleState) => {
@@ -1462,6 +1601,10 @@ export function ScheduleApp() {
       setMessage({ tone: "warn", text: "최소 한 칸 이상 이름을 입력해 주세요." });
       return false;
     }
+    if (hasBlockingBigEventValidation) {
+      setMessage({ tone: "warn", text: "빅이벤트 입력값을 먼저 확인해 주세요." });
+      return false;
+    }
     setMessage({ tone: "ok", text: "저장되었습니다. 입력값과 오프 상태를 유지합니다." });
     return true;
   };
@@ -1547,6 +1690,10 @@ export function ScheduleApp() {
 
   const onRebalance = () => {
     if (!visibleSchedule) return;
+    if (visibleBigEventValidationMessages.some((item) => item.tone === "error")) {
+      setMessage({ tone: "warn", text: "자동 재배치 전 빅이벤트 입력값을 먼저 확인해 주세요." });
+      return;
+    }
     if (
       typeof window !== "undefined" &&
       !window.confirm(`${visibleSchedule.month}월 근무표를 재배치하겠습니까?`)
@@ -1604,6 +1751,10 @@ export function ScheduleApp() {
       latestState?.generatedHistory.find((item) => item.monthKey === publishMonthKey) ??
       state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
     if (!target) return;
+    if (getBigEventValidationMessages(target).some((item) => item.tone === "error")) {
+      setMessage({ tone: "warn", text: "게시 전 빅이벤트 입력값을 먼저 확인해 주세요." });
+      return;
+    }
     try {
       const published = await publishSchedule(target);
       await refreshRouteData({ includeRequests: false, preferredMonthKey: published.monthKey });
@@ -1713,6 +1864,7 @@ export function ScheduleApp() {
       </section>
 
       <div className="subgrid-2">
+        <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="chip">근무표 설정</div>
@@ -1769,6 +1921,26 @@ export function ScheduleApp() {
             <MessageBox message={message} />
           </div>
         </section>
+        {visibleSchedule ? (
+          <ScheduleBigEventsSection
+            monthKey={visibleSchedule.monthKey}
+            year={visibleSchedule.year}
+            month={visibleSchedule.month}
+            events={visibleBigEvents}
+            people={Array.from(new Set([...generalTeamPeople, ...uniquePeople]))}
+            disabled={isEditingDate}
+            validationMessages={visibleBigEventValidationMessages}
+            onChange={updateVisibleBigEvents}
+          />
+        ) : (
+          <section className="panel">
+            <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
+              <div className="chip">빅이벤트</div>
+              <div className="status note">근무표를 작성한 뒤 해당 월 빅이벤트를 등록할 수 있습니다.</div>
+            </div>
+          </section>
+        )}
+        </div>
 
         <section className="panel">
           <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
@@ -2261,21 +2433,24 @@ export function ScheduleApp() {
                       </div>
                       <div style={{ display: "grid", gap: 1 }}>
                         {visibleAssignments.map(([category, names]) => {
-                          const slotNames = editMode ? getEditableSlotNames(names) : names.map((name) => name.trim()).filter(Boolean);
+                          const isBigEventAssignmentCategory = visibleBigEventNameSet.has(category);
+                          const slotNames = editMode && !isBigEventAssignmentCategory
+                            ? getEditableSlotNames(names)
+                            : names.map((name) => name.trim()).filter(Boolean);
 
                           return (
                           <article
                             key={`${day.dateKey}-${category}`}
                             data-category={category}
-                            draggable={canDragAssignmentCategories}
+                            draggable={canDragAssignmentCategories && !isBigEventAssignmentCategory}
                             onDragStart={(event) => {
-                              if (!canDragAssignmentCategories) return;
+                              if (!canDragAssignmentCategories || isBigEventAssignmentCategory) return;
                               event.stopPropagation();
                               event.dataTransfer.effectAllowed = "move";
                               event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "category", dateKey: day.dateKey, category }));
                             }}
                             onDragOver={(event) => {
-                              if (!canDropAssignmentCategories) return;
+                              if (!canDropAssignmentCategories || isBigEventAssignmentCategory) return;
                               const source = parseScheduleDragPayload(event.dataTransfer.getData("text/plain"));
                               if (!source || source.kind !== "category") return;
                               event.preventDefault();
@@ -2284,7 +2459,7 @@ export function ScheduleApp() {
                               const payload = event.dataTransfer.getData("text/plain");
                               if (!payload) return;
                               const source = parseScheduleDragPayload(payload);
-                              if (!source || source.kind !== "category" || !canDropAssignmentCategories) return;
+                              if (!source || source.kind !== "category" || !canDropAssignmentCategories || isBigEventAssignmentCategory) return;
                               event.preventDefault();
                               event.stopPropagation();
                               if (source.dateKey === day.dateKey) {
@@ -2296,7 +2471,7 @@ export function ScheduleApp() {
                               borderRadius: 10,
                               padding: 6,
                               background: "rgba(9,17,30,.34)",
-                              cursor: canDragAssignmentCategories ? "grab" : "default",
+                              cursor: canDragAssignmentCategories && !isBigEventAssignmentCategory ? "grab" : "default",
                             }}
                           >
                             <div
@@ -2333,7 +2508,7 @@ export function ScheduleApp() {
                                   {getCategoryDisplayLabel(day, category)}
                                 </strong>
                               </div>
-                              {editMode && isEditingVisibleMonth ? (
+                              {editMode && isEditingVisibleMonth && !isBigEventAssignmentCategory ? (
                                 <div style={{ display: "flex", gap: 4, alignItems: "center", gridColumn: 2, gridRow: 1, justifySelf: "end" }}>
                                   {canEditAssignmentLabel(day, category) ? (
                                     <button
@@ -2545,9 +2720,10 @@ export function ScheduleApp() {
                                       <div
                                         className={`schedule-name-chip ${editMode ? "schedule-name-chip--edit" : ""}`}
                                         data-selected={selected ? "true" : undefined}
-                                        draggable={canDragAssignments}
+                                        draggable={canDragAssignments && !isBigEventAssignmentCategory}
                                         onClick={() => {
                                           if (!editMode) return;
+                                          if (isBigEventAssignmentCategory) return;
                                           if (category === "휴가") {
                                             updateEditingState((current) =>
                                               cycleVacationEntryType(current, day.dateKey, index, name),
@@ -2563,7 +2739,7 @@ export function ScheduleApp() {
                                           handlePersonSlotActivate({ dateKey: day.dateKey, category, index });
                                         }}
                                         onDragStart={(event) => {
-                                          if (!canDragAssignments) return;
+                                          if (!canDragAssignments || isBigEventAssignmentCategory) return;
                                           event.stopPropagation();
                                           event.dataTransfer.effectAllowed = "move";
                                           event.dataTransfer.setData("text/plain", JSON.stringify({ kind: "person", dateKey: day.dateKey, category, index }));
@@ -2586,7 +2762,7 @@ export function ScheduleApp() {
                                         gap: 5,
                                         width: "100%",
                                         minWidth: 0,
-                                        cursor: canDragAssignments ? "grab" : editMode ? "pointer" : "default",
+                                        cursor: canDragAssignments && !isBigEventAssignmentCategory ? "grab" : editMode && !isBigEventAssignmentCategory ? "pointer" : "default",
                                         minHeight: 32,
                                         padding: editMode ? "3px 4px" : "4px 4px",
                                         borderRadius: 0,
@@ -2641,7 +2817,7 @@ export function ScheduleApp() {
                                         />
                                         {personObject.pending && !editMode ? <span style={{ fontSize: 13 }}>근무변경요청중</span> : null}
                                       </div>
-                                      {editMode ? (
+                                      {editMode && !isBigEventAssignmentCategory ? (
                                         <button
                                           className="btn"
                                           style={{
