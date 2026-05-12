@@ -2609,11 +2609,20 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
   select 'eng_set', '공용 ENG', concat('공용ENG', shared_no), concat('eng-set-shared-', shared_no), shared_no, '{"kind":"shared_eng_set"}'::jsonb
   from generate_series(1, 3) as shared_no
   union all
-  select 'live', 'TVU', concat('TVU-', tvu_no), concat('live-tvu-', tvu_no), 1000 + row_number() over (order by display_order), '{"kind":"tvu"}'::jsonb
+  select
+    'live',
+    'TVU',
+    concat('TVU-', tvu_no),
+    concat('live-tvu-', tvu_no),
+    1000 + row_number() over (order by display_order),
+    case
+      when tvu_no between 15 and 19 then '{"kind":"tvu","network":"global"}'::jsonb
+      else '{"kind":"tvu"}'::jsonb
+    end
   from (
     values
       (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6),
-      (14, 14), (16, 16), (17, 17), (18, 18), (19, 19)
+      (14, 14), (15, 15), (16, 16), (17, 17), (18, 18), (19, 19)
   ) as tvu(tvu_no, display_order)
 )
 insert into public.equipment_items (

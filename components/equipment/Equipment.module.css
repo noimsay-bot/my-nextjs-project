@@ -442,6 +442,32 @@
   line-height: 1.25;
 }
 
+.itemNameStack {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 0;
+  justify-items: start;
+}
+
+.globalBadge {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  border-radius: 999px;
+  color: #d1fae5;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:global(html[data-theme="light"]) .globalBadge {
+  color: #064e3b;
+}
+
 .statusPill {
   display: inline-flex;
   flex: 0 0 auto;

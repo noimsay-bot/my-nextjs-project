@@ -30,6 +30,7 @@ import {
   type EquipmentProfile,
   type LiveLoanDetails,
 } from "@/lib/equipment/types";
+import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import styles from "./Equipment.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
@@ -233,6 +234,20 @@ function isTvuItem(item: EquipmentItem) {
   return item.category === "live" && item.groupName.trim().toUpperCase() === "TVU";
 }
 
+function getTvuNumber(item: EquipmentItem) {
+  if (!isTvuItem(item)) return null;
+  const matched = /^TVU-(\d+)$/i.exec(item.name.trim());
+  if (!matched) return null;
+  return Number(matched[1]);
+}
+
+function isGlobalTvuItem(item: EquipmentItem) {
+  const metadataNetwork = typeof item.metadata.network === "string" ? item.metadata.network.trim().toLowerCase() : "";
+  if (metadataNetwork === "global") return true;
+  const tvuNumber = getTvuNumber(item);
+  return tvuNumber !== null && tvuNumber >= 15 && tvuNumber <= 19;
+}
+
 function isTvuInlineAccessoryItem(item: EquipmentItem) {
   if (item.category !== "live") return false;
   const normalizedName = item.name.replace(/\s+/g, "").toLowerCase();
@@ -407,6 +422,7 @@ function EquipmentItemCard({
   const repairTarget = repairDraftByItemId?.[item.id] ?? item.isUnderRepair;
   const repairing = repairMode ? repairTarget : item.isUnderRepair;
   const repairChanged = repairMode && repairTarget !== item.isUnderRepair;
+  const showGlobalBadge = isGlobalTvuItem(item);
   return (
     <button
       type="button"
@@ -424,7 +440,14 @@ function EquipmentItemCard({
       aria-pressed={repairMode ? repairChanged : selected}
     >
       <span className={styles.itemCardTop}>
-        <strong>{displayName ?? item.name}</strong>
+        <span className={styles.itemNameStack}>
+          <strong>{displayName ?? item.name}</strong>
+          {showGlobalBadge ? (
+            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+              Global
+            </span>
+          ) : null}
+        </span>
         {repairChanged ? (
           <span className={`${styles.statusPill} ${repairing ? styles.statusRepairing : styles.statusAvailable}`.trim()}>
             {repairing ? "수리 예정" : "해제 예정"}
@@ -1826,7 +1849,16 @@ export function LiveEquipmentStatusPage() {
                     const loanItem = currentByItemId.get(item.id);
                     return (
                       <tr key={item.id}>
-                        <td><strong>{item.name}</strong></td>
+                        <td>
+                          <span className={styles.itemNameStack}>
+                            <strong>{item.name}</strong>
+                            {isGlobalTvuItem(item) ? (
+                              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                Global
+                              </span>
+                            ) : null}
+                          </span>
+                        </td>
                         <td>{loanItem?.loan.liveTrs || "-"}</td>
                         <td>{loanItem?.loan.liveCameraReporter || "-"}</td>
                         <td>{loanItem?.loan.liveAudioMan || "-"}</td>
