@@ -4,6 +4,8 @@ import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/con
 import { buildBigEventBlockedByDate, generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule } from "@/lib/schedule/published";
+import { syncVacationTextForChangedRoute } from "@/lib/schedule/change-requests";
+import type { GeneratedSchedule, SchedulePersonRef } from "@/lib/schedule/types";
 
 test("2026 schedule months use calendar month ranges", () => {
   const ranges = [
@@ -449,4 +451,85 @@ test("published repair allows general auto-sync when only vacation data changed"
   expect(generatedDay8?.assignments["일반"]).toContain("정상원");
   expect(generatedDay8?.assignments["휴가"]).toContain("근속휴가:이완근");
   expect(canRepairPublishedGeneralAssignments(published, generated!)).toBe(true);
+});
+
+test("accepted compensatory leave swaps update vacation source text before schedule normalization", () => {
+  const baseDay = {
+    day: 1,
+    month: 6,
+    year: 2026,
+    dow: 1,
+    isWeekend: false,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    assignments: {},
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  };
+  const swappedSchedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-06",
+    days: [
+      {
+        ...baseDay,
+        dateKey: "2026-06-10",
+        day: 10,
+        dow: 3,
+        vacations: ["대휴:박재현"],
+        assignments: { 휴가: ["대휴:박재현"] },
+      },
+      {
+        ...baseDay,
+        dateKey: "2026-06-12",
+        day: 12,
+        dow: 5,
+        vacations: ["대휴:김재식"],
+        assignments: { 휴가: ["대휴:김재식"] },
+      },
+    ],
+  } satisfies GeneratedSchedule;
+  const route = [
+    {
+      monthKey: "2026-06",
+      dateKey: "2026-06-10",
+      category: "휴가",
+      index: 0,
+      name: "대휴:김재식",
+    },
+    {
+      monthKey: "2026-06",
+      dateKey: "2026-06-12",
+      category: "휴가",
+      index: 0,
+      name: "대휴:박재현",
+    },
+  ] satisfies SchedulePersonRef[];
+  const vacations = syncVacationTextForChangedRoute(
+    "2026-06-10: 대휴:김재식\n2026-06-12: 대휴:박재현",
+    [swappedSchedule],
+    route,
+  );
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    vacations,
+    generated: swappedSchedule,
+    generatedHistory: [swappedSchedule],
+  });
+
+  expect(vacations).toContain("2026-06-10: 대휴:박재현");
+  expect(vacations).toContain("2026-06-12: 대휴:김재식");
+  expect(state.generated?.days.find((day) => day.dateKey === "2026-06-10")?.assignments["휴가"]).toContain(
+    "대휴:박재현",
+  );
+  expect(state.generated?.days.find((day) => day.dateKey === "2026-06-12")?.assignments["휴가"]).toContain(
+    "대휴:김재식",
+  );
 });

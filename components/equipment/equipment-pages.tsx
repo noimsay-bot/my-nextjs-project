@@ -482,7 +482,7 @@ function getEngBadgeSortRank(badges: EngScheduleBadge[]) {
 
 function EquipmentNav({ activeHref }: { activeHref: string }) {
   return (
-    <div className={styles.nav} aria-label="라이브/장비 하위 메뉴">
+    <div className={styles.nav} aria-label="TVU/장비 하위 메뉴">
       {equipmentNavItems.map((item) => (
         <Link key={item.href} href={item.href} className={`${styles.navLink} ${activeHref === item.href ? styles.navLinkActive : ""}`.trim()}>
           {item.label}
@@ -688,8 +688,6 @@ function ConfirmDialog({
   onLiveDetailsChange: (details: LiveLoanDetails) => void;
   onReturnIdsChange: (ids: string[]) => void;
 }) {
-  const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
-
   return (
     <div className={styles.modalBackdrop} role="presentation">
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="equipment-confirm-title">
@@ -725,28 +723,6 @@ function ConfirmDialog({
           </div>
           {showLiveFields ? (
             <div className={styles.liveFields}>
-              <div className={styles.liveFieldBlock}>
-                <span>TRS</span>
-                <div className={styles.trsOptionGrid} role="group" aria-label="TRS 선택">
-                  {LIVE_TRS_OPTIONS.map((trs) => {
-                    const selected = selectedTrsValues.includes(trs);
-                    return (
-                      <button
-                        key={trs}
-                        type="button"
-                        className={[
-                          styles.trsOptionButton,
-                          selected ? styles.trsOptionButtonSelected : "",
-                        ].join(" ").trim()}
-                        onClick={() => onLiveDetailsChange({ ...liveDetails, trs: toggleSelectedTrs(liveDetails.trs, trs) })}
-                        aria-pressed={selected}
-                      >
-                        {trs}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
               <label>
                 <span>촬영기자</span>
                 <input className="field-input" value={liveDetails.cameraReporter} onChange={(event) => onLiveDetailsChange({ ...liveDetails, cameraReporter: event.target.value })} />

@@ -64,7 +64,7 @@ const PAGE_VISIT_META: Record<PageVisitKey, { label: string; pathPrefixes: strin
     pathPrefixes: ["/restaurants"],
   },
   equipment: {
-    label: "라이브/장비",
+    label: "TVU/장비",
     pathPrefixes: ["/equipment"],
   },
 };

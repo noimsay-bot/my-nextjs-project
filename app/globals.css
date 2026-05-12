@@ -3903,6 +3903,60 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   text-align: center;
 }
 
+.customer-support-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(6, 10, 18, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.customer-support-dialog {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--panel-shadow);
+}
+
+.customer-support-dialog__header,
+.customer-support-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-support-dialog__header h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.customer-support-dialog__textarea {
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.customer-support-dialog__textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.customer-support-dialog__footer .status {
+  min-width: 0;
+}
+
 .portal-sidebar-usercard {
   display: grid;
   gap: 4px;
@@ -4131,6 +4185,32 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     background: var(--bg-start);
     box-shadow: var(--panel-shadow);
     z-index: 70;
+  }
+
+  .customer-support-dialog-backdrop {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .customer-support-dialog {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    border-radius: 16px;
+  }
+
+  .customer-support-dialog__header,
+  .customer-support-dialog__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-support-dialog__header .btn,
+  .customer-support-dialog__footer .btn {
+    width: 100%;
+  }
+
+  .customer-support-dialog__textarea {
+    min-height: 220px;
   }
 }
 

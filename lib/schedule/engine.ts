@@ -974,7 +974,7 @@ export function parseVacationMap(text: string) {
   return map;
 }
 
-function serializeVacationMap(map: Record<string, string[]>) {
+export function serializeVacationMap(map: Record<string, string[]>) {
   return Object.entries(map)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([dateKey, entries]) => `${dateKey}: ${entries.join(", ")}`)

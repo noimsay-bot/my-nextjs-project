@@ -9,7 +9,13 @@ import {
   ScheduleState,
 } from "@/lib/schedule/types";
 import { isAutoManagedGeneralAssignment } from "@/lib/schedule/constants";
-import { sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
+import {
+  isDeskPriorityVacationEntry,
+  parseVacationEntry,
+  parseVacationMap,
+  serializeVacationMap,
+  syncGeneralAssignments,
+} from "@/lib/schedule/engine";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -224,9 +230,77 @@ function findRefSlot(schedule: GeneratedSchedule, ref: SchedulePersonRef) {
   if (!day) return null;
   const list = day.assignments[ref.category];
   if (!list) return null;
-  const index = list[ref.index] === ref.name ? ref.index : list.findIndex((name) => name === ref.name);
+  const index = isSameAssignmentValue(ref.category, list[ref.index], ref.name)
+    ? ref.index
+    : list.findIndex((name) => isSameAssignmentValue(ref.category, name, ref.name));
   if (index < 0) return null;
   return { day, list, index };
+}
+
+function hasVacationTypePrefix(value: string) {
+  return /^(연차|대휴|etc|기타|공가|근속휴가|건강검진|경조)\s*:/.test(value.trim());
+}
+
+function isSameAssignmentValue(category: string, left: string | undefined, right: string | undefined) {
+  const normalizedLeft = left?.trim() ?? "";
+  const normalizedRight = right?.trim() ?? "";
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (category !== "휴가") return normalizedLeft === normalizedRight;
+
+  const leftVacation = parseVacationEntry(normalizedLeft);
+  const rightVacation = parseVacationEntry(normalizedRight);
+  if (!hasVacationTypePrefix(normalizedRight)) {
+    return leftVacation.name === rightVacation.name;
+  }
+  return leftVacation.type === rightVacation.type && leftVacation.name === rightVacation.name;
+}
+
+function getVacationEntriesForDay(day: GeneratedSchedule["days"][number]) {
+  return Array.from(
+    new Set(
+      [...(day.vacations ?? []), ...(day.assignments["휴가"] ?? [])]
+        .map((entry) => entry.trim())
+        .filter((entry) => entry && !isDeskPriorityVacationEntry(entry)),
+    ),
+  );
+}
+
+export function syncVacationTextForChangedRoute(
+  vacationText: string,
+  schedules: GeneratedSchedule[],
+  route: SchedulePersonRef[],
+) {
+  const vacationDateKeys = Array.from(
+    new Set(route.filter((ref) => ref.category === "휴가").map((ref) => ref.dateKey)),
+  );
+  if (vacationDateKeys.length === 0) return vacationText;
+
+  const vacationMap = parseVacationMap(vacationText);
+  vacationDateKeys.forEach((dateKey) => {
+    const day = schedules
+      .flatMap((schedule) => schedule.days)
+      .find((candidate) => candidate.dateKey === dateKey);
+    if (!day) return;
+
+    const entries = getVacationEntriesForDay(day);
+    if (entries.length > 0) {
+      vacationMap[dateKey] = entries;
+      return;
+    }
+
+    delete vacationMap[dateKey];
+  });
+
+  return serializeVacationMap(vacationMap);
+}
+
+function syncStateVacationTextForChangedRoute(
+  state: ScheduleState,
+  schedules: GeneratedSchedule[],
+  route: SchedulePersonRef[],
+) {
+  const vacations = syncVacationTextForChangedRoute(state.vacations, schedules, route);
+  return vacations === state.vacations ? state : { ...state, vacations };
 }
 
 function buildScheduleMap(items: GeneratedSchedule[], monthKeys: Set<string>) {
@@ -381,12 +455,19 @@ async function applyRequestToScheduleState(request: ScheduleChangeRequest) {
     return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
   }
 
-  const generatedHistory = current.generatedHistory.map((item) => scheduleMap.get(item.monthKey) ?? item);
-  const generated = current.generated ? scheduleMap.get(current.generated.monthKey) ?? current.generated : null;
-  const syncedGeneratedHistory = syncGeneralAssignmentsForSchedules(current, generatedHistory);
-  const syncedGenerated = generated ? syncGeneralAssignmentsForSchedules(current, [generated])[0] : null;
+  const currentWithRouteVacations = syncStateVacationTextForChangedRoute(
+    current,
+    Array.from(scheduleMap.values()),
+    request.route,
+  );
+  const generatedHistory = currentWithRouteVacations.generatedHistory.map((item) => scheduleMap.get(item.monthKey) ?? item);
+  const generated = currentWithRouteVacations.generated
+    ? scheduleMap.get(currentWithRouteVacations.generated.monthKey) ?? currentWithRouteVacations.generated
+    : null;
+  const syncedGeneratedHistory = syncGeneralAssignmentsForSchedules(currentWithRouteVacations, generatedHistory);
+  const syncedGenerated = generated ? syncGeneralAssignmentsForSchedules(currentWithRouteVacations, [generated])[0] : null;
   const nextState = {
-    ...current,
+    ...currentWithRouteVacations,
     generated: syncedGenerated,
     generatedHistory: syncedGeneratedHistory,
   } satisfies ScheduleState;
@@ -425,10 +506,15 @@ async function applyRequestToPublishedSchedules(
     return { matched: true, applied: false, snapshots: [] as GeneratedSchedule[] };
   }
 
+  const currentStateWithRouteVacations = syncStateVacationTextForChangedRoute(
+    currentState,
+    Array.from(scheduleMap.values()),
+    request.route,
+  );
   const syncedSchedules =
     resolvedSchedules.length > 0
       ? resolvedSchedules.map((schedule) => cloneValue(schedule))
-      : syncGeneralAssignmentsForSchedules(currentState, Array.from(scheduleMap.values()));
+      : syncGeneralAssignmentsForSchedules(currentStateWithRouteVacations, Array.from(scheduleMap.values()));
   const syncedScheduleMap = new Map(syncedSchedules.map((schedule) => [schedule.monthKey, schedule]));
 
   const nextItems = items.map((item) => {

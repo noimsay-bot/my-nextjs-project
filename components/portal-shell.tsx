@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppRouteBoundary } from "@/components/app-route-boundary";
+import { CustomerSupportDialog } from "@/components/customer-support-dialog";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarInset, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarSeparator, useSidebar } from "@/components/sidebar";
 import { ShinyText } from "@/components/effects/ShinyText";
 import {
@@ -57,7 +58,7 @@ const links: PortalNavLink[] = [
   { href: "/partner/schedule", label: "일정" },
   {
     href: "/equipment",
-    label: "라이브/장비",
+    label: "TVU/장비",
     children: equipmentNavItems.map((item) => ({ href: item.href, label: item.label })),
   },
   {
@@ -316,6 +317,7 @@ function PortalSidebar({
   adminSession,
   canOpenAdminArea,
   onCycleTheme,
+  onOpenCustomerSupport,
   onCycleExperienceRole,
   onConfirmRoleExperience,
   mobileTriggerProps,
@@ -329,6 +331,7 @@ function PortalSidebar({
   adminSession: SessionUser | null;
   canOpenAdminArea: boolean;
   onCycleTheme: () => void;
+  onOpenCustomerSupport: () => void;
   onCycleExperienceRole: () => void;
   onConfirmRoleExperience: () => void;
   mobileTriggerProps?: ButtonHTMLAttributes<HTMLButtonElement>;
@@ -544,6 +547,16 @@ function PortalSidebar({
               ) : null}
             </div>
           ) : null}
+          <button
+            type="button"
+            className="btn portal-sidebar-action"
+            onClick={() => {
+              closeMobileSidebar();
+              onOpenCustomerSupport();
+            }}
+          >
+            <span>고객센터</span>
+          </button>
           <button type="button" className="btn portal-sidebar-action" onClick={onCycleTheme}>
             <span>모드변경</span>
           </button>
@@ -564,6 +577,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const [sidebarTriggerTopOffset, setSidebarTriggerTopOffset] = useState(12);
   const [mobileSidebarTriggerTop, setMobileSidebarTriggerTop] = useState(MOBILE_SIDEBAR_TRIGGER_DEFAULT_TOP);
   const [isDraggingMobileSidebarTrigger, setIsDraggingMobileSidebarTrigger] = useState(false);
+  const [customerSupportOpen, setCustomerSupportOpen] = useState(false);
   const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>("member");
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
@@ -874,6 +888,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         adminSession={adminSession}
         canOpenAdminArea={canOpenAdminArea}
         onCycleTheme={cycleTheme}
+        onOpenCustomerSupport={() => setCustomerSupportOpen(true)}
         onCycleExperienceRole={cycleExperienceRole}
         onConfirmRoleExperience={confirmRoleExperience}
         mobileTriggerProps={{
@@ -890,6 +905,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
           },
         }}
       />
+      <CustomerSupportDialog open={customerSupportOpen} onClose={() => setCustomerSupportOpen(false)} />
       <SidebarInset>
         <div className="shell portal-shell-main">
           <section ref={headerRef} className="panel portal-header-shell">

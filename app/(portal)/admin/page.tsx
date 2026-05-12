@@ -10,6 +10,10 @@ import {
   updateAdminProfileAccess,
 } from "@/lib/team-lead/storage";
 import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
+import {
+  getAdminCustomerSupportMessages,
+  type CustomerSupportMessageWorkspace,
+} from "@/lib/portal/customer-support";
 import { getMemberLevelMap, type MemberLevelSnapshot } from "@/lib/portal/member-level";
 import {
   getAdminPageVisitAnalytics,
@@ -163,6 +167,12 @@ const emptyPageVisitAnalytics: PageVisitAnalytics = {
   message: null,
 };
 
+const emptyCustomerSupportWorkspace: CustomerSupportMessageWorkspace = {
+  items: [],
+  schemaMissing: false,
+  message: null,
+};
+
 const visitRangeLabels: Record<PageVisitRange, string> = {
   week: "최근 7일",
   month: "이번 달",
@@ -277,6 +287,8 @@ export default function AdminPage() {
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
   const [memberLevelMap, setMemberLevelMap] = useState<Map<string, MemberLevelSnapshot>>(new Map());
   const [visitAnalytics, setVisitAnalytics] = useState<PageVisitAnalytics>(emptyPageVisitAnalytics);
+  const [customerSupport, setCustomerSupport] =
+    useState<CustomerSupportMessageWorkspace>(emptyCustomerSupportWorkspace);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -286,14 +298,16 @@ export default function AdminPage() {
   async function refresh() {
     setLoading(true);
     try {
-      const [workspace, analytics] = await Promise.all([
+      const [workspace, analytics, customerSupportWorkspace] = await Promise.all([
         getAdminWorkspace(),
         getAdminPageVisitAnalytics(),
+        getAdminCustomerSupportMessages(),
       ]);
       const nextMemberLevelMap = await getMemberLevelMap(workspace.profiles.map((profile) => profile.id));
       setProfiles(workspace.profiles);
       setMemberLevelMap(nextMemberLevelMap);
       setVisitAnalytics(analytics);
+      setCustomerSupport(customerSupportWorkspace);
       setDraftRoles(
         Object.fromEntries(workspace.profiles.map((profile) => [profile.id, profile.role])),
       );
@@ -329,6 +343,57 @@ export default function AdminPage() {
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
+      <article className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div className="chip">고객센터</div>
+              <strong style={{ fontSize: 22 }}>접수 내용</strong>
+            </div>
+            <span className="muted">최근 접수 {customerSupport.items.length}건</span>
+          </div>
+          {customerSupport.message ? (
+            <div className={`status ${customerSupport.schemaMissing ? "warn" : "note"}`}>
+              {customerSupport.message}
+            </div>
+          ) : null}
+          <div style={{ display: "grid", gap: 10 }}>
+            {customerSupport.items.length > 0 ? (
+              customerSupport.items.map((item) => (
+                <article
+                  key={item.id}
+                  style={{
+                    display: "grid",
+                    gap: 8,
+                    padding: 14,
+                    borderRadius: 16,
+                    border: "1px solid rgba(255,255,255,.08)",
+                    background: "rgba(255,255,255,.03)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <strong>익명 접수</strong>
+                    <span className="muted">{formatDateTime(item.createdAt)}</span>
+                  </div>
+                  <p
+                    style={{
+                      margin: 0,
+                      lineHeight: 1.65,
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {item.body}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <div className="status note">{loading ? "불러오는 중입니다." : "접수된 고객센터 내용이 없습니다."}</div>
+            )}
+          </div>
+        </div>
+      </article>
+
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           {message ? <div className="status note">{message}</div> : null}
@@ -390,7 +455,7 @@ export default function AdminPage() {
               <div className="chip">방문 통계</div>
               <strong style={{ fontSize: 22 }}>주요 페이지 방문 현황</strong>
             </div>
-            <span className="muted">마이페이지 · 커뮤니티 · 근무표 · 내 주변 맛집 · 라이브/장비</span>
+            <span className="muted">마이페이지 · 커뮤니티 · 근무표 · 내 주변 맛집 · TVU/장비</span>
           </div>
           {visitAnalytics.message ? (
             <div className={`status ${visitAnalytics.schemaMissing ? "warn" : "note"}`}>
