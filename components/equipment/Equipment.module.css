@@ -176,9 +176,11 @@
 }
 
 .trsOptionButton {
+  position: relative;
   display: grid;
   gap: 2px;
   place-items: center;
+  overflow: hidden;
   min-height: 42px;
   border: 1px solid rgba(125, 211, 252, 0.28);
   border-radius: 8px;
@@ -187,6 +189,12 @@
   font-size: 15px;
   font-weight: 900;
   cursor: pointer;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    color 0.3s ease,
+    transform 0.3s ease;
 }
 
 .trsOptionButton small {
@@ -208,16 +216,30 @@
 
 .trsOptionButtonSelected,
 .trsOptionButtonSelected:hover {
-  border-color: rgba(52, 211, 153, 0.56);
-  background: rgba(16, 185, 129, 0.24);
-  color: #d1fae5;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
+}
+
+.trsOptionButtonSelected::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--selected-button-dot-bg);
+  box-shadow: var(--selected-button-dot-shadow);
 }
 
 .itemCard,
 .memberCard {
+  position: relative;
   display: grid;
   gap: 9px;
+  overflow: hidden;
   width: 100%;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.11);
@@ -226,6 +248,12 @@
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    color 0.3s ease,
+    transform 0.3s ease;
 }
 
 .itemCard {
@@ -262,23 +290,24 @@
 }
 
 .itemCardSelected {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(16, 185, 129, 0.22);
-  color: #d1fae5;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 .itemCardSelectedGreen {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(16, 185, 129, 0.22);
-  color: #d1fae5;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 .itemCardSelected:hover,
 .itemCardSelectedGreen:hover {
-  border-color: rgba(52, 211, 153, 0.62);
-  background: rgba(16, 185, 129, 0.28);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  box-shadow: var(--selected-button-shadow);
 }
 
 .itemCardLive {
@@ -293,37 +322,38 @@
 }
 
 .itemCardSelectedLive {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(16, 185, 129, 0.22);
-  color: #d1fae5;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 .itemCardSelectedLive:hover {
-  border-color: rgba(52, 211, 153, 0.62);
-  background: rgba(16, 185, 129, 0.28);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  box-shadow: var(--selected-button-shadow);
 }
 
 :global(html[data-theme="light"]) .itemCardSelected {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(16, 185, 129, 0.22);
-  color: #064e3b;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 :global(html[data-theme="light"]) .itemCardSelected:hover {
-  background: rgba(16, 185, 129, 0.28);
+  background: var(--selected-button-bg);
 }
 
 :global(html[data-theme="light"]) .itemCardSelectedGreen {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(16, 185, 129, 0.22);
-  color: #064e3b;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 :global(html[data-theme="light"]) .itemCardSelectedGreen:hover {
-  background: rgba(16, 185, 129, 0.28);
+  background: var(--selected-button-bg);
 }
 
 :global(html[data-theme="light"]) .itemCardLive {
@@ -350,22 +380,37 @@
 
 :global(html[data-theme="light"]) .trsOptionButtonSelected,
 :global(html[data-theme="light"]) .trsOptionButtonSelected:hover {
-  border-color: rgba(52, 211, 153, 0.58);
-  background: rgba(16, 185, 129, 0.26);
-  color: #064e3b;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 :global(html[data-theme="light"]) .itemCardSelectedLive {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(16, 185, 129, 0.22);
-  color: #064e3b;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 :global(html[data-theme="light"]) .itemCardSelectedLive:hover {
-  border-color: rgba(52, 211, 153, 0.62);
-  background: rgba(16, 185, 129, 0.28);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  box-shadow: var(--selected-button-shadow);
+}
+
+.itemCardSelected::before,
+.itemCardSelectedGreen::before,
+.itemCardSelectedLive::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--selected-button-dot-bg);
+  box-shadow: var(--selected-button-dot-shadow);
 }
 
 .itemCardBorrowed {
@@ -423,18 +468,18 @@
 
 .memberCard.itemCardSelected,
 .memberCard.itemCardSelected:hover {
-  border-color: rgba(52, 211, 153, 0.62);
-  background: rgba(16, 185, 129, 0.28);
-  color: #d1fae5;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 :global(html[data-theme="light"]) .memberCard.itemCardSelected,
 :global(html[data-theme="light"]) .memberCard.itemCardSelected:hover {
-  border-color: rgba(52, 211, 153, 0.58);
-  background: rgba(16, 185, 129, 0.26);
-  color: #064e3b;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.16);
+  border-color: var(--selected-button-border);
+  background: var(--selected-button-bg);
+  color: var(--selected-button-text);
+  box-shadow: var(--selected-button-shadow);
 }
 
 .itemCardTop {

@@ -56,6 +56,12 @@
   --btn-primary-bg: linear-gradient(90deg, rgba(255,255,255,0.22), rgba(255,255,255,0.12));
   --btn-primary-text: #f5fbff;
   --btn-primary-border: rgba(233, 248, 255, 0.2);
+  --selected-button-bg: rgba(16, 185, 129, 0.28);
+  --selected-button-border: rgba(52, 211, 153, 0.58);
+  --selected-button-text: #ffffff;
+  --selected-button-shadow: 0 8px 22px rgba(16, 185, 129, 0.18);
+  --selected-button-dot-bg: #ffffff;
+  --selected-button-dot-shadow: 0 0 18px rgba(255, 255, 255, 0.9);
   --theme-toggle-active-bg: rgba(255, 255, 255, 0.96);
   --theme-toggle-active-text: #08111d;
   --team-personal-border: rgba(251, 191, 36, 0.34);
@@ -112,6 +118,12 @@ html[data-theme="light"] {
   --btn-primary-bg: linear-gradient(90deg, rgba(125, 211, 252, 0.42), rgba(96, 165, 250, 0.38), rgba(251, 146, 60, 0.34));
   --btn-primary-text: #111827;
   --btn-primary-border: rgba(59, 130, 246, 0.18);
+  --selected-button-bg: rgba(16, 185, 129, 0.2);
+  --selected-button-border: rgba(16, 185, 129, 0.42);
+  --selected-button-text: #064e3b;
+  --selected-button-shadow: 0 8px 22px rgba(16, 185, 129, 0.14);
+  --selected-button-dot-bg: #10b981;
+  --selected-button-dot-shadow: 0 0 16px rgba(16, 185, 129, 0.45);
   --theme-toggle-active-bg: #ffffff;
   --theme-toggle-active-text: #0f172a;
   --team-personal-border: rgba(245, 158, 11, 0.28);
@@ -404,9 +416,12 @@ h6 {
 }
 
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
+  overflow: hidden;
   cursor: pointer;
   font-weight: 800;
   padding: 11px 15px;
@@ -417,6 +432,17 @@ h6 {
   white-space: nowrap;
   touch-action: manipulation;
   user-select: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    color 0.3s ease,
+    transform 0.3s ease;
+}
+
+.btn:hover:not(:disabled) {
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
 .btn.primary {
@@ -426,9 +452,24 @@ h6 {
 }
 
 .btn.white {
-  color: var(--btn-white-text);
-  border: none;
-  background: var(--btn-white-bg);
+  color: var(--selected-button-text);
+  border: 1px solid var(--selected-button-border);
+  background: var(--selected-button-bg);
+  box-shadow: var(--selected-button-shadow);
+}
+
+.btn.white::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--selected-button-dot-bg);
+  box-shadow: var(--selected-button-dot-shadow);
+}
+
+.btn.white :where(span, strong, small) {
+  color: inherit !important;
 }
 
 .final-cut-decision-btn {
