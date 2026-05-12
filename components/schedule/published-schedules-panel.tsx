@@ -59,7 +59,7 @@ const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON = 0.01;
-const HOME_PREVIEW_DAY_COUNT = 6;
+const HOME_PREVIEW_DAY_COUNT = 7;
 const MOBILE_THREE_DAY_ROW_SIZE = 3;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
@@ -1129,10 +1129,11 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const isHomeThreeDayView = isHomePreview && scheduleLayoutMode !== "desktop";
+  const isHomeThreeDayView = isHomePreview && scheduleLayoutMode === "mobile";
+  const isHomeWeekFitView = isHomePreview && scheduleLayoutMode === "tablet";
   const isPageMobileThreeDayView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "three-day";
   const isMobileThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
-  const isCompactThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
+  const isCompactThreeDayView = isHomeThreeDayView || isHomeWeekFitView || isPageMobileThreeDayView;
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
@@ -1273,7 +1274,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       : scheduleLayoutMode === "tablet"
         ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
-  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayView ? " schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
+  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayView ? " schedule-published-panel--home-three-day" : ""}${isHomeWeekFitView ? " schedule-published-panel--home-week-fit" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;

@@ -182,6 +182,9 @@
 }
 
 .trsOptionButton {
+  display: grid;
+  gap: 2px;
+  place-items: center;
   min-height: 42px;
   border: 1px solid rgba(125, 211, 252, 0.28);
   border-radius: 8px;
@@ -192,9 +195,21 @@
   cursor: pointer;
 }
 
+.trsOptionButton small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .trsOptionButton:hover {
   border-color: rgba(125, 211, 252, 0.5);
   background: rgba(59, 130, 246, 0.2);
+}
+
+.trsOptionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .trsOptionButtonSelected,
@@ -569,6 +584,201 @@
   min-width: 880px;
 }
 
+.liveStatusPage {
+  color: #0f172a;
+}
+
+.liveStatusBoard {
+  display: grid;
+  gap: 22px;
+  padding: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+}
+
+.liveStatusTop {
+  display: grid;
+  gap: 18px;
+}
+
+.liveStatusHeading {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.liveStatusBadge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #0f5cc5;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.liveStatusHeading h1 {
+  margin: 0;
+  color: #020617;
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+.liveStatusToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.liveStatusToolbar p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.liveStatusActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.liveStatusTableWrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.liveStatusTable {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.liveStatusTable th {
+  height: 42px;
+  padding: 10px 14px;
+  background: #062650;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.liveStatusTable td {
+  height: 54px;
+  padding: 8px 14px;
+  border-top: 1px solid #e5e7eb;
+  background: #ffffff;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.liveStatusTable tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.liveStatusDirtyRow td {
+  background: #fffbeb;
+}
+
+.liveStatusDirtyRow:nth-child(even) td {
+  background: #fef3c7;
+}
+
+.liveStatusInput {
+  width: 100%;
+  min-width: 96px;
+  height: 34px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+  outline: none;
+}
+
+.liveStatusInput::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+.liveStatusInput:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #ffffff;
+}
+
+.liveStatusInput:not(:disabled):focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.liveStatusInput:disabled {
+  color: #334155;
+  opacity: 1;
+}
+
+.liveStatusCellValue {
+  display: block;
+  min-width: 96px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.liveStatusTable .itemNameStack {
+  min-width: 96px;
+  justify-items: start;
+  text-align: left;
+}
+
+.liveStatusTable .itemNameStack strong {
+  color: #0f172a;
+}
+
+.liveStatusTable .globalBadge {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #064e3b;
+}
+
+.liveStatusTable .statusAvailable {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.liveStatusTable .statusBorrowed {
+  border-color: #fecaca;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.liveStatusTable .statusRepairing {
+  border-color: #fde68a;
+  background: #fef3c7;
+  color: #a16207;
+}
+
 .recordName {
   display: block;
   font-weight: 900;
@@ -582,6 +792,38 @@
   place-items: center;
   padding: 16px;
   background: rgba(2, 6, 23, 0.62);
+}
+
+@media (max-width: 760px) {
+  .liveStatusBoard {
+    padding: 18px 14px;
+  }
+
+  .liveStatusHeading h1 {
+    font-size: 26px;
+  }
+
+  .liveStatusToolbar {
+    align-items: stretch;
+  }
+
+  .liveStatusActions {
+    width: 100%;
+  }
+
+  .liveStatusActions :global(.btn) {
+    flex: 1 1 120px;
+  }
+
+  .liveStatusTable {
+    min-width: 860px;
+    font-size: 14px;
+  }
+
+  .liveStatusTable th,
+  .liveStatusTable td {
+    padding-inline: 10px;
+  }
 }
 
 .modal {

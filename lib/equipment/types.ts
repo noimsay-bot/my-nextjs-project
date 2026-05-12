@@ -59,6 +59,16 @@ export interface LiveLoanDetails {
   note: string;
 }
 
+export interface LiveEquipmentStatusEntry extends LiveLoanDetails {
+  equipmentItemId: string;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface LiveEquipmentStatusSaveEntry extends LiveLoanDetails {
+  equipmentItemId: string;
+}
+
 export interface EquipmentCategoryConfig {
   category: EquipmentCategory;
   title: string;

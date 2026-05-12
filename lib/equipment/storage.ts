@@ -12,6 +12,8 @@ import type {
   EquipmentLoanStatus,
   EquipmentLoanType,
   EquipmentProfile,
+  LiveEquipmentStatusEntry,
+  LiveEquipmentStatusSaveEntry,
   LiveLoanDetails,
 } from "@/lib/equipment/types";
 
@@ -70,6 +72,17 @@ interface EquipmentProfileRow {
   approved: boolean;
 }
 
+interface LiveEquipmentStatusBoardRow {
+  equipment_item_id: string;
+  live_trs: string | null;
+  live_camera_reporter: string | null;
+  live_audio_man: string | null;
+  live_location: string | null;
+  live_note: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
 export interface EquipmentLoanItemQuery {
   categories?: EquipmentCategory[];
   status?: EquipmentLoanStatus;
@@ -115,6 +128,19 @@ function rowToLoan(row: EquipmentLoanRow, borrowerName: string): EquipmentLoan {
     liveLocation: row.live_location,
     liveNote: row.live_note,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowToLiveStatusEntry(row: LiveEquipmentStatusBoardRow): LiveEquipmentStatusEntry {
+  return {
+    equipmentItemId: row.equipment_item_id,
+    trs: row.live_trs ?? "",
+    cameraReporter: row.live_camera_reporter ?? "",
+    audioMan: row.live_audio_man ?? "",
+    location: row.live_location ?? "",
+    note: row.live_note ?? "",
+    updatedBy: row.updated_by,
     updatedAt: row.updated_at,
   };
 }
@@ -208,6 +234,26 @@ export async function fetchEquipmentProfiles() {
     role: row.role,
     approved: row.approved,
   })) satisfies EquipmentProfile[];
+}
+
+export async function fetchLiveEquipmentStatusEntries() {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    return [];
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("live_equipment_status_board")
+    .select("equipment_item_id, live_trs, live_camera_reporter, live_audio_man, live_location, live_note, updated_by, updated_at")
+    .order("updated_at", { ascending: false })
+    .returns<LiveEquipmentStatusBoardRow[]>();
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "live_equipment_status_board"));
+  }
+
+  return (data ?? []).map(rowToLiveStatusEntry);
 }
 
 export async function fetchEquipmentLoanItems(options: EquipmentLoanItemQuery = {}) {
@@ -321,6 +367,14 @@ function assertCanManageRepair() {
   return session;
 }
 
+function assertCanManageLiveStatus() {
+  const session = getSession();
+  if (!session?.approved || !hasDeskAccess(session.role)) {
+    throw new Error("라이브장비 현황판 저장 권한이 없습니다.");
+  }
+  return session;
+}
+
 export function canReturnLoanItem(loanItem: EquipmentLoanItem) {
   const session = getSession();
   if (!session?.approved) return false;
@@ -388,6 +442,34 @@ export async function setEquipmentItemsRepairStatus(itemIds: string[], isUnderRe
 
   if (error) {
     throw new Error(getEquipmentStorageErrorMessage(error, "equipment repair"));
+  }
+}
+
+export async function saveLiveEquipmentStatusEntries(entries: LiveEquipmentStatusSaveEntry[]) {
+  const session = assertCanManageLiveStatus();
+  const payload = entries
+    .map((entry) => ({
+      equipment_item_id: entry.equipmentItemId.trim(),
+      live_trs: entry.trs.trim() || null,
+      live_camera_reporter: entry.cameraReporter.trim() || null,
+      live_audio_man: entry.audioMan.trim() || null,
+      live_location: entry.location.trim() || null,
+      live_note: entry.note.trim() || null,
+      updated_by: session.id,
+    }))
+    .filter((entry) => entry.equipment_item_id);
+
+  if (payload.length === 0) {
+    throw new Error("저장할 라이브장비 현황이 없습니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase
+    .from("live_equipment_status_board")
+    .upsert(payload, { onConflict: "equipment_item_id" });
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "live_equipment_status_board"));
   }
 }
 

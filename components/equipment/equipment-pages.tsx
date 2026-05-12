@@ -6,6 +6,7 @@ import {
   getSession,
   hasDeskAccess,
   isReadOnlyPortalRole,
+  subscribeToAuth,
   type SessionUser,
 } from "@/lib/auth/storage";
 import { getEngScheduleBadges, loadEngScheduleHighlights, type EngScheduleBadge, type EngScheduleHighlightMap } from "@/lib/equipment/eng-schedule";
@@ -16,7 +17,9 @@ import {
   fetchEquipmentItems,
   fetchEquipmentLoanItems,
   fetchEquipmentProfiles,
+  fetchLiveEquipmentStatusEntries,
   returnEquipmentLoanItems,
+  saveLiveEquipmentStatusEntries,
   setEquipmentItemsRepairStatus,
 } from "@/lib/equipment/storage";
 import {
@@ -28,6 +31,8 @@ import {
   type EquipmentItem,
   type EquipmentLoanItem,
   type EquipmentProfile,
+  type LiveEquipmentStatusEntry,
+  type LiveEquipmentStatusSaveEntry,
   type LiveLoanDetails,
 } from "@/lib/equipment/types";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
@@ -37,6 +42,8 @@ type Message = { tone: "ok" | "warn" | "note"; text: string };
 type ConfirmMode = "borrow" | "return";
 type EquipmentItemCardTone = "default" | "live";
 type RepairDraftByItemId = Record<string, boolean>;
+type LiveStatusDraftByItemId = Record<string, LiveLoanDetails>;
+type LiveAccessoryGroupKey = "pin_mic" | "distributor";
 type BorrowSelection =
   | {
       kind: "item";
@@ -79,6 +86,7 @@ const LIVE_TRS_OPTIONS = [
   "1780",
 ] as const;
 const LIVE_TRS_OPTION_SET = new Set<string>(LIVE_TRS_OPTIONS);
+const LIVE_ACCESSORY_GROUPS: readonly LiveAccessoryGroupKey[] = ["pin_mic", "distributor"];
 const EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX = "jtbc-equipment-borrow-selection-v1";
 const EQUIPMENT_BORROW_SELECTION_EVENT = "jtbc-equipment-borrow-selection-change";
 
@@ -248,15 +256,72 @@ function isGlobalTvuItem(item: EquipmentItem) {
   return tvuNumber !== null && tvuNumber >= 15 && tvuNumber <= 19;
 }
 
-function isTvuInlineAccessoryItem(item: EquipmentItem) {
+const hiddenEquipmentChoiceCodes = new Set([
+  "camera-5d-lens-24-105mm",
+  "camera-5d-lens-28-300mm",
+  "camera-fx3-lens-24-105mm-02",
+  "camera-standalone-ax40-03",
+  "camera-standalone-gopro",
+  "camera-drone-dji-s-1000",
+  "camera-drone-inspiper-1",
+  "camera-drone-inspiper-2",
+  "live-cubotec",
+  "live-bnc-cable",
+]);
+
+function isHiddenEquipmentChoiceItem(item: EquipmentItem) {
+  if (hiddenEquipmentChoiceCodes.has(item.code)) return true;
+  if (item.code.startsWith("camera-gopro-battery-")) return true;
   if (item.category !== "live") return false;
   const normalizedName = item.name.replace(/\s+/g, "").toLowerCase();
-  return normalizedName === "tvu배터리" || normalizedName === "핀마이크";
+  return normalizedName === "쿠보텍" || normalizedName === "bnc케이블";
+}
+
+function isTvuInlineAccessoryItem(item: EquipmentItem) {
+  if (item.category !== "live") return false;
+  const kind = getMetadataString(item, "kind");
+  if (kind === "tvu_battery" || kind === "pin_mic" || kind === "distributor") return true;
+  const normalizedName = item.name.replace(/\s+/g, "").toLowerCase();
+  return normalizedName === "tvu배터리" || normalizedName.startsWith("핀마이크") || normalizedName.startsWith("분배기");
 }
 
 function isTvuBatteryItem(item: EquipmentItem) {
   if (item.category !== "live") return false;
+  if (getMetadataString(item, "kind") === "tvu_battery") return true;
   return item.name.replace(/\s+/g, "").toLowerCase() === "tvu배터리";
+}
+
+function getLiveAccessoryGroupKey(item: EquipmentItem): LiveAccessoryGroupKey | null {
+  if (item.category !== "live") return null;
+  const kind = getMetadataString(item, "kind");
+  if (kind === "pin_mic" || kind === "distributor") return kind;
+  const normalizedName = item.name.replace(/\s+/g, "").toLowerCase();
+  if (normalizedName.startsWith("핀마이크")) return "pin_mic";
+  if (normalizedName.startsWith("분배기")) return "distributor";
+  return null;
+}
+
+function getLiveAccessoryGroupLabel(groupKey: LiveAccessoryGroupKey) {
+  return groupKey === "pin_mic" ? "핀마이크" : "분배기";
+}
+
+function getLiveAccessoryOptionNumber(item: EquipmentItem) {
+  const matched = /(\d+)\s*번/.exec(item.name);
+  return matched ? Number(matched[1]) : Number.POSITIVE_INFINITY;
+}
+
+function getLiveAccessoryOptionLabel(item: EquipmentItem) {
+  const optionNumber = getLiveAccessoryOptionNumber(item);
+  return Number.isFinite(optionNumber) ? `${optionNumber}번` : getVariantLabel(item);
+}
+
+function getLiveAccessorySummary(items: EquipmentItem[], selectedIds: string[]) {
+  const selectedLabels = items
+    .filter((item) => selectedIds.includes(item.id))
+    .map(getLiveAccessoryOptionLabel);
+  if (selectedLabels.length === 0) return "";
+  if (selectedLabels.length <= 2) return selectedLabels.join(", ");
+  return `${selectedLabels[0]} 외 ${selectedLabels.length - 1}개`;
 }
 
 function getEngTargetProfileId(loanItem: EquipmentLoanItem) {
@@ -266,6 +331,69 @@ function getEngTargetProfileId(loanItem: EquipmentLoanItem) {
 
 function isSharedEngSetItem(item: EquipmentItem) {
   return item.category === "eng_set" && getMetadataString(item, "kind") === "shared_eng_set";
+}
+
+function normalizeLiveStatusDraft(value?: Partial<LiveLoanDetails> | null): LiveLoanDetails {
+  return {
+    trs: value?.trs?.trim() ?? "",
+    cameraReporter: value?.cameraReporter?.trim() ?? "",
+    audioMan: value?.audioMan?.trim() ?? "",
+    location: value?.location?.trim() ?? "",
+    note: value?.note?.trim() ?? "",
+  };
+}
+
+function liveStatusDraftsEqual(left?: LiveLoanDetails, right?: LiveLoanDetails) {
+  const normalizedLeft = normalizeLiveStatusDraft(left);
+  const normalizedRight = normalizeLiveStatusDraft(right);
+  return (
+    normalizedLeft.trs === normalizedRight.trs &&
+    normalizedLeft.cameraReporter === normalizedRight.cameraReporter &&
+    normalizedLeft.audioMan === normalizedRight.audioMan &&
+    normalizedLeft.location === normalizedRight.location &&
+    normalizedLeft.note === normalizedRight.note
+  );
+}
+
+function createLiveStatusDraftByItemId(entries: LiveEquipmentStatusEntry[]) {
+  return entries.reduce<LiveStatusDraftByItemId>((map, entry) => {
+    map[entry.equipmentItemId] = normalizeLiveStatusDraft(entry);
+    return map;
+  }, {});
+}
+
+function getLoanLiveStatusDraft(loanItem?: EquipmentLoanItem): LiveLoanDetails {
+  return {
+    trs: loanItem?.loan.liveTrs?.trim() ?? "",
+    cameraReporter: loanItem?.loan.liveCameraReporter?.trim() ?? "",
+    audioMan: loanItem?.loan.liveAudioMan?.trim() ?? "",
+    location: loanItem?.loan.liveLocation?.trim() ?? "",
+    note: loanItem?.loan.liveNote?.trim() ?? "",
+  };
+}
+
+function resolveLiveStatusDraft(manualDraft: LiveLoanDetails | undefined, loanItem?: EquipmentLoanItem): LiveLoanDetails {
+  const manual = normalizeLiveStatusDraft(manualDraft);
+  const linked = getLoanLiveStatusDraft(loanItem);
+  return {
+    trs: manual.trs || linked.trs,
+    cameraReporter: manual.cameraReporter || linked.cameraReporter,
+    audioMan: manual.audioMan || linked.audioMan,
+    location: manual.location || linked.location,
+    note: manual.note || linked.note,
+  };
+}
+
+function stripLinkedLiveStatusDraft(displayDraft: LiveLoanDetails | undefined, loanItem?: EquipmentLoanItem): LiveLoanDetails {
+  const display = normalizeLiveStatusDraft(displayDraft);
+  const linked = getLoanLiveStatusDraft(loanItem);
+  return {
+    trs: display.trs === linked.trs ? "" : display.trs,
+    cameraReporter: display.cameraReporter === linked.cameraReporter ? "" : display.cameraReporter,
+    audioMan: display.audioMan === linked.audioMan ? "" : display.audioMan,
+    location: display.location === linked.location ? "" : display.location,
+    note: display.note === linked.note ? "" : display.note,
+  };
 }
 
 function groupLoanItemsByBorrower(loanItems: EquipmentLoanItem[]) {
@@ -302,6 +430,19 @@ function getVariantParentLabel(item: EquipmentItem) {
 
 function getVariantLabel(item: EquipmentItem) {
   return getMetadataString(item, "variant_label") || item.name;
+}
+
+function getStandaloneVariantParentLabel(item: EquipmentItem) {
+  if (item.groupName !== "단독 카메라") return "";
+  const variantParent = getVariantParentLabel(item);
+  if (variantParent) return variantParent;
+  const matched = /^(.*?)\s+\d+\s*번$/i.exec(item.name.trim());
+  return matched?.[1]?.trim() ?? "";
+}
+
+function getStandaloneVariantOptionLabel(item: EquipmentItem) {
+  const optionNumber = getLiveAccessoryOptionNumber(item);
+  return Number.isFinite(optionNumber) ? `${optionNumber}번` : getVariantLabel(item);
 }
 
 function isStandaloneBatteryItem(item: EquipmentItem) {
@@ -883,6 +1024,7 @@ function CameraGroups({
   repairDraftByItemId?: RepairDraftByItemId;
 }) {
   const [expandedBatteryAnchors, setExpandedBatteryAnchors] = useState<Record<string, string>>({});
+  const [expandedStandaloneVariantKeys, setExpandedStandaloneVariantKeys] = useState<string[]>([]);
   const familyNames = ["FX3", "5D", "GH4"];
   const familyGroups = familyNames.map((familyName) => ({
     familyName,
@@ -901,6 +1043,47 @@ function CameraGroups({
     map.set(key, existing);
     return map;
   }, new Map<string, EquipmentItem[]>());
+  const standaloneEntries = useMemo(() => {
+    const variantGroups = new Map<string, EquipmentItem[]>();
+    const entries: Array<
+      | { type: "item"; key: string; sortOrder: number; item: EquipmentItem }
+      | { type: "variant"; key: string; sortOrder: number; parentLabel: string; items: EquipmentItem[] }
+    > = [];
+
+    standalonePrimaryItems.forEach((item) => {
+      const parentLabel = getStandaloneVariantParentLabel(item);
+      if (!parentLabel) {
+        entries.push({ type: "item", key: item.id, sortOrder: item.sortOrder, item });
+        return;
+      }
+      const existing = variantGroups.get(parentLabel) ?? [];
+      existing.push(item);
+      variantGroups.set(parentLabel, existing);
+    });
+
+    variantGroups.forEach((variantItems, parentLabel) => {
+      const sortedItems = [...variantItems].sort((left, right) => (
+        getLiveAccessoryOptionNumber(left) - getLiveAccessoryOptionNumber(right)
+        || left.sortOrder - right.sortOrder
+        || left.name.localeCompare(right.name, "ko")
+      ));
+      entries.push({
+        type: "variant",
+        key: `standalone:${parentLabel}`,
+        sortOrder: sortedItems[0]?.sortOrder ?? 0,
+        parentLabel,
+        items: sortedItems,
+      });
+    });
+
+    return entries.sort((left, right) => left.sortOrder - right.sortOrder || left.key.localeCompare(right.key, "ko"));
+  }, [standalonePrimaryItems]);
+
+  const toggleStandaloneVariant = (key: string) => {
+    setExpandedStandaloneVariantKeys((current) => (
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+    ));
+  };
 
   const handleFamilyBodyToggle = (familyName: string, item: EquipmentItem, hasAccessoryItems: boolean) => {
     if (repairMode) {
@@ -1003,39 +1186,116 @@ function CameraGroups({
                 <span>{standalonePrimaryItems.length}개</span>
               </div>
               <div className={styles.itemGrid}>
-                {standalonePrimaryItems.map((item) => {
-                  const batteryKey = getStandaloneCameraBatteryKey(item);
-                  const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) ?? [] : [];
-                  const showBatteries = Boolean(batteryKey && expandedBatteryAnchors[batteryKey] === item.id && batteryItems.length > 0);
+                {standaloneEntries.map((entry) => {
+                  if (entry.type === "item") {
+                    const batteryKey = getStandaloneCameraBatteryKey(entry.item);
+                    const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) ?? [] : [];
+                    const showBatteries = Boolean(batteryKey && expandedBatteryAnchors[batteryKey] === entry.item.id && batteryItems.length > 0);
+                    return (
+                      <Fragment key={entry.key}>
+                        <EquipmentItemCard
+                          item={entry.item}
+                          selected={selectedIds.includes(entry.item.id)}
+                          loanItem={currentByItemId.get(entry.item.id)}
+                          onToggle={() => handleStandaloneToggle(entry.item)}
+                          allowBorrowedClick={batteryItems.length > 0}
+                          repairMode={repairMode}
+                          repairDraftByItemId={repairDraftByItemId}
+                        />
+                        {showBatteries ? (
+                          <div key={`${entry.item.id}-batteries`} className={styles.inlineBatteryPanel}>
+                            <div className={styles.inlineBatteryHead}>
+                              <h4>{entry.item.name} 배터리</h4>
+                              <span>{batteryItems.length}개</span>
+                            </div>
+                            <div className={styles.inlineBatteryGrid}>
+                              {batteryItems.map((batteryItem) => (
+                                <EquipmentItemCard
+                                  key={batteryItem.id}
+                                  item={batteryItem}
+                                  selected={selectedIds.includes(batteryItem.id)}
+                                  loanItem={currentByItemId.get(batteryItem.id)}
+                                  onToggle={() => onToggle(batteryItem.id)}
+                                  repairMode={repairMode}
+                                  repairDraftByItemId={repairDraftByItemId}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </Fragment>
+                    );
+                  }
+
+                  const expanded = expandedStandaloneVariantKeys.includes(entry.key);
+                  const selected = entry.items.some((item) => selectedIds.includes(item.id));
+                  const summary = getLiveAccessorySummary(entry.items, selectedIds);
+                  const borrowedCount = entry.items.filter((item) => currentByItemId.has(item.id)).length;
+                  const repairingCount = entry.items.filter((item) => item.isUnderRepair).length;
                   return (
-                    <Fragment key={item.id}>
-                      <EquipmentItemCard
-                        item={item}
-                        selected={selectedIds.includes(item.id)}
-                        loanItem={currentByItemId.get(item.id)}
-                        onToggle={() => handleStandaloneToggle(item)}
-                        allowBorrowedClick={batteryItems.length > 0}
-                        repairMode={repairMode}
-                        repairDraftByItemId={repairDraftByItemId}
-                      />
-                      {showBatteries ? (
-                        <div key={`${item.id}-batteries`} className={styles.inlineBatteryPanel}>
+                    <Fragment key={entry.key}>
+                      <button
+                        type="button"
+                        className={[
+                          styles.itemCard,
+                          selected ? styles.itemCardSelected : "",
+                        ].join(" ").trim()}
+                        onClick={() => toggleStandaloneVariant(entry.key)}
+                        aria-expanded={expanded}
+                      >
+                        <span className={styles.itemCardTop}>
+                          <strong>{entry.parentLabel}</strong>
+                          {summary ? <small>{summary}</small> : null}
+                          {borrowedCount > 0 || repairingCount > 0 ? <StatusPill borrowed={borrowedCount > 0} repairing={repairingCount > 0} /> : null}
+                        </span>
+                      </button>
+                      {expanded ? (
+                        <div className={styles.inlineBatteryPanel}>
                           <div className={styles.inlineBatteryHead}>
-                            <h4>{item.name} 배터리</h4>
-                            <span>{batteryItems.length}개</span>
+                            <h4>{entry.parentLabel}</h4>
+                            <span>{entry.items.length}개</span>
                           </div>
                           <div className={styles.inlineBatteryGrid}>
-                            {batteryItems.map((batteryItem) => (
-                              <EquipmentItemCard
-                                key={batteryItem.id}
-                                item={batteryItem}
-                                selected={selectedIds.includes(batteryItem.id)}
-                                loanItem={currentByItemId.get(batteryItem.id)}
-                                onToggle={() => onToggle(batteryItem.id)}
-                                repairMode={repairMode}
-                                repairDraftByItemId={repairDraftByItemId}
-                              />
-                            ))}
+                            {entry.items.map((item) => {
+                              const batteryKey = getStandaloneCameraBatteryKey(item);
+                              const batteryItems = batteryKey ? batteriesByKey.get(batteryKey) ?? [] : [];
+                              const showBatteries = Boolean(batteryKey && expandedBatteryAnchors[batteryKey] === item.id && batteryItems.length > 0);
+                              return (
+                                <Fragment key={item.id}>
+                                  <EquipmentItemCard
+                                    item={item}
+                                    displayName={getStandaloneVariantOptionLabel(item)}
+                                    selected={selectedIds.includes(item.id)}
+                                    loanItem={currentByItemId.get(item.id)}
+                                    onToggle={() => handleStandaloneToggle(item)}
+                                    allowBorrowedClick={batteryItems.length > 0}
+                                    repairMode={repairMode}
+                                    repairDraftByItemId={repairDraftByItemId}
+                                  />
+                                  {showBatteries ? (
+                                    <div key={`${item.id}-batteries`} className={styles.inlineBatteryPanel}>
+                                      <div className={styles.inlineBatteryHead}>
+                                        <h4>{item.name} 배터리</h4>
+                                        <span>{batteryItems.length}개</span>
+                                      </div>
+                                      <div className={styles.inlineBatteryGrid}>
+                                        {batteryItems.map((batteryItem) => (
+                                          <EquipmentItemCard
+                                            key={batteryItem.id}
+                                            item={batteryItem}
+                                            selected={selectedIds.includes(batteryItem.id)}
+                                            loanItem={currentByItemId.get(batteryItem.id)}
+                                            onToggle={() => onToggle(batteryItem.id)}
+                                            repairMode={repairMode}
+                                            repairDraftByItemId={repairDraftByItemId}
+                                          />
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </Fragment>
+                              );
+                            })}
                           </div>
                         </div>
                       ) : null}
@@ -1075,10 +1335,20 @@ function LiveEquipmentGroups({
 }) {
   const [expandedTvuId, setExpandedTvuId] = useState<string | null>(null);
   const [expandedTrsTvuId, setExpandedTrsTvuId] = useState<string | null>(null);
+  const [expandedAccessoryGroup, setExpandedAccessoryGroup] = useState<{ tvuId: string; groupKey: LiveAccessoryGroupKey } | null>(null);
   const tvuItems = items.filter(isTvuItem);
   const tvuAccessoryItems = items.filter(isTvuInlineAccessoryItem);
-  const visibleTvuAccessoryItems = tvuAccessoryItems.filter((item) => !isTvuBatteryItem(item));
-  const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item));
+  const visibleTvuAccessoryItems = tvuAccessoryItems
+    .filter((item) => !isTvuBatteryItem(item))
+    .filter((item) => !isHiddenEquipmentChoiceItem(item));
+  const liveAccessoryGroups = LIVE_ACCESSORY_GROUPS.map((groupKey) => ({
+    groupKey,
+    label: getLiveAccessoryGroupLabel(groupKey),
+    items: visibleTvuAccessoryItems
+      .filter((accessoryItem) => getLiveAccessoryGroupKey(accessoryItem) === groupKey)
+      .sort((left, right) => getLiveAccessoryOptionNumber(left) - getLiveAccessoryOptionNumber(right)),
+  })).filter((group) => group.items.length > 0);
+  const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item) && !isHiddenEquipmentChoiceItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
     if (repairMode) {
@@ -1091,6 +1361,7 @@ function LiveEquipmentGroups({
     }
     setExpandedTvuId((current) => (selected || current === item.id ? null : item.id));
     setExpandedTrsTvuId(null);
+    setExpandedAccessoryGroup(null);
   };
 
   return (
@@ -1103,9 +1374,12 @@ function LiveEquipmentGroups({
           </div>
           <div className={styles.itemGrid}>
             {tvuItems.map((item) => {
-              const accessoryCount = visibleTvuAccessoryItems.length + 1;
+              const accessoryCount = liveAccessoryGroups.length + 1;
               const showAccessories = expandedTvuId === item.id;
               const showTrsOptions = expandedTrsTvuId === item.id;
+              const expandedGroup = expandedAccessoryGroup?.tvuId === item.id
+                ? liveAccessoryGroups.find((group) => group.groupKey === expandedAccessoryGroup.groupKey)
+                : null;
               return (
                 <Fragment key={item.id}>
                   <EquipmentItemCard
@@ -1132,7 +1406,10 @@ function LiveEquipmentGroups({
                             styles.itemCardLive,
                             selectedTrsValues.length > 0 ? styles.itemCardSelectedLive : "",
                           ].join(" ").trim()}
-                          onClick={() => setExpandedTrsTvuId((current) => (current === item.id ? null : item.id))}
+                          onClick={() => {
+                            setExpandedAccessoryGroup(null);
+                            setExpandedTrsTvuId((current) => (current === item.id ? null : item.id));
+                          }}
                           aria-expanded={showTrsOptions}
                         >
                           <span className={styles.itemCardTop}>
@@ -1140,18 +1417,35 @@ function LiveEquipmentGroups({
                             {selectedTrsValues.length > 0 ? <small>{formatTrsSummary(selectedTrsValues)}</small> : null}
                           </span>
                         </button>
-                        {visibleTvuAccessoryItems.map((accessoryItem) => (
-                          <EquipmentItemCard
-                            key={accessoryItem.id}
-                            item={accessoryItem}
-                            selected={selectedIds.includes(accessoryItem.id)}
-                            loanItem={currentByItemId.get(accessoryItem.id)}
-                            onToggle={() => onToggle(accessoryItem.id)}
-                            tone="live"
-                            repairMode={repairMode}
-                            repairDraftByItemId={repairDraftByItemId}
-                          />
-                        ))}
+                        {liveAccessoryGroups.map((group) => {
+                          const summary = getLiveAccessorySummary(group.items, selectedIds);
+                          const expanded = expandedGroup?.groupKey === group.groupKey;
+                          return (
+                            <button
+                              key={group.groupKey}
+                              type="button"
+                              className={[
+                                styles.itemCard,
+                                styles.itemCardLive,
+                                summary ? styles.itemCardSelectedLive : "",
+                              ].join(" ").trim()}
+                              onClick={() => {
+                                setExpandedTrsTvuId(null);
+                                setExpandedAccessoryGroup((current) => (
+                                  current?.tvuId === item.id && current.groupKey === group.groupKey
+                                    ? null
+                                    : { tvuId: item.id, groupKey: group.groupKey }
+                                ));
+                              }}
+                              aria-expanded={expanded}
+                            >
+                              <span className={styles.itemCardTop}>
+                                <strong>{group.label}</strong>
+                                {summary ? <small>{summary}</small> : null}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                       {showTrsOptions ? (
                         <div className={styles.trsOptionPanel}>
@@ -1170,6 +1464,35 @@ function LiveEquipmentGroups({
                                 {trs}
                               </button>
                             ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {expandedGroup ? (
+                        <div className={styles.trsOptionPanel}>
+                          <div className={styles.trsOptionGrid}>
+                            {expandedGroup.items.map((accessoryItem) => {
+                              const loanItem = currentByItemId.get(accessoryItem.id);
+                              const repairTarget = repairDraftByItemId?.[accessoryItem.id] ?? accessoryItem.isUnderRepair;
+                              const repairChanged = repairMode && repairTarget !== accessoryItem.isUnderRepair;
+                              const selected = repairMode ? repairChanged : selectedIds.includes(accessoryItem.id);
+                              const disabled = repairMode ? Boolean(loanItem) : Boolean(loanItem) || accessoryItem.isUnderRepair;
+                              return (
+                                <button
+                                  key={accessoryItem.id}
+                                  type="button"
+                                  className={[
+                                    styles.trsOptionButton,
+                                    selected ? styles.trsOptionButtonSelected : "",
+                                  ].join(" ").trim()}
+                                  onClick={() => onToggle(accessoryItem.id)}
+                                  aria-pressed={selected}
+                                  disabled={disabled}
+                                >
+                                  <span>{getLiveAccessoryOptionLabel(accessoryItem)}</span>
+                                  {loanItem ? <small>대여중</small> : accessoryItem.isUnderRepair ? <small>수리중</small> : null}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       ) : null}
@@ -1302,8 +1625,9 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     () => selectedEntries.map((selection) => ({ id: getBorrowSelectionKey(selection), label: formatBorrowSelectionLabel(selection) })),
     [selectedEntries],
   );
-  const itemSelectionById = useMemo(() => new Map(items.map((item) => [item.id, itemToBorrowSelection(item)] as const)), [items]);
-  const itemById = useMemo(() => new Map(items.map((item) => [item.id, item] as const)), [items]);
+  const visibleItems = useMemo(() => items.filter((item) => !isHiddenEquipmentChoiceItem(item)), [items]);
+  const itemSelectionById = useMemo(() => new Map(visibleItems.map((item) => [item.id, itemToBorrowSelection(item)] as const)), [visibleItems]);
+  const itemById = useMemo(() => new Map(visibleItems.map((item) => [item.id, item] as const)), [visibleItems]);
   const profileSelectionById = useMemo(
     () => new Map(profiles.map((profile) => [profile.id, profileToBorrowSelection(profile)] as const)),
     [profiles],
@@ -1369,8 +1693,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       .sort((left, right) => left.sortRank - right.sortRank || left.index - right.index)
   ), [engHighlights, profiles]);
   const sharedEngSetItems = useMemo(
-    () => items.filter(isSharedEngSetItem).sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ko")),
-    [items],
+    () => visibleItems.filter(isSharedEngSetItem).sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ko")),
+    [visibleItems],
   );
 
   const updateBorrowSelections = useCallback((updater: (current: BorrowSelection[]) => BorrowSelection[]) => {
@@ -1648,7 +1972,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             </div>
           ) : category === "camera_lens" ? (
             <CameraGroups
-              items={items}
+              items={visibleItems}
               selectedIds={repairMode ? [] : selectedIds}
               currentByItemId={currentByItemId}
               onToggle={repairMode ? toggleRepairDraft : toggleSelection}
@@ -1657,7 +1981,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             />
           ) : category === "live" ? (
             <LiveEquipmentGroups
-              items={items}
+              items={visibleItems}
               selectedIds={repairMode ? [] : selectedIds}
               currentByItemId={currentByItemId}
               selectedTrsValues={selectedTrsValues}
@@ -1669,7 +1993,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
           ) : (
             <div className={styles.sectionStack}>
               {renderGroupedItems({
-                items,
+                items: visibleItems,
                 selectedIds: repairMode ? [] : selectedIds,
                 currentByItemId,
                 onToggle: repairMode ? toggleRepairDraft : toggleSelection,
@@ -1779,20 +2103,32 @@ export function EquipmentStatusPage() {
 }
 
 export function LiveEquipmentStatusPage() {
+  const [session, setSession] = useState<SessionUser | null>(() => getSession());
   const [items, setItems] = useState<EquipmentItem[]>([]);
   const [currentLoanItems, setCurrentLoanItems] = useState<EquipmentLoanItem[]>([]);
+  const [savedDrafts, setSavedDrafts] = useState<LiveStatusDraftByItemId>({});
+  const [drafts, setDrafts] = useState<LiveStatusDraftByItemId>({});
+  const [editBaselineDrafts, setEditBaselineDrafts] = useState<LiveStatusDraftByItemId>({});
+  const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextItems, nextCurrent] = await Promise.all([
+      const [nextItems, nextCurrent, nextStatusEntries] = await Promise.all([
         fetchEquipmentItems(["live"]),
         fetchEquipmentLoanItems({ categories: ["live"], status: "borrowed" }),
+        fetchLiveEquipmentStatusEntries(),
       ]);
+      const nextDrafts = createLiveStatusDraftByItemId(nextStatusEntries);
       setItems(nextItems);
       setCurrentLoanItems(nextCurrent);
+      setSavedDrafts(nextDrafts);
+      setDrafts(nextDrafts);
+      setEditBaselineDrafts({});
+      setEditMode(false);
       setMessage(null);
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비현황을 불러오지 못했습니다." });
@@ -1805,74 +2141,232 @@ export function LiveEquipmentStatusPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    return subscribeToAuth((nextSession) => {
+      setSession(nextSession);
+    });
+  }, []);
+
   const currentByItemId = useMemo(
     () => new Map(currentLoanItems.map((loanItem) => [loanItem.equipmentItemId, loanItem] as const)),
     [currentLoanItems],
   );
   const tvuItems = useMemo(() => items.filter(isTvuItem), [items]);
+  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.role));
+  const hasDirtyDrafts = useMemo(() => (
+    editMode && tvuItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
+  ), [drafts, editBaselineDrafts, editMode, tvuItems]);
+  const buildDisplayDrafts = useCallback(() => (
+    tvuItems.reduce<LiveStatusDraftByItemId>((map, item) => {
+      map[item.id] = resolveLiveStatusDraft(savedDrafts[item.id], currentByItemId.get(item.id));
+      return map;
+    }, {})
+  ), [currentByItemId, savedDrafts, tvuItems]);
+  const updateDraft = (itemId: string, field: keyof LiveLoanDetails, value: string) => {
+    setDrafts((current) => ({
+      ...current,
+      [itemId]: {
+        ...(current[itemId] ?? liveDetailEmpty),
+        [field]: value,
+      },
+    }));
+  };
+  const startStatusBoardEdit = () => {
+    const nextDrafts = buildDisplayDrafts();
+    setDrafts(nextDrafts);
+    setEditBaselineDrafts(nextDrafts);
+    setEditMode(true);
+    setMessage(null);
+  };
+  const confirmStatusBoardEdit = async () => {
+    if (!canManageLiveStatus) {
+      setMessage({ tone: "warn", text: "라이브장비 현황판 저장 권한이 없습니다." });
+      return;
+    }
+    if (!hasDirtyDrafts) {
+      setEditMode(false);
+      setDrafts(savedDrafts);
+      setEditBaselineDrafts({});
+      setMessage(null);
+      return;
+    }
+    const payload = tvuItems.map((item): LiveEquipmentStatusSaveEntry => ({
+      equipmentItemId: item.id,
+      ...stripLinkedLiveStatusDraft(drafts[item.id], currentByItemId.get(item.id)),
+    }));
+    setSaving(true);
+    try {
+      await saveLiveEquipmentStatusEntries(payload);
+      const nextDrafts = payload.reduce<LiveStatusDraftByItemId>((map, entry) => {
+        map[entry.equipmentItemId] = normalizeLiveStatusDraft(entry);
+        return map;
+      }, {});
+      setSavedDrafts(nextDrafts);
+      setDrafts(nextDrafts);
+      setEditBaselineDrafts({});
+      setEditMode(false);
+      setMessage({ tone: "ok", text: "라이브장비 현황판을 저장했습니다." });
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비 현황판 저장에 실패했습니다." });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const resetStatusBoard = () => {
+    setDrafts(savedDrafts);
+    setEditBaselineDrafts({});
+    setEditMode(false);
+    setMessage({ tone: "note", text: "수정을 취소했습니다." });
+  };
 
   return (
-    <section className={styles.page}>
-      <PageHeader
-        eyebrow="LIVE STATUS"
-        title="라이브장비현황"
-        description="TVU 중심으로 현재 대여 상황과 현장 정보를 확인합니다."
-        activeHref="/equipment/live-status"
-      />
-      <article className="panel">
-        <div className={`panel-pad ${styles.sectionStack}`}>
-          <div className={styles.sectionHead}>
-            <div>
-              <span className="chip">TVU 상황판</span>
-              <h2 className={styles.sectionTitle}>TVU 현재 상태</h2>
-            </div>
+    <section className={`${styles.page} ${styles.liveStatusPage}`}>
+      <article className={styles.liveStatusBoard}>
+        <div className={styles.liveStatusTop}>
+          <div className={styles.liveStatusHeading}>
+            <span className={styles.liveStatusBadge}>라이브장비 상황판</span>
           </div>
-          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-          {loading ? (
-            <LoadingBlocks />
-          ) : (
-            <div className={styles.tableWrap}>
-              <table className="table-like">
-                <thead>
-                  <tr>
-                    <th>장비명</th>
-                    <th>TRS</th>
-                    <th>촬영기자</th>
-                    <th>오디오맨</th>
-                    <th>장소</th>
-                    <th>비고</th>
-                    <th>상태</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tvuItems.map((item) => {
-                    const loanItem = currentByItemId.get(item.id);
-                    return (
-                      <tr key={item.id}>
-                        <td>
-                          <span className={styles.itemNameStack}>
-                            <strong>{item.name}</strong>
-                            {isGlobalTvuItem(item) ? (
-                              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                Global
-                              </span>
-                            ) : null}
-                          </span>
-                        </td>
-                        <td>{loanItem?.loan.liveTrs || "-"}</td>
-                        <td>{loanItem?.loan.liveCameraReporter || "-"}</td>
-                        <td>{loanItem?.loan.liveAudioMan || "-"}</td>
-                        <td>{loanItem?.loan.liveLocation || "-"}</td>
-                        <td>{loanItem?.loan.liveNote || "-"}</td>
-                        <td><StatusPill borrowed={Boolean(loanItem)} repairing={item.isUnderRepair} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <EquipmentNav activeHref="/equipment/live-status" />
         </div>
+        <div className={styles.liveStatusToolbar}>
+          <p>{editMode ? (hasDirtyDrafts ? "확인 전 변경사항이 있습니다." : "수정할 값을 입력한 뒤 확인하세요.") : "대여 정보와 수동 입력값을 함께 표시합니다."}</p>
+          {canManageLiveStatus ? (
+            <div className={styles.liveStatusActions}>
+              {editMode ? (
+                <>
+                  <button type="button" className="btn primary" disabled={saving || loading} onClick={confirmStatusBoardEdit}>
+                    {saving ? "확인 중" : "확인"}
+                  </button>
+                  <button type="button" className="btn" disabled={saving || loading} onClick={resetStatusBoard}>
+                    취소
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn primary" disabled={saving || loading} onClick={startStatusBoardEdit}>
+                  수정
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
+        {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+        {loading ? (
+          <LoadingBlocks />
+        ) : (
+          <div className={styles.liveStatusTableWrap}>
+            <table className={styles.liveStatusTable}>
+              <thead>
+                <tr>
+                  <th>장비명</th>
+                  <th>TRS</th>
+                  <th>촬영기자</th>
+                  <th>오디오맨</th>
+                  <th>장소</th>
+                  <th>비고</th>
+                  <th>상태</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tvuItems.map((item) => {
+                  const loanItem = currentByItemId.get(item.id);
+                  const displayDraft = resolveLiveStatusDraft(savedDrafts[item.id], loanItem);
+                  const draft = editMode ? drafts[item.id] ?? displayDraft : displayDraft;
+                  const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
+                  return (
+                    <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
+                      <td>
+                        <span className={styles.itemNameStack}>
+                          <strong>{item.name}</strong>
+                          {isGlobalTvuItem(item) ? (
+                            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                              Global
+                            </span>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td>
+                        {editMode ? (
+                          <input
+                            className={styles.liveStatusInput}
+                            aria-label={`${item.name} TRS`}
+                            maxLength={120}
+                            value={draft.trs}
+                            onChange={(event) => updateDraft(item.id, "trs", event.target.value)}
+                            disabled={!canManageLiveStatus || saving}
+                            placeholder="-"
+                          />
+                        ) : (
+                          <span className={styles.liveStatusCellValue}>{draft.trs || "-"}</span>
+                        )}
+                      </td>
+                      <td>
+                        {editMode ? (
+                          <input
+                            className={styles.liveStatusInput}
+                            aria-label={`${item.name} 촬영기자`}
+                            maxLength={120}
+                            value={draft.cameraReporter}
+                            onChange={(event) => updateDraft(item.id, "cameraReporter", event.target.value)}
+                            disabled={!canManageLiveStatus || saving}
+                            placeholder="-"
+                          />
+                        ) : (
+                          <span className={styles.liveStatusCellValue}>{draft.cameraReporter || "-"}</span>
+                        )}
+                      </td>
+                      <td>
+                        {editMode ? (
+                          <input
+                            className={styles.liveStatusInput}
+                            aria-label={`${item.name} 오디오맨`}
+                            maxLength={120}
+                            value={draft.audioMan}
+                            onChange={(event) => updateDraft(item.id, "audioMan", event.target.value)}
+                            disabled={!canManageLiveStatus || saving}
+                            placeholder="-"
+                          />
+                        ) : (
+                          <span className={styles.liveStatusCellValue}>{draft.audioMan || "-"}</span>
+                        )}
+                      </td>
+                      <td>
+                        {editMode ? (
+                          <input
+                            className={styles.liveStatusInput}
+                            aria-label={`${item.name} 장소`}
+                            maxLength={160}
+                            value={draft.location}
+                            onChange={(event) => updateDraft(item.id, "location", event.target.value)}
+                            disabled={!canManageLiveStatus || saving}
+                            placeholder="-"
+                          />
+                        ) : (
+                          <span className={styles.liveStatusCellValue}>{draft.location || "-"}</span>
+                        )}
+                      </td>
+                      <td>
+                        {editMode ? (
+                          <input
+                            className={styles.liveStatusInput}
+                            aria-label={`${item.name} 비고`}
+                            maxLength={240}
+                            value={draft.note}
+                            onChange={(event) => updateDraft(item.id, "note", event.target.value)}
+                            disabled={!canManageLiveStatus || saving}
+                            placeholder="-"
+                          />
+                        ) : (
+                          <span className={styles.liveStatusCellValue}>{draft.note || "-"}</span>
+                        )}
+                      </td>
+                      <td><StatusPill borrowed={Boolean(loanItem)} repairing={item.isUnderRepair} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </article>
     </section>
   );

@@ -18,6 +18,10 @@ set
   group_name = excluded.group_name,
   name = excluded.name,
   sort_order = excluded.sort_order,
-  metadata = excluded.metadata,
+  metadata = case
+    when coalesce(public.equipment_items.metadata ->> 'is_under_repair', 'false') = 'true'
+      then excluded.metadata || jsonb_build_object('is_under_repair', true)
+    else excluded.metadata
+  end,
   is_active = true,
-  updated_at = now();
+  updated_at = timezone('utc', now());

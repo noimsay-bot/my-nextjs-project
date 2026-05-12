@@ -189,27 +189,44 @@ for (const deviceCase of deviceCases) {
     const panel = page.locator(`.schedule-published-panel--${deviceCase.expectedMode}`);
     await expect(panel).toBeVisible();
 
-    await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day")).toBeVisible();
-    await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day .schedule-day-card")).toHaveCount(6);
+    if (deviceCase.expectedMode === "mobile") {
+      await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day")).toBeVisible();
+      await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day .schedule-day-card")).toHaveCount(7);
 
-    const homeRows = await page.evaluate(() =>
-      Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div"))
-        .map((row) => row.querySelectorAll(".schedule-day-card").length),
-    );
-    expect(homeRows).toEqual([3, 3]);
+      const homeRows = await page.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLElement>(".schedule-calendar-grid--home-mobile-three-day > div > div"))
+          .map((row) => row.querySelectorAll(".schedule-day-card").length),
+      );
+      expect(homeRows).toEqual([3, 3, 1]);
 
-    const threePersonGrid = await page.evaluate(() => {
-      const grid = Array.from(document.querySelectorAll<HTMLElement>(".schedule-published-panel--home-three-day .schedule-name-grid"))
-        .find((candidate) => candidate.querySelectorAll(".schedule-name-chip").length === 3);
-      const columns = grid
-        ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length
-        : 0;
-      return {
-        chipCount: grid?.querySelectorAll(".schedule-name-chip").length ?? 0,
-        columns,
-      };
-    });
-    expect(threePersonGrid).toEqual({ chipCount: 3, columns: 2 });
+      const threePersonGrid = await page.evaluate(() => {
+        const grid = Array.from(document.querySelectorAll<HTMLElement>(".schedule-published-panel--home-three-day .schedule-name-grid"))
+          .find((candidate) => candidate.querySelectorAll(".schedule-name-chip").length === 3);
+        const columns = grid
+          ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length
+          : 0;
+        return {
+          chipCount: grid?.querySelectorAll(".schedule-name-chip").length ?? 0,
+          columns,
+        };
+      });
+      expect(threePersonGrid).toEqual({ chipCount: 3, columns: 2 });
+    } else {
+      await expect(page.locator(".schedule-published-panel--home-week-fit")).toBeVisible();
+      await expect(page.locator(".schedule-calendar-grid--home-mobile-three-day")).toHaveCount(0);
+      await expect(page.locator(".schedule-calendar-grid--daily .schedule-day-card")).toHaveCount(7);
+
+      const weeklyMetrics = await page.evaluate(() => {
+        const grid = document.querySelector<HTMLElement>(".schedule-calendar-grid--daily");
+        const scroll = document.querySelector<HTMLElement>(".schedule-calendar-scroll--daily");
+        return {
+          gridColumns: grid ? window.getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length : 0,
+          rightOverflow: scroll ? scroll.scrollWidth - scroll.clientWidth : 0,
+        };
+      });
+      expect(weeklyMetrics.gridColumns).toBe(7);
+      expect(weeklyMetrics.rightOverflow).toBeLessThanOrEqual(2);
+    }
 
     const diagnostics = await page.evaluate(() => {
       const chips = Array.from(document.querySelectorAll<HTMLElement>(".schedule-day-card .schedule-name-chip"));
