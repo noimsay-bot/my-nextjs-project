@@ -390,7 +390,7 @@ export default function AdminPage() {
               <div className="chip">방문 통계</div>
               <strong style={{ fontSize: 22 }}>주요 페이지 방문 현황</strong>
             </div>
-            <span className="muted">마이페이지 · 커뮤니티 · 근무표 · 내 주변 맛집</span>
+            <span className="muted">마이페이지 · 커뮤니티 · 근무표 · 내 주변 맛집 · 라이브/장비</span>
           </div>
           {visitAnalytics.message ? (
             <div className={`status ${visitAnalytics.schemaMissing ? "warn" : "note"}`}>

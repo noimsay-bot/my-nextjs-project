@@ -1772,6 +1772,14 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     setConfirmMode("borrow");
   };
 
+  const clearBorrowSelection = () => {
+    updateBorrowSelections(() => []);
+    setLiveDetails(liveDetailEmpty);
+    setReturnIds([]);
+    setConfirmMode(null);
+    setMessage({ tone: "note", text: "장비 선택을 초기화했습니다." });
+  };
+
   const openReturnDialog = () => {
     if (!canMutate) {
       setMessage({ tone: "warn", text: "읽기 전용 계정은 장비 대여/반납을 할 수 없습니다." });
@@ -1857,6 +1865,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     }
   };
 
+  const hasBorrowSelectionDraft = selectedIds.length > 0 || selectedTrsValues.length > 0;
+
   return (
     <section className={styles.page}>
       <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} activeHref={config.route} />
@@ -1885,14 +1895,21 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                   <button type="button" className="btn primary" disabled={!canMutate || selectedIds.length === 0 || actionPending} onClick={openBorrowDialog}>
                     대여하기
                   </button>
+                  {hasBorrowSelectionDraft ? (
+                    <button type="button" className="btn" disabled={actionPending} onClick={clearBorrowSelection}>
+                      선택 초기화
+                    </button>
+                  ) : null}
                   {canManageRepair ? (
                     <button type="button" className={`btn ${styles.repairButton}`} disabled={actionPending} onClick={openRepairMode}>
                       수리
                     </button>
                   ) : null}
-                  <button type="button" className="btn" disabled={!canMutate || returnableItems.length === 0 || actionPending} onClick={openReturnDialog}>
-                    반납하기
-                  </button>
+                  {returnableItems.length > 0 ? (
+                    <button type="button" className="btn" disabled={!canMutate || actionPending} onClick={openReturnDialog}>
+                      반납하기
+                    </button>
+                  ) : null}
                 </>
               )}
             </div>
