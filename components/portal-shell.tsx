@@ -111,6 +111,23 @@ function hasEquipmentAccessRole(role: UserRole | null | undefined) {
   return role === "desk" || role === "team_lead" || role === "admin";
 }
 
+function canViewEquipmentStatusLink(session: SessionUser | null) {
+  return Boolean(
+    session?.approved &&
+    hasEquipmentAccessRole(session.role) &&
+    hasEquipmentAccessRole(session.actualRole),
+  );
+}
+
+function withVisibleEquipmentChildren(link: PortalNavLink, session: SessionUser | null) {
+  if (!link.children) return link;
+  const canViewStatus = canViewEquipmentStatusLink(session);
+  return {
+    ...link,
+    children: link.children.filter((child) => child.href !== "/equipment/status" || canViewStatus),
+  };
+}
+
 type PortalTheme = "dark" | "light" | "pink" | "green";
 
 const PORTAL_THEME_STORAGE_KEY = "jtbc-portal-theme";
@@ -170,10 +187,13 @@ function getVisibleLinks(
     Boolean(session) &&
     hasEquipmentAccessRole(session?.role) &&
     hasEquipmentAccessRole(session?.actualRole);
+  const visibleRoleLinks = links.map((link) => (
+    link.href === "/equipment" ? withVisibleEquipmentChildren(link, session) : link
+  ));
 
   switch (session?.role) {
     case "member":
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/me" ||
           link.href === "/community" ||
@@ -185,7 +205,7 @@ function getVisibleLinks(
       );
     case "outlet":
     case "observer":
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||
@@ -195,7 +215,7 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
       );
     case "partner":
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/" ||
           link.href === "/work-schedule" ||
@@ -203,7 +223,7 @@ function getVisibleLinks(
           link.href === "/partner/schedule",
       );
     case "reviewer":
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||
@@ -213,7 +233,7 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview && !reviewLocked),
       );
     case "desk":
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||
@@ -225,7 +245,7 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview),
       );
     case "team_lead":
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||
@@ -239,7 +259,7 @@ function getVisibleLinks(
           link.href === "/admin",
       );
     case "admin":
-      return links
+      return visibleRoleLinks
         .filter((link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||
@@ -254,7 +274,7 @@ function getVisibleLinks(
         )
         .map((link) => (link.href === "/schedule" ? withVisibleChildren(link, ["/schedule/write"]) : link));
     default:
-      return links.filter(
+      return visibleRoleLinks.filter(
         (link) =>
           link.href === "/community" ||
           link.href === "/work-schedule" ||

@@ -480,10 +480,16 @@ function getEngBadgeSortRank(badges: EngScheduleBadge[]) {
   return Math.min(...badges.map((badge) => engBadgePriority[badge] ?? 99));
 }
 
-function EquipmentNav({ activeHref }: { activeHref: string }) {
+function canViewEquipmentStatus(session: SessionUser | null) {
+  return Boolean(session?.approved && hasDeskAccess(session.role) && hasDeskAccess(session.actualRole));
+}
+
+function EquipmentNav({ activeHref, showStatusLink }: { activeHref: string; showStatusLink: boolean }) {
+  const visibleNavItems = equipmentNavItems.filter((item) => item.href !== "/equipment/status" || showStatusLink);
+
   return (
     <div className={styles.nav} aria-label="TVU/장비 하위 메뉴">
-      {equipmentNavItems.map((item) => (
+      {visibleNavItems.map((item) => (
         <Link key={item.href} href={item.href} className={`${styles.navLink} ${activeHref === item.href ? styles.navLinkActive : ""}`.trim()}>
           {item.label}
         </Link>
@@ -496,10 +502,12 @@ function PageHeader({
   eyebrow,
   title,
   activeHref,
+  showStatusLink,
 }: {
   eyebrow: string;
   title: string;
   activeHref: string;
+  showStatusLink: boolean;
 }) {
   return (
     <article className="panel">
@@ -508,7 +516,7 @@ function PageHeader({
           <span className="chip">{eyebrow}</span>
           <h1 className="page-title">{title}</h1>
         </div>
-        <EquipmentNav activeHref={activeHref} />
+        <EquipmentNav activeHref={activeHref} showStatusLink={showStatusLink} />
       </div>
     </article>
   );
@@ -1578,6 +1586,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const isEngSetPage = category === "eng_set";
   const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
   const canManageRepair = Boolean(session?.approved && hasDeskAccess(session.role));
+  const showEquipmentStatusLink = canViewEquipmentStatus(session);
   const highlightDateKey = useMemo(() => getTodayDateKey(), []);
 
   const load = useCallback(async () => {
@@ -1918,7 +1927,12 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   return (
     <section className={styles.page}>
-      <PageHeader eyebrow={config.eyebrow} title={config.title} activeHref={config.route} />
+      <PageHeader
+        eyebrow={config.eyebrow}
+        title={config.title}
+        activeHref={config.route}
+        showStatusLink={showEquipmentStatusLink}
+      />
 
       <article className="panel">
         <div className={`panel-pad ${styles.sectionStack}`}>
@@ -2092,13 +2106,21 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 }
 
 export function EquipmentStatusPage() {
+  const [session, setSession] = useState<SessionUser | null>(() => getSession());
   const [dateKey, setDateKey] = useState(getTodayDateKey);
   const [currentLoanItems, setCurrentLoanItems] = useState<EquipmentLoanItem[]>([]);
   const [dailyRecords, setDailyRecords] = useState<EquipmentLoanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<Message | null>(null);
+  const showEquipmentStatusLink = canViewEquipmentStatus(session);
 
   const load = useCallback(async () => {
+    if (!showEquipmentStatusLink) {
+      setCurrentLoanItems([]);
+      setDailyRecords([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [nextCurrent, nextRecords] = await Promise.all([
@@ -2108,16 +2130,19 @@ export function EquipmentStatusPage() {
       setCurrentLoanItems(nextCurrent);
       setDailyRecords(nextRecords);
       setMessage(null);
+      setSession(getSession());
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "장비대여현황을 불러오지 못했습니다." });
     } finally {
       setLoading(false);
     }
-  }, [dateKey]);
+  }, [dateKey, showEquipmentStatusLink]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => subscribeToAuth(setSession), []);
 
   const normalCurrent = useMemo(
     () => currentLoanItems.filter((item) => normalEquipmentCategories.includes(item.item.category)),
@@ -2134,35 +2159,43 @@ export function EquipmentStatusPage() {
         eyebrow="STATUS"
         title="장비대여현황"
         activeHref="/equipment/status"
+        showStatusLink={showEquipmentStatusLink}
       />
-      <article className="panel">
-        <div className={`panel-pad ${styles.sectionStack}`}>
-          <div className={styles.sectionHead}>
-            <div>
-              <span className="chip">현재 현황</span>
-              <h2 className={styles.sectionTitle}>대여자별 현재 대여 장비</h2>
+      {!showEquipmentStatusLink ? (
+        <div className="status warn">장비대여현황은 DESK, 총괄팀장, 관리자만 볼 수 있습니다.</div>
+      ) : null}
+      {showEquipmentStatusLink ? (
+        <>
+          <article className="panel">
+            <div className={`panel-pad ${styles.sectionStack}`}>
+              <div className={styles.sectionHead}>
+                <div>
+                  <span className="chip">현재 현황</span>
+                  <h2 className={styles.sectionTitle}>대여자별 현재 대여 장비</h2>
+                </div>
+              </div>
+              {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+              {loading ? (
+                <LoadingBlocks />
+              ) : (
+                <>
+                  <LoanSummaryByBorrower loanItems={normalCurrent} emptyText="카메라/렌즈, 조명, ENG SET 현재 대여 장비가 없습니다." />
+                  {liveCurrent.length > 0 ? (
+                    <section className={styles.sectionStack}>
+                      <div className={styles.groupHead}>
+                        <h3>라이브장비</h3>
+                        <span>별도 섹션</span>
+                      </div>
+                      <LoanSummaryByBorrower loanItems={liveCurrent} emptyText="현재 대여 중인 라이브장비가 없습니다." />
+                    </section>
+                  ) : null}
+                </>
+              )}
             </div>
-          </div>
-          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-          {loading ? (
-            <LoadingBlocks />
-          ) : (
-            <>
-              <LoanSummaryByBorrower loanItems={normalCurrent} emptyText="카메라/렌즈, 조명, ENG SET 현재 대여 장비가 없습니다." />
-              {liveCurrent.length > 0 ? (
-                <section className={styles.sectionStack}>
-                  <div className={styles.groupHead}>
-                    <h3>라이브장비</h3>
-                    <span>별도 섹션</span>
-                  </div>
-                  <LoanSummaryByBorrower loanItems={liveCurrent} emptyText="현재 대여 중인 라이브장비가 없습니다." />
-                </section>
-              ) : null}
-            </>
-          )}
-        </div>
-      </article>
-      <DailyRecords dateKey={dateKey} onDateChange={setDateKey} records={dailyRecords} />
+          </article>
+          <DailyRecords dateKey={dateKey} onDateChange={setDateKey} records={dailyRecords} />
+        </>
+      ) : null}
     </section>
   );
 }
@@ -2291,7 +2324,7 @@ export function LiveEquipmentStatusPage() {
           <div className={styles.liveStatusHeading}>
             <span className={styles.liveStatusBadge}>라이브장비 상황판</span>
           </div>
-          <EquipmentNav activeHref="/equipment/live-status" />
+          <EquipmentNav activeHref="/equipment/live-status" showStatusLink={canViewEquipmentStatus(session)} />
         </div>
         <div className={styles.liveStatusToolbar}>
           {editMode ? <p>{hasDirtyDrafts ? "확인 전 변경사항이 있습니다." : "수정할 값을 입력한 뒤 확인하세요."}</p> : null}
