@@ -472,25 +472,11 @@ function isValidScheduleDateKey(value: string) {
   return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day;
 }
 
-function eachDateKeyInRange(startDate: string, endDate: string, visit: (dateKey: string) => void) {
-  if (!isValidScheduleDateKey(startDate) || !isValidScheduleDateKey(endDate) || startDate > endDate) return;
-  const cursor = new Date(Number(startDate.slice(0, 4)), Number(startDate.slice(5, 7)) - 1, Number(startDate.slice(8, 10)));
-  const end = new Date(Number(endDate.slice(0, 4)), Number(endDate.slice(5, 7)) - 1, Number(endDate.slice(8, 10)));
-
-  for (; cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
-    visit(formatLocalDateKey(cursor));
-  }
-}
-
 function getBigEventValidationMessages(schedule: GeneratedSchedule | null | undefined): BigEventValidationMessage[] {
   if (!schedule) return [];
 
   const messages: BigEventValidationMessage[] = [];
   const bigEvents = schedule.big_events ?? [];
-  const bigEventNameSet = new Set(bigEvents.map((event) => event.name.trim()).filter(Boolean));
-  const dayMap = new Map(schedule.days.map((day) => [day.dateKey, day] as const));
-  const exactRangeKeys = new Set<string>();
-  const warnedSpecialOverlapKeys = new Set<string>();
 
   bigEvents.forEach((event, eventIndex) => {
     const eventName = event.name.trim();
@@ -525,44 +511,6 @@ function getBigEventValidationMessages(schedule: GeneratedSchedule | null | unde
           text: `${messagePrefix}: 시작일이 종료일보다 늦을 수 없습니다.`,
         });
       }
-
-      const exactRangeKey = [eventName, assignmentName, assignment.start_date, assignment.end_date].join("::");
-      if (eventName && assignmentName && exactRangeKeys.has(exactRangeKey)) {
-        messages.push({
-          id: `${event.id || eventIndex}-${assignment.id || assignmentIndex}-duplicate-range`,
-          tone: "warn",
-          text: `${eventName}: ${assignmentName}의 동일 날짜 범위가 중복 등록되어 있습니다.`,
-        });
-      }
-      if (eventName && assignmentName) {
-        exactRangeKeys.add(exactRangeKey);
-      }
-
-      if (!eventName || !assignmentName) return;
-      eachDateKeyInRange(assignment.start_date, assignment.end_date, (dateKey) => {
-        if (!dateKey.startsWith(`${schedule.monthKey}-`)) return;
-        const day = dayMap.get(dateKey);
-        if (!day) return;
-
-        Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
-          if (category === eventName || isGeneralAssignmentCategory(category)) return;
-          const categoryIsOtherBigEvent = bigEventNameSet.has(category);
-          const matched = (names ?? []).some((name) => {
-            const normalizedName = category === "휴가" ? parseVacationEntry(name).name.trim() : name.trim();
-            return normalizedName === assignmentName;
-          });
-          if (!matched) return;
-
-          const overlapKey = `${dateKey}::${eventName}::${assignmentName}::${category}`;
-          if (warnedSpecialOverlapKeys.has(overlapKey)) return;
-          warnedSpecialOverlapKeys.add(overlapKey);
-          messages.push({
-            id: overlapKey,
-            tone: "warn",
-            text: `${dateKey} ${assignmentName}: ${eventName}와 ${categoryIsOtherBigEvent ? "다른 빅이벤트" : getScheduleCategoryLabel(category)}가 겹칩니다. 기존 수동 배정은 삭제하지 않습니다.`,
-          });
-        });
-      });
     });
   });
 
@@ -1929,7 +1877,6 @@ export function ScheduleApp() {
             events={visibleBigEvents}
             people={Array.from(new Set([...generalTeamPeople, ...uniquePeople]))}
             disabled={isEditingDate}
-            validationMessages={visibleBigEventValidationMessages}
             onChange={updateVisibleBigEvents}
           />
         ) : (
