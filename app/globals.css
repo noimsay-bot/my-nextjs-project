@@ -4150,6 +4150,13 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   min-width: 0;
 }
 
+@media (min-width: 1025px) {
+  .portal-sidebar__inset {
+    padding-left: calc(var(--portal-sidebar-collapsed-width, 68px) + 12px);
+    padding-right: 12px;
+  }
+}
+
 .portal-shell-main {
   width: min(100%, 1560px);
   margin: 0 auto;
