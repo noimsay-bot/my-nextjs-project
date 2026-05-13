@@ -694,8 +694,7 @@ on public.home_popup_notice_state
 for select
 to authenticated
 using (
-  is_active = true
-  and public.current_profile_approved() = true
+  public.current_profile_approved() = true
 );
 
 drop policy if exists "home_popup_notice_state_select_managers" on public.home_popup_notice_state;
