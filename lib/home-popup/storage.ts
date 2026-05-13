@@ -143,6 +143,8 @@ let applicationCache: HomePopupNoticeApplication[] = [];
 let tripCardCache: TeamLeadTripPersonCard[] = [];
 let currentUserAppliedCache = false;
 let refreshPromise: Promise<RefreshResult> | null = null;
+let refreshPromiseKey: string | null = null;
+let refreshRequestId = 0;
 let homeWorkspaceLoaded = false;
 let homeWorkspaceTripCardsLoaded = false;
 let homeWorkspaceLastFetchedAt = 0;
@@ -746,6 +748,13 @@ export function hasAppliedToCurrentHomePopupNotice() {
   return currentUserAppliedCache;
 }
 
+function getHomeWorkspaceRequestKey(
+  sessionKey: string,
+  options: RefreshHomePopupNoticeWorkspaceOptions,
+) {
+  return `${sessionKey}:${options.includeTrips === false ? "no-trips" : "with-trips"}`;
+}
+
 async function fetchHomePublicWorkspaceFallback(
   session: NonNullable<Awaited<ReturnType<typeof getPortalSession>>>,
 ): Promise<HomePublicWorkspaceResponse> {
@@ -904,18 +913,24 @@ async function persistNotices(
 }
 
 export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupNoticeWorkspaceOptions = {}) {
-  if (refreshPromise) return refreshPromise;
+  const session = await getPortalSession();
+  const sessionKey = getHomeWorkspaceSessionKey(session);
+  const requestKey = getHomeWorkspaceRequestKey(sessionKey, options);
 
+  if (refreshPromise && refreshPromiseKey === requestKey) return refreshPromise;
+
+  const requestId = refreshRequestId + 1;
+  refreshRequestId = requestId;
   refreshPromise = (async () => {
-    const session = await getPortalSession();
-    const sessionKey = getHomeWorkspaceSessionKey(session);
-
     if (homeWorkspaceSessionKey && homeWorkspaceSessionKey !== sessionKey) {
       homeWorkspaceTripCardsLoaded = false;
       resetSessionScopedWorkspaceState();
     }
 
     if (!session?.approved) {
+      if (requestId !== refreshRequestId) {
+        return buildCachedWorkspaceResult();
+      }
       syncCaches([], [], [], [], [], false, []);
       homeWorkspaceLoaded = true;
       homeWorkspaceTripCardsLoaded = true;
@@ -944,6 +959,9 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
     try {
       const workspace = await fetchHomePublicWorkspace(options);
 
+      if (requestId !== refreshRequestId) {
+        return buildCachedWorkspaceResult();
+      }
       syncCaches(
         workspace.notices,
         workspace.ddays,
@@ -958,6 +976,9 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
       emitHomePopupNoticeEvent();
       return buildCachedWorkspaceResult();
     } catch (error) {
+      if (requestId !== refreshRequestId) {
+        return buildCachedWorkspaceResult();
+      }
       homeWorkspaceLastFailureAt = Date.now();
       if (homeWorkspaceLoaded) {
         console.warn(error instanceof Error ? error.message : "홈 데이터를 불러오지 못했습니다.");
@@ -966,8 +987,12 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
       throw error;
     }
   })().finally(() => {
-    refreshPromise = null;
+    if (requestId === refreshRequestId) {
+      refreshPromise = null;
+      refreshPromiseKey = null;
+    }
   });
+  refreshPromiseKey = requestKey;
 
   return refreshPromise;
 }

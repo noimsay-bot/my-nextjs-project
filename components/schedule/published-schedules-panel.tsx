@@ -1129,11 +1129,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const isHomeThreeDayView = isHomePreview && scheduleLayoutMode === "mobile";
-  const isHomeWeekFitView = isHomePreview && scheduleLayoutMode === "tablet";
+  const isHomeResponsivePreviewView = isHomePreview && scheduleLayoutMode !== "desktop";
   const isPageMobileThreeDayView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "three-day";
-  const isMobileThreeDayView = isHomeThreeDayView || isPageMobileThreeDayView;
-  const isCompactThreeDayView = isHomeThreeDayView || isHomeWeekFitView || isPageMobileThreeDayView;
+  const isMobileThreeDayView = isHomeResponsivePreviewView || isPageMobileThreeDayView;
+  const isCompactThreeDayView = isHomeResponsivePreviewView || isPageMobileThreeDayView;
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
@@ -1156,30 +1155,35 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const visibleDisplayDays = useMemo(
     () =>
       isHomePreview
-          ? isHomeThreeDayView
+          ? isHomeResponsivePreviewView
             ? getHomePreviewDays(homeMobileDisplayDays, todayKey)
             : getWeeklyPreviewDays(displayDays, todayKey)
         : displayDays,
-    [displayDays, homeMobileDisplayDays, isHomeThreeDayView, isHomePreview, todayKey],
+    [displayDays, homeMobileDisplayDays, isHomePreview, isHomeResponsivePreviewView, todayKey],
   );
   const mobileThreeDayDisplayDays = useMemo(() => {
     if (!isMobileThreeDayView) return [] as DisplayDay[];
-    if (isHomeThreeDayView) return getHomePreviewDays(homeMobileDisplayDays, todayKey);
+    if (isHomeResponsivePreviewView) return getHomePreviewDays(homeMobileDisplayDays, todayKey);
     return visibleDisplayDays;
-  }, [homeMobileDisplayDays, isHomeThreeDayView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
+  }, [homeMobileDisplayDays, isHomeResponsivePreviewView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
+  const mobileThreeDayRowSize = isHomeResponsivePreviewView
+    ? scheduleLayoutMode === "mobile"
+      ? 1
+      : 2
+    : MOBILE_THREE_DAY_ROW_SIZE;
   const mobileThreeDayRows = useMemo(() => {
     if (!isMobileThreeDayView) return [];
 
     const rows: DisplayDay[][] = [];
-    for (let index = 0; index < mobileThreeDayDisplayDays.length; index += MOBILE_THREE_DAY_ROW_SIZE) {
-      rows.push(mobileThreeDayDisplayDays.slice(index, index + MOBILE_THREE_DAY_ROW_SIZE));
+    for (let index = 0; index < mobileThreeDayDisplayDays.length; index += mobileThreeDayRowSize) {
+      rows.push(mobileThreeDayDisplayDays.slice(index, index + mobileThreeDayRowSize));
     }
     return rows;
-  }, [isMobileThreeDayView, mobileThreeDayDisplayDays]);
+  }, [isMobileThreeDayView, mobileThreeDayDisplayDays, mobileThreeDayRowSize]);
   const homePreviewTitle = "이번주 근무표";
   const homePreviewRangeLabel =
     visibleDisplayDays.length > 0
-      ? isHomeThreeDayView
+      ? isHomeResponsivePreviewView
         ? `오늘 기준 ${visibleDisplayDays.length}일`
         : `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
       : null;
@@ -1274,7 +1278,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       : scheduleLayoutMode === "tablet"
         ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
-  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayView ? " schedule-published-panel--home-three-day" : ""}${isHomeWeekFitView ? " schedule-published-panel--home-week-fit" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
+  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeResponsivePreviewView ? " schedule-published-panel--home-responsive schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
@@ -1961,7 +1965,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         key={`home-mobile-row-${rowIndex}`}
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                          gridTemplateColumns: `repeat(${mobileThreeDayRowSize}, minmax(0, 1fr))`,
                           gap: 6,
                           alignItems: "start",
                         }}
@@ -1988,7 +1992,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                             </div>
                           );
                         })}
-                        {row.length < 3 ? Array.from({ length: 3 - row.length }).map((_, fillerIndex) => (
+                        {row.length < mobileThreeDayRowSize ? Array.from({ length: mobileThreeDayRowSize - row.length }).map((_, fillerIndex) => (
                           <div
                             key={`home-mobile-row-${rowIndex}-weekday-filler-${fillerIndex}`}
                             aria-hidden="true"
