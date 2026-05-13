@@ -459,12 +459,14 @@ function isStandaloneInlineAccessoryItem(item: EquipmentItem) {
 
 function getStandaloneCameraBatteryKey(item: EquipmentItem) {
   if (item.groupName !== "단독 카메라") return "";
+  if (getMetadataString(item, "kind") === "etc") return "etc";
   const target = `${item.code} ${item.name}`.toLowerCase();
   if (target.includes("z-90")) return "z-90";
   if (target.includes("ax40")) return "ax40";
   if (target.includes("rx100")) return "rx100";
   if (target.includes("gopro") || target.includes("고프로")) return "gopro";
   if (target.includes("osmo") || target.includes("오스모")) return "osmo";
+  if (target.includes("기타")) return "etc";
   return "";
 }
 
@@ -1136,7 +1138,8 @@ function CameraGroups({
     }
     const accessoryKey = getStandaloneCameraBatteryKey(item);
     const accessoryEntries = accessoryKey ? standaloneAccessoryEntriesByKey.get(accessoryKey) : undefined;
-    if (!currentByItemId.has(item.id)) {
+    const expandOnly = accessoryKey === "etc" && accessoryEntries && accessoryEntries.length > 0;
+    if (!expandOnly && !currentByItemId.has(item.id)) {
       onToggle(item.id);
     }
     if (accessoryKey && accessoryEntries && accessoryEntries.length > 0) {
@@ -1244,10 +1247,6 @@ function CameraGroups({
             <div className={styles.familySubgroups}>
               {bodyItems.length > 0 ? (
                 <section className={styles.equipmentGroup}>
-                  <div className={styles.groupHead}>
-                    <h3>{bodyGroupName}</h3>
-                    <span>{bodyItems.length}개</span>
-                  </div>
                   <div className={styles.itemGrid}>
                     {bodyItems.map((item) => {
                       return (
