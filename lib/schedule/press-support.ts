@@ -7,12 +7,12 @@ import {
   getTeamLeadSchedules,
 } from "@/lib/team-lead/storage";
 
-export type PressSupportCategory = "assembly" | "prosecution";
+export type PressSupportCategory = "assembly" | "law";
 
 export interface PressSupportRow {
   name: string;
   assembly: number;
-  prosecution: number;
+  law: number;
 }
 
 export interface PressSupportPeriod {
@@ -29,7 +29,7 @@ function normalizePressSupportRow(value: Partial<PressSupportRow> | null | undef
   return {
     name,
     assembly: Number.isFinite(Number(value?.assembly)) ? Number(value?.assembly) : 0,
-    prosecution: Number.isFinite(Number(value?.prosecution)) ? Number(value?.prosecution) : 0,
+    law: Number.isFinite(Number(value?.law)) ? Number(value?.law) : 0,
   } satisfies PressSupportRow;
 }
 
@@ -50,6 +50,29 @@ function countMatches(text: string, keyword: string) {
   if (!normalizedText) return 0;
   const normalizedKeyword = keyword.replace(/\s+/g, "").trim();
   return normalizedText.includes(normalizedKeyword) ? 1 : 0;
+}
+
+function normalizeSupportDuty(value: string) {
+  return value.replace(/\s+/g, "").trim();
+}
+
+function countAnyKeyword(text: string, keywords: string[]) {
+  return keywords.some((keyword) => countMatches(text, keyword) > 0) ? 1 : 0;
+}
+
+export function getPressSupportCountsForAssignment(duty: string, schedules: string[]) {
+  const normalizedDuty = normalizeSupportDuty(duty);
+  const hasAssemblyDuty = normalizedDuty === "국회지원";
+  const hasLawDuty = normalizedDuty === "법조지원";
+
+  return {
+    assembly: hasAssemblyDuty
+      ? 1
+      : schedules.reduce((sum, schedule) => sum + countMatches(schedule, "국회 지원"), 0),
+    law: hasLawDuty
+      ? 1
+      : schedules.reduce((sum, schedule) => sum + countAnyKeyword(schedule, ["법조 지원", "검찰 지원"]), 0),
+  } satisfies Pick<PressSupportRow, "assembly" | "law">;
 }
 
 function getMonthKey(year: number, month: number) {
@@ -94,7 +117,7 @@ export function getPressSupportRows(periodYear?: number) {
     totals.set(name, {
       name,
       assembly: 0,
-      prosecution: 0,
+      law: 0,
     });
   });
 
@@ -125,12 +148,10 @@ export function getPressSupportRows(periodYear?: number) {
           if (!name) return;
 
           const entry = monthEntries[row.key] ?? createDefaultScheduleAssignmentEntry();
-          const current = totals.get(name) ?? { name, assembly: 0, prosecution: 0 };
-
-          entry.schedules.forEach((schedule) => {
-            current.assembly += countMatches(schedule, "국회 지원");
-            current.prosecution += countMatches(schedule, "검찰 지원");
-          });
+          const current = totals.get(name) ?? { name, assembly: 0, law: 0 };
+          const counts = getPressSupportCountsForAssignment(row.duty, entry.schedules);
+          current.assembly += counts.assembly;
+          current.law += counts.law;
 
           totals.set(name, current);
         });
@@ -140,9 +161,9 @@ export function getPressSupportRows(periodYear?: number) {
   return Array.from(totals.values())
     .map((row) => normalizePressSupportRow(row))
     .filter((row): row is PressSupportRow => Boolean(row))
-    .filter((row) => row.assembly > 0 || row.prosecution > 0)
+    .filter((row) => row.assembly > 0 || row.law > 0)
     .sort((left, right) => {
-      const totalCompare = right.assembly + right.prosecution - (left.assembly + left.prosecution);
+      const totalCompare = right.assembly + right.law - (left.assembly + left.law);
       if (totalCompare !== 0) return totalCompare;
       return left.name.localeCompare(right.name, "ko");
     });

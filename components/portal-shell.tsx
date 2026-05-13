@@ -31,6 +31,7 @@ import {
 } from "@/lib/portal/member-level";
 import { recordPageVisit } from "@/lib/portal/page-visit-analytics";
 import { equipmentNavItems } from "@/lib/equipment/types";
+import Image from "next/image";
 
 type PortalNavChild = {
   href: string;
@@ -43,6 +44,12 @@ type PortalNavLink = {
   label: string;
   children?: PortalNavChild[];
 };
+
+type SidebarNavActionId = "customer-support" | "theme";
+
+type SidebarNavEntry =
+  | { kind: "link"; link: PortalNavLink }
+  | { kind: "action"; id: SidebarNavActionId; label: string };
 
 const links: PortalNavLink[] = [
   { href: "/", label: "홈" },
@@ -97,6 +104,40 @@ const links: PortalNavLink[] = [
     ],
   },
   { href: "/admin", label: "관리자" },
+];
+
+const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
+  "/equipment": "/images/sidebar-icons/tvu-equipment.png",
+  "/admin": "/images/sidebar-icons/admin.png",
+  "/work-schedule": "/images/sidebar-icons/work-schedule.png",
+  "/restaurants": "/images/sidebar-icons/restaurants.png",
+  "/schedule": "/images/sidebar-icons/desk.png",
+  "/me": "/images/sidebar-icons/my-page.png",
+  "/submissions": "/images/sidebar-icons/best-report-submit.png",
+  "/review": "/images/sidebar-icons/best-report-review.png",
+  "/community": "/images/sidebar-icons/community.png",
+  "/vacation": "/images/sidebar-icons/vacation.png",
+  "/team-lead": "/images/sidebar-icons/team-lead.png",
+};
+
+const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
+  "customer-support": "/images/sidebar-icons/customer-support.png",
+  theme: "/images/sidebar-icons/theme-mode.png",
+};
+
+const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"; id: SidebarNavActionId }> = [
+  { kind: "link", href: "/me" },
+  { kind: "link", href: "/work-schedule" },
+  { kind: "link", href: "/equipment" },
+  { kind: "link", href: "/vacation" },
+  { kind: "link", href: "/submissions" },
+  { kind: "link", href: "/review" },
+  { kind: "link", href: "/restaurants" },
+  { kind: "link", href: "/community" },
+  { kind: "link", href: "/schedule" },
+  { kind: "link", href: "/team-lead" },
+  { kind: "link", href: "/admin" },
+  { kind: "action", id: "customer-support" },
 ];
 
 function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
@@ -328,6 +369,18 @@ function formatNextLevelLabel(memberLevel: MemberLevelSnapshot | null) {
   return `Lv${nextLevel}`;
 }
 
+function SidebarItemIcon({ src, label }: { src?: string; label: string }) {
+  return (
+    <span className="portal-sidebar-link__icon" aria-hidden="true">
+      {src ? (
+        <Image src={src} alt="" width={34} height={34} sizes="34px" />
+      ) : (
+        <span className="portal-sidebar-link__fallback-icon">{label.slice(0, 1)}</span>
+      )}
+    </span>
+  );
+}
+
 function PortalSidebar({
   pathname,
   session,
@@ -364,6 +417,38 @@ function PortalSidebar({
   const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const submenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const expandedMenuHref = Object.keys(expandedMenus).find((href) => expandedMenus[href]) ?? null;
+  const sidebarEntries = useMemo<SidebarNavEntry[]>(() => {
+    const linkByHref = new Map(visibleLinks.map((link) => [link.href, link] as const));
+    const usedHrefs = new Set<string>();
+    const entries: SidebarNavEntry[] = [];
+    const appendRemainingLinks = () => {
+      visibleLinks.forEach((link) => {
+        if (usedHrefs.has(link.href)) return;
+        usedHrefs.add(link.href);
+        entries.push({ kind: "link", link });
+      });
+    };
+
+    SIDEBAR_NAV_ORDER.forEach((item) => {
+      if (item.kind === "action") {
+        entries.push({
+          kind: "action",
+          id: item.id,
+          label: item.id === "customer-support" ? "고객센터" : "모드변경",
+        });
+        return;
+      }
+
+      const link = linkByHref.get(item.href);
+      if (!link) return;
+      usedHrefs.add(link.href);
+      entries.push({ kind: "link", link });
+    });
+
+    appendRemainingLinks();
+
+    return entries;
+  }, [visibleLinks]);
 
   useEffect(() => {
     if (!openMobile) {
@@ -429,10 +514,39 @@ function PortalSidebar({
       <SidebarContent>
         <nav aria-label="주요 메뉴">
           <SidebarMenu>
-            {visibleLinks.map((link) => {
+            {sidebarEntries.map((entry) => {
+              if (entry.kind === "action") {
+                const iconSrc = SIDEBAR_ACTION_ICON_BY_ID[entry.id];
+                const handleActionClick = () => {
+                  closeMobileSidebar();
+                  if (entry.id === "customer-support") {
+                    onOpenCustomerSupport();
+                    return;
+                  }
+                  onCycleTheme();
+                };
+
+                return (
+                  <SidebarMenuItem key={`action:${entry.id}`}>
+                    <button
+                      type="button"
+                      className="portal-sidebar-link portal-sidebar-link--action"
+                      aria-label={entry.label}
+                      title={entry.label}
+                      onClick={handleActionClick}
+                    >
+                      <SidebarItemIcon src={iconSrc} label={entry.label} />
+                      <span className="portal-sidebar-link__label">{entry.label}</span>
+                    </button>
+                  </SidebarMenuItem>
+                );
+              }
+
+              const link = entry.link;
               const active = isLinkActive(pathname, link.href);
               const hasChildren = Boolean(link.children?.length);
               const isExpanded = expandedMenus[link.href] ?? false;
+              const iconSrc = SIDEBAR_ICON_BY_HREF[link.href];
 
               return (
                 <SidebarMenuItem key={link.href} className={hasChildren ? "portal-sidebar__menu-item--has-children" : undefined}>
@@ -450,7 +564,8 @@ function PortalSidebar({
                           setExpandedMenus(isExpanded ? {} : { [link.href]: true });
                         }}
                       >
-                        <span>{link.label}</span>
+                        <SidebarItemIcon src={iconSrc} label={link.label} />
+                        <span className="portal-sidebar-link__label">{link.label}</span>
                         <span className={`portal-sidebar-link__chevron ${isExpanded ? "is-expanded" : ""}`.trim()} aria-hidden="true">
                           ▾
                         </span>
@@ -517,7 +632,8 @@ function PortalSidebar({
                       aria-current={active ? "page" : undefined}
                       onClick={handleMenuNavigate}
                     >
-                      <span>{link.label}</span>
+                      <SidebarItemIcon src={iconSrc} label={link.label} />
+                      <span className="portal-sidebar-link__label">{link.label}</span>
                     </Link>
                   )}
                 </SidebarMenuItem>
@@ -529,6 +645,17 @@ function PortalSidebar({
       <SidebarSeparator />
       <SidebarFooter>
         <div className="portal-sidebar-footer-stack">
+          <button
+            type="button"
+            className="btn portal-sidebar-action portal-sidebar-action--with-icon"
+            onClick={() => {
+              closeMobileSidebar();
+              onCycleTheme();
+            }}
+          >
+            <SidebarItemIcon src={SIDEBAR_ACTION_ICON_BY_ID.theme} label="모드변경" />
+            <span>모드변경</span>
+          </button>
           {shouldShowLogoutButton ? (
             <button
               className="btn portal-sidebar-action"
@@ -568,19 +695,6 @@ function PortalSidebar({
               ) : null}
             </div>
           ) : null}
-          <button
-            type="button"
-            className="btn portal-sidebar-action"
-            onClick={() => {
-              closeMobileSidebar();
-              onOpenCustomerSupport();
-            }}
-          >
-            <span>고객센터</span>
-          </button>
-          <button type="button" className="btn portal-sidebar-action" onClick={onCycleTheme}>
-            <span>모드변경</span>
-          </button>
         </div>
       </SidebarFooter>
     </Sidebar>
@@ -895,6 +1009,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
           "--portal-sidebar-top-offset": `${sidebarTopOffset}px`,
           "--portal-sidebar-rail-top": `${isMobile ? mobileSidebarTriggerTop : sidebarTriggerTopOffset}px`,
           "--portal-sidebar-width": "232px",
+          "--portal-sidebar-collapsed-width": "68px",
           "--portal-sidebar-mobile-width": "288px",
         } as CSSProperties
       }

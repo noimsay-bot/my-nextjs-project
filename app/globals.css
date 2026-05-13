@@ -3764,11 +3764,13 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   box-shadow: var(--panel-shadow);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: transform 0.2s ease;
+  transition: width 0.2s ease, transform 0.2s ease, padding 0.2s ease;
+  overflow: visible;
 }
 
 .portal-sidebar.is-collapsed .portal-sidebar__panel {
-  transform: translateX(calc(-1 * var(--portal-sidebar-width, 256px) + 28px));
+  width: var(--portal-sidebar-collapsed-width, 68px);
+  padding: calc(var(--portal-sidebar-top-offset, 0px) + 12px) 8px 12px;
   cursor: pointer;
 }
 
@@ -3837,12 +3839,61 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   border: 1px solid var(--line);
   background: var(--nav-bg);
   color: var(--muted);
+  font: inherit;
   font-weight: 800;
+  text-align: left;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .portal-sidebar-link--toggle {
   cursor: pointer;
+}
+
+.portal-sidebar-link--action {
+  cursor: pointer;
+}
+
+.portal-sidebar-link--icon-only {
+  justify-content: center;
+}
+
+.portal-sidebar-link__icon {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.portal-sidebar-link__icon img {
+  display: block;
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+}
+
+.portal-sidebar-link__fallback-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.portal-sidebar-link__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .portal-sidebar-link__chevron {
@@ -3863,6 +3914,41 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   color: var(--text);
   background: var(--nav-active-bg);
   border-color: var(--nav-active-line);
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar__inner {
+  gap: 10px;
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar__content {
+  overflow: visible;
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar__menu {
+  gap: 7px;
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar-link {
+  min-height: 50px;
+  justify-content: center;
+  gap: 0;
+  padding: 7px;
+  border-radius: 16px;
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar-link__label,
+.portal-sidebar.is-collapsed .portal-sidebar-link__chevron {
+  width: 0;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar-submenu,
+.portal-sidebar.is-collapsed .portal-sidebar__separator,
+.portal-sidebar.is-collapsed .portal-sidebar__footer {
+  display: none;
 }
 
 .portal-sidebar-submenu {
@@ -3942,6 +4028,17 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   justify-content: center;
   gap: 8px;
   text-align: center;
+}
+
+.portal-sidebar-action--with-icon {
+  justify-content: flex-start;
+  min-height: 46px;
+  padding-left: 10px;
+  text-align: left;
+}
+
+.portal-sidebar-action--with-icon > span:last-child {
+  font-weight: 800;
 }
 
 .customer-support-dialog-backdrop {
@@ -4104,10 +4201,11 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   left: calc(var(--portal-sidebar-width, 256px) + 12px);
   z-index: 42;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: none;
 }
 
 .portal-sidebar.is-collapsed .portal-sidebar-trigger--desktop {
-  left: 42px;
+  left: calc(var(--portal-sidebar-collapsed-width, 68px) + 8px);
 }
 
 @media (min-width: 1025px) {
@@ -4159,6 +4257,46 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
   .portal-sidebar.is-collapsed .portal-sidebar__panel.is-open {
     transform: translateX(0);
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar__inner {
+    gap: 16px;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar__menu {
+    gap: 8px;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar-link {
+    min-height: 44px;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar-link--icon-only {
+    justify-content: center;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar-link__label,
+  .portal-sidebar.is-collapsed .portal-sidebar-link__chevron {
+    width: auto;
+    max-width: none;
+    opacity: 1;
+    overflow: visible;
+    pointer-events: auto;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar-submenu {
+    display: grid;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar__separator {
+    display: block;
+  }
+
+  .portal-sidebar.is-collapsed .portal-sidebar__footer {
+    display: flex;
   }
 
   .portal-sidebar-trigger--rail {

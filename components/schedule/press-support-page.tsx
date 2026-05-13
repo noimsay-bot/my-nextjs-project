@@ -14,7 +14,7 @@ import {
 
 const columns: Array<{ key: PressSupportCategory; label: string }> = [
   { key: "assembly", label: "국회" },
-  { key: "prosecution", label: "검찰" },
+  { key: "law", label: "법조" },
 ];
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
@@ -77,7 +77,7 @@ export function PressSupportPage() {
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">DESK 출입처 지원</div>
           <strong style={{ fontSize: 24 }}>출입처 지원</strong>
-          <div className="status note">일정배정의 일정 내용 중 `국회 지원`, `검찰 지원` 문구를 연도별로 자동 집계해 보여줍니다.</div>
+          <div className="status note">일정배정의 근무유형 중 `국회 지원`, `법조 지원` 지정 내역을 연도별로 자동 집계해 보여줍니다.</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <span className="chip">집계 기간</span>
             <select
