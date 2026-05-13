@@ -480,6 +480,23 @@ function getActivePopupNotice(notices: HomeNotice[]) {
   return popup ? ({ ...popup, kind: "popup" } as HomePopupNotice) : null;
 }
 
+function normalizeHomePublicWorkspaceResponse(
+  payload: Partial<HomePublicWorkspaceResponse> | null | undefined,
+): HomePublicWorkspaceResponse {
+  const notices = Array.isArray(payload?.notices) ? payload.notices : [];
+
+  return {
+    notice: payload?.notice ?? getActivePopupNotice(notices),
+    notices,
+    ddays: Array.isArray(payload?.ddays) ? payload.ddays : [],
+    communityPosts: Array.isArray(payload?.communityPosts) ? payload.communityPosts : [],
+    communityComments: Array.isArray(payload?.communityComments) ? payload.communityComments : [],
+    applications: Array.isArray(payload?.applications) ? payload.applications : [],
+    ownApplied: Boolean(payload?.ownApplied),
+    tripCards: Array.isArray(payload?.tripCards) ? payload.tripCards : [],
+  };
+}
+
 function rowToLegacyNotice(row: HomePopupNoticeStateRow | null | undefined) {
   if (!row?.notice_id || !row.title.trim() || !row.body.trim()) return [] as HomeNotice[];
   return [
@@ -842,7 +859,14 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
         : "홈 데이터를 불러오지 못했습니다.");
     }
 
-    return payload as HomePublicWorkspaceResponse;
+    if (!payload || typeof payload !== "object") {
+      if (session?.approved) {
+        return fetchHomePublicWorkspaceFallback(session);
+      }
+      return normalizeHomePublicWorkspaceResponse(null);
+    }
+
+    return normalizeHomePublicWorkspaceResponse(payload as Partial<HomePublicWorkspaceResponse>);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("홈 데이터 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
@@ -957,7 +981,7 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
     }
 
     try {
-      const workspace = await fetchHomePublicWorkspace(options);
+      const workspace = normalizeHomePublicWorkspaceResponse(await fetchHomePublicWorkspace(options));
 
       if (requestId !== refreshRequestId) {
         return buildCachedWorkspaceResult();
