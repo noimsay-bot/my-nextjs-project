@@ -825,7 +825,7 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
 
     const payload = (await response.json().catch(() => null)) as { message?: string } | HomePublicWorkspaceResponse | null;
     if (!response.ok) {
-      if ((response.status === 401 || response.status === 403) && options.includeTrips === false && session?.approved) {
+      if (options.includeTrips === false && session?.approved) {
         return fetchHomePublicWorkspaceFallback(session);
       }
       throw new Error(payload && "message" in payload && typeof payload.message === "string"
@@ -942,10 +942,7 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
     }
 
     try {
-      const workspace =
-        options.includeTrips === false
-          ? await fetchHomePublicWorkspaceFallback(session)
-          : await fetchHomePublicWorkspace(options);
+      const workspace = await fetchHomePublicWorkspace(options);
 
       syncCaches(
         workspace.notices,
