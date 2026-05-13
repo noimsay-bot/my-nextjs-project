@@ -107,15 +107,15 @@ function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
   };
 }
 
-function hasEquipmentAccessRole(role: UserRole | null | undefined) {
+function hasEquipmentStatusAccessRole(role: UserRole | null | undefined) {
   return role === "desk" || role === "team_lead" || role === "admin";
 }
 
 function canViewEquipmentStatusLink(session: SessionUser | null) {
   return Boolean(
     session?.approved &&
-    hasEquipmentAccessRole(session.role) &&
-    hasEquipmentAccessRole(session.actualRole),
+    hasEquipmentStatusAccessRole(session.role) &&
+    hasEquipmentStatusAccessRole(session.actualRole),
   );
 }
 
@@ -183,10 +183,6 @@ function getVisibleLinks(
   submissionAccessOpen: boolean,
   reviewLocked: boolean,
 ) {
-  const canAccessEquipment =
-    Boolean(session) &&
-    hasEquipmentAccessRole(session?.role) &&
-    hasEquipmentAccessRole(session?.actualRole);
   const visibleRoleLinks = links.map((link) => (
     link.href === "/equipment" ? withVisibleEquipmentChildren(link, session) : link
   ));
@@ -199,6 +195,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
@@ -210,6 +207,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
@@ -220,6 +218,7 @@ function getVisibleLinks(
           link.href === "/" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          link.href === "/equipment" ||
           link.href === "/partner/schedule",
       );
     case "reviewer":
@@ -228,6 +227,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           link.href === "/submissions" ||
           (link.href === "/review" && session.canReview && !reviewLocked),
@@ -240,7 +240,7 @@ function getVisibleLinks(
           link.href === "/restaurants" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
-          (link.href === "/equipment" && canAccessEquipment) ||
+          link.href === "/equipment" ||
           link.href === "/schedule" ||
           (link.href === "/review" && session.canReview),
       );
@@ -253,7 +253,7 @@ function getVisibleLinks(
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !reviewLocked) ||
-          (link.href === "/equipment" && canAccessEquipment) ||
+          link.href === "/equipment" ||
           link.href === "/schedule" ||
           link.href === "/team-lead" ||
           link.href === "/admin",
@@ -265,7 +265,7 @@ function getVisibleLinks(
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/me" ||
-          (link.href === "/equipment" && canAccessEquipment) ||
+          link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/schedule" ||
@@ -279,6 +279,7 @@ function getVisibleLinks(
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
+          link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen),
       );

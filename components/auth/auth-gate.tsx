@@ -30,13 +30,6 @@ function authLog(stage: string, details: Record<string, unknown>) {
 
 const AUTH_GATE_PENDING_TIMEOUT_MS = 6_000;
 
-function hasEquipmentAccess(session: SessionUser) {
-  return (
-    (session.role === "desk" || session.role === "team_lead" || session.role === "admin") &&
-    (session.actualRole === "desk" || session.actualRole === "team_lead" || session.actualRole === "admin")
-  );
-}
-
 function hasAccess(
   pathname: string,
   session: SessionUser,
@@ -68,7 +61,7 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/equipment")) {
-    return hasEquipmentAccess(session);
+    return true;
   }
 
   if (pathname.startsWith("/community") || pathname.startsWith("/notices")) {
