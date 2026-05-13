@@ -1130,7 +1130,12 @@ as $$
       split_part(entry_items.row_key, '::', 2) as row_type,
       split_part(entry_items.row_key, '::', 3) as row_ref,
       nullif(trim(split_part(entry_items.row_key, '::', 4)), '') as base_name,
-      trim(entry_items.content) as schedule_content
+      trim(entry_items.content) as schedule_content,
+      case
+        when entry_items.month_key = substring(split_part(entry_items.row_key, '::', 1) from 1 for 7) then 0
+        when entry_items.month_key = entry_items.requested_month_key then 1
+        else 2
+      end as source_rank
     from entry_items
     where split_part(entry_items.row_key, '::', 1) like entry_items.requested_month_key || '-__'
       and split_part(entry_items.row_key, '::', 1) ~ '^\d{4}-\d{2}-\d{2}$'
@@ -1146,9 +1151,12 @@ as $$
   visible_items as (
     select
       parsed_entry_items.date_key,
+      concat(parsed_entry_items.row_key, '::schedule::', parsed_entry_items.ordinality::text) as schedule_item_id,
       parsed_entry_items.row_key,
       parsed_entry_items.ordinality,
       parsed_entry_items.schedule_content,
+      parsed_entry_items.source_rank,
+      case when partner_entry.id is null then 1 else 0 end as partner_rank,
       coalesce(
         nullif(trim(parsed_entry_items.rows -> parsed_entry_items.date_key -> 'rowOverrides' -> parsed_entry_items.row_key ->> 'name'), ''),
         nullif(trim(custom_row.value ->> 'name'), ''),
@@ -1165,15 +1173,30 @@ as $$
     ) as custom_row(value)
       on parsed_entry_items.row_type = 'custom'
      and custom_row.value ->> 'id' = parsed_entry_items.row_ref
+    left join public.schedule_partner_entries partner_entry
+      on partner_entry.schedule_item_id = concat(parsed_entry_items.row_key, '::schedule::', parsed_entry_items.ordinality::text)
+  ),
+  deduped_items as (
+    select *
+    from (
+      select
+        visible_items.*,
+        row_number() over (
+          partition by visible_items.date_key, visible_items.photographer_name, visible_items.schedule_content
+          order by visible_items.partner_rank, visible_items.source_rank, visible_items.schedule_item_id
+        ) as duplicate_rank
+      from visible_items
+    ) ranked_items
+    where ranked_items.duplicate_rank = 1
   )
   select
-    visible_items.date_key::date as schedule_date,
-    concat(visible_items.row_key, '::schedule::', visible_items.ordinality::text) as schedule_item_id,
+    deduped_items.date_key::date as schedule_date,
+    deduped_items.schedule_item_id as schedule_item_id,
     current_profile.id as photographer_profile_id,
     current_profile.name as photographer_name,
-    visible_items.schedule_content as schedule_content
-  from visible_items
-  join current_profile on visible_items.photographer_name = current_profile.name
+    deduped_items.schedule_content as schedule_content
+  from deduped_items
+  join current_profile on deduped_items.photographer_name = current_profile.name
   order by schedule_date, schedule_item_id;
 $$;
 
@@ -1240,7 +1263,11 @@ as $$
       split_part(entry_items.row_key, '::', 2) as row_type,
       split_part(entry_items.row_key, '::', 3) as row_ref,
       nullif(trim(split_part(entry_items.row_key, '::', 4)), '') as base_name,
-      trim(entry_items.content) as schedule_content
+      trim(entry_items.content) as schedule_content,
+      case
+        when entry_items.month_key = substring(split_part(entry_items.row_key, '::', 1) from 1 for 7) then 0
+        else 1
+      end as source_rank
     from entry_items
     where split_part(entry_items.row_key, '::', 1) = entry_items.schedule_date::text
       and split_part(entry_items.row_key, '::', 1) ~ '^\d{4}-\d{2}-\d{2}$'
@@ -1256,9 +1283,12 @@ as $$
   visible_items as (
     select
       parsed_entry_items.date_key,
+      concat(parsed_entry_items.row_key, '::schedule::', parsed_entry_items.ordinality::text) as schedule_item_id,
       parsed_entry_items.row_key,
       parsed_entry_items.ordinality,
       parsed_entry_items.schedule_content,
+      parsed_entry_items.source_rank,
+      case when partner_entry.id is null then 1 else 0 end as partner_rank,
       coalesce(
         nullif(trim(parsed_entry_items.rows -> parsed_entry_items.date_key -> 'rowOverrides' -> parsed_entry_items.row_key ->> 'name'), ''),
         nullif(trim(custom_row.value ->> 'name'), ''),
@@ -1275,18 +1305,33 @@ as $$
     ) as custom_row(value)
       on parsed_entry_items.row_type = 'custom'
      and custom_row.value ->> 'id' = parsed_entry_items.row_ref
+    left join public.schedule_partner_entries partner_entry
+      on partner_entry.schedule_item_id = concat(parsed_entry_items.row_key, '::schedule::', parsed_entry_items.ordinality::text)
+  ),
+  deduped_items as (
+    select *
+    from (
+      select
+        visible_items.*,
+        row_number() over (
+          partition by visible_items.date_key, visible_items.photographer_name, visible_items.schedule_content
+          order by visible_items.partner_rank, visible_items.source_rank, visible_items.schedule_item_id
+        ) as duplicate_rank
+      from visible_items
+    ) ranked_items
+    where ranked_items.duplicate_rank = 1
   )
   select
-    visible_items.date_key::date as schedule_date,
-    concat(visible_items.row_key, '::schedule::', visible_items.ordinality::text) as schedule_item_id,
+    deduped_items.date_key::date as schedule_date,
+    deduped_items.schedule_item_id as schedule_item_id,
     photographer.id as photographer_profile_id,
-    visible_items.photographer_name as photographer_name,
-    visible_items.schedule_content as schedule_content
-  from visible_items
+    deduped_items.photographer_name as photographer_name,
+    deduped_items.schedule_content as schedule_content
+  from deduped_items
   left join public.profiles photographer
     on photographer.approved = true
-   and photographer.name = visible_items.photographer_name
-  where visible_items.photographer_name is not null
+   and photographer.name = deduped_items.photographer_name
+  where deduped_items.photographer_name is not null
   order by photographer_name, schedule_item_id;
 $$;
 
@@ -2691,6 +2736,15 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
     119 + n,
     '{"family":"light","kind":"EX600U","variant_parent":"EX600U"}'::jsonb || jsonb_build_object('variant_label', concat(n, '번'))
   from generate_series(1, 2) as n
+  union all
+  select
+    'light',
+    '조명',
+    concat('LC500 ', n, '번'),
+    case when n = 1 then 'light-lc500' else concat('light-lc500-', lpad(n::text, 2, '0')) end,
+    124 + n,
+    '{"family":"light","kind":"LC500","variant_parent":"LC500"}'::jsonb || jsonb_build_object('variant_label', concat(n, '번'))
+  from generate_series(1, 3) as n
   union all
   select
     'light',

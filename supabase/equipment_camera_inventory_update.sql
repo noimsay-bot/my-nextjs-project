@@ -112,6 +112,15 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
   select
     'light',
     '조명',
+    concat('LC500 ', n, '번'),
+    case when n = 1 then 'light-lc500' else concat('light-lc500-', lpad(n::text, 2, '0')) end,
+    124 + n,
+    '{"family":"light","kind":"LC500","variant_parent":"LC500"}'::jsonb || jsonb_build_object('variant_label', concat(n, '번'))
+  from generate_series(1, 3) as n
+  union all
+  select
+    'light',
+    '조명',
     concat('프라임 ', n, '번'),
     case when n = 1 then 'light-prime' else concat('light-prime-', lpad(n::text, 2, '0')) end,
     129 + n,

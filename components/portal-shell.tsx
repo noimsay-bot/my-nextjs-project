@@ -148,6 +148,16 @@ function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
   };
 }
 
+function withVisibleLeafChildren(link: PortalNavLink, childHrefs: string[]) {
+  if (!link.children) return link;
+  return {
+    ...link,
+    children: link.children
+      .filter((child) => childHrefs.includes(child.href))
+      .map((child) => ({ href: child.href, label: child.label })),
+  };
+}
+
 function hasEquipmentStatusAccessRole(role: UserRole | null | undefined) {
   return role === "desk" || role === "team_lead" || role === "admin";
 }
@@ -313,7 +323,7 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview && !reviewLocked) ||
           link.href === "/admin",
         )
-        .map((link) => (link.href === "/schedule" ? withVisibleChildren(link, ["/schedule/write"]) : link));
+        .map((link) => (link.href === "/schedule" ? withVisibleLeafChildren(link, ["/schedule/write"]) : link));
     default:
       return visibleRoleLinks.filter(
         (link) =>
