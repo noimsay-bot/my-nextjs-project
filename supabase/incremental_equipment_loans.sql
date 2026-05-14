@@ -1,5 +1,5 @@
 -- Purpose: Add equipment rental inventory, loans, RLS, RPC mutations, and idempotent seed data.
--- Impact: Approved portal users can read equipment status/history; non-observer users can borrow/return their own loans; team_lead/admin can correct all.
+-- Impact: Approved portal users can read equipment status/history; non-observer users can borrow/return their own loans; desk/team_lead/admin can correct all.
 
 create table if not exists public.equipment_items (
   id uuid primary key default gen_random_uuid(),
@@ -549,7 +549,7 @@ begin
       and equipment_loan_items.status = 'borrowed'
       and (
         equipment_loans.borrower_profile_id = v_user_id
-        or public.is_admin()
+        or public.current_profile_role() in ('desk', 'admin', 'team_lead')
       )
     returning equipment_loan_items.loan_id
   )

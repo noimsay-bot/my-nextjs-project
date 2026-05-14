@@ -21,6 +21,7 @@ interface PartnerEntryRow {
   audio_man_name: string | null;
   senior_name: string | null;
   memo_text: string | null;
+  final_cut_completed: boolean | null;
   partner_profile_id: string | null;
   created_at: string;
   updated_at: string;
@@ -30,6 +31,8 @@ const PARTNER_ENTRY_SELECT_BASE =
   "id, schedule_date, schedule_item_id, photographer_profile_id, photographer_name, schedule_content, audio_man_name, senior_name, partner_profile_id, created_at, updated_at";
 const PARTNER_ENTRY_SELECT_WITH_MEMO =
   "id, schedule_date, schedule_item_id, photographer_profile_id, photographer_name, schedule_content, audio_man_name, senior_name, memo_text, partner_profile_id, created_at, updated_at";
+const PARTNER_ENTRY_SELECT_WITH_FINAL_CUT =
+  "id, schedule_date, schedule_item_id, photographer_profile_id, photographer_name, schedule_content, audio_man_name, senior_name, memo_text, final_cut_completed, partner_profile_id, created_at, updated_at";
 
 export interface PartnerScheduleAssignment extends ScheduleAssignmentItem {
   audioManName: string;
@@ -43,6 +46,7 @@ export interface MyScheduleAssignmentItem extends ScheduleAssignmentItem {
   memoText: string;
   generatedText: string;
   isMemoCustom: boolean;
+  finalCutCompleted: boolean;
   missingFields: string[];
 }
 
@@ -71,6 +75,15 @@ function getLogicalAssignmentKey(assignment: ScheduleAssignmentItem) {
     assignment.photographerProfileId ?? assignment.photographerName,
     assignment.photographerName.trim(),
     assignment.scheduleContent.trim().replace(/\s+/g, " "),
+  ].join("::");
+}
+
+function getLogicalPartnerEntryKey(entry: PartnerEntryRow) {
+  return [
+    entry.schedule_date,
+    entry.photographer_profile_id ?? entry.photographer_name,
+    entry.photographer_name.trim(),
+    entry.schedule_content.trim().replace(/\s+/g, " "),
   ].join("::");
 }
 
@@ -106,38 +119,114 @@ function isMissingMemoTextColumnError(error: unknown) {
   return message.includes("memo_text") && message.includes("does not exist");
 }
 
+function isMissingFinalCutColumnError(error: unknown) {
+  const message = JSON.stringify(error ?? "").toLowerCase();
+  return message.includes("final_cut_completed") && message.includes("does not exist");
+}
+
+function withMissingPartnerEntryDefaults<T extends Partial<PartnerEntryRow>>(row: T) {
+  return {
+    ...row,
+    memo_text: "memo_text" in row ? row.memo_text ?? null : null,
+    final_cut_completed: "final_cut_completed" in row ? row.final_cut_completed ?? false : false,
+  } as PartnerEntryRow;
+}
+
 async function fetchPartnerEntryRowsByScheduleItemIds(
   supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>,
   ids: string[],
 ) {
   const { data, error } = await supabase
     .from("schedule_partner_entries")
-    .select(PARTNER_ENTRY_SELECT_WITH_MEMO)
+    .select(PARTNER_ENTRY_SELECT_WITH_FINAL_CUT)
     .in("schedule_item_id", ids)
     .returns<PartnerEntryRow[]>();
 
   if (!error) {
-    return (data ?? []) as PartnerEntryRow[];
+    return (data ?? []).map(withMissingPartnerEntryDefaults);
   }
 
-  if (!isMissingMemoTextColumnError(error)) {
+  if (!isMissingFinalCutColumnError(error) && !isMissingMemoTextColumnError(error)) {
     throw new Error(getSchemaMessage(error, "schedule_partner_entries"));
+  }
+
+  if (isMissingFinalCutColumnError(error)) {
+    const fallback = await supabase
+      .from("schedule_partner_entries")
+      .select(PARTNER_ENTRY_SELECT_WITH_MEMO)
+      .in("schedule_item_id", ids)
+      .returns<Omit<PartnerEntryRow, "final_cut_completed">[]>();
+
+    if (!fallback.error) {
+      return (fallback.data ?? []).map(withMissingPartnerEntryDefaults);
+    }
+
+    if (!isMissingMemoTextColumnError(fallback.error)) {
+      throw new Error(getSchemaMessage(fallback.error, "schedule_partner_entries"));
+    }
   }
 
   const fallback = await supabase
     .from("schedule_partner_entries")
     .select(PARTNER_ENTRY_SELECT_BASE)
     .in("schedule_item_id", ids)
-    .returns<Omit<PartnerEntryRow, "memo_text">[]>();
+    .returns<Omit<PartnerEntryRow, "memo_text" | "final_cut_completed">[]>();
 
   if (fallback.error) {
     throw new Error(getSchemaMessage(fallback.error, "schedule_partner_entries"));
   }
 
-  return (fallback.data ?? []).map((row) => ({
-    ...row,
-    memo_text: null,
-  })) as PartnerEntryRow[];
+  return (fallback.data ?? []).map(withMissingPartnerEntryDefaults);
+}
+
+async function fetchPartnerEntryRowsByScheduleDates(
+  supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>,
+  scheduleDates: string[],
+) {
+  const uniqueDates = Array.from(new Set(scheduleDates.filter(Boolean)));
+  if (uniqueDates.length === 0) return [] as PartnerEntryRow[];
+
+  const { data, error } = await supabase
+    .from("schedule_partner_entries")
+    .select(PARTNER_ENTRY_SELECT_WITH_FINAL_CUT)
+    .in("schedule_date", uniqueDates)
+    .returns<PartnerEntryRow[]>();
+
+  if (!error) {
+    return (data ?? []).map(withMissingPartnerEntryDefaults);
+  }
+
+  if (!isMissingFinalCutColumnError(error) && !isMissingMemoTextColumnError(error)) {
+    throw new Error(getSchemaMessage(error, "schedule_partner_entries"));
+  }
+
+  if (isMissingFinalCutColumnError(error)) {
+    const fallback = await supabase
+      .from("schedule_partner_entries")
+      .select(PARTNER_ENTRY_SELECT_WITH_MEMO)
+      .in("schedule_date", uniqueDates)
+      .returns<Omit<PartnerEntryRow, "final_cut_completed">[]>();
+
+    if (!fallback.error) {
+      return (fallback.data ?? []).map(withMissingPartnerEntryDefaults);
+    }
+
+    if (!isMissingMemoTextColumnError(fallback.error)) {
+      throw new Error(getSchemaMessage(fallback.error, "schedule_partner_entries"));
+    }
+  }
+
+  const fallback = await supabase
+    .from("schedule_partner_entries")
+    .select(PARTNER_ENTRY_SELECT_BASE)
+    .in("schedule_date", uniqueDates)
+    .returns<Omit<PartnerEntryRow, "memo_text" | "final_cut_completed">[]>();
+
+  if (fallback.error) {
+    throw new Error(getSchemaMessage(fallback.error, "schedule_partner_entries"));
+  }
+
+  return (fallback.data ?? []).map(withMissingPartnerEntryDefaults);
 }
 
 export async function fetchMyScheduleAssignments(monthKey: string) {
@@ -233,6 +322,24 @@ export async function saveMyScheduleAssignmentEntry(input: MyScheduleAssignmentI
   }
 }
 
+export async function saveMyScheduleFinalCutStatus(input: MyScheduleAssignmentItem, completed: boolean) {
+  const session = getSession();
+  if (!session?.approved || session.role === "partner" || session.role === "observer") {
+    throw new Error("정제본 생성완료 처리 권한이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.rpc("update_my_schedule_final_cut_status", {
+    p_schedule_date: input.scheduleDate,
+    p_schedule_item_id: input.scheduleItemId,
+    p_final_cut_completed: completed,
+  });
+
+  if (error) {
+    throw new Error(getSchemaMessage(error, "정제본 생성완료"));
+  }
+}
+
 export async function fetchMyScheduleAssignmentsWithPartnerInfo(monthKey: string) {
   const session = getSession();
   if (!session?.approved) {
@@ -247,11 +354,16 @@ export async function fetchMyScheduleAssignmentsWithPartnerInfo(monthKey: string
   }
 
   const partnerRows = await fetchPartnerEntryRowsByScheduleItemIds(supabase, ids);
+  const logicalPartnerRows = await fetchPartnerEntryRowsByScheduleDates(
+    supabase,
+    assignments.map((item) => item.scheduleDate),
+  );
 
   const partnerMap = new Map((partnerRows ?? []).map((row) => [row.schedule_item_id, row] as const));
+  const logicalPartnerMap = new Map((logicalPartnerRows ?? []).map((row) => [getLogicalPartnerEntryKey(row), row] as const));
 
   const items = assignments.map((assignment) => {
-    const partner = partnerMap.get(assignment.scheduleItemId);
+    const partner = partnerMap.get(assignment.scheduleItemId) ?? logicalPartnerMap.get(getLogicalAssignmentKey(assignment));
     const audioManName = partner?.audio_man_name?.trim() ?? "";
     const seniorName = partner?.senior_name?.trim() ?? "";
     const autoGeneratedText = buildCorporateCardMemo({
@@ -276,6 +388,7 @@ export async function fetchMyScheduleAssignmentsWithPartnerInfo(monthKey: string
       memoText,
       generatedText: memoText,
       isMemoCustom: Boolean(storedMemoText),
+      finalCutCompleted: Boolean(partner?.final_cut_completed),
       missingFields,
     };
   });

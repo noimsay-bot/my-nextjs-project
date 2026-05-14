@@ -515,6 +515,70 @@ with check (
   and public.current_profile_approved() = true
 );
 
+create table if not exists public.portal_user_settings (
+  profile_id uuid not null references public.profiles (id) on delete cascade,
+  key text not null,
+  state jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  primary key (profile_id, key)
+);
+
+drop trigger if exists set_portal_user_settings_updated_at on public.portal_user_settings;
+
+create trigger set_portal_user_settings_updated_at
+before update on public.portal_user_settings
+for each row
+execute function public.set_updated_at();
+
+alter table public.portal_user_settings enable row level security;
+
+drop policy if exists "portal_user_settings_select_own" on public.portal_user_settings;
+create policy "portal_user_settings_select_own"
+on public.portal_user_settings
+for select
+to authenticated
+using (
+  profile_id = auth.uid()
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "portal_user_settings_insert_own" on public.portal_user_settings;
+create policy "portal_user_settings_insert_own"
+on public.portal_user_settings
+for insert
+to authenticated
+with check (
+  profile_id = auth.uid()
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "portal_user_settings_update_own" on public.portal_user_settings;
+create policy "portal_user_settings_update_own"
+on public.portal_user_settings
+for update
+to authenticated
+using (
+  profile_id = auth.uid()
+  and public.current_profile_approved() = true
+)
+with check (
+  profile_id = auth.uid()
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "portal_user_settings_delete_own" on public.portal_user_settings;
+create policy "portal_user_settings_delete_own"
+on public.portal_user_settings
+for delete
+to authenticated
+using (
+  profile_id = auth.uid()
+  and public.current_profile_approved() = true
+);
+
+grant select, insert, update, delete on public.portal_user_settings to authenticated;
+
 create table if not exists public.schedule_months (
   month_key text primary key,
   draft_state jsonb,
@@ -1002,6 +1066,7 @@ create table if not exists public.schedule_partner_entries (
   audio_man_name text,
   senior_name text,
   memo_text text,
+  final_cut_completed boolean not null default false,
   partner_profile_id uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -1395,12 +1460,67 @@ begin
 end;
 $$;
 
+create or replace function public.update_my_schedule_final_cut_status(
+  p_schedule_date date,
+  p_schedule_item_id text,
+  p_final_cut_completed boolean default false
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_assignment record;
+begin
+  select *
+  into target_assignment
+  from public.get_my_schedule_assignment_items(to_char(p_schedule_date, 'YYYY-MM'))
+  where schedule_date = p_schedule_date
+    and schedule_item_id = trim(coalesce(p_schedule_item_id, ''))
+    and photographer_profile_id = auth.uid()
+  limit 1;
+
+  if not found then
+    raise exception '정제본 생성완료 처리할 내 일정을 찾을 수 없습니다.';
+  end if;
+
+  insert into public.schedule_partner_entries (
+    schedule_date,
+    schedule_item_id,
+    photographer_profile_id,
+    photographer_name,
+    schedule_content,
+    final_cut_completed,
+    partner_profile_id
+  )
+  values (
+    target_assignment.schedule_date,
+    target_assignment.schedule_item_id,
+    target_assignment.photographer_profile_id,
+    target_assignment.photographer_name,
+    target_assignment.schedule_content,
+    coalesce(p_final_cut_completed, false),
+    null
+  )
+  on conflict (schedule_item_id) do update
+  set
+    schedule_date = excluded.schedule_date,
+    photographer_profile_id = excluded.photographer_profile_id,
+    photographer_name = excluded.photographer_name,
+    schedule_content = excluded.schedule_content,
+    final_cut_completed = excluded.final_cut_completed;
+end;
+$$;
+
 revoke execute on function public.get_my_schedule_assignment_items(text) from public, anon;
 revoke execute on function public.get_partner_schedule_assignment_items(date) from public, anon;
 revoke execute on function public.upsert_my_schedule_partner_entry(date, text, text, text, text) from public, anon;
+revoke execute on function public.update_my_schedule_final_cut_status(date, text, boolean) from public, anon;
 grant execute on function public.get_my_schedule_assignment_items(text) to authenticated;
 grant execute on function public.get_partner_schedule_assignment_items(date) to authenticated;
 grant execute on function public.upsert_my_schedule_partner_entry(date, text, text, text, text) to authenticated;
+grant execute on function public.update_my_schedule_final_cut_status(date, text, boolean) to authenticated;
 
 notify pgrst, 'reload schema';
 
@@ -2701,7 +2821,7 @@ begin
       and equipment_loan_items.status = 'borrowed'
       and (
         equipment_loans.borrower_profile_id = v_user_id
-        or public.is_admin()
+        or public.current_profile_role() in ('desk', 'admin', 'team_lead')
       )
     returning equipment_loan_items.loan_id
   )

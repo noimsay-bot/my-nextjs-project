@@ -34,6 +34,11 @@ import {
 } from "@/lib/schedule/change-requests";
 import { parseVacationEntry } from "@/lib/schedule/engine";
 import {
+  loadHiddenPublishedMonthKeys,
+  readLocalHiddenPublishedMonthKeys,
+  saveHiddenPublishedMonthKeys,
+} from "@/lib/schedule/hidden-published-schedules";
+import {
   getPublishedSchedules,
   PUBLISHED_SCHEDULES_EVENT,
   PUBLISHED_SCHEDULES_STATUS_EVENT,
@@ -304,42 +309,6 @@ function dayContainsUser(day: DaySchedule, username: string) {
 function getCurrentMonthKey() {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function getHiddenPublishedScheduleStorageKey(sessionId?: string | null, username?: string | null) {
-  const actorKey = sessionId?.trim() || username?.trim() || "anonymous";
-  return `j-special-force-hidden-published-schedules:${actorKey}`;
-}
-
-function readHiddenPublishedMonthKeys(sessionId?: string | null, username?: string | null) {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(getHiddenPublishedScheduleStorageKey(sessionId, username));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return Array.from(
-      new Set(
-        parsed
-          .map((item) => (typeof item === "string" ? item.trim() : ""))
-          .filter((item) => /^\d{4}-\d{2}$/.test(item)),
-      ),
-    ).sort((left, right) => left.localeCompare(right));
-  } catch {
-    return [];
-  }
-}
-
-function writeHiddenPublishedMonthKeys(monthKeys: string[], sessionId?: string | null, username?: string | null) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(
-    getHiddenPublishedScheduleStorageKey(sessionId, username),
-    JSON.stringify(
-      Array.from(new Set(monthKeys.filter((item) => /^\d{4}-\d{2}$/.test(item)))).sort((left, right) =>
-        left.localeCompare(right),
-      ),
-    ),
-  );
 }
 
 function getCoveredDateRange(
@@ -886,9 +855,24 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   }, []);
 
   useEffect(() => {
-    const nextHidden = readHiddenPublishedMonthKeys(session?.id, session?.username);
-    setHiddenPublishedMonthKeys(nextHidden);
-    setDraftHiddenPublishedMonthKeys(nextHidden);
+    let cancelled = false;
+    const localHidden = readLocalHiddenPublishedMonthKeys(session?.id, session?.username);
+    setHiddenPublishedMonthKeys(localHidden);
+    setDraftHiddenPublishedMonthKeys(localHidden);
+    void loadHiddenPublishedMonthKeys(session?.id, session?.username)
+      .then((nextHidden) => {
+        if (cancelled) return;
+        setHiddenPublishedMonthKeys(nextHidden);
+        setDraftHiddenPublishedMonthKeys(nextHidden);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setRequestMessage(error instanceof Error ? error.message : "근무표 숨김 상태를 불러오지 못했습니다.");
+        setRequestMessageTone("warn");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [session?.id, session?.username]);
 
   const syncItemsFromCache = () => {
@@ -1140,10 +1124,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const selectedIndex = selectedItem ? activeItems.findIndex((item) => item.monthKey === selectedItem.monthKey) : -1;
   const todayKey = useMemo(() => getTodayDateKey(), []);
-  const isHomeResponsivePreviewView = isHomePreview && scheduleLayoutMode !== "desktop";
+  const isHomeThreeDayPreviewView = isHomePreview && scheduleLayoutMode !== "desktop";
   const isPageMobileThreeDayView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "three-day";
-  const isMobileThreeDayView = isHomeResponsivePreviewView || isPageMobileThreeDayView;
-  const isCompactThreeDayView = isHomeResponsivePreviewView || isPageMobileThreeDayView;
+  const isMobileThreeDayView = isHomeThreeDayPreviewView || isPageMobileThreeDayView;
+  const isCompactThreeDayView = isHomeThreeDayPreviewView || isPageMobileThreeDayView;
   const allPendingRequests = useMemo(() => requests.filter((item) => item.status === "pending"), [requests]);
   const publishedDayIndex = useMemo(() => buildDayIndex(activeItems), [activeItems]);
   const displayDays = useMemo(
@@ -1167,17 +1151,17 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     return Array.from(merged.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   }, [displayDays, isHomePreview, nextSelectedItem, previousSelectedItem, selectedItem]);
   const homeResponsivePreviewDayCount =
-    isHomeResponsivePreviewView
+    isHomeThreeDayPreviewView
       ? HOME_RESPONSIVE_PREVIEW_DAY_COUNT
       : HOME_PREVIEW_DAY_COUNT;
   const homeResponsivePreviewStartOffset =
-    isHomeResponsivePreviewView
+    isHomeThreeDayPreviewView
       ? HOME_RESPONSIVE_PREVIEW_START_OFFSET
       : 0;
   const visibleDisplayDays = useMemo(
     () =>
       isHomePreview
-          ? isHomeResponsivePreviewView
+          ? isHomeThreeDayPreviewView
             ? getHomePreviewDays(
                 homeMobileDisplayDays,
                 todayKey,
@@ -1192,15 +1176,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       homeResponsivePreviewDayCount,
       homeResponsivePreviewStartOffset,
       isHomePreview,
-      isHomeResponsivePreviewView,
+      isHomeThreeDayPreviewView,
       todayKey,
     ],
   );
   const mobileThreeDayDisplayDays = useMemo(() => {
     if (!isMobileThreeDayView) return [] as DisplayDay[];
-    if (isHomeResponsivePreviewView) return visibleDisplayDays;
+    if (isHomeThreeDayPreviewView) return visibleDisplayDays;
     return visibleDisplayDays;
-  }, [isHomeResponsivePreviewView, isMobileThreeDayView, visibleDisplayDays]);
+  }, [isHomeThreeDayPreviewView, isMobileThreeDayView, visibleDisplayDays]);
   const mobileThreeDayRowSize = MOBILE_THREE_DAY_ROW_SIZE;
   const mobileThreeDayRows = useMemo(() => {
     if (!isMobileThreeDayView) return [];
@@ -1214,7 +1198,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const homePreviewTitle = "이번주 근무표";
   const homePreviewRangeLabel =
     visibleDisplayDays.length > 0
-      ? isHomeResponsivePreviewView
+      ? isHomeThreeDayPreviewView
         ? `어제부터 ${visibleDisplayDays.length}일`
         : `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
       : null;
@@ -1292,11 +1276,20 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       return;
     }
 
-    writeHiddenPublishedMonthKeys(draftHiddenPublishedMonthKeys, session?.id, session?.username);
+    let saveFailed = false;
+    try {
+      await saveHiddenPublishedMonthKeys(draftHiddenPublishedMonthKeys, session?.id, session?.username);
+    } catch (error) {
+      saveFailed = true;
+      setRequestMessage(error instanceof Error ? error.message : "근무표 숨김 상태를 저장하지 못했습니다.");
+      setRequestMessageTone("warn");
+    }
     setHiddenPublishedMonthKeys(draftHiddenPublishedMonthKeys);
     setHideMode(false);
-    setRequestMessage("내 홈 근무표 숨김 상태를 저장했습니다.");
-    setRequestMessageTone("ok");
+    if (!saveFailed) {
+      setRequestMessage("내 홈 근무표 숨김 상태를 저장했습니다.");
+      setRequestMessageTone("ok");
+    }
   };
 
   const isCompactMonthlyView = false;
@@ -1309,7 +1302,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       : scheduleLayoutMode === "tablet"
         ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
-  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeResponsivePreviewView ? " schedule-published-panel--home-responsive schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
+  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayPreviewView ? " schedule-published-panel--home-three-day" : ""}${isHomePreview && !isHomeThreeDayPreviewView ? " schedule-published-panel--home-week-fit" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;

@@ -1,4 +1,4 @@
-import { getSession, hasAdminAccess, hasDeskAccess, isReadOnlyPortalRole } from "@/lib/auth/storage";
+import { getSession, hasDeskAccess, isReadOnlyPortalRole } from "@/lib/auth/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -414,7 +414,7 @@ function assertCanManageRentalTvu() {
 export function canReturnLoanItem(loanItem: EquipmentLoanItem) {
   const session = getSession();
   if (!session?.approved) return false;
-  return loanItem.loan.borrowerProfileId === session.id || hasAdminAccess(session.role);
+  return loanItem.loan.borrowerProfileId === session.id || hasDeskAccess(session.role);
 }
 
 export async function borrowEquipmentItems(

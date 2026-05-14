@@ -2966,6 +2966,14 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   min-width: 0 !important;
 }
 
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day {
+  display: block;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day > div {
+  width: 100%;
+}
+
 .schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   gap: 0 !important;
@@ -2973,6 +2981,34 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
 
 .schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-day-card {
   padding: 4px !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-day-head {
+  gap: 4px !important;
+  margin-bottom: 4px !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-day-date {
+  font-size: 17px !important;
+  line-height: 1.05;
+}
+
+.schedule-published-panel--home-three-day .schedule-assignment-label {
+  font-size: 10px !important;
+  line-height: 1.05 !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-chip {
+  min-height: 18px !important;
+  padding: 1px 2px !important;
+  font-size: 8px !important;
+  gap: 0 !important;
+}
+
+.schedule-published-panel--home-three-day .schedule-calendar-grid--home-mobile-three-day .schedule-name-chip__text {
+  white-space: nowrap;
+  overflow: hidden !important;
+  text-overflow: clip !important;
 }
 
 .schedule-published-panel--home-week-fit .schedule-calendar-scroll--daily {
