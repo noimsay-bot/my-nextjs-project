@@ -2544,24 +2544,26 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                 repairMode={repairMode}
                 repairDraftByItemId={repairDraftByItemId}
               />
-              <RentalTvuSection
-                inactiveItems={inactiveRentalTvuItems}
-                activeItems={activeRentalTvuItems}
-                mode={rentalTvuMode}
-                selectedIds={rentalTvuSelectionIds}
-                canManage={canManageRentalTvu}
-                actionPending={actionPending}
-                editingItemId={rentalTvuEditItemId}
-                editName={rentalTvuEditName}
-                onModeStart={openRentalTvuMode}
-                onModeCancel={cancelRentalTvuMode}
-                onModeConfirm={confirmRentalTvuMode}
-                onSelectionToggle={toggleRentalTvuSelection}
-                onEditStart={startRentalTvuRename}
-                onEditNameChange={setRentalTvuEditName}
-                onEditConfirm={confirmRentalTvuRename}
-                onEditCancel={cancelRentalTvuRename}
-              />
+              {canManageRentalTvu ? (
+                <RentalTvuSection
+                  inactiveItems={inactiveRentalTvuItems}
+                  activeItems={activeRentalTvuItems}
+                  mode={rentalTvuMode}
+                  selectedIds={rentalTvuSelectionIds}
+                  canManage={canManageRentalTvu}
+                  actionPending={actionPending}
+                  editingItemId={rentalTvuEditItemId}
+                  editName={rentalTvuEditName}
+                  onModeStart={openRentalTvuMode}
+                  onModeCancel={cancelRentalTvuMode}
+                  onModeConfirm={confirmRentalTvuMode}
+                  onSelectionToggle={toggleRentalTvuSelection}
+                  onEditStart={startRentalTvuRename}
+                  onEditNameChange={setRentalTvuEditName}
+                  onEditConfirm={confirmRentalTvuRename}
+                  onEditCancel={cancelRentalTvuRename}
+                />
+              ) : null}
             </>
           ) : (
             <div className={styles.sectionStack}>
@@ -2838,7 +2840,7 @@ export function LiveEquipmentStatusPage() {
                 const displayDraft = resolveLiveStatusDraft(savedDrafts[item.id], loanItem);
                 const draft = editMode ? drafts[item.id] ?? displayDraft : displayDraft;
                 const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
-                const noteValue = isRegionalTable && !draft.note ? "대여 대상 아님" : draft.note || "-";
+                const noteValue = draft.note || "-";
                 return (
                   <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
                     <td>
@@ -2930,7 +2932,7 @@ export function LiveEquipmentStatusPage() {
                           value={draft.note}
                           onChange={(event) => updateDraft(item.id, "note", event.target.value)}
                           disabled={!canManageLiveStatus || saving}
-                          placeholder={isRegionalTable ? "대여 대상 아님" : "-"}
+                          placeholder="-"
                         />
                       ) : (
                         <span className={styles.liveStatusCellValue}>{noteValue}</span>

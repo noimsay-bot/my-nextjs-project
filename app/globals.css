@@ -3808,7 +3808,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   left: 0;
   bottom: 0;
   width: var(--portal-sidebar-width, 256px);
-  padding: calc(var(--portal-sidebar-top-offset, 0px) + 16px) 12px 16px;
+  padding: clamp(8px, 1.4dvh, 12px) 10px;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
@@ -3822,14 +3822,14 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar.is-collapsed .portal-sidebar__panel {
   width: var(--portal-sidebar-collapsed-width, 68px);
-  padding: calc(var(--portal-sidebar-top-offset, 0px) + 12px) 8px 12px;
+  padding: clamp(8px, 1.4dvh, 12px) 8px;
   cursor: pointer;
 }
 
 .portal-sidebar__inner {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: clamp(6px, 1.2dvh, 10px);
   min-height: 100%;
   height: 100%;
   overflow: hidden;
@@ -3847,27 +3847,24 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 .portal-sidebar-footer-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: clamp(5px, 0.9dvh, 8px);
 }
 
 .portal-sidebar__content {
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: visible;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
-  scrollbar-width: thin;
+  overflow-y: visible;
+  padding-right: 0;
 }
 
 .portal-sidebar__footer {
   flex: 0 0 auto;
-  margin-top: 12px;
-  max-height: min(38dvh, 300px);
+  margin-top: 0;
+  max-height: none;
   min-height: 0;
-  overflow-y: auto;
-  padding-right: 2px;
-  scrollbar-width: thin;
+  overflow-y: visible;
+  padding-right: 0;
 }
 
 .portal-sidebar__separator {
@@ -3880,7 +3877,7 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar__menu {
   display: grid;
-  gap: 8px;
+  gap: clamp(5px, 0.9dvh, 8px);
   list-style: none;
   padding: 0;
   margin: 0;
@@ -3897,8 +3894,8 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  min-height: 46px;
-  padding: 12px 14px;
+  min-height: clamp(38px, 5.4dvh, 46px);
+  padding: clamp(7px, 1.1dvh, 10px) 10px;
   border-radius: 16px;
   border: 1px solid var(--line);
   background: var(--nav-bg);
@@ -3922,9 +3919,9 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 }
 
 .portal-sidebar-link__icon {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
+  width: clamp(28px, 3.8dvh, 34px);
+  height: clamp(28px, 3.8dvh, 34px);
+  min-width: clamp(28px, 3.8dvh, 34px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3934,8 +3931,8 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar-link__icon img {
   display: block;
-  width: 34px;
-  height: 34px;
+  width: clamp(28px, 3.8dvh, 34px);
+  height: clamp(28px, 3.8dvh, 34px);
   object-fit: cover;
 }
 
@@ -4116,38 +4113,38 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 }
 
 .portal-sidebar--dense .portal-sidebar__inner {
-  gap: 10px;
+  gap: clamp(5px, 0.9dvh, 8px);
 }
 
 .portal-sidebar--dense .portal-sidebar__menu {
-  gap: 5px;
+  gap: clamp(4px, 0.7dvh, 5px);
 }
 
 .portal-sidebar--dense .portal-sidebar-link {
-  min-height: 42px;
-  padding: 8px 10px;
+  min-height: clamp(36px, 5dvh, 40px);
+  padding: clamp(6px, 0.9dvh, 8px) 9px;
   border-radius: 14px;
 }
 
 .portal-sidebar--dense .portal-sidebar-link__icon {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
+  width: clamp(26px, 3.6dvh, 30px);
+  height: clamp(26px, 3.6dvh, 30px);
+  min-width: clamp(26px, 3.6dvh, 30px);
   border-radius: 10px;
 }
 
 .portal-sidebar--dense .portal-sidebar-link__icon img {
-  width: 30px;
-  height: 30px;
+  width: clamp(26px, 3.6dvh, 30px);
+  height: clamp(26px, 3.6dvh, 30px);
 }
 
 .portal-sidebar--dense .portal-sidebar-action {
-  min-height: 38px;
+  min-height: clamp(34px, 4.6dvh, 38px);
 }
 
 .portal-sidebar--dense .portal-sidebar-usercard {
   gap: 3px;
-  padding: 10px;
+  padding: clamp(7px, 1dvh, 10px);
   border-radius: 14px;
 }
 
@@ -4162,49 +4159,17 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 @media (max-height: 820px) {
   .portal-sidebar__inner {
-    gap: 10px;
+    gap: 6px;
   }
 
   .portal-sidebar__menu {
-    gap: 5px;
-  }
-
-  .portal-sidebar-link {
-    min-height: 40px;
-    padding: 8px 10px;
-    border-radius: 14px;
-  }
-
-  .portal-sidebar-link__icon {
-    width: 30px;
-    height: 30px;
-    min-width: 30px;
-  }
-
-  .portal-sidebar-link__icon img {
-    width: 30px;
-    height: 30px;
-  }
-
-  .portal-sidebar__footer {
-    margin-top: 8px;
-    max-height: min(34dvh, 260px);
-  }
-
-  .portal-sidebar-usercard {
-    padding: 10px;
-    border-radius: 14px;
-  }
-}
-
-@media (max-height: 700px) {
-  .portal-sidebar__panel {
-    padding-bottom: 10px;
+    gap: 4px;
   }
 
   .portal-sidebar-link {
     min-height: 36px;
     padding: 6px 8px;
+    border-radius: 14px;
   }
 
   .portal-sidebar-link__icon {
@@ -4218,8 +4183,39 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
     height: 28px;
   }
 
-  .portal-sidebar__footer {
-    max-height: min(32dvh, 220px);
+  .portal-sidebar-footer-stack {
+    gap: 5px;
+  }
+
+  .portal-sidebar-usercard {
+    padding: 8px;
+    border-radius: 14px;
+  }
+}
+
+@media (max-height: 700px) {
+  .portal-sidebar__panel {
+    padding: 6px;
+  }
+
+  .portal-sidebar-link {
+    min-height: 32px;
+    padding: 6px 8px;
+  }
+
+  .portal-sidebar-link__icon {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+  }
+
+  .portal-sidebar-link__icon img {
+    width: 24px;
+    height: 24px;
+  }
+
+  .portal-sidebar-usercard {
+    padding: 7px;
   }
 }
 
