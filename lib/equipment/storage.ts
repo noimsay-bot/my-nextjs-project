@@ -18,7 +18,7 @@ import type {
 } from "@/lib/equipment/types";
 
 const EQUIPMENT_SCHEMA_GUIDE =
-  "Supabase SQL Editor에서 supabase/incremental_equipment_loans.sql을 실행해 주세요.";
+  "Supabase SQL Editor에서 supabase/incremental_equipment_loans.sql, supabase/incremental_rental_tvu_items.sql, supabase/incremental_regional_tvu_items.sql을 실행해 주세요.";
 
 interface EquipmentItemRow {
   id: string;
@@ -210,6 +210,30 @@ export async function fetchEquipmentItems(categories?: EquipmentCategory[]) {
   return (data ?? []).map(rowToItem);
 }
 
+export async function fetchLiveEquipmentItemsForManagement() {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    return [];
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("equipment_items")
+    .select("id, category, group_name, name, code, sort_order, is_active, metadata, created_at, updated_at")
+    .eq("category", "live")
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true })
+    .returns<EquipmentItemRow[]>();
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "equipment_items"));
+  }
+
+  return (data ?? [])
+    .map(rowToItem)
+    .filter((item) => item.isActive || item.metadata.rental === true || item.metadata.rental === "true");
+}
+
 export async function fetchEquipmentProfiles() {
   const session = await getPortalSession();
   if (!session?.approved) {
@@ -375,6 +399,18 @@ function assertCanManageLiveStatus() {
   return session;
 }
 
+function hasRentalTvuManagerRole(role: string | null | undefined) {
+  return role === "desk" || role === "team_lead";
+}
+
+function assertCanManageRentalTvu() {
+  const session = getSession();
+  if (!session?.approved || !hasRentalTvuManagerRole(session.actualRole)) {
+    throw new Error("임대 장비 관리 권한이 없습니다.");
+  }
+  return session;
+}
+
 export function canReturnLoanItem(loanItem: EquipmentLoanItem) {
   const session = getSession();
   if (!session?.approved) return false;
@@ -442,6 +478,51 @@ export async function setEquipmentItemsRepairStatus(itemIds: string[], isUnderRe
 
   if (error) {
     throw new Error(getEquipmentStorageErrorMessage(error, "equipment repair"));
+  }
+}
+
+export async function setRentalTvuItemsActive(itemIds: string[], isActive: boolean) {
+  assertCanManageRentalTvu();
+  const normalizedIds = Array.from(new Set(itemIds.map((item) => item.trim()).filter(Boolean)));
+  if (normalizedIds.length === 0) {
+    throw new Error(isActive ? "활성화할 임대 장비를 선택해 주세요." : "비활성화할 임대 장비를 선택해 주세요.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase.rpc("set_rental_tvu_items_active", {
+    p_equipment_item_ids: normalizedIds,
+    p_is_active: isActive,
+  });
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "rental TVU equipment"));
+  }
+
+  const updatedCount = typeof data === "number" ? data : 0;
+  if (updatedCount === 0) {
+    throw new Error("변경된 임대 장비가 없습니다.");
+  }
+}
+
+export async function renameRentalTvuItem(itemId: string, name: string) {
+  assertCanManageRentalTvu();
+  const normalizedId = itemId.trim();
+  const normalizedName = name.trim();
+  if (!normalizedId) {
+    throw new Error("이름을 수정할 임대 장비를 선택해 주세요.");
+  }
+  if (!normalizedName) {
+    throw new Error("임대 장비 이름을 입력해 주세요.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.rpc("rename_rental_tvu_item", {
+    p_equipment_item_id: normalizedId,
+    p_name: normalizedName,
+  });
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "rental TVU equipment"));
   }
 }
 

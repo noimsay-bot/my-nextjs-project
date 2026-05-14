@@ -3831,7 +3831,8 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   flex-direction: column;
   gap: 16px;
   min-height: 100%;
-  height: auto;
+  height: 100%;
+  overflow: hidden;
 }
 
 .portal-sidebar__header,
@@ -3845,21 +3846,32 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar-footer-stack {
   display: flex;
-  flex-direction: column-reverse;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .portal-sidebar__content {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: visible;
+  overflow-x: visible;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
 }
 
 .portal-sidebar__footer {
+  flex: 0 0 auto;
   margin-top: 12px;
+  max-height: min(38dvh, 300px);
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
 }
 
 .portal-sidebar__separator {
+  flex: 0 0 auto;
   width: 100%;
   margin: 0;
   border: 0;
@@ -3973,11 +3985,18 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 }
 
 .portal-sidebar.is-collapsed .portal-sidebar__content {
-  overflow: visible;
+  overflow-x: visible;
+  overflow-y: auto;
+  padding-right: 0;
+  scrollbar-width: none;
 }
 
 .portal-sidebar.is-collapsed .portal-sidebar__menu {
   gap: 7px;
+}
+
+.portal-sidebar.is-collapsed .portal-sidebar__content::-webkit-scrollbar {
+  display: none;
 }
 
 .portal-sidebar.is-collapsed .portal-sidebar-link {
@@ -4059,12 +4078,15 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   }
 
   .portal-sidebar-submenu {
-    position: absolute;
-    top: 0;
-    left: calc(100% + 10px);
+    position: fixed;
+    top: var(--portal-sidebar-submenu-top, 12px);
+    left: calc(var(--portal-sidebar-width, 256px) + 10px);
     min-width: 180px;
+    max-height: calc(100dvh - 24px);
     margin-top: 0;
     padding: 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border-radius: 18px;
     border: 1px solid var(--line);
     background: var(--bg-start);
@@ -4091,6 +4113,114 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
 .portal-sidebar-action--with-icon > span:last-child {
   font-weight: 800;
+}
+
+.portal-sidebar--dense .portal-sidebar__inner {
+  gap: 10px;
+}
+
+.portal-sidebar--dense .portal-sidebar__menu {
+  gap: 5px;
+}
+
+.portal-sidebar--dense .portal-sidebar-link {
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 14px;
+}
+
+.portal-sidebar--dense .portal-sidebar-link__icon {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 10px;
+}
+
+.portal-sidebar--dense .portal-sidebar-link__icon img {
+  width: 30px;
+  height: 30px;
+}
+
+.portal-sidebar--dense .portal-sidebar-action {
+  min-height: 38px;
+}
+
+.portal-sidebar--dense .portal-sidebar-usercard {
+  gap: 3px;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+.portal-sidebar--dense .portal-sidebar-usercard__name {
+  font-size: 14px;
+}
+
+.portal-sidebar--dense .portal-sidebar-usercard__meta {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@media (max-height: 820px) {
+  .portal-sidebar__inner {
+    gap: 10px;
+  }
+
+  .portal-sidebar__menu {
+    gap: 5px;
+  }
+
+  .portal-sidebar-link {
+    min-height: 40px;
+    padding: 8px 10px;
+    border-radius: 14px;
+  }
+
+  .portal-sidebar-link__icon {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+  }
+
+  .portal-sidebar-link__icon img {
+    width: 30px;
+    height: 30px;
+  }
+
+  .portal-sidebar__footer {
+    margin-top: 8px;
+    max-height: min(34dvh, 260px);
+  }
+
+  .portal-sidebar-usercard {
+    padding: 10px;
+    border-radius: 14px;
+  }
+}
+
+@media (max-height: 700px) {
+  .portal-sidebar__panel {
+    padding-bottom: 10px;
+  }
+
+  .portal-sidebar-link {
+    min-height: 36px;
+    padding: 6px 8px;
+  }
+
+  .portal-sidebar-link__icon {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+  }
+
+  .portal-sidebar-link__icon img {
+    width: 28px;
+    height: 28px;
+  }
+
+  .portal-sidebar__footer {
+    max-height: min(32dvh, 220px);
+  }
 }
 
 .customer-support-dialog-backdrop {
@@ -4143,8 +4273,102 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   opacity: 0.9;
 }
 
+.customer-support-dialog__attachments {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-support-dialog__attachments .btn.disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.customer-support-dialog__preview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.customer-support-dialog__preview {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 66px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.customer-support-dialog__preview img {
+  width: 58px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.customer-support-dialog__preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .customer-support-dialog__footer .status {
   min-width: 0;
+}
+
+.customer-support-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.customer-support-status--open {
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  background: rgba(14, 165, 233, 0.14);
+  color: #bae6fd;
+}
+
+.customer-support-status--processed {
+  border: 1px solid rgba(74, 222, 128, 0.42);
+  background: rgba(34, 197, 94, 0.14);
+  color: #bbf7d0;
+}
+
+.customer-support-admin-attachments {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 160px));
+  gap: 10px;
+}
+
+.customer-support-admin-attachments a {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.customer-support-admin-attachments img {
+  width: 100%;
+  height: 118px;
+  object-fit: cover;
 }
 
 .portal-sidebar-usercard {
@@ -4453,6 +4677,19 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 
   .customer-support-dialog__textarea {
     min-height: 220px;
+  }
+
+  .customer-support-dialog__preview {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .customer-support-dialog__preview .btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .customer-support-admin-attachments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

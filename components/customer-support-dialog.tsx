@@ -13,13 +13,18 @@ type CustomerSupportDialogProps = {
 
 export function CustomerSupportDialog({ open, onClose }: CustomerSupportDialogProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachmentPreviews, setAttachmentPreviews] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setBody("");
+      setAttachments([]);
+      setAttachmentPreviews([]);
       setMessage("");
       setSubmitting(false);
       return;
@@ -39,9 +44,47 @@ export function CustomerSupportDialog({ open, onClose }: CustomerSupportDialogPr
     };
   }, [onClose, open]);
 
+  useEffect(() => {
+    const urls = attachments.map((file) => URL.createObjectURL(file));
+    setAttachmentPreviews(urls);
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [attachments]);
+
   if (!open) return null;
 
   const canSubmit = body.trim().length > 0 && !submitting;
+  const addAttachments = (files: FileList | null) => {
+    const nextFiles = Array.from(files ?? []);
+    if (nextFiles.length === 0) return;
+    const imageFiles = nextFiles.filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length !== nextFiles.length) {
+      setMessage("사진 파일만 첨부할 수 있습니다.");
+      return;
+    }
+    if (imageFiles.some((file) => file.size > 5 * 1024 * 1024)) {
+      setMessage("사진은 파일당 5MB 이하로 첨부해 주세요.");
+      return;
+    }
+    setAttachments((current) => {
+      const combined = [...current, ...imageFiles].slice(0, 3);
+      if (current.length + imageFiles.length > 3) {
+        setMessage("사진은 최대 3장까지 첨부할 수 있습니다.");
+      } else {
+        setMessage("");
+      }
+      return combined;
+    });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setMessage("");
+  };
 
   return (
     <div className="customer-support-dialog-backdrop" role="presentation" onClick={onClose}>
@@ -57,7 +100,7 @@ export function CustomerSupportDialog({ open, onClose }: CustomerSupportDialogPr
 
           setSubmitting(true);
           setMessage("");
-          const result = await submitCustomerSupportMessage(body);
+          const result = await submitCustomerSupportMessage(body, attachments);
           setSubmitting(false);
           if (!result.ok) {
             setMessage(result.message);
@@ -81,6 +124,42 @@ export function CustomerSupportDialog({ open, onClose }: CustomerSupportDialogPr
           maxLength={2000}
           onChange={(event) => setBody(event.target.value)}
         />
+        <div className="customer-support-dialog__attachments">
+          <input
+            ref={fileInputRef}
+            id="customer-support-attachments"
+            type="file"
+            accept="image/*"
+            multiple
+            className="sr-only"
+            onChange={(event) => addAttachments(event.target.files)}
+            disabled={submitting || attachments.length >= 3}
+          />
+          <label
+            className={`btn ${attachments.length >= 3 || submitting ? "disabled" : ""}`.trim()}
+            htmlFor="customer-support-attachments"
+            aria-disabled={attachments.length >= 3 || submitting}
+          >
+            사진 첨부
+          </label>
+          <span className="muted">최대 3장, 파일당 5MB</span>
+        </div>
+        {attachments.length > 0 ? (
+          <div className="customer-support-dialog__preview-list">
+            {attachments.map((file, index) => (
+              <div key={`${file.name}-${file.lastModified}-${index}`} className="customer-support-dialog__preview">
+                {attachmentPreviews[index] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={attachmentPreviews[index]} alt="" />
+                ) : null}
+                <span>{file.name}</span>
+                <button type="button" className="btn" onClick={() => removeAttachment(index)} disabled={submitting}>
+                  삭제
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="customer-support-dialog__footer">
           <span className={message ? "status warn" : "muted"} aria-live="polite">
             {message || `${body.trim().length.toLocaleString("ko-KR")} / 2,000`}

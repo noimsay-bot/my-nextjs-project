@@ -12,6 +12,7 @@ import {
 import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
 import {
   getAdminCustomerSupportMessages,
+  markCustomerSupportMessageProcessed,
   type CustomerSupportMessageWorkspace,
 } from "@/lib/portal/customer-support";
 import { getMemberLevelMap, type MemberLevelSnapshot } from "@/lib/portal/member-level";
@@ -293,6 +294,7 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
+  const [processingSupportId, setProcessingSupportId] = useState<string | null>(null);
   const [draftRoles, setDraftRoles] = useState<Record<string, RoleOption>>({});
 
   async function refresh() {
@@ -341,6 +343,24 @@ export default function AdminPage() {
     });
   }, [profiles, query]);
 
+  const openCustomerSupportCount = useMemo(
+    () => customerSupport.items.filter((item) => item.status !== "processed").length,
+    [customerSupport.items],
+  );
+
+  async function handleCustomerSupportProcessed(messageId: string) {
+    setProcessingSupportId(messageId);
+    setMessage("");
+    const result = await markCustomerSupportMessageProcessed(messageId);
+    setProcessingSupportId(null);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setMessage(result.message);
+    await refresh();
+  }
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
@@ -350,7 +370,9 @@ export default function AdminPage() {
               <div className="chip">고객센터</div>
               <strong style={{ fontSize: 22 }}>접수 내용</strong>
             </div>
-            <span className="muted">최근 접수 {customerSupport.items.length}건</span>
+            <span className="muted">
+              미처리 {openCustomerSupportCount}건 · 최근 접수 {customerSupport.items.length}건
+            </span>
           </div>
           {customerSupport.message ? (
             <div className={`status ${customerSupport.schemaMissing ? "warn" : "note"}`}>
@@ -371,8 +393,13 @@ export default function AdminPage() {
                     background: "rgba(255,255,255,.03)",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                    <strong>익명 접수</strong>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <strong>익명 접수</strong>
+                      <span className={`customer-support-status customer-support-status--${item.status}`}>
+                        {item.status === "processed" ? "처리완료" : "접수"}
+                      </span>
+                    </div>
                     <span className="muted">{formatDateTime(item.createdAt)}</span>
                   </div>
                   <p
@@ -385,6 +412,41 @@ export default function AdminPage() {
                   >
                     {item.body}
                   </p>
+                  {item.attachments.length > 0 ? (
+                    <div className="customer-support-admin-attachments">
+                      {item.attachments.map((attachment) => (
+                        <a
+                          key={attachment.path}
+                          href={attachment.url ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-disabled={!attachment.url}
+                        >
+                          {attachment.url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={attachment.url} alt={attachment.name} />
+                          ) : (
+                            <span>사진을 불러올 수 없습니다.</span>
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    <span className="muted">
+                      {item.status === "processed"
+                        ? `처리 ${item.processedAt ? formatDateTime(item.processedAt) : ""}${item.processedByName ? ` · ${item.processedByName}` : ""}`
+                        : "처리 대기"}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={item.status === "processed" || processingSupportId === item.id}
+                      onClick={() => void handleCustomerSupportProcessed(item.id)}
+                    >
+                      {item.status === "processed" ? "처리완료됨" : processingSupportId === item.id ? "처리 중" : "처리완료"}
+                    </button>
+                  </div>
                 </article>
               ))
             ) : (

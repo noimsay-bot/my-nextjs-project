@@ -82,6 +82,26 @@
   color: #78350f;
 }
 
+.rentalTvuSection {
+  padding-top: 4px;
+}
+
+.rentalTvuToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rentalTvuToolbar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .familyBlock,
 .equipmentGroup {
   display: grid;
@@ -259,6 +279,48 @@
 .itemCard {
   min-height: 64px;
   align-content: center;
+}
+
+.rentalTvuCard {
+  align-content: stretch;
+  padding: 0;
+  cursor: default;
+}
+
+.rentalTvuCardMain {
+  display: grid;
+  width: 100%;
+  min-height: 64px;
+  padding: 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rentalTvuCardMain:disabled {
+  cursor: default;
+  color: inherit;
+  opacity: 1;
+}
+
+.rentalTvuCardActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 14px 14px;
+}
+
+.rentalTvuCardActions :global(.btn) {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.rentalTvuEditForm {
+  display: grid;
+  gap: 8px;
+  padding: 0 14px 14px;
 }
 
 .memberCard {
@@ -522,6 +584,28 @@
   color: #064e3b;
 }
 
+.regionalBadge {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border: 1px solid rgba(125, 211, 252, 0.5);
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.16);
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:global(html[data-theme="light"]) .regionalBadge {
+  border-color: rgba(14, 165, 233, 0.38);
+  background: #e0f2fe;
+  color: #075985;
+}
+
 .statusPill {
   display: inline-flex;
   flex: 0 0 auto;
@@ -691,6 +775,16 @@
   flex-wrap: wrap;
 }
 
+.liveStatusTableStack {
+  display: grid;
+  gap: 22px;
+}
+
+.liveStatusTableSection {
+  display: grid;
+  gap: 10px;
+}
+
 .liveStatusTableWrap {
   width: 100%;
   overflow-x: auto;
@@ -798,6 +892,12 @@
 .liveStatusTable .globalBadge {
   border-color: rgba(52, 211, 153, 0.5);
   color: #064e3b;
+}
+
+.liveStatusTable .regionalBadge {
+  border-color: rgba(14, 165, 233, 0.38);
+  background: #e0f2fe;
+  color: #075985;
 }
 
 .liveStatusTable .statusAvailable {

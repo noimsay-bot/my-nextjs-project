@@ -60,6 +60,8 @@ const MAX_ROUTE_SIZE = 3;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON = 0.01;
 const HOME_PREVIEW_DAY_COUNT = 7;
+const HOME_RESPONSIVE_PREVIEW_DAY_COUNT = 6;
+const HOME_RESPONSIVE_PREVIEW_START_OFFSET = -1;
 const MOBILE_THREE_DAY_ROW_SIZE = 3;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
 
@@ -694,22 +696,31 @@ function getWeeklyPreviewDays(days: DisplayDay[], todayKey: string) {
   return previewDays.length > 0 ? previewDays : days;
 }
 
-function getHomePreviewDays(days: DisplayDay[], todayKey: string) {
+function buildActualDisplayDays(item: ScheduleDisplaySource) {
+  return item.schedule.days.map((day) => ({
+    ...day,
+    ownerMonthKey: item.monthKey,
+  }));
+}
+
+function getHomePreviewDays(
+  days: DisplayDay[],
+  todayKey: string,
+  dayCount = HOME_PREVIEW_DAY_COUNT,
+  startOffset = 0,
+) {
   if (days.length === 0) return [];
 
-  const anchorIndex = days.findIndex(
+  const exactTodayIndex = days.findIndex(
     (day) => day.dateKey === todayKey && !day.isOverflowMonth,
   );
-  const resolvedAnchorIndex =
-    anchorIndex >= 0
-      ? anchorIndex
-      : days.findIndex((day) => day.dateKey === todayKey) >= 0
-        ? days.findIndex((day) => day.dateKey === todayKey)
-        : days.findIndex((day) => !day.isOverflowMonth) >= 0
-          ? days.findIndex((day) => !day.isOverflowMonth)
-          : 0;
+  const todayIndex = exactTodayIndex >= 0 ? exactTodayIndex : days.findIndex((day) => day.dateKey === todayKey);
+  const firstCurrentMonthIndex = days.findIndex((day) => !day.isOverflowMonth);
+  const resolvedAnchorIndex = todayIndex >= 0 ? todayIndex : Math.max(firstCurrentMonthIndex, 0);
+  const offset = todayIndex >= 0 ? startOffset : 0;
+  const startIndex = Math.max(0, resolvedAnchorIndex + offset);
 
-  return days.slice(resolvedAnchorIndex, resolvedAnchorIndex + HOME_PREVIEW_DAY_COUNT);
+  return days.slice(startIndex, startIndex + dayCount);
 }
 
 function getPreviousDateKey(dateKey: string) {
@@ -1141,36 +1152,56 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   );
   const homeMobileDisplayDays = useMemo(() => {
     if (!isHomePreview || !selectedItem) return displayDays;
-    if (!nextSelectedItem) return displayDays;
 
     const merged = new Map<string, DisplayDay>();
-    [...displayDays, ...buildDisplayDays(nextSelectedItem, selectedItem)].forEach((day) => {
+    [
+      ...(previousSelectedItem ? buildActualDisplayDays(previousSelectedItem) : []),
+      ...displayDays,
+      ...(nextSelectedItem ? buildActualDisplayDays(nextSelectedItem) : []),
+    ].forEach((day) => {
       if (!merged.has(day.dateKey)) {
         merged.set(day.dateKey, day);
       }
     });
 
     return Array.from(merged.values()).sort((left, right) => left.dateKey.localeCompare(right.dateKey));
-  }, [displayDays, isHomePreview, nextSelectedItem, selectedItem]);
+  }, [displayDays, isHomePreview, nextSelectedItem, previousSelectedItem, selectedItem]);
+  const homeResponsivePreviewDayCount =
+    isHomeResponsivePreviewView
+      ? HOME_RESPONSIVE_PREVIEW_DAY_COUNT
+      : HOME_PREVIEW_DAY_COUNT;
+  const homeResponsivePreviewStartOffset =
+    isHomeResponsivePreviewView
+      ? HOME_RESPONSIVE_PREVIEW_START_OFFSET
+      : 0;
   const visibleDisplayDays = useMemo(
     () =>
       isHomePreview
           ? isHomeResponsivePreviewView
-            ? getHomePreviewDays(homeMobileDisplayDays, todayKey)
+            ? getHomePreviewDays(
+                homeMobileDisplayDays,
+                todayKey,
+                homeResponsivePreviewDayCount,
+                homeResponsivePreviewStartOffset,
+              )
             : getWeeklyPreviewDays(displayDays, todayKey)
         : displayDays,
-    [displayDays, homeMobileDisplayDays, isHomePreview, isHomeResponsivePreviewView, todayKey],
+    [
+      displayDays,
+      homeMobileDisplayDays,
+      homeResponsivePreviewDayCount,
+      homeResponsivePreviewStartOffset,
+      isHomePreview,
+      isHomeResponsivePreviewView,
+      todayKey,
+    ],
   );
   const mobileThreeDayDisplayDays = useMemo(() => {
     if (!isMobileThreeDayView) return [] as DisplayDay[];
-    if (isHomeResponsivePreviewView) return getHomePreviewDays(homeMobileDisplayDays, todayKey);
+    if (isHomeResponsivePreviewView) return visibleDisplayDays;
     return visibleDisplayDays;
-  }, [homeMobileDisplayDays, isHomeResponsivePreviewView, isMobileThreeDayView, todayKey, visibleDisplayDays]);
-  const mobileThreeDayRowSize = isHomeResponsivePreviewView
-    ? scheduleLayoutMode === "mobile"
-      ? 1
-      : 2
-    : MOBILE_THREE_DAY_ROW_SIZE;
+  }, [isHomeResponsivePreviewView, isMobileThreeDayView, visibleDisplayDays]);
+  const mobileThreeDayRowSize = MOBILE_THREE_DAY_ROW_SIZE;
   const mobileThreeDayRows = useMemo(() => {
     if (!isMobileThreeDayView) return [];
 
@@ -1184,7 +1215,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const homePreviewRangeLabel =
     visibleDisplayDays.length > 0
       ? isHomeResponsivePreviewView
-        ? `오늘 기준 ${visibleDisplayDays.length}일`
+        ? `어제부터 ${visibleDisplayDays.length}일`
         : `${visibleDisplayDays[0]?.month}/${visibleDisplayDays[0]?.day} - ${visibleDisplayDays[visibleDisplayDays.length - 1]?.month}/${visibleDisplayDays[visibleDisplayDays.length - 1]?.day}`
       : null;
   const firstSelectedRef = selectedRoute[0] ?? null;
@@ -2361,13 +2392,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                             </article>
                           );
                         })}
-                        {row.length < 3 ? Array.from({ length: 3 - row.length }).map((_, fillerIndex) => (
-                          <div
-                            key={`home-mobile-row-${rowIndex}-filler-${fillerIndex}`}
-                            aria-hidden="true"
-                            style={{ minHeight: 0 }}
-                          />
-                        )) : null}
+                        {row.length < mobileThreeDayRowSize
+                          ? Array.from({ length: mobileThreeDayRowSize - row.length }).map((_, fillerIndex) => (
+                              <div
+                                key={`home-mobile-row-${rowIndex}-filler-${fillerIndex}`}
+                                aria-hidden="true"
+                                style={{ minHeight: 0 }}
+                              />
+                            ))
+                          : null}
                       </div>
                     ))}
                   </div>

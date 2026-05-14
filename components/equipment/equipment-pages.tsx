@@ -15,12 +15,15 @@ import {
   borrowEquipmentItems,
   canReturnLoanItem,
   fetchEquipmentItems,
+  fetchLiveEquipmentItemsForManagement,
   fetchEquipmentLoanItems,
   fetchEquipmentProfiles,
   fetchLiveEquipmentStatusEntries,
+  renameRentalTvuItem,
   returnEquipmentLoanItems,
   saveLiveEquipmentStatusEntries,
   setEquipmentItemsRepairStatus,
+  setRentalTvuItemsActive,
 } from "@/lib/equipment/storage";
 import {
   equipmentCategoryConfigs,
@@ -40,6 +43,7 @@ import styles from "./Equipment.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type ConfirmMode = "borrow" | "return";
+type RentalTvuMode = "activate" | "deactivate";
 type EquipmentItemCardTone = "default" | "live";
 type RepairDraftByItemId = Record<string, boolean>;
 type LiveStatusDraftByItemId = Record<string, LiveLoanDetails>;
@@ -247,6 +251,14 @@ function isTvuItem(item: EquipmentItem) {
 
 function getTvuNumber(item: EquipmentItem) {
   if (!isTvuItem(item)) return null;
+  const metadataRegionalNumber = item.metadata.regional_number;
+  if (typeof metadataRegionalNumber === "number" && Number.isFinite(metadataRegionalNumber)) return metadataRegionalNumber;
+  if (typeof metadataRegionalNumber === "string" && /^\d+$/.test(metadataRegionalNumber.trim())) return Number(metadataRegionalNumber);
+  const metadataNumber = item.metadata.rental_number;
+  if (typeof metadataNumber === "number" && Number.isFinite(metadataNumber)) return metadataNumber;
+  if (typeof metadataNumber === "string" && /^\d+$/.test(metadataNumber.trim())) return Number(metadataNumber);
+  const codeMatched = /^live-(?:rental-|regional-)?tvu-(\d+)$/i.exec(item.code.trim());
+  if (codeMatched) return Number(codeMatched[1]);
   const matched = /^TVU-(\d+)$/i.exec(item.name.trim());
   if (!matched) return null;
   return Number(matched[1]);
@@ -257,6 +269,26 @@ function isGlobalTvuItem(item: EquipmentItem) {
   if (metadataNetwork === "global") return true;
   const tvuNumber = getTvuNumber(item);
   return tvuNumber !== null && tvuNumber >= 15 && tvuNumber <= 19;
+}
+
+function isRentalTvuItem(item: EquipmentItem) {
+  if (!isTvuItem(item)) return false;
+  if (item.metadata.rental === true || item.metadata.rental === "true") return true;
+  return /^live-rental-tvu-\d+$/i.test(item.code.trim());
+}
+
+function isRegionalTransmissionTvuItem(item: EquipmentItem) {
+  if (!isTvuItem(item)) return false;
+  if (item.metadata.regional_transmission === true || item.metadata.regional_transmission === "true") return true;
+  return /^live-regional-tvu-\d+$/i.test(item.code.trim());
+}
+
+function isBorrowableEquipmentItem(item: EquipmentItem) {
+  return item.metadata.borrowable !== false && item.metadata.borrowable !== "false" && !isRegionalTransmissionTvuItem(item);
+}
+
+function hasRentalTvuManagerRole(role: SessionUser["role"] | null | undefined) {
+  return role === "desk" || role === "team_lead";
 }
 
 const hiddenEquipmentChoiceCodes = new Set([
@@ -534,13 +566,23 @@ function LoadingBlocks() {
   );
 }
 
-function StatusPill({ borrowed, repairing = false }: { borrowed: boolean; repairing?: boolean }) {
+function StatusPill({
+  borrowed,
+  repairing = false,
+  availableLabel = "대여가능",
+  borrowedLabel = "대여중",
+}: {
+  borrowed: boolean;
+  repairing?: boolean;
+  availableLabel?: string;
+  borrowedLabel?: string;
+}) {
   const statusClassName = borrowed
     ? styles.statusBorrowed
     : repairing
       ? styles.statusRepairing
       : styles.statusAvailable;
-  const label = borrowed ? "대여중" : repairing ? "수리중" : "대여가능";
+  const label = borrowed ? borrowedLabel : repairing ? "수리중" : availableLabel;
   return (
     <span className={`${styles.statusPill} ${statusClassName}`.trim()}>
       {label}
@@ -558,6 +600,7 @@ function EquipmentItemCard({
   tone = "default",
   repairMode = false,
   repairDraftByItemId,
+  disabled = false,
 }: {
   item: EquipmentItem;
   displayName?: string;
@@ -568,12 +611,15 @@ function EquipmentItemCard({
   tone?: EquipmentItemCardTone;
   repairMode?: boolean;
   repairDraftByItemId?: RepairDraftByItemId;
+  disabled?: boolean;
 }) {
   const borrowed = Boolean(loanItem);
   const repairTarget = repairDraftByItemId?.[item.id] ?? item.isUnderRepair;
   const repairing = repairMode ? repairTarget : item.isUnderRepair;
   const repairChanged = repairMode && repairTarget !== item.isUnderRepair;
   const showGlobalBadge = isGlobalTvuItem(item);
+  const showRentalBadge = isRentalTvuItem(item);
+  const showRegionalBadge = isRegionalTransmissionTvuItem(item);
   return (
     <button
       type="button"
@@ -586,7 +632,7 @@ function EquipmentItemCard({
         repairing ? styles.itemCardRepairing : "",
         repairChanged ? styles.itemCardRepairPending : "",
       ].join(" ").trim()}
-      disabled={repairMode ? borrowed : (borrowed && !allowBorrowedClick) || repairing}
+      disabled={disabled || (repairMode ? borrowed : (borrowed && !allowBorrowedClick) || repairing)}
       onClick={onToggle}
       aria-pressed={repairMode ? repairChanged : selected}
     >
@@ -596,6 +642,16 @@ function EquipmentItemCard({
           {showGlobalBadge ? (
             <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
               Global
+            </span>
+          ) : null}
+          {showRentalBadge ? (
+            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+              임대
+            </span>
+          ) : null}
+          {showRegionalBadge ? (
+            <span className={styles.regionalBadge}>
+              지역
             </span>
           ) : null}
         </span>
@@ -807,7 +863,14 @@ function LoanSummaryByBorrower({
                 {group.items.map((item) => (
                   <div key={item.id} className={styles.borrowerItemRow}>
                     <span>{equipmentCategoryLabels[item.item.category]}</span>
-                    <strong>{item.item.name}</strong>
+                    <strong>
+                      {item.item.name}
+                      {isRentalTvuItem(item.item) ? (
+                        <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                          임대
+                        </span>
+                      ) : null}
+                    </strong>
                     <span>{formatDateTime(item.borrowedAt)}</span>
                   </div>
                 ))}
@@ -1379,6 +1442,9 @@ function LiveEquipmentGroups({
   onTrsToggle,
   repairMode = false,
   repairDraftByItemId,
+  rentalTvuMode = null,
+  rentalTvuSelectedIds = [],
+  onRentalTvuToggle,
 }: {
   items: EquipmentItem[];
   selectedIds: string[];
@@ -1388,6 +1454,9 @@ function LiveEquipmentGroups({
   onTrsToggle: (trs: string) => void;
   repairMode?: boolean;
   repairDraftByItemId?: RepairDraftByItemId;
+  rentalTvuMode?: RentalTvuMode | null;
+  rentalTvuSelectedIds?: string[];
+  onRentalTvuToggle?: (itemId: string) => void;
 }) {
   const [expandedTvuId, setExpandedTvuId] = useState<string | null>(null);
   const [expandedTrsTvuId, setExpandedTrsTvuId] = useState<string | null>(null);
@@ -1407,6 +1476,13 @@ function LiveEquipmentGroups({
   const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item) && !isHiddenEquipmentChoiceItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
+    if (rentalTvuMode === "deactivate" && isRentalTvuItem(item)) {
+      onRentalTvuToggle?.(item.id);
+      setExpandedTvuId(null);
+      setExpandedTrsTvuId(null);
+      setExpandedAccessoryGroup(null);
+      return;
+    }
     if (repairMode) {
       onToggle(item.id);
       return;
@@ -1433,6 +1509,7 @@ function LiveEquipmentGroups({
               const accessoryCount = liveAccessoryGroups.length + 1;
               const showAccessories = expandedTvuId === item.id;
               const showTrsOptions = expandedTrsTvuId === item.id;
+              const rentalDeactivateTarget = rentalTvuMode === "deactivate" && isRentalTvuItem(item);
               const expandedGroup = expandedAccessoryGroup?.tvuId === item.id
                 ? liveAccessoryGroups.find((group) => group.groupKey === expandedAccessoryGroup.groupKey)
                 : null;
@@ -1440,10 +1517,10 @@ function LiveEquipmentGroups({
                 <Fragment key={item.id}>
                   <EquipmentItemCard
                     item={item}
-                    selected={selectedIds.includes(item.id)}
+                    selected={rentalDeactivateTarget ? rentalTvuSelectedIds.includes(item.id) : selectedIds.includes(item.id)}
                     loanItem={currentByItemId.get(item.id)}
                     onToggle={() => handleTvuToggle(item)}
-                    allowBorrowedClick={tvuAccessoryItems.length > 0}
+                    allowBorrowedClick={rentalDeactivateTarget ? false : tvuAccessoryItems.length > 0}
                     tone="live"
                     repairMode={repairMode}
                     repairDraftByItemId={repairDraftByItemId}
@@ -1565,6 +1642,242 @@ function LiveEquipmentGroups({
   );
 }
 
+function RegionalTransmissionSection({
+  items,
+  currentByItemId,
+  onToggle,
+  repairMode = false,
+  repairDraftByItemId,
+}: {
+  items: EquipmentItem[];
+  currentByItemId: Map<string, EquipmentLoanItem>;
+  onToggle: (itemId: string) => void;
+  repairMode?: boolean;
+  repairDraftByItemId?: RepairDraftByItemId;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className={styles.equipmentGroup}>
+      <div className={styles.groupHead}>
+        <h3>지역 전송장비</h3>
+        <span>{items.length}개</span>
+      </div>
+      <div className={styles.itemGrid}>
+        {items.map((item) => {
+          const repairTarget = repairDraftByItemId?.[item.id] ?? item.isUnderRepair;
+          const repairChanged = repairMode && repairTarget !== item.isUnderRepair;
+          return (
+            <EquipmentItemCard
+              key={item.id}
+              item={item}
+              selected={repairChanged}
+              loanItem={currentByItemId.get(item.id)}
+              onToggle={() => {
+                if (repairMode) onToggle(item.id);
+              }}
+              tone="live"
+              repairMode={repairMode}
+              repairDraftByItemId={repairDraftByItemId}
+              disabled={!repairMode}
+            />
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function RentalTvuCard({
+  item,
+  selected,
+  selectionMode,
+  canManage,
+  editing,
+  editName,
+  disabled,
+  onToggle,
+  onStartEdit,
+  onEditNameChange,
+  onConfirmEdit,
+  onCancelEdit,
+}: {
+  item: EquipmentItem;
+  selected: boolean;
+  selectionMode: boolean;
+  canManage: boolean;
+  editing: boolean;
+  editName: string;
+  disabled: boolean;
+  onToggle: () => void;
+  onStartEdit: () => void;
+  onEditNameChange: (value: string) => void;
+  onConfirmEdit: () => void;
+  onCancelEdit: () => void;
+}) {
+  return (
+    <article
+      className={[
+        styles.itemCard,
+        styles.itemCardLive,
+        styles.rentalTvuCard,
+        selected ? styles.itemCardSelectedLive : "",
+      ].join(" ").trim()}
+    >
+      <button
+        type="button"
+        className={styles.rentalTvuCardMain}
+        disabled={!selectionMode || disabled}
+        onClick={onToggle}
+        aria-pressed={selected}
+      >
+        <span className={styles.itemCardTop}>
+          <span className={styles.itemNameStack}>
+            <strong>{item.name}</strong>
+            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+              임대
+            </span>
+          </span>
+        </span>
+      </button>
+      {canManage ? (
+        editing ? (
+          <form
+            className={styles.rentalTvuEditForm}
+            onSubmit={(event) => {
+              event.preventDefault();
+              onConfirmEdit();
+            }}
+          >
+            <input
+              className="field-input"
+              value={editName}
+              maxLength={80}
+              onChange={(event) => onEditNameChange(event.target.value)}
+              aria-label={`${item.name} 이름`}
+              disabled={disabled}
+            />
+            <div className={styles.rentalTvuCardActions}>
+              <button type="submit" className="btn primary" disabled={disabled || editName.trim().length === 0}>
+                확인
+              </button>
+              <button type="button" className="btn" disabled={disabled} onClick={onCancelEdit}>
+                취소
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className={styles.rentalTvuCardActions}>
+            <button type="button" className="btn" disabled={selectionMode || disabled} onClick={onStartEdit}>
+              이름수정
+            </button>
+          </div>
+        )
+      ) : null}
+    </article>
+  );
+}
+
+function RentalTvuSection({
+  inactiveItems,
+  activeItems,
+  mode,
+  selectedIds,
+  canManage,
+  actionPending,
+  editingItemId,
+  editName,
+  onModeStart,
+  onModeCancel,
+  onModeConfirm,
+  onSelectionToggle,
+  onEditStart,
+  onEditNameChange,
+  onEditConfirm,
+  onEditCancel,
+}: {
+  inactiveItems: EquipmentItem[];
+  activeItems: EquipmentItem[];
+  mode: RentalTvuMode | null;
+  selectedIds: string[];
+  canManage: boolean;
+  actionPending: boolean;
+  editingItemId: string | null;
+  editName: string;
+  onModeStart: (mode: RentalTvuMode) => void;
+  onModeCancel: () => void;
+  onModeConfirm: () => void;
+  onSelectionToggle: (itemId: string) => void;
+  onEditStart: (item: EquipmentItem) => void;
+  onEditNameChange: (value: string) => void;
+  onEditConfirm: () => void;
+  onEditCancel: () => void;
+}) {
+  return (
+    <section className={`${styles.equipmentGroup} ${styles.rentalTvuSection}`.trim()}>
+      <div className={styles.groupHead}>
+        <h3>임대 장비</h3>
+        <span>{inactiveItems.length}개 대기 · {activeItems.length}개 활성</span>
+      </div>
+      <div className={styles.rentalTvuToolbar}>
+        <p>
+          {mode === "activate"
+            ? "활성화할 임대 장비를 선택하세요."
+            : mode === "deactivate"
+              ? "비활성화할 임대 장비는 위 TVU 섹션에서 선택하세요."
+              : "TVU21~TVU40 임대 장비를 필요할 때 현재 TVU 목록에 추가합니다."}
+        </p>
+        {canManage ? (
+          <div className={styles.actionButtons}>
+            {mode ? (
+              <>
+                <button type="button" className="btn primary" disabled={selectedIds.length === 0 || actionPending} onClick={onModeConfirm}>
+                  확인
+                </button>
+                <button type="button" className="btn" disabled={actionPending} onClick={onModeCancel}>
+                  취소
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn primary" disabled={inactiveItems.length === 0 || actionPending} onClick={() => onModeStart("activate")}>
+                  활성화
+                </button>
+                <button type="button" className="btn" disabled={activeItems.length === 0 || actionPending} onClick={() => onModeStart("deactivate")}>
+                  비활성화
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+      {inactiveItems.length > 0 ? (
+        <div className={styles.itemGrid}>
+          {inactiveItems.map((item) => (
+            <RentalTvuCard
+              key={item.id}
+              item={item}
+              selected={selectedIds.includes(item.id)}
+              selectionMode={mode === "activate"}
+              canManage={canManage}
+              editing={editingItemId === item.id}
+              editName={editName}
+              disabled={actionPending}
+              onToggle={() => onSelectionToggle(item.id)}
+              onStartEdit={() => onEditStart(item)}
+              onEditNameChange={onEditNameChange}
+              onConfirmEdit={onEditConfirm}
+              onCancelEdit={onEditCancel}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="status note">모든 임대 장비가 활성화되어 있습니다.</div>
+      )}
+    </section>
+  );
+}
+
 export function EquipmentCategoryPage({ category }: { category: EquipmentCategory }) {
   const config = equipmentCategoryConfigs[category];
   const [session, setSession] = useState<SessionUser | null>(() => getSession());
@@ -1581,10 +1894,15 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [liveDetails, setLiveDetails] = useState<LiveLoanDetails>(liveDetailEmpty);
   const [repairMode, setRepairMode] = useState(false);
   const [repairDraftByItemId, setRepairDraftByItemId] = useState<RepairDraftByItemId>({});
+  const [rentalTvuMode, setRentalTvuMode] = useState<RentalTvuMode | null>(null);
+  const [rentalTvuSelectionIds, setRentalTvuSelectionIds] = useState<string[]>([]);
+  const [rentalTvuEditItemId, setRentalTvuEditItemId] = useState<string | null>(null);
+  const [rentalTvuEditName, setRentalTvuEditName] = useState("");
 
   const isEngSetPage = category === "eng_set";
   const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
   const canManageRepair = Boolean(session?.approved && hasDeskAccess(session.role));
+  const canManageRentalTvu = Boolean(session?.approved && hasRentalTvuManagerRole(session.actualRole));
   const showEquipmentStatusLink = canViewEquipmentStatus(session);
   const highlightDateKey = useMemo(() => getTodayDateKey(), []);
 
@@ -1594,7 +1912,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     try {
       const [nextCurrent, nextItems, nextProfiles, nextHighlights] = await Promise.all([
         fetchEquipmentLoanItems({ status: "borrowed" }),
-        fetchEquipmentItems([category]),
+        category === "live" ? fetchLiveEquipmentItemsForManagement() : fetchEquipmentItems([category]),
         isEngSetPage ? fetchEquipmentProfiles() : Promise.resolve([]),
         isEngSetPage ? loadEngScheduleHighlights(highlightDateKey) : Promise.resolve(new Map() as EngScheduleHighlightMap),
       ]);
@@ -1683,8 +2001,29 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     [selectedEntries],
   );
   const visibleItems = useMemo(() => items.filter((item) => !isHiddenEquipmentChoiceItem(item)), [items]);
-  const itemSelectionById = useMemo(() => new Map(visibleItems.map((item) => [item.id, itemToBorrowSelection(item)] as const)), [visibleItems]);
-  const itemById = useMemo(() => new Map(visibleItems.map((item) => [item.id, item] as const)), [visibleItems]);
+  const activeVisibleItems = useMemo(() => visibleItems.filter((item) => item.isActive), [visibleItems]);
+  const inactiveRentalTvuItems = useMemo(
+    () => visibleItems.filter((item) => isRentalTvuItem(item) && !item.isActive),
+    [visibleItems],
+  );
+  const activeRentalTvuItems = useMemo(
+    () => activeVisibleItems.filter(isRentalTvuItem),
+    [activeVisibleItems],
+  );
+  const activeRegionalTransmissionItems = useMemo(
+    () => activeVisibleItems.filter(isRegionalTransmissionTvuItem),
+    [activeVisibleItems],
+  );
+  const activeLiveBorrowableOrRentalItems = useMemo(
+    () => activeVisibleItems.filter((item) => !isRegionalTransmissionTvuItem(item)),
+    [activeVisibleItems],
+  );
+  const borrowableVisibleItems = useMemo(
+    () => activeVisibleItems.filter(isBorrowableEquipmentItem),
+    [activeVisibleItems],
+  );
+  const itemSelectionById = useMemo(() => new Map(borrowableVisibleItems.map((item) => [item.id, itemToBorrowSelection(item)] as const)), [borrowableVisibleItems]);
+  const itemById = useMemo(() => new Map(activeVisibleItems.map((item) => [item.id, item] as const)), [activeVisibleItems]);
   const profileSelectionById = useMemo(
     () => new Map(profiles.map((profile) => [profile.id, profileToBorrowSelection(profile)] as const)),
     [profiles],
@@ -1702,6 +2041,20 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   ), [currentByItemId, itemById, repairDraftByItemId]);
 
   const repairChangeCount = repairChangeEntries.length;
+  const rentalTvuSelectableIds = useMemo(() => {
+    if (rentalTvuMode === "activate") {
+      return new Set(inactiveRentalTvuItems.map((item) => item.id));
+    }
+    if (rentalTvuMode === "deactivate") {
+      return new Set(activeRentalTvuItems.filter((item) => !currentByItemId.has(item.id)).map((item) => item.id));
+    }
+    return new Set<string>();
+  }, [activeRentalTvuItems, currentByItemId, inactiveRentalTvuItems, rentalTvuMode]);
+
+  useEffect(() => {
+    if (!rentalTvuMode || rentalTvuSelectionIds.length === 0) return;
+    setRentalTvuSelectionIds((current) => current.filter((itemId) => rentalTvuSelectableIds.has(itemId)));
+  }, [rentalTvuMode, rentalTvuSelectableIds, rentalTvuSelectionIds.length]);
 
   useEffect(() => {
     if (loading || selectedEntries.length === 0) return;
@@ -1710,6 +2063,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
         const item = itemById.get(selection.id);
         if (!item) return false;
         if (item.isUnderRepair) return false;
+        if (!isBorrowableEquipmentItem(item)) return false;
         return !(category === "live" && isTvuBatteryItem(item));
       }
       if (selection.kind === "eng_profile" && isEngSetPage) {
@@ -1810,6 +2164,106 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     setRepairMode(false);
     setRepairDraftByItemId({});
     setMessage(null);
+  };
+
+  const openRentalTvuMode = (mode: RentalTvuMode) => {
+    if (!canManageRentalTvu) {
+      setMessage({ tone: "warn", text: "임대 장비 관리 권한이 없습니다." });
+      return;
+    }
+    setRepairMode(false);
+    setRepairDraftByItemId({});
+    setConfirmMode(null);
+    setRentalTvuEditItemId(null);
+    setRentalTvuEditName("");
+    setRentalTvuSelectionIds([]);
+    setRentalTvuMode(mode);
+    updateBorrowSelections(() => []);
+    setLiveDetails(liveDetailEmpty);
+    setMessage({
+      tone: "note",
+      text: mode === "activate"
+        ? "활성화할 임대 장비를 선택한 뒤 확인을 누르세요."
+        : "비활성화할 임대 장비를 TVU 섹션에서 선택한 뒤 확인을 누르세요.",
+    });
+  };
+
+  const cancelRentalTvuMode = () => {
+    setRentalTvuMode(null);
+    setRentalTvuSelectionIds([]);
+    setMessage(null);
+  };
+
+  const toggleRentalTvuSelection = (itemId: string) => {
+    if (!rentalTvuSelectableIds.has(itemId)) {
+      setMessage({ tone: "note", text: "선택할 수 없는 임대 장비입니다." });
+      return;
+    }
+    setRentalTvuSelectionIds((current) => (
+      current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]
+    ));
+  };
+
+  const confirmRentalTvuMode = async () => {
+    if (!canManageRentalTvu) {
+      setMessage({ tone: "warn", text: "임대 장비 관리 권한이 없습니다." });
+      return;
+    }
+    if (!rentalTvuMode) return;
+    if (rentalTvuSelectionIds.length === 0) {
+      setMessage({ tone: "note", text: "변경할 임대 장비를 선택해 주세요." });
+      return;
+    }
+
+    setActionPending(true);
+    try {
+      await setRentalTvuItemsActive(rentalTvuSelectionIds, rentalTvuMode === "activate");
+      setMessage({ tone: "ok", text: rentalTvuMode === "activate" ? "선택한 임대 장비를 활성화했습니다." : "선택한 임대 장비를 비활성화했습니다." });
+      setRentalTvuMode(null);
+      setRentalTvuSelectionIds([]);
+      await load();
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "임대 장비 처리에 실패했습니다." });
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const startRentalTvuRename = (item: EquipmentItem) => {
+    if (!canManageRentalTvu) {
+      setMessage({ tone: "warn", text: "임대 장비 관리 권한이 없습니다." });
+      return;
+    }
+    setRentalTvuMode(null);
+    setRentalTvuSelectionIds([]);
+    setRentalTvuEditItemId(item.id);
+    setRentalTvuEditName(item.name);
+    setMessage(null);
+  };
+
+  const cancelRentalTvuRename = () => {
+    setRentalTvuEditItemId(null);
+    setRentalTvuEditName("");
+  };
+
+  const confirmRentalTvuRename = async () => {
+    if (!rentalTvuEditItemId) return;
+    if (!canManageRentalTvu) {
+      setMessage({ tone: "warn", text: "임대 장비 관리 권한이 없습니다." });
+      return;
+    }
+    setActionPending(true);
+    try {
+      await renameRentalTvuItem(rentalTvuEditItemId, rentalTvuEditName);
+      setMessage({ tone: "ok", text: "임대 장비 이름을 수정했습니다." });
+      setRentalTvuEditItemId(null);
+      setRentalTvuEditName("");
+      await load();
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "임대 장비 이름 수정에 실패했습니다." });
+    } finally {
+      setActionPending(false);
+    }
   };
 
   const openBorrowDialog = () => {
@@ -1937,9 +2391,19 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
         <div className={`panel-pad ${styles.sectionStack}`}>
           <div className={styles.actionBar}>
             <div className={styles.actionSummary}>
-              <strong>{repairMode ? `${repairChangeCount}개 변경 예정` : `${selectedIds.length}개 선택됨`}</strong>
+              <strong>
+                {repairMode
+                  ? `${repairChangeCount}개 변경 예정`
+                  : rentalTvuMode
+                    ? `${rentalTvuSelectionIds.length}개 임대 장비 선택됨`
+                    : `${selectedIds.length}개 선택됨`}
+              </strong>
               <span className="muted">
-                {repairMode ? "장비를 클릭해 수리중/해제를 선택한 뒤 확인을 누르세요." : "대여중/수리중 장비는 선택할 수 없습니다."}
+                {repairMode
+                  ? "장비를 클릭해 수리중/해제를 선택한 뒤 확인을 누르세요."
+                  : rentalTvuMode
+                    ? "임대 장비 섹션의 확인/취소 버튼으로 변경을 마무리하세요."
+                    : "대여중/수리중 장비는 선택할 수 없습니다."}
               </span>
             </div>
             <div className={styles.actionButtons}>
@@ -1952,7 +2416,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                     취소
                   </button>
                 </>
-              ) : (
+              ) : rentalTvuMode ? null : (
                 <>
                   <button type="button" className="btn primary" disabled={!canMutate || selectedIds.length === 0 || actionPending} onClick={openBorrowDialog}>
                     대여하기
@@ -2051,7 +2515,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             </div>
           ) : category === "camera_lens" ? (
             <CameraGroups
-              items={visibleItems}
+              items={activeVisibleItems}
               selectedIds={repairMode ? [] : selectedIds}
               currentByItemId={currentByItemId}
               onToggle={repairMode ? toggleRepairDraft : toggleSelection}
@@ -2059,20 +2523,50 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
               repairDraftByItemId={repairDraftByItemId}
             />
           ) : category === "live" ? (
-            <LiveEquipmentGroups
-              items={visibleItems}
-              selectedIds={repairMode ? [] : selectedIds}
-              currentByItemId={currentByItemId}
-              selectedTrsValues={selectedTrsValues}
-              onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
-              onToggle={repairMode ? toggleRepairDraft : toggleSelection}
-              repairMode={repairMode}
-              repairDraftByItemId={repairDraftByItemId}
-            />
+            <>
+              <LiveEquipmentGroups
+                items={activeLiveBorrowableOrRentalItems}
+                selectedIds={repairMode || rentalTvuMode ? [] : selectedIds}
+                currentByItemId={currentByItemId}
+                selectedTrsValues={rentalTvuMode ? [] : selectedTrsValues}
+                onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
+                onToggle={rentalTvuMode ? () => undefined : repairMode ? toggleRepairDraft : toggleSelection}
+                repairMode={repairMode}
+                repairDraftByItemId={repairDraftByItemId}
+                rentalTvuMode={rentalTvuMode}
+                rentalTvuSelectedIds={rentalTvuSelectionIds}
+                onRentalTvuToggle={toggleRentalTvuSelection}
+              />
+              <RegionalTransmissionSection
+                items={activeRegionalTransmissionItems}
+                currentByItemId={currentByItemId}
+                onToggle={repairMode ? toggleRepairDraft : () => undefined}
+                repairMode={repairMode}
+                repairDraftByItemId={repairDraftByItemId}
+              />
+              <RentalTvuSection
+                inactiveItems={inactiveRentalTvuItems}
+                activeItems={activeRentalTvuItems}
+                mode={rentalTvuMode}
+                selectedIds={rentalTvuSelectionIds}
+                canManage={canManageRentalTvu}
+                actionPending={actionPending}
+                editingItemId={rentalTvuEditItemId}
+                editName={rentalTvuEditName}
+                onModeStart={openRentalTvuMode}
+                onModeCancel={cancelRentalTvuMode}
+                onModeConfirm={confirmRentalTvuMode}
+                onSelectionToggle={toggleRentalTvuSelection}
+                onEditStart={startRentalTvuRename}
+                onEditNameChange={setRentalTvuEditName}
+                onEditConfirm={confirmRentalTvuRename}
+                onEditCancel={cancelRentalTvuRename}
+              />
+            </>
           ) : (
             <div className={styles.sectionStack}>
               {renderGroupedItems({
-                items: visibleItems,
+                items: activeVisibleItems,
                 selectedIds: repairMode ? [] : selectedIds,
                 currentByItemId,
                 onToggle: repairMode ? toggleRepairDraft : toggleSelection,
@@ -2248,17 +2742,19 @@ export function LiveEquipmentStatusPage() {
     () => new Map(currentLoanItems.map((loanItem) => [loanItem.equipmentItemId, loanItem] as const)),
     [currentLoanItems],
   );
-  const tvuItems = useMemo(() => items.filter(isTvuItem), [items]);
+  const regionalTvuItems = useMemo(() => items.filter(isRegionalTransmissionTvuItem), [items]);
+  const tvuItems = useMemo(() => items.filter((item) => isTvuItem(item) && !isRegionalTransmissionTvuItem(item)), [items]);
+  const statusBoardItems = useMemo(() => [...tvuItems, ...regionalTvuItems], [regionalTvuItems, tvuItems]);
   const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.role));
   const hasDirtyDrafts = useMemo(() => (
-    editMode && tvuItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
-  ), [drafts, editBaselineDrafts, editMode, tvuItems]);
+    editMode && statusBoardItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
+  ), [drafts, editBaselineDrafts, editMode, statusBoardItems]);
   const buildDisplayDrafts = useCallback(() => (
-    tvuItems.reduce<LiveStatusDraftByItemId>((map, item) => {
+    statusBoardItems.reduce<LiveStatusDraftByItemId>((map, item) => {
       map[item.id] = resolveLiveStatusDraft(savedDrafts[item.id], currentByItemId.get(item.id));
       return map;
     }, {})
-  ), [currentByItemId, savedDrafts, tvuItems]);
+  ), [currentByItemId, savedDrafts, statusBoardItems]);
   const updateDraft = (itemId: string, field: keyof LiveLoanDetails, value: string) => {
     setDrafts((current) => ({
       ...current,
@@ -2287,7 +2783,7 @@ export function LiveEquipmentStatusPage() {
       setMessage(null);
       return;
     }
-    const payload = tvuItems.map((item): LiveEquipmentStatusSaveEntry => ({
+    const payload = statusBoardItems.map((item): LiveEquipmentStatusSaveEntry => ({
       equipmentItemId: item.id,
       ...stripLinkedLiveStatusDraft(drafts[item.id], currentByItemId.get(item.id)),
     }));
@@ -2315,6 +2811,149 @@ export function LiveEquipmentStatusPage() {
     setEditMode(false);
     setMessage({ tone: "note", text: "수정을 취소했습니다." });
   };
+
+  const renderLiveStatusTable = (tableItems: EquipmentItem[], title: string, isRegionalTable = false) => (
+    <section className={styles.liveStatusTableSection}>
+      <div className={styles.groupHead}>
+        <h3>{title}</h3>
+        <span>{tableItems.length}개</span>
+      </div>
+      {tableItems.length > 0 ? (
+        <div className={styles.liveStatusTableWrap}>
+          <table className={styles.liveStatusTable}>
+            <thead>
+              <tr>
+                <th>장비명</th>
+                <th>TRS</th>
+                <th>촬영기자</th>
+                <th>오디오맨</th>
+                <th>장소</th>
+                <th>비고</th>
+                <th>상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableItems.map((item) => {
+                const loanItem = currentByItemId.get(item.id);
+                const displayDraft = resolveLiveStatusDraft(savedDrafts[item.id], loanItem);
+                const draft = editMode ? drafts[item.id] ?? displayDraft : displayDraft;
+                const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
+                const noteValue = isRegionalTable && !draft.note ? "대여 대상 아님" : draft.note || "-";
+                return (
+                  <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
+                    <td>
+                      <span className={styles.itemNameStack}>
+                        <strong>{item.name}</strong>
+                        {isGlobalTvuItem(item) ? (
+                          <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                            Global
+                          </span>
+                        ) : null}
+                        {isRentalTvuItem(item) ? (
+                          <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                            임대
+                          </span>
+                        ) : null}
+                        {isRegionalTransmissionTvuItem(item) ? (
+                          <span className={styles.regionalBadge}>
+                            지역
+                          </span>
+                        ) : null}
+                      </span>
+                    </td>
+                    <td>
+                      {editMode ? (
+                        <input
+                          className={styles.liveStatusInput}
+                          aria-label={`${item.name} TRS`}
+                          maxLength={120}
+                          value={draft.trs}
+                          onChange={(event) => updateDraft(item.id, "trs", event.target.value)}
+                          disabled={!canManageLiveStatus || saving}
+                          placeholder="-"
+                        />
+                      ) : (
+                        <span className={styles.liveStatusCellValue}>{draft.trs || "-"}</span>
+                      )}
+                    </td>
+                    <td>
+                      {editMode ? (
+                        <input
+                          className={styles.liveStatusInput}
+                          aria-label={`${item.name} 촬영기자`}
+                          maxLength={120}
+                          value={draft.cameraReporter}
+                          onChange={(event) => updateDraft(item.id, "cameraReporter", event.target.value)}
+                          disabled={!canManageLiveStatus || saving}
+                          placeholder="-"
+                        />
+                      ) : (
+                        <span className={styles.liveStatusCellValue}>{draft.cameraReporter || "-"}</span>
+                      )}
+                    </td>
+                    <td>
+                      {editMode ? (
+                        <input
+                          className={styles.liveStatusInput}
+                          aria-label={`${item.name} 오디오맨`}
+                          maxLength={120}
+                          value={draft.audioMan}
+                          onChange={(event) => updateDraft(item.id, "audioMan", event.target.value)}
+                          disabled={!canManageLiveStatus || saving}
+                          placeholder="-"
+                        />
+                      ) : (
+                        <span className={styles.liveStatusCellValue}>{draft.audioMan || "-"}</span>
+                      )}
+                    </td>
+                    <td>
+                      {editMode ? (
+                        <input
+                          className={styles.liveStatusInput}
+                          aria-label={`${item.name} 장소`}
+                          maxLength={160}
+                          value={draft.location}
+                          onChange={(event) => updateDraft(item.id, "location", event.target.value)}
+                          disabled={!canManageLiveStatus || saving}
+                          placeholder="-"
+                        />
+                      ) : (
+                        <span className={styles.liveStatusCellValue}>{draft.location || "-"}</span>
+                      )}
+                    </td>
+                    <td>
+                      {editMode ? (
+                        <input
+                          className={styles.liveStatusInput}
+                          aria-label={`${item.name} 비고`}
+                          maxLength={240}
+                          value={draft.note}
+                          onChange={(event) => updateDraft(item.id, "note", event.target.value)}
+                          disabled={!canManageLiveStatus || saving}
+                          placeholder={isRegionalTable ? "대여 대상 아님" : "-"}
+                        />
+                      ) : (
+                        <span className={styles.liveStatusCellValue}>{noteValue}</span>
+                      )}
+                    </td>
+                    <td>
+                      <StatusPill
+                        borrowed={Boolean(loanItem)}
+                        repairing={item.isUnderRepair}
+                        availableLabel={isRegionalTable ? "사용 가능" : "대여가능"}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="status note">{title} 표시 대상이 없습니다.</div>
+      )}
+    </section>
+  );
 
   return (
     <section className={`${styles.page} ${styles.liveStatusPage}`}>
@@ -2350,118 +2989,9 @@ export function LiveEquipmentStatusPage() {
         {loading ? (
           <LoadingBlocks />
         ) : (
-          <div className={styles.liveStatusTableWrap}>
-            <table className={styles.liveStatusTable}>
-              <thead>
-                <tr>
-                  <th>장비명</th>
-                  <th>TRS</th>
-                  <th>촬영기자</th>
-                  <th>오디오맨</th>
-                  <th>장소</th>
-                  <th>비고</th>
-                  <th>상태</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tvuItems.map((item) => {
-                  const loanItem = currentByItemId.get(item.id);
-                  const displayDraft = resolveLiveStatusDraft(savedDrafts[item.id], loanItem);
-                  const draft = editMode ? drafts[item.id] ?? displayDraft : displayDraft;
-                  const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
-                  return (
-                    <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
-                      <td>
-                        <span className={styles.itemNameStack}>
-                          <strong>{item.name}</strong>
-                          {isGlobalTvuItem(item) ? (
-                            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                              Global
-                            </span>
-                          ) : null}
-                        </span>
-                      </td>
-                      <td>
-                        {editMode ? (
-                          <input
-                            className={styles.liveStatusInput}
-                            aria-label={`${item.name} TRS`}
-                            maxLength={120}
-                            value={draft.trs}
-                            onChange={(event) => updateDraft(item.id, "trs", event.target.value)}
-                            disabled={!canManageLiveStatus || saving}
-                            placeholder="-"
-                          />
-                        ) : (
-                          <span className={styles.liveStatusCellValue}>{draft.trs || "-"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {editMode ? (
-                          <input
-                            className={styles.liveStatusInput}
-                            aria-label={`${item.name} 촬영기자`}
-                            maxLength={120}
-                            value={draft.cameraReporter}
-                            onChange={(event) => updateDraft(item.id, "cameraReporter", event.target.value)}
-                            disabled={!canManageLiveStatus || saving}
-                            placeholder="-"
-                          />
-                        ) : (
-                          <span className={styles.liveStatusCellValue}>{draft.cameraReporter || "-"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {editMode ? (
-                          <input
-                            className={styles.liveStatusInput}
-                            aria-label={`${item.name} 오디오맨`}
-                            maxLength={120}
-                            value={draft.audioMan}
-                            onChange={(event) => updateDraft(item.id, "audioMan", event.target.value)}
-                            disabled={!canManageLiveStatus || saving}
-                            placeholder="-"
-                          />
-                        ) : (
-                          <span className={styles.liveStatusCellValue}>{draft.audioMan || "-"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {editMode ? (
-                          <input
-                            className={styles.liveStatusInput}
-                            aria-label={`${item.name} 장소`}
-                            maxLength={160}
-                            value={draft.location}
-                            onChange={(event) => updateDraft(item.id, "location", event.target.value)}
-                            disabled={!canManageLiveStatus || saving}
-                            placeholder="-"
-                          />
-                        ) : (
-                          <span className={styles.liveStatusCellValue}>{draft.location || "-"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {editMode ? (
-                          <input
-                            className={styles.liveStatusInput}
-                            aria-label={`${item.name} 비고`}
-                            maxLength={240}
-                            value={draft.note}
-                            onChange={(event) => updateDraft(item.id, "note", event.target.value)}
-                            disabled={!canManageLiveStatus || saving}
-                            placeholder="-"
-                          />
-                        ) : (
-                          <span className={styles.liveStatusCellValue}>{draft.note || "-"}</span>
-                        )}
-                      </td>
-                      <td><StatusPill borrowed={Boolean(loanItem)} repairing={item.isUnderRepair} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className={styles.liveStatusTableStack}>
+            {renderLiveStatusTable(tvuItems, "라이브장비")}
+            {renderLiveStatusTable(regionalTvuItems, "지역 전송장비", true)}
           </div>
         )}
       </article>

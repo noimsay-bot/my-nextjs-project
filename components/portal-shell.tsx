@@ -138,6 +138,7 @@ const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"
   { kind: "link", href: "/team-lead" },
   { kind: "link", href: "/admin" },
   { kind: "action", id: "customer-support" },
+  { kind: "action", id: "theme" },
 ];
 
 function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
@@ -468,13 +469,13 @@ function PortalSidebar({
   }, [openMobile]);
 
   useEffect(() => {
-    if (!isMobile || !expandedMenuHref || typeof window === "undefined") {
+    if (!expandedMenuHref || typeof window === "undefined") {
       setMobileSubmenuTop(null);
       return;
     }
 
     let animationFrame = 0;
-    const viewportGap = 10;
+    const viewportGap = isMobile ? 10 : 12;
     const syncSubmenuPosition = () => {
       const buttonElement = menuButtonRefs.current[expandedMenuHref];
       const submenuElement = submenuRefs.current[expandedMenuHref];
@@ -484,7 +485,7 @@ function PortalSidebar({
       const submenuRect = submenuElement.getBoundingClientRect();
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
       const visibleSubmenuHeight = Math.min(submenuRect.height, viewportHeight - viewportGap * 2);
-      const preferredTop = buttonRect.bottom + 6;
+      const preferredTop = isMobile ? buttonRect.bottom + 6 : buttonRect.top;
       const maxTop = viewportHeight - visibleSubmenuHeight - viewportGap;
       setMobileSubmenuTop(Math.round(Math.max(viewportGap, Math.min(preferredTop, maxTop))));
     };
@@ -494,7 +495,9 @@ function PortalSidebar({
     };
 
     scheduleSync();
+    const menuScrollElement = menuButtonRefs.current[expandedMenuHref]?.closest(".portal-sidebar__content");
     window.addEventListener("resize", scheduleSync);
+    menuScrollElement?.addEventListener("scroll", scheduleSync, { passive: true });
     window.visualViewport?.addEventListener("resize", scheduleSync);
 
     const submenuElement = submenuRefs.current[expandedMenuHref];
@@ -509,6 +512,7 @@ function PortalSidebar({
     return () => {
       window.cancelAnimationFrame(animationFrame);
       window.removeEventListener("resize", scheduleSync);
+      menuScrollElement?.removeEventListener("scroll", scheduleSync);
       window.visualViewport?.removeEventListener("resize", scheduleSync);
       resizeObserver?.disconnect();
     };
@@ -518,9 +522,10 @@ function PortalSidebar({
     setExpandedMenus({});
     closeMobileSidebar();
   };
+  const sidebarDensityClassName = sidebarEntries.length >= 10 ? "portal-sidebar--dense" : undefined;
 
   return (
-    <Sidebar mobileTriggerProps={mobileTriggerProps}>
+    <Sidebar className={sidebarDensityClassName} mobileTriggerProps={mobileTriggerProps}>
       <SidebarContent>
         <nav aria-label="주요 메뉴">
           <SidebarMenu>
@@ -587,12 +592,10 @@ function PortalSidebar({
                           }}
                           className="portal-sidebar-submenu"
                           style={
-                            isMobile
-                              ? ({
-                                  "--portal-sidebar-submenu-top": `${mobileSubmenuTop ?? 10}px`,
-                                  visibility: mobileSubmenuTop === null ? "hidden" : undefined,
-                                } as CSSProperties)
-                              : undefined
+                            {
+                              "--portal-sidebar-submenu-top": `${mobileSubmenuTop ?? 10}px`,
+                              visibility: mobileSubmenuTop === null ? "hidden" : undefined,
+                            } as CSSProperties
                           }
                         >
                           {link.children?.map((child) => {
@@ -655,17 +658,6 @@ function PortalSidebar({
       <SidebarSeparator />
       <SidebarFooter>
         <div className="portal-sidebar-footer-stack">
-          <button
-            type="button"
-            className="btn portal-sidebar-action portal-sidebar-action--with-icon"
-            onClick={() => {
-              closeMobileSidebar();
-              onCycleTheme();
-            }}
-          >
-            <SidebarItemIcon src={SIDEBAR_ACTION_ICON_BY_ID.theme} label="모드변경" />
-            <span>모드변경</span>
-          </button>
           {shouldShowLogoutButton ? (
             <button
               className="btn portal-sidebar-action"
