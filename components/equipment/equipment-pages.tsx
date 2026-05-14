@@ -168,7 +168,7 @@ function itemToBorrowSelection(item: EquipmentItem): BorrowSelection {
     kind: "item",
     id: item.id,
     category: item.category,
-    label: item.name,
+    label: getEquipmentDisplayName(item),
     isTvu: isTvuItem(item),
   };
 }
@@ -259,9 +259,19 @@ function getTvuNumber(item: EquipmentItem) {
   if (typeof metadataNumber === "string" && /^\d+$/.test(metadataNumber.trim())) return Number(metadataNumber);
   const codeMatched = /^live-(?:rental-|regional-)?tvu-(\d+)$/i.exec(item.code.trim());
   if (codeMatched) return Number(codeMatched[1]);
-  const matched = /^TVU-(\d+)$/i.exec(item.name.trim());
+  const matched = /^TVU\s*-?\s*(\d+)$/i.exec(item.name.trim());
   if (!matched) return null;
   return Number(matched[1]);
+}
+
+function formatTvuDisplayName(name: string) {
+  const matched = /^TVU\s*-?\s*(\d+)$/i.exec(name.trim());
+  if (!matched) return name;
+  return `TVU-${Number(matched[1])}`;
+}
+
+function getEquipmentDisplayName(item: EquipmentItem) {
+  return isTvuItem(item) ? formatTvuDisplayName(item.name) : item.name;
 }
 
 function isGlobalTvuItem(item: EquipmentItem) {
@@ -638,7 +648,7 @@ function EquipmentItemCard({
     >
       <span className={styles.itemCardTop}>
         <span className={styles.itemNameStack}>
-          <strong>{displayName ?? item.name}</strong>
+          <strong>{displayName ?? getEquipmentDisplayName(item)}</strong>
           {showGlobalBadge ? (
             <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
               Global
@@ -708,7 +718,7 @@ function DailyRecords({
                     <td>{formatDate(record.borrowedAt)}</td>
                     <td>{record.loan.borrowerName}</td>
                     <td>
-                      <span className={styles.recordName}>{record.item.name}</span>
+                      <span className={styles.recordName}>{getEquipmentDisplayName(record.item)}</span>
                       <span className={styles.recordCategory}>{equipmentCategoryLabels[record.item.category]}</span>
                     </td>
                     <td>{formatDateTime(record.borrowedAt)}</td>
@@ -777,7 +787,7 @@ function ConfirmDialog({
                         );
                       }}
                     />
-                    <span>{equipmentCategoryLabels[item.item.category]} · {item.item.name}</span>
+                    <span>{equipmentCategoryLabels[item.item.category]} · {getEquipmentDisplayName(item.item)}</span>
                     <small>{formatDateTime(item.borrowedAt)}</small>
                   </label>
                 ))
@@ -864,7 +874,7 @@ function LoanSummaryByBorrower({
                   <div key={item.id} className={styles.borrowerItemRow}>
                     <span>{equipmentCategoryLabels[item.item.category]}</span>
                     <strong>
-                      {item.item.name}
+                      {getEquipmentDisplayName(item.item)}
                       {isRentalTvuItem(item.item) ? (
                         <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
                           임대
@@ -1528,7 +1538,7 @@ function LiveEquipmentGroups({
                   {showAccessories ? (
                     <div className={styles.inlineBatteryPanel}>
                       <div className={styles.inlineBatteryHead}>
-                        <h4>{item.name} 부속 장비</h4>
+                        <h4>{getEquipmentDisplayName(item)} 부속 장비</h4>
                         <span>{accessoryCount}개</span>
                       </div>
                       <div className={styles.inlineBatteryGrid}>
@@ -1733,7 +1743,7 @@ function RentalTvuCard({
       >
         <span className={styles.itemCardTop}>
           <span className={styles.itemNameStack}>
-            <strong>{item.name}</strong>
+            <strong>{getEquipmentDisplayName(item)}</strong>
             <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
               임대
             </span>
@@ -1754,7 +1764,7 @@ function RentalTvuCard({
               value={editName}
               maxLength={80}
               onChange={(event) => onEditNameChange(event.target.value)}
-              aria-label={`${item.name} 이름`}
+              aria-label={`${getEquipmentDisplayName(item)} 이름`}
               disabled={disabled}
             />
             <div className={styles.rentalTvuCardActions}>
@@ -1768,7 +1778,7 @@ function RentalTvuCard({
           </form>
         ) : (
           <div className={styles.rentalTvuCardActions}>
-            <button type="button" className="btn" disabled={selectionMode || disabled} onClick={onStartEdit}>
+            <button type="button" className={`btn ${styles.rentalTvuNameEditButton}`} disabled={selectionMode || disabled} onClick={onStartEdit}>
               이름수정
             </button>
           </div>
@@ -2468,7 +2478,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                     aria-pressed={repairMode ? repairChanged : selected}
                   >
                     <span className={styles.itemCardTop}>
-                      <strong>{item.name}</strong>
+                      <strong>{getEquipmentDisplayName(item)}</strong>
                       {repairChanged ? (
                         <span className={`${styles.statusPill} ${repairing ? styles.statusRepairing : styles.statusAvailable}`.trim()}>
                           {repairing ? "수리 예정" : "해제 예정"}
@@ -2848,7 +2858,7 @@ export function LiveEquipmentStatusPage() {
                   <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
                     <td>
                       <span className={styles.itemNameStack}>
-                        <strong>{item.name}</strong>
+                        <strong>{getEquipmentDisplayName(item)}</strong>
                         {isGlobalTvuItem(item) ? (
                           <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
                             Global
@@ -2870,7 +2880,7 @@ export function LiveEquipmentStatusPage() {
                       {editMode ? (
                         <input
                           className={styles.liveStatusInput}
-                          aria-label={`${item.name} TRS`}
+                          aria-label={`${getEquipmentDisplayName(item)} TRS`}
                           maxLength={120}
                           value={draft.trs}
                           onChange={(event) => updateDraft(item.id, "trs", event.target.value)}
@@ -2885,7 +2895,7 @@ export function LiveEquipmentStatusPage() {
                       {editMode ? (
                         <input
                           className={styles.liveStatusInput}
-                          aria-label={`${item.name} 촬영기자`}
+                          aria-label={`${getEquipmentDisplayName(item)} 촬영기자`}
                           maxLength={120}
                           value={draft.cameraReporter}
                           onChange={(event) => updateDraft(item.id, "cameraReporter", event.target.value)}
@@ -2900,7 +2910,7 @@ export function LiveEquipmentStatusPage() {
                       {editMode ? (
                         <input
                           className={styles.liveStatusInput}
-                          aria-label={`${item.name} 오디오맨`}
+                          aria-label={`${getEquipmentDisplayName(item)} 오디오맨`}
                           maxLength={120}
                           value={draft.audioMan}
                           onChange={(event) => updateDraft(item.id, "audioMan", event.target.value)}
@@ -2915,7 +2925,7 @@ export function LiveEquipmentStatusPage() {
                       {editMode ? (
                         <input
                           className={styles.liveStatusInput}
-                          aria-label={`${item.name} 장소`}
+                          aria-label={`${getEquipmentDisplayName(item)} 장소`}
                           maxLength={160}
                           value={draft.location}
                           onChange={(event) => updateDraft(item.id, "location", event.target.value)}
@@ -2930,7 +2940,7 @@ export function LiveEquipmentStatusPage() {
                       {editMode ? (
                         <input
                           className={styles.liveStatusInput}
-                          aria-label={`${item.name} 비고`}
+                          aria-label={`${getEquipmentDisplayName(item)} 비고`}
                           maxLength={240}
                           value={draft.note}
                           onChange={(event) => updateDraft(item.id, "note", event.target.value)}

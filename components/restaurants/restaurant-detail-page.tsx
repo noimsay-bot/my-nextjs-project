@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSession, initializeAuth, isReadOnlyPortalRole, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
 import { RestaurantsMap } from "@/components/restaurants/restaurants-map";
 import { RestaurantCommentForm } from "@/components/restaurants/restaurant-comment-form";
 import { RestaurantCommentList } from "@/components/restaurants/restaurant-comment-list";
 import { fetchRestaurantComments, fetchRestaurantDetail } from "@/lib/restaurants/fetch";
+import { deleteRestaurant } from "@/lib/restaurants/delete";
 import { calculateDistanceMeters, formatDistance } from "@/lib/restaurants/distance";
 import type { NearbyRestaurant, RestaurantCommentRow, RestaurantRow } from "@/lib/restaurants/types";
 
@@ -21,11 +23,13 @@ function formatCreatedAt(value: string) {
 }
 
 export function RestaurantDetailPage({ restaurantId }: { restaurantId: string }) {
+  const router = useRouter();
   const [session, setSession] = useState<SessionUser | null>(() => getSession());
   const [restaurant, setRestaurant] = useState<RestaurantRow | null>(null);
   const [comments, setComments] = useState<RestaurantCommentRow[]>([]);
   const [loadingRestaurant, setLoadingRestaurant] = useState(true);
   const [loadingComments, setLoadingComments] = useState(true);
+  const [deletingRestaurant, setDeletingRestaurant] = useState(false);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "warn" | "note">("note");
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -122,6 +126,27 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
     ];
   }, [currentLocation, restaurant]);
   const isReadOnlyUser = Boolean(session?.approved && isReadOnlyPortalRole(session.role));
+  const canDeleteRestaurant = Boolean(session?.approved && restaurant && session.id === restaurant.authorId && !isReadOnlyPortalRole(session.role));
+
+  const handleDeleteRestaurant = async () => {
+    if (!session?.id || !restaurant || deletingRestaurant) return;
+
+    const confirmed = window.confirm("내가 등록한 이 맛집을 삭제하시겠습니까?");
+    if (!confirmed) return;
+
+    setDeletingRestaurant(true);
+    setMessage("");
+    const result = await deleteRestaurant(session.id, restaurant.id);
+    setDeletingRestaurant(false);
+
+    if (!result.ok) {
+      setMessageTone("warn");
+      setMessage(result.message);
+      return;
+    }
+
+    router.replace("/restaurants");
+  };
 
   return (
     <section className="panel">
@@ -130,7 +155,14 @@ export function RestaurantDetailPage({ restaurantId }: { restaurantId: string })
           <Link href="/restaurants" className="btn" style={{ textDecoration: "none" }}>
             뒤로가기
           </Link>
-          {restaurant ? <span className="chip">{formatDistance(detailRestaurantForMap[0]?.distanceMeters ?? null)}</span> : null}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {restaurant ? <span className="chip">{formatDistance(detailRestaurantForMap[0]?.distanceMeters ?? null)}</span> : null}
+            {canDeleteRestaurant ? (
+              <button type="button" className="btn" onClick={() => void handleDeleteRestaurant()} disabled={deletingRestaurant}>
+                {deletingRestaurant ? "삭제 중..." : "삭제"}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {loadingRestaurant ? <div className="status note">상세 데이터를 불러오는 중입니다.</div> : null}

@@ -183,10 +183,11 @@ export function SidebarProvider({
 
 type SidebarProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
+  keepOpenOnMouseLeave?: boolean;
   mobileTriggerProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 };
 
-export function Sidebar({ children, className, mobileTriggerProps, ...props }: SidebarProps) {
+export function Sidebar({ children, className, keepOpenOnMouseLeave = false, mobileTriggerProps, ...props }: SidebarProps) {
   const { open, openMobile, closeMobileSidebar, isMobile, setOpen } = useSidebar();
   const { className: mobileTriggerClassName, ...mobileTriggerRest } = mobileTriggerProps ?? {};
 
@@ -233,7 +234,7 @@ export function Sidebar({ children, className, mobileTriggerProps, ...props }: S
             }
           }}
           onMouseLeave={() => {
-            if (isMobile || !open) {
+            if (isMobile || !open || keepOpenOnMouseLeave) {
               return;
             }
 

@@ -5,13 +5,13 @@ with rental_seed as (
   select
     'live'::text as category,
     'TVU'::text as group_name,
-    concat('TVU', tvu_no)::text as name,
+    concat('TVU-', tvu_no)::text as name,
     concat('live-rental-tvu-', tvu_no)::text as code,
     (1100 + tvu_no)::integer as sort_order,
     jsonb_build_object(
       'kind', 'tvu',
       'rental', true,
-      'rental_id', concat('TVU', tvu_no),
+      'rental_id', concat('TVU-', tvu_no),
       'rental_number', tvu_no
     ) as metadata
   from generate_series(21, 40) as tvu_no

@@ -405,6 +405,8 @@ function PortalSidebar({
   onOpenCustomerSupport,
   onCycleExperienceRole,
   onConfirmRoleExperience,
+  desktopSidebarPinned,
+  onDesktopSidebarPinnedChange,
   mobileTriggerProps,
 }: {
   pathname: string;
@@ -419,9 +421,11 @@ function PortalSidebar({
   onOpenCustomerSupport: () => void;
   onCycleExperienceRole: () => void;
   onConfirmRoleExperience: () => void;
+  desktopSidebarPinned: boolean;
+  onDesktopSidebarPinnedChange: (pinned: boolean) => void;
   mobileTriggerProps?: ButtonHTMLAttributes<HTMLButtonElement>;
 }) {
-  const { closeMobileSidebar, isMobile, openMobile } = useSidebar();
+  const { closeMobileSidebar, isMobile, openMobile, setOpen } = useSidebar();
   const shouldShowLogoutButton = Boolean(session);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const [mobileSubmenuTop, setMobileSubmenuTop] = useState<number | null>(null);
@@ -467,6 +471,26 @@ function PortalSidebar({
       setMobileSubmenuTop(null);
     }
   }, [openMobile]);
+
+  useEffect(() => {
+    if (isMobile || !desktopSidebarPinned || typeof document === "undefined") {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".portal-sidebar")) return;
+
+      setExpandedMenus({});
+      setMobileSubmenuTop(null);
+      onDesktopSidebarPinnedChange(false);
+      setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [desktopSidebarPinned, isMobile, onDesktopSidebarPinnedChange, setOpen]);
 
   useEffect(() => {
     if (!expandedMenuHref || typeof window === "undefined") {
@@ -520,12 +544,27 @@ function PortalSidebar({
 
   const handleMenuNavigate = () => {
     setExpandedMenus({});
+    onDesktopSidebarPinnedChange(false);
     closeMobileSidebar();
+  };
+
+  const handleSubmenuNavigate = () => {
+    if (isMobile) {
+      handleMenuNavigate();
+      return;
+    }
+
+    onDesktopSidebarPinnedChange(true);
+    setOpen(true);
   };
   const sidebarDensityClassName = sidebarEntries.length >= 10 ? "portal-sidebar--dense" : undefined;
 
   return (
-    <Sidebar className={sidebarDensityClassName} mobileTriggerProps={mobileTriggerProps}>
+    <Sidebar
+      className={sidebarDensityClassName}
+      keepOpenOnMouseLeave={!isMobile && desktopSidebarPinned}
+      mobileTriggerProps={mobileTriggerProps}
+    >
       <SidebarContent>
         <nav aria-label="주요 메뉴">
           <SidebarMenu>
@@ -576,6 +615,10 @@ function PortalSidebar({
                         aria-expanded={isExpanded}
                         onClick={() => {
                           setMobileSubmenuTop(null);
+                          onDesktopSidebarPinnedChange(!isExpanded && !isMobile);
+                          if (!isExpanded && !isMobile) {
+                            setOpen(true);
+                          }
                           setExpandedMenus(isExpanded ? {} : { [link.href]: true });
                         }}
                       >
@@ -607,7 +650,7 @@ function PortalSidebar({
                                   href={child.href}
                                   className={`portal-sidebar-sublink ${childActive ? "is-active" : ""}`.trim()}
                                   aria-current={pathname === child.href ? "page" : undefined}
-                                  onClick={handleMenuNavigate}
+                                  onClick={handleSubmenuNavigate}
                                 >
                                   <span>{child.label}</span>
                                 </Link>
@@ -624,7 +667,7 @@ function PortalSidebar({
                                             nestedChildActive ? "is-active" : ""
                                           }`.trim()}
                                           aria-current={nestedChildActive ? "page" : undefined}
-                                          onClick={handleMenuNavigate}
+                                          onClick={handleSubmenuNavigate}
                                         >
                                           <span>{nestedChild.label}</span>
                                         </Link>
@@ -715,6 +758,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const [mobileSidebarTriggerTop, setMobileSidebarTriggerTop] = useState(MOBILE_SIDEBAR_TRIGGER_DEFAULT_TOP);
   const [isDraggingMobileSidebarTrigger, setIsDraggingMobileSidebarTrigger] = useState(false);
   const [customerSupportOpen, setCustomerSupportOpen] = useState(false);
+  const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(false);
   const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>("member");
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
@@ -753,12 +797,18 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 
   useEffect(() => {
     if (isMobile) {
+      setDesktopSidebarPinned(false);
       setOpenMobile(false);
       return;
     }
 
+    if (desktopSidebarPinned) {
+      setOpen(true);
+      return;
+    }
+
     setOpen(false);
-  }, [isMobile, pathname, setOpen, setOpenMobile]);
+  }, [desktopSidebarPinned, isMobile, pathname, setOpen, setOpenMobile]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1029,6 +1079,8 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         onOpenCustomerSupport={() => setCustomerSupportOpen(true)}
         onCycleExperienceRole={cycleExperienceRole}
         onConfirmRoleExperience={confirmRoleExperience}
+        desktopSidebarPinned={desktopSidebarPinned}
+        onDesktopSidebarPinnedChange={setDesktopSidebarPinned}
         mobileTriggerProps={{
           className: isDraggingMobileSidebarTrigger ? "portal-sidebar-trigger--dragging" : undefined,
           onPointerDown: handleMobileSidebarTriggerPointerDown,

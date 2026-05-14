@@ -3000,13 +3000,13 @@ with rental_seed as (
   select
     'live'::text as category,
     'TVU'::text as group_name,
-    concat('TVU', tvu_no)::text as name,
+    concat('TVU-', tvu_no)::text as name,
     concat('live-rental-tvu-', tvu_no)::text as code,
     (1100 + tvu_no)::integer as sort_order,
     jsonb_build_object(
       'kind', 'tvu',
       'rental', true,
-      'rental_id', concat('TVU', tvu_no),
+      'rental_id', concat('TVU-', tvu_no),
       'rental_number', tvu_no
     ) as metadata
   from generate_series(21, 40) as tvu_no
@@ -3047,13 +3047,13 @@ with regional_seed as (
   select
     'live'::text as category,
     'TVU'::text as group_name,
-    concat('TVU', tvu_no)::text as name,
+    concat('TVU-', tvu_no)::text as name,
     concat('live-regional-tvu-', tvu_no)::text as code,
     (1060 + display_order)::integer as sort_order,
     jsonb_build_object(
       'kind', 'tvu',
       'regional_transmission', true,
-      'regional_id', concat('TVU', tvu_no),
+      'regional_id', concat('TVU-', tvu_no),
       'regional_number', tvu_no,
       'borrowable', false
     ) as metadata
