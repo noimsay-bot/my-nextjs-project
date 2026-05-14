@@ -1079,6 +1079,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
   const isPageMobileFullScheduleView = !isHomePreview && scheduleLayoutMode === "mobile" && mobilePageViewMode === "full";
   const isMobilePageSchedule = !isHomePreview && scheduleLayoutMode === "mobile";
+  const isHomeWeekFitView = isHomePreview && scheduleLayoutMode === "desktop";
 
   const activeHiddenMonthKeys = hideMode ? draftHiddenPublishedMonthKeys : hiddenPublishedMonthKeys;
   const activeItems = useMemo(() => {
@@ -1302,7 +1303,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       : scheduleLayoutMode === "tablet"
         ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
-  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayPreviewView ? " schedule-published-panel--home-three-day" : ""}${isHomePreview && !isHomeThreeDayPreviewView ? " schedule-published-panel--home-week-fit" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
+  const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayPreviewView ? " schedule-published-panel--home-three-day" : ""}${isHomeWeekFitView ? " schedule-published-panel--home-week-fit" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
   const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
   const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
   const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
@@ -2345,8 +2346,20 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 <FittedNameText
                                                   text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                                   className="schedule-name-chip__text"
-                                                  minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
-                                                  maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                                  minFontSize={shouldAutoFitSchedule || isCompactThreeDayView || isHomeWeekFitView ? 3.5 : 9}
+                                                  maxFontSize={
+                                                    isCompactThreeDayView
+                                                      ? 10
+                                                      : isHomeWeekFitView
+                                                        ? hasTaggedDisplayName
+                                                          ? 7
+                                                          : 8
+                                                        : isCompactMonthlyView
+                                                          ? 16
+                                                          : isCompactDailyView
+                                                            ? 16
+                                                            : 18
+                                                  }
                                                   style={{
                                                     display: "inline-block",
                                                     flex: "0 1 auto",
@@ -2726,8 +2739,20 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                         <FittedNameText
                                           text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                           className="schedule-name-chip__text"
-                                          minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
-                                          maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                          minFontSize={shouldAutoFitSchedule || isCompactThreeDayView || isHomeWeekFitView ? 3.5 : 9}
+                                          maxFontSize={
+                                            isCompactThreeDayView
+                                              ? 10
+                                              : isHomeWeekFitView
+                                                ? hasTaggedDisplayName
+                                                  ? 7
+                                                  : 8
+                                                : isCompactMonthlyView
+                                                  ? 16
+                                                  : isCompactDailyView
+                                                    ? 16
+                                                    : 18
+                                          }
                                           style={{
                                             display: "inline-block",
                                             flex: "0 1 auto",
