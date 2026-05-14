@@ -288,7 +288,7 @@ function isBorrowableEquipmentItem(item: EquipmentItem) {
 }
 
 function hasRentalTvuManagerRole(role: SessionUser["role"] | null | undefined) {
-  return role === "desk" || role === "team_lead";
+  return role === "desk" || role === "team_lead" || role === "admin";
 }
 
 const hiddenEquipmentChoiceCodes = new Set([
@@ -1903,6 +1903,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
   const canManageRepair = Boolean(session?.approved && hasDeskAccess(session.role));
   const canManageRentalTvu = Boolean(session?.approved && hasRentalTvuManagerRole(session.actualRole));
+  const canViewRegionalTransmissionItems = Boolean(session?.approved && hasDeskAccess(session.actualRole));
   const showEquipmentStatusLink = canViewEquipmentStatus(session);
   const highlightDateKey = useMemo(() => getTodayDateKey(), []);
 
@@ -2537,13 +2538,15 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                 rentalTvuSelectedIds={rentalTvuSelectionIds}
                 onRentalTvuToggle={toggleRentalTvuSelection}
               />
-              <RegionalTransmissionSection
-                items={activeRegionalTransmissionItems}
-                currentByItemId={currentByItemId}
-                onToggle={repairMode ? toggleRepairDraft : () => undefined}
-                repairMode={repairMode}
-                repairDraftByItemId={repairDraftByItemId}
-              />
+              {canViewRegionalTransmissionItems ? (
+                <RegionalTransmissionSection
+                  items={activeRegionalTransmissionItems}
+                  currentByItemId={currentByItemId}
+                  onToggle={repairMode ? toggleRepairDraft : () => undefined}
+                  repairMode={repairMode}
+                  repairDraftByItemId={repairDraftByItemId}
+                />
+              ) : null}
               {canManageRentalTvu ? (
                 <RentalTvuSection
                   inactiveItems={inactiveRentalTvuItems}

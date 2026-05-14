@@ -400,7 +400,7 @@ function assertCanManageLiveStatus() {
 }
 
 function hasRentalTvuManagerRole(role: string | null | undefined) {
-  return role === "desk" || role === "team_lead";
+  return role === "desk" || role === "team_lead" || role === "admin";
 }
 
 function assertCanManageRentalTvu() {

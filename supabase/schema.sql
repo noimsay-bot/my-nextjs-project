@@ -3119,7 +3119,7 @@ begin
   end if;
 
   if public.current_profile_approved() is distinct from true
-     or public.current_profile_role() not in ('desk', 'team_lead') then
+     or public.current_profile_role() not in ('desk', 'team_lead', 'admin') then
     raise exception '임대 장비 관리 권한이 없습니다.';
   end if;
 
@@ -3225,7 +3225,7 @@ begin
   end if;
 
   if public.current_profile_approved() is distinct from true
-     or public.current_profile_role() not in ('desk', 'team_lead') then
+     or public.current_profile_role() not in ('desk', 'team_lead', 'admin') then
     raise exception '임대 장비 관리 권한이 없습니다.';
   end if;
 
