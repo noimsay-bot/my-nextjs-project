@@ -304,3 +304,61 @@ export async function markCustomerSupportMessageProcessed(messageId: string) {
 
   return { ok: true as const, message: "처리완료로 변경했습니다." };
 }
+
+export async function deleteCustomerSupportMessage(messageId: string) {
+  const session = await getPortalSession();
+  if (!session?.approved || (session.role !== "admin" && session.role !== "team_lead")) {
+    return {
+      ok: false as const,
+      message: "고객센터 접수 내용 삭제 권한이 없습니다.",
+    };
+  }
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { data, error: selectError } = await supabase
+      .from(CUSTOMER_SUPPORT_TABLE)
+      .select("attachments")
+      .eq("id", messageId)
+      .maybeSingle<{ attachments: unknown }>();
+
+    if (selectError) {
+      return {
+        ok: false as const,
+        message: getSupabaseStorageErrorMessage(selectError, CUSTOMER_SUPPORT_TABLE),
+      };
+    }
+
+    const attachmentPaths = normalizeCustomerSupportAttachments(data?.attachments).map((attachment) => attachment.path);
+    if (attachmentPaths.length > 0) {
+      const { error: removeError } = await supabase.storage
+        .from(CUSTOMER_SUPPORT_ATTACHMENT_BUCKET)
+        .remove(attachmentPaths);
+      if (removeError) {
+        return {
+          ok: false as const,
+          message: getSupabaseStorageErrorMessage(removeError, CUSTOMER_SUPPORT_ATTACHMENT_BUCKET),
+        };
+      }
+    }
+
+    const { error: deleteError } = await supabase
+      .from(CUSTOMER_SUPPORT_TABLE)
+      .delete()
+      .eq("id", messageId);
+
+    if (deleteError) {
+      return {
+        ok: false as const,
+        message: getSupabaseStorageErrorMessage(deleteError, CUSTOMER_SUPPORT_TABLE),
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "고객센터 접수 내용을 삭제하지 못했습니다.",
+    };
+  }
+
+  return { ok: true as const, message: "고객센터 접수 내용을 삭제했습니다." };
+}

@@ -11,6 +11,7 @@ import {
 } from "@/lib/team-lead/storage";
 import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
 import {
+  deleteCustomerSupportMessage,
   getAdminCustomerSupportMessages,
   markCustomerSupportMessageProcessed,
   type CustomerSupportMessageWorkspace,
@@ -295,6 +296,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
   const [processingSupportId, setProcessingSupportId] = useState<string | null>(null);
+  const [deletingSupportId, setDeletingSupportId] = useState<string | null>(null);
+  const [expandedProcessedSupportIds, setExpandedProcessedSupportIds] = useState<Set<string>>(() => new Set());
   const [draftRoles, setDraftRoles] = useState<Record<string, RoleOption>>({});
 
   async function refresh() {
@@ -357,8 +360,45 @@ export default function AdminPage() {
       setMessage(result.message);
       return;
     }
+    setExpandedProcessedSupportIds((current) => {
+      const next = new Set(current);
+      next.delete(messageId);
+      return next;
+    });
     setMessage(result.message);
     await refresh();
+  }
+
+  async function handleCustomerSupportDelete(messageId: string) {
+    const confirmed = window.confirm("이 고객센터 접수 내용을 삭제하시겠습니까?");
+    if (!confirmed) return;
+    setDeletingSupportId(messageId);
+    setMessage("");
+    const result = await deleteCustomerSupportMessage(messageId);
+    setDeletingSupportId(null);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setExpandedProcessedSupportIds((current) => {
+      const next = new Set(current);
+      next.delete(messageId);
+      return next;
+    });
+    setMessage(result.message);
+    await refresh();
+  }
+
+  function toggleProcessedCustomerSupport(messageId: string) {
+    setExpandedProcessedSupportIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
   }
 
   return (
@@ -381,74 +421,106 @@ export default function AdminPage() {
           ) : null}
           <div style={{ display: "grid", gap: 10 }}>
             {customerSupport.items.length > 0 ? (
-              customerSupport.items.map((item) => (
-                <article
-                  key={item.id}
-                  style={{
-                    display: "grid",
-                    gap: 8,
-                    padding: 14,
-                    borderRadius: 16,
-                    border: "1px solid rgba(255,255,255,.08)",
-                    background: "rgba(255,255,255,.03)",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <strong>익명 접수</strong>
-                      <span className={`customer-support-status customer-support-status--${item.status}`}>
-                        {item.status === "processed" ? "처리완료" : "접수"}
-                      </span>
-                    </div>
-                    <span className="muted">{formatDateTime(item.createdAt)}</span>
-                  </div>
-                  <p
+              customerSupport.items.map((item) => {
+                const isProcessed = item.status === "processed";
+                const isExpanded = !isProcessed || expandedProcessedSupportIds.has(item.id);
+                const isDeleting = deletingSupportId === item.id;
+                return (
+                  <article
+                    key={item.id}
                     style={{
-                      margin: 0,
-                      lineHeight: 1.65,
-                      whiteSpace: "pre-wrap",
-                      overflowWrap: "anywhere",
+                      display: "grid",
+                      gap: 8,
+                      padding: 14,
+                      borderRadius: 16,
+                      border: "1px solid rgba(255,255,255,.08)",
+                      background: "rgba(255,255,255,.03)",
                     }}
                   >
-                    {item.body}
-                  </p>
-                  {item.attachments.length > 0 ? (
-                    <div className="customer-support-admin-attachments">
-                      {item.attachments.map((attachment) => (
-                        <a
-                          key={attachment.path}
-                          href={attachment.url ?? undefined}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-disabled={!attachment.url}
-                        >
-                          {attachment.url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={attachment.url} alt={attachment.name} />
-                          ) : (
-                            <span>사진을 불러올 수 없습니다.</span>
-                          )}
-                        </a>
-                      ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <strong>익명 접수</strong>
+                        <span className={`customer-support-status customer-support-status--${item.status}`}>
+                          {isProcessed ? "처리완료" : "접수"}
+                        </span>
+                      </div>
+                      <span className="muted">{formatDateTime(item.createdAt)}</span>
                     </div>
-                  ) : null}
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                    <span className="muted">
-                      {item.status === "processed"
-                        ? `처리 ${item.processedAt ? formatDateTime(item.processedAt) : ""}${item.processedByName ? ` · ${item.processedByName}` : ""}`
-                        : "처리 대기"}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn primary"
-                      disabled={item.status === "processed" || processingSupportId === item.id}
-                      onClick={() => void handleCustomerSupportProcessed(item.id)}
-                    >
-                      {item.status === "processed" ? "처리완료됨" : processingSupportId === item.id ? "처리 중" : "처리완료"}
-                    </button>
-                  </div>
-                </article>
-              ))
+                    {isExpanded ? (
+                      <>
+                        <p
+                          style={{
+                            margin: 0,
+                            lineHeight: 1.65,
+                            whiteSpace: "pre-wrap",
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          {item.body}
+                        </p>
+                        {item.attachments.length > 0 ? (
+                          <div className="customer-support-admin-attachments">
+                            {item.attachments.map((attachment) => (
+                              <a
+                                key={attachment.path}
+                                href={attachment.url ?? undefined}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-disabled={!attachment.url}
+                              >
+                                {attachment.url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={attachment.url} alt={attachment.name} />
+                                ) : (
+                                  <span>사진을 불러올 수 없습니다.</span>
+                                )}
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.body}
+                      </span>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <span className="muted">
+                        {isProcessed
+                          ? `처리 ${item.processedAt ? formatDateTime(item.processedAt) : ""}${item.processedByName ? ` · ${item.processedByName}` : ""}`
+                          : "처리 대기"}
+                      </span>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {isProcessed ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => toggleProcessedCustomerSupport(item.id)}
+                          >
+                            {isExpanded ? "접기" : "펼치기"}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={isDeleting || processingSupportId === item.id}
+                          onClick={() => void handleCustomerSupportDelete(item.id)}
+                        >
+                          {isDeleting ? "삭제 중" : "삭제"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn primary"
+                          disabled={isProcessed || processingSupportId === item.id || isDeleting}
+                          onClick={() => void handleCustomerSupportProcessed(item.id)}
+                        >
+                          {isProcessed ? "처리완료됨" : processingSupportId === item.id ? "처리 중" : "처리완료"}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })
             ) : (
               <div className="status note">{loading ? "불러오는 중입니다." : "접수된 고객센터 내용이 없습니다."}</div>
             )}

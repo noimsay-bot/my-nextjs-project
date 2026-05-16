@@ -1888,6 +1888,13 @@ to authenticated
 using (public.is_admin())
 with check (public.is_admin());
 
+drop policy if exists "customer_support_messages_delete_admins" on public.customer_support_messages;
+create policy "customer_support_messages_delete_admins"
+on public.customer_support_messages
+for delete
+to authenticated
+using (public.is_admin());
+
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'customer-support-attachments',
@@ -1932,6 +1939,16 @@ using (
   bucket_id = 'customer-support-attachments'
   and public.current_profile_approved() = true
   and (storage.foldername(name))[1] = auth.uid()::text
+);
+
+drop policy if exists "customer_support_attachments_delete_admins" on storage.objects;
+create policy "customer_support_attachments_delete_admins"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'customer-support-attachments'
+  and public.is_admin()
 );
 
 create or replace function public.mark_customer_support_message_processed(

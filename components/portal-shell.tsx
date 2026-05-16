@@ -136,9 +136,8 @@ const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"
   { kind: "link", href: "/community" },
   { kind: "link", href: "/schedule" },
   { kind: "link", href: "/team-lead" },
-  { kind: "link", href: "/admin" },
   { kind: "action", id: "customer-support" },
-  { kind: "action", id: "theme" },
+  { kind: "link", href: "/admin" },
 ];
 
 function withVisibleChildren(link: PortalNavLink, childHrefs: string[]) {
@@ -740,6 +739,16 @@ function PortalSidebar({
               ) : null}
             </div>
           ) : null}
+          <button
+            type="button"
+            className="btn portal-sidebar-action"
+            onClick={() => {
+              closeMobileSidebar();
+              onCycleTheme();
+            }}
+          >
+            모드변경
+          </button>
         </div>
       </SidebarFooter>
     </Sidebar>
