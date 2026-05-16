@@ -18,8 +18,14 @@ const PublishedSchedulesPanel = dynamic(
   { ssr: false },
 );
 
+const LiveEquipmentStatusHomePanel = dynamic(
+  () => import("@/components/equipment/equipment-pages").then((module) => module.LiveEquipmentStatusHomePanel),
+  { ssr: false },
+);
+
 export function HomeDeferredWidgets() {
   const [showSchedules, setShowSchedules] = useState(false);
+  const [showLiveEquipmentStatus, setShowLiveEquipmentStatus] = useState(false);
   const [showPopup, setShowPopup] = useState(false);
 
   useEffect(() => {
@@ -27,10 +33,15 @@ export function HomeDeferredWidgets() {
 
     const isMobileLike = window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth <= 820;
     const scheduleDelay = isMobileLike ? 420 : 120;
+    const liveEquipmentDelay = isMobileLike ? 760 : 260;
     const popupDelay = isMobileLike ? 280 : 80;
     const scheduleTimer = window.setTimeout(() => {
       setShowSchedules(true);
     }, scheduleDelay);
+
+    const liveEquipmentTimer = window.setTimeout(() => {
+      setShowLiveEquipmentStatus(true);
+    }, liveEquipmentDelay);
 
     const popupTimer = window.setTimeout(() => {
       setShowPopup(true);
@@ -38,6 +49,7 @@ export function HomeDeferredWidgets() {
 
     return () => {
       window.clearTimeout(scheduleTimer);
+      window.clearTimeout(liveEquipmentTimer);
       window.clearTimeout(popupTimer);
     };
   }, []);
@@ -51,6 +63,7 @@ export function HomeDeferredWidgets() {
       />
       <HomeNewsPortal />
       {showSchedules ? <PublishedSchedulesPanel mode="home" /> : null}
+      {showLiveEquipmentStatus ? <LiveEquipmentStatusHomePanel /> : null}
       {showPopup ? <HomePopupNoticeModal /> : null}
     </>
   );

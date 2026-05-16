@@ -56,6 +56,10 @@ const links: PortalNavLink[] = [
   {
     href: "/me",
     label: "마이페이지",
+    children: [
+      { href: "/me", label: "내 일정 보기" },
+      { href: "/me/work", label: "내 일정" },
+    ],
   },
   { href: "/work-schedule", label: "근무표" },
   { href: "/restaurants", label: "내 주변 맛집" },
@@ -252,6 +256,17 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
       );
     case "outlet":
+      return visibleRoleLinks.filter(
+        (link) =>
+          link.href === "/me" ||
+          link.href === "/community" ||
+          link.href === "/work-schedule" ||
+          link.href === "/restaurants" ||
+          link.href === "/equipment" ||
+          (link.href === "/vacation" && vacationRequestOpen) ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
+          (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
+      );
     case "observer":
       return visibleRoleLinks.filter(
         (link) =>
@@ -267,6 +282,7 @@ function getVisibleLinks(
       return visibleRoleLinks.filter(
         (link) =>
           link.href === "/" ||
+          link.href === "/me" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
@@ -286,6 +302,7 @@ function getVisibleLinks(
     case "desk":
       return visibleRoleLinks.filter(
         (link) =>
+          link.href === "/me" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -298,6 +315,7 @@ function getVisibleLinks(
     case "team_lead":
       return visibleRoleLinks.filter(
         (link) =>
+          link.href === "/me" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||

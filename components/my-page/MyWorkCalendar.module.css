@@ -1,0 +1,532 @@
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+.headerBar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.header {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.title,
+.detailTitle {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.title {
+  font-size: 28px;
+}
+
+.detailTitle {
+  margin-top: 8px;
+  font-size: 24px;
+}
+
+.description {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.headerActions,
+.calendarToolbar,
+.monthControls,
+.summary,
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.headerActions {
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.headerActions > a {
+  min-height: 44px;
+  align-self: stretch;
+}
+
+.calendarToolbar,
+.detailHead {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.monthField {
+  display: grid;
+  min-width: 172px;
+  font-weight: 800;
+}
+
+.monthField :global(.field-input) {
+  min-height: 44px;
+  height: 44px;
+}
+
+.summary,
+.detailSummary {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.summary span,
+.detailSummary {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.weekday {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.weekday:nth-child(7) {
+  border-right: 0;
+}
+
+.weekday:nth-child(1),
+.weekday:nth-child(7) {
+  background: rgba(248, 113, 113, 0.13);
+  color: #fecaca;
+}
+
+.dayCell {
+  min-width: 0;
+  min-height: 136px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dayCell:nth-child(7n) {
+  border-right: 0;
+}
+
+.dayCell:hover {
+  background: rgba(125, 211, 252, 0.12);
+}
+
+.dayCellMuted {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  opacity: 0.62;
+}
+
+.dayCellRed {
+  background: rgba(248, 113, 113, 0.18);
+}
+
+.dayCellRed:hover {
+  background: rgba(248, 113, 113, 0.25);
+}
+
+.dayCellSelected {
+  outline: 3px solid rgba(56, 189, 248, 0.65);
+  outline-offset: -3px;
+  background: rgba(14, 165, 233, 0.16);
+}
+
+.dayCellRed.dayCellSelected {
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.dayCellToday {
+  box-shadow: inset 0 0 0 3px rgba(125, 211, 252, 0.68);
+  background: rgba(14, 165, 233, 0.14);
+}
+
+.dayCellToday.dayCellSelected {
+  outline: 3px solid rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 0 0 4px rgba(56, 189, 248, 0.82);
+}
+
+.dayHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dayNumber {
+  width: fit-content;
+  min-width: 45px;
+  min-height: 45px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 23px;
+  font-weight: 900;
+}
+
+.dayContent {
+  min-width: 0;
+  display: flex;
+  align-content: flex-start;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.workChip,
+.scheduleChip,
+.customTextChip,
+.moreChip {
+  max-width: 100%;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workChip {
+  border: 1px solid rgba(125, 211, 252, 0.44);
+  background: rgba(14, 165, 233, 0.18);
+  color: #e0f2fe;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 18px;
+}
+
+.scheduleChip {
+  border: 1px solid rgba(167, 139, 250, 0.44);
+  background: rgba(124, 58, 237, 0.16);
+  color: #ede9fe;
+}
+
+.customTextChip {
+  border: 1px solid rgba(134, 239, 172, 0.48);
+  background: rgba(187, 247, 208, 0.24);
+  color: #dcfce7;
+  cursor: context-menu;
+}
+
+.customTextActionGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.customTextChipSelected {
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.24);
+}
+
+.customTextDeleteButton {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border: 1px solid rgba(252, 165, 165, 0.55);
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.22);
+  color: #fee2e2;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.customTextDeleteButton:hover {
+  background: rgba(239, 68, 68, 0.32);
+}
+
+.customTextInput {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid rgba(134, 239, 172, 0.58);
+  border-radius: 8px;
+  background: rgba(187, 247, 208, 0.24);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  outline: none;
+}
+
+.customTextInput:focus {
+  box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.22);
+}
+
+.moreChip {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.emptyMark {
+  color: var(--muted);
+  font-weight: 900;
+  opacity: 0.42;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: 14px;
+}
+
+.detailSection {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.detailSection h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+}
+
+.detailList {
+  display: grid;
+  gap: 8px;
+}
+
+.detailItem,
+.scheduleDetailItem {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.detailItem strong,
+.scheduleDetailItem strong {
+  color: var(--text);
+}
+
+.detailItem span,
+.scheduleDetailItem span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.scheduleDetailItem p {
+  margin: 4px 0 0;
+  color: var(--text);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.customTextDetailItem {
+  border-color: rgba(134, 239, 172, 0.38);
+  background: rgba(187, 247, 208, 0.16);
+}
+
+.customTextDetailItemSelected {
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.16);
+}
+
+:global(html[data-theme="light"]) .dayCell,
+:global(html[data-theme="light"]) .detailSection {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+:global(html[data-theme="light"]) .dayCellMuted {
+  background: rgba(248, 250, 252, 0.76);
+}
+
+:global(html[data-theme="light"]) .weekday:nth-child(1),
+:global(html[data-theme="light"]) .weekday:nth-child(7) {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+:global(html[data-theme="light"]) .dayCellRed {
+  background: #fee2e2;
+}
+
+:global(html[data-theme="light"]) .dayCellRed:hover {
+  background: #fecaca;
+}
+
+:global(html[data-theme="light"]) .workChip {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+:global(html[data-theme="light"]) .scheduleChip {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+:global(html[data-theme="light"]) .customTextChip,
+:global(html[data-theme="light"]) .customTextInput {
+  background: #dcfce7;
+  color: #166534;
+}
+
+:global(html[data-theme="light"]) .customTextChipSelected {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+
+:global(html[data-theme="light"]) .customTextDeleteButton {
+  border-color: rgba(185, 28, 28, 0.24);
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+:global(html[data-theme="light"]) .customTextDetailItem {
+  background: #dcfce7;
+}
+
+:global(html[data-theme="light"]) .detailItem,
+:global(html[data-theme="light"]) .scheduleDetailItem {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: #f8fafc;
+}
+
+:global(html[data-theme="light"]) .scheduleDetailItem.customTextDetailItem {
+  border-color: rgba(22, 101, 52, 0.18);
+  background: #dcfce7;
+}
+
+:global(html[data-theme="light"]) .scheduleDetailItem.customTextDetailItemSelected {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+
+@media (max-width: 900px) {
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dayCell {
+    min-height: 116px;
+    padding: 8px;
+  }
+}
+
+@media (max-width: 640px) {
+  .title {
+    font-size: 24px;
+  }
+
+  .headerActions,
+  .monthField,
+  .monthControls,
+  .monthControls button {
+    width: 100%;
+  }
+
+  .headerActions > a {
+    flex: 1 1 130px;
+  }
+
+  .calendarGrid {
+    border-radius: 6px;
+  }
+
+  .weekday {
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .dayCell {
+    min-height: 82px;
+    gap: 4px;
+    padding: 5px;
+  }
+
+  .dayNumber {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 3px 9px;
+    font-size: 18px;
+  }
+
+  .workChip,
+  .scheduleChip,
+  .customTextChip,
+  .moreChip {
+    max-width: 100%;
+    min-height: 18px;
+    padding: 2px 5px;
+    font-size: 10px;
+  }
+
+  .workChip {
+    min-height: 27px;
+    padding: 3px 8px;
+    font-size: 15px;
+  }
+
+  .customTextInput {
+    min-height: 26px;
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+
+  .customTextDeleteButton {
+    min-height: 18px;
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchMyScheduleAssignmentsWithPartnerInfo,
@@ -252,13 +253,21 @@ export function MyAssignmentsPage() {
         <div className="panel-pad">
           <div className={styles.toolbar}>
             <div className={styles.header}>
-              <span className="chip">내 일정</span>
-              <h1 className={styles.title}>{year}년 {Number(month)}월 내 일정</h1>
+              <span className="chip">내 일정 보기</span>
+              <h1 className={styles.title}>{year}년 {Number(month)}월 내 일정 보기</h1>
             </div>
-            <label className={styles.field}>
-              <span>월 선택</span>
-              <input className="field-input" type="month" value={monthKey} onChange={(event) => setMonthKey(event.target.value)} />
-            </label>
+            <div className={styles.actions}>
+              <Link href="/me" className="btn primary">
+                내 일정 보기
+              </Link>
+              <Link href="/me/work" className="btn">
+                내 근무
+              </Link>
+              <label className={styles.field}>
+                <span>월 선택</span>
+                <input className="field-input" type="month" value={monthKey} onChange={(event) => setMonthKey(event.target.value)} />
+              </label>
+            </div>
           </div>
         </div>
       </article>

@@ -730,6 +730,36 @@
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
 }
 
+.liveStatusHomeBoard {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--panel-shadow);
+}
+
+.liveStatusHomeBoard .liveStatusTableWrap {
+  border-color: var(--line);
+  background: transparent;
+}
+
+.liveStatusHomeBoard .liveStatusTable {
+  color: var(--text);
+}
+
+.liveStatusHomeBoard .liveStatusTable td {
+  border-top-color: var(--line);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.liveStatusHomeBoard .liveStatusTable tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.liveStatusHomeBoard .liveStatusTable .itemNameStack strong,
+.liveStatusHomeBoard .liveStatusCellValue {
+  color: var(--text);
+}
+
 .liveStatusTop {
   display: grid;
   gap: 18px;
