@@ -116,8 +116,8 @@ function buildMyWorkEvents(items: PublishedScheduleItem[], username: string) {
         events.push({
           id: `${day.dateKey}:header`,
           dateKey: day.dateKey,
-          category: "대표",
-          label: "대표",
+          category: "데스크",
+          label: "데스크",
           name: day.headerName,
         });
       }
