@@ -36,7 +36,9 @@ type CustomTextMap = Record<string, string[]>;
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 const MONTH_GRID_DAYS = 42;
 const CUSTOM_TEXT_STORAGE_PREFIX = "jtbc-my-work-calendar-custom-text-v1";
+const HELP_DISMISSED_STORAGE_PREFIX = "jtbc-my-work-calendar-help-dismissed-v1";
 const MAX_CUSTOM_TEXTS_PER_DAY = 5;
+const CUSTOM_TEXT_HELP_MESSAGE = "날짜를 더블 클릭하면 입력할 수 있습니다. 입력 후 삭제는 오른쪽 클릭해주세요.";
 
 function getTodayDateKey() {
   return formatDateKey(new Date());
@@ -196,6 +198,20 @@ function getCustomTextStorageKey(sessionId: string | null | undefined) {
   return `${CUSTOM_TEXT_STORAGE_PREFIX}:${sessionId || "anonymous"}`;
 }
 
+function getHelpDismissedStorageKey(sessionId: string | null | undefined) {
+  return `${HELP_DISMISSED_STORAGE_PREFIX}:${sessionId || "anonymous"}`;
+}
+
+function readHelpDismissed(sessionId: string | null | undefined) {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(getHelpDismissedStorageKey(sessionId)) === "1";
+}
+
+function writeHelpDismissed(sessionId: string | null | undefined) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(getHelpDismissedStorageKey(sessionId), "1");
+}
+
 function normalizeCustomTextList(value: unknown) {
   const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   return values
@@ -250,6 +266,7 @@ export function MyWorkCalendarPage() {
   const [customTextDraft, setCustomTextDraft] = useState("");
   const [selectedCustomTextKey, setSelectedCustomTextKey] = useState<string | null>(null);
   const [deleteCustomTextKey, setDeleteCustomTextKey] = useState<string | null>(null);
+  const [showHelpDialog, setShowHelpDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<MessageState | null>(null);
 
@@ -261,6 +278,7 @@ export function MyWorkCalendarPage() {
     setCustomTextDraft("");
     setSelectedCustomTextKey(null);
     setDeleteCustomTextKey(null);
+    setShowHelpDialog(!readHelpDismissed(session?.id));
   }, [session?.id]);
 
   useEffect(() => {
@@ -394,6 +412,11 @@ export function MyWorkCalendarPage() {
     }
   };
 
+  const dismissHelpDialog = () => {
+    writeHelpDismissed(session?.id);
+    setShowHelpDialog(false);
+  };
+
   return (
     <section className={styles.page}>
       <article className="panel">
@@ -402,7 +425,7 @@ export function MyWorkCalendarPage() {
             <div className={styles.header}>
               <span className="chip">내 일정</span>
               <h1 className={styles.title}>{getMonthTitle(monthKey)} 내 일정</h1>
-              <p className={styles.description}>날짜를 더블 클릭하면 입력할 수 있습니다. 입력 후 삭제는 오른쪽 클릭해주세요.</p>
+              <p className={styles.description}>{CUSTOM_TEXT_HELP_MESSAGE}</p>
             </div>
             <div className={styles.headerActions}>
               <Link href="/me" className="btn">
@@ -636,6 +659,18 @@ export function MyWorkCalendarPage() {
           </div>
         </div>
       </article>
+
+      {showHelpDialog ? (
+        <div className={styles.helpBackdrop} role="presentation">
+          <section className={styles.helpDialog} role="dialog" aria-modal="true" aria-labelledby="my-work-help-title">
+            <h2 id="my-work-help-title">내 일정 입력 안내</h2>
+            <p>{CUSTOM_TEXT_HELP_MESSAGE}</p>
+            <button type="button" className="btn primary" onClick={dismissHelpDialog}>
+              확인
+            </button>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -39,6 +39,44 @@
   line-height: 1.6;
 }
 
+.helpBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(8px);
+}
+
+.helpDialog {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--panel-shadow);
+}
+
+.helpDialog h2,
+.helpDialog p {
+  margin: 0;
+}
+
+.helpDialog h2 {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.helpDialog p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 .headerActions,
 .calendarToolbar,
 .monthControls,
