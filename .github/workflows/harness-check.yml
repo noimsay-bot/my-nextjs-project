@@ -1,0 +1,35 @@
+name: Harness Check
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Harness
+        run: npm run harness:all
+
+      - name: Generated docs are committed
+        run: git diff --exit-code -- AGENTS.md docs package.json scripts/harness .codex/agents .github/workflows/harness-check.yml
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

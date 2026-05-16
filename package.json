@@ -7,7 +7,16 @@
     "start": "next start",
     "lint": "eslint .",
     "debug:rebalance": "ts-node --project scripts/tsconfig.debug.json -r tsconfig-paths/register scripts/replay-rebalance.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "harness:routes": "node scripts/harness/generate-route-map.mjs",
+    "harness:env": "node scripts/harness/generate-env-map.mjs",
+    "harness:supabase": "node scripts/harness/generate-supabase-map.mjs",
+    "harness:scripts": "node scripts/harness/generate-package-scripts.mjs",
+    "harness:generate": "npm run harness:routes && npm run harness:env && npm run harness:supabase && npm run harness:scripts",
+    "harness:docs": "node scripts/harness/check-doc-links.mjs && node scripts/harness/check-generated-freshness.mjs",
+    "harness:boundaries": "node scripts/harness/check-boundaries.mjs",
+    "harness:quality": "node scripts/harness/quality-score.mjs",
+    "harness:all": "node scripts/harness/run-harness.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.0",
