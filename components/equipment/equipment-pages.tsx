@@ -96,6 +96,29 @@ const LIVE_TRS_OPTION_SET = new Set<string>(LIVE_TRS_OPTIONS);
 const LIVE_ACCESSORY_GROUPS: readonly LiveAccessoryGroupKey[] = ["pin_mic", "distributor"];
 const EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX = "jtbc-equipment-borrow-selection-v1";
 const EQUIPMENT_BORROW_SELECTION_EVENT = "jtbc-equipment-borrow-selection-change";
+const HIDDEN_ENG_SET_PROFILE_NAMES = new Set([
+  "공영수",
+  "김대호",
+  "김미란",
+  "김상현",
+  "김영묵",
+  "손준수",
+  "신승규",
+  "영취공용",
+  "오반장",
+  "유연경",
+  "이경",
+  "이동현",
+  "이주현",
+  "이현일",
+  "장후원",
+  "주수영",
+  "홍승재",
+]);
+
+function isHiddenEngSetProfile(profile: EquipmentProfile) {
+  return HIDDEN_ENG_SET_PROFILE_NAMES.has(profile.name.trim());
+}
 
 function getBorrowSelectionStorageKey(profileId: string | null | undefined) {
   return `${EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX}:${profileId || "anonymous"}`;
@@ -1929,7 +1952,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       ]);
       setCurrentLoanItems(nextCurrent);
       setItems(nextItems);
-      setProfiles(nextProfiles);
+      setProfiles(isEngSetPage ? nextProfiles.filter((profile) => !isHiddenEngSetProfile(profile)) : nextProfiles);
       setEngHighlights(nextHighlights);
       setSession(getSession());
     } catch (error) {
