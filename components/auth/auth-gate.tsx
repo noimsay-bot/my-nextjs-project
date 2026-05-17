@@ -29,6 +29,7 @@ function authLog(stage: string, details: Record<string, unknown>) {
 }
 
 const AUTH_GATE_PENDING_TIMEOUT_MS = 6_000;
+const MY_PAGE_ACCESS_ROLES = new Set(["member", "outlet", "partner", "desk", "team_lead", "admin"]);
 
 function hasAccess(
   pathname: string,
@@ -53,7 +54,7 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/me")) {
-    return session.role === "member" || (session.role === "admin" && session.actualRole === "admin");
+    return MY_PAGE_ACCESS_ROLES.has(session.role);
   }
 
   if (pathname.startsWith("/partner")) {
