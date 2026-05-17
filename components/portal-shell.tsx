@@ -57,8 +57,8 @@ const links: PortalNavLink[] = [
     href: "/me",
     label: "마이페이지",
     children: [
-      { href: "/me", label: "내 일정 보기" },
       { href: "/me/work", label: "내 일정" },
+      { href: "/me", label: "법카문구" },
     ],
   },
   { href: "/work-schedule", label: "근무표" },
