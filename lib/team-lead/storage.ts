@@ -14,7 +14,7 @@ import {
 } from "@/lib/schedule/constants";
 import { getPublishedSchedules } from "@/lib/schedule/published";
 import { readStoredScheduleState } from "@/lib/schedule/storage";
-import { DaySchedule, GeneratedSchedule, ScheduleAssignmentNameTag } from "@/lib/schedule/types";
+import { DaySchedule, GeneratedSchedule, ScheduleAssignmentNameTag, ScheduleBigEvent } from "@/lib/schedule/types";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -1440,12 +1440,76 @@ function addUniqueName(target: string[], name: string) {
   target.push(trimmed);
 }
 
+function isScheduleAssignmentDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day;
+}
+
+function isDateInBigEventAssignmentRange(
+  dateKey: string,
+  assignment: ScheduleBigEvent["assignments"][number],
+) {
+  const startDate = assignment.start_date.trim();
+  const endDate = assignment.end_date.trim();
+  return (
+    isScheduleAssignmentDateKey(dateKey) &&
+    isScheduleAssignmentDateKey(startDate) &&
+    isScheduleAssignmentDateKey(endDate) &&
+    startDate <= endDate &&
+    dateKey >= startDate &&
+    dateKey <= endDate
+  );
+}
+
+export function getScheduleAssignmentBigEvents(
+  source: GeneratedSchedule | GeneratedSchedule[] | null | undefined,
+) {
+  const schedules = Array.isArray(source) ? source : source ? [source] : [];
+  return schedules.flatMap((schedule) => schedule.big_events ?? []);
+}
+
+export function getScheduleAssignmentBigEventDutyOptions(
+  source: GeneratedSchedule | GeneratedSchedule[] | null | undefined,
+) {
+  return Array.from(
+    new Set(
+      getScheduleAssignmentBigEvents(source)
+        .map((event) => event.name.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+export function getScheduleAssignmentBigEventDuty(
+  dateKey: string,
+  name: string,
+  bigEvents: ScheduleBigEvent[] | null | undefined,
+) {
+  const normalizedName = name.trim();
+  if (!normalizedName) return "";
+
+  for (const event of bigEvents ?? []) {
+    const eventName = event.name.trim();
+    if (!eventName) continue;
+    const matched = event.assignments.some((assignment) =>
+      assignment.name.trim() === normalizedName &&
+      isDateInBigEventAssignmentRange(dateKey, assignment),
+    );
+    if (matched) return eventName;
+  }
+
+  return "";
+}
+
 export function applyScheduleAssignmentDutyCategoriesToSchedule(
   schedule: GeneratedSchedule,
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+  bigEvents: ScheduleBigEvent[] | null | undefined = schedule.big_events,
 ) {
   const monthRows = store.rows[schedule.monthKey] ?? {};
-  const bigEventCategorySet = new Set((schedule.big_events ?? []).map((event) => event.name.trim()).filter(Boolean));
+  const bigEventCategorySet = new Set((bigEvents ?? []).map((event) => event.name.trim()).filter(Boolean));
   let changed = false;
 
   const days = schedule.days.map((day) => {
@@ -1458,7 +1522,7 @@ export function applyScheduleAssignmentDutyCategoriesToSchedule(
       }
     });
 
-    getScheduleAssignmentRows(day, dayRows).forEach((row) => {
+    getScheduleAssignmentRows(day, dayRows, bigEvents).forEach((row) => {
       const category = getScheduleAssignmentLinkedDutyCategory(row.duty);
       if (!category) return;
       const names = desiredByCategory.get(category) ?? [];
@@ -1516,13 +1580,14 @@ export function applyScheduleAssignmentDutyCategoriesToSchedule(
 export function applyScheduleAssignmentNameTagsToSchedule(
   schedule: GeneratedSchedule,
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+  bigEvents: ScheduleBigEvent[] | null | undefined = schedule.big_events,
 ) {
   const monthRows = store.rows[schedule.monthKey] ?? {};
   let changed = false;
 
   const days = schedule.days.map((day) => {
     const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
-    const rows = getScheduleAssignmentRows(day, dayRows);
+    const rows = getScheduleAssignmentRows(day, dayRows, bigEvents);
     const nextTags = { ...(day.assignmentNameTags ?? {}) };
     let dayChanged = false;
 
@@ -1566,7 +1631,8 @@ export function applyScheduleAssignmentNameTagsToSchedules(
   schedules: GeneratedSchedule[],
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
 ) {
-  return schedules.map((schedule) => applyScheduleAssignmentNameTagsToSchedule(schedule, store));
+  const bigEvents = getScheduleAssignmentBigEvents(schedules);
+  return schedules.map((schedule) => applyScheduleAssignmentNameTagsToSchedule(schedule, store, bigEvents));
 }
 
 export function getTeamLeadSchedules() {
@@ -1589,9 +1655,10 @@ export function getTeamLeadSchedules() {
     }
   });
 
-  const schedules = Array.from(merged.values())
-    .sort((left, right) => left.monthKey.localeCompare(right.monthKey))
-    .map((schedule) => applyScheduleAssignmentDutyCategoriesToSchedule(schedule, store));
+  const mergedSchedules = Array.from(merged.values())
+    .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  const bigEvents = getScheduleAssignmentBigEvents(mergedSchedules);
+  const schedules = mergedSchedules.map((schedule) => applyScheduleAssignmentDutyCategoriesToSchedule(schedule, store, bigEvents));
 
   return applyScheduleAssignmentNameTagsToSchedules(
     normalizeTeamLeadSchedules(schedules),
@@ -1602,7 +1669,13 @@ export function getTeamLeadSchedules() {
 export function getScheduleAssignmentRows(
   day: DaySchedule,
   dayRows: ScheduleAssignmentDayRows = createDefaultScheduleAssignmentDayRows(),
+  bigEvents: ScheduleBigEvent[] | null | undefined = null,
 ) {
+  const applyBigEventDuty = (row: ScheduleAssignmentRow): ScheduleAssignmentRow => {
+    const bigEventDuty = getScheduleAssignmentBigEventDuty(day.dateKey, row.name, bigEvents);
+    return bigEventDuty ? { ...row, duty: bigEventDuty } : row;
+  };
+
   const baseRows = Object.entries(day.assignments)
     .filter(([category, names]) => category !== "휴가" && category !== "제크" && names.length > 0)
     .flatMap(([category, names]) =>
@@ -1627,6 +1700,7 @@ export function getScheduleAssignmentRows(
   }));
 
   return [...addedRows, ...baseRows]
+    .map(applyBigEventDuty)
     .map((row, index) => ({ row, index }))
     .sort((left, right) => {
       const rankDiff =
@@ -1658,10 +1732,11 @@ export function getScheduleAssignmentGeneralDisplayNames(
   dayRows: ScheduleAssignmentDayRows,
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
   visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag> = new Map(),
+  bigEvents: ScheduleBigEvent[] | null | undefined = null,
 ) {
   const monthEntries = store.entries[monthKey] ?? {};
 
-  return getScheduleAssignmentRows(day, dayRows)
+  return getScheduleAssignmentRows(day, dayRows, bigEvents)
     .filter((row) => {
       if (getScheduleCategoryLabel(row.duty) === "일반") return true;
       if (row.isCustom) return false;
@@ -1731,6 +1806,7 @@ function buildTripTimelineRows(
   store: ScheduleAssignmentDataStore,
 ) {
   const timelineMap = new Map<string, TripTimelineRow[]>();
+  const bigEvents = getScheduleAssignmentBigEvents(schedules);
 
   schedules.forEach((monthSchedule) => {
     const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
@@ -1740,7 +1816,7 @@ function buildTripTimelineRows(
       .filter((day) => day.month === monthSchedule.month)
       .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
       .forEach((day) => {
-        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows());
+        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents);
         rows.forEach((row) => {
           const personName = row.name.trim();
           if (!personName) return;
@@ -2010,6 +2086,7 @@ export function getFinalCutCards(monthKey?: string) {
   const schedules = getTeamLeadSchedules().filter((schedule) => !monthKey || schedule.monthKey === monthKey);
   const store = getScheduleAssignmentStore();
   const finalCutStore = getFinalCutStore();
+  const bigEvents = getScheduleAssignmentBigEvents(schedules);
   const hiddenNames = new Set(
     getUsers()
       .filter((user) => isTeamLeadEvaluationExcludedRole(user.role))
@@ -2025,7 +2102,7 @@ export function getFinalCutCards(monthKey?: string) {
     monthSchedule.days
       .filter((day) => day.month === monthSchedule.month)
       .forEach((day) => {
-        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows());
+        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents);
         rows.forEach((row) => {
           const personName = row.name.trim();
           if (!personName) return;
@@ -2068,6 +2145,7 @@ export function getContributionCards(baseDateOrYear: Date | number = new Date())
   const schedules = getTeamLeadSchedules().filter((schedule) => isMonthKeyInContributionPeriod(schedule.monthKey, period));
   const store = getScheduleAssignmentStore();
   const manualStore = getContributionManualStore(evaluationYear);
+  const bigEvents = getScheduleAssignmentBigEvents(schedules);
   const hiddenNames = new Set(
     getUsers()
       .filter((user) => isTeamLeadEvaluationExcludedRole(user.role))
@@ -2083,7 +2161,7 @@ export function getContributionCards(baseDateOrYear: Date | number = new Date())
     monthSchedule.days
       .filter((day) => day.month === monthSchedule.month)
       .forEach((day) => {
-        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows());
+        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents);
         rows.forEach((row) => {
           const personName = row.name.trim();
           if (!personName) return;

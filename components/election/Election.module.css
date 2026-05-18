@@ -1,0 +1,306 @@
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.titleBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.titleBlock h1 {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.statusBadge,
+.miniBadge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 4px 9px;
+  border: 1px solid rgba(125, 211, 252, 0.34);
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.statusDraft {
+  border-color: rgba(250, 204, 21, 0.42);
+  background: rgba(250, 204, 21, 0.14);
+  color: #fef3c7;
+}
+
+.statusPublished {
+  border-color: rgba(34, 197, 94, 0.38);
+  background: rgba(34, 197, 94, 0.14);
+  color: #dcfce7;
+}
+
+.statusClosed {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.12);
+  color: #e2e8f0;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(180px, 260px);
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tableWrap {
+  overflow-x: visible;
+}
+
+.table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.table th {
+  white-space: nowrap;
+  padding: 6px 4px;
+  border: 1px solid var(--line);
+}
+
+.table th:first-child {
+  width: 26px;
+  padding-right: 2px;
+  padding-left: 2px;
+}
+
+.table td {
+  padding: 5px 4px;
+  border: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.table input,
+.table select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 5px 6px;
+  border-radius: 0 !important;
+  font-size: 12px;
+}
+
+.placeColumn {
+  width: 9%;
+}
+
+.staffColumn {
+  width: 8%;
+}
+
+.wideColumn {
+  width: 10%;
+}
+
+.positionColumn {
+  width: 42px;
+  padding-right: 2px !important;
+  padding-left: 2px !important;
+  text-align: center;
+}
+
+th.positionColumn {
+  white-space: normal;
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.numberCell {
+  width: 26px;
+  padding-right: 2px !important;
+  padding-left: 2px !important;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.readOnlyCell {
+  display: block;
+  min-height: 28px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.readOnlyCellEmpty {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.readOnlySplit {
+  display: grid;
+  gap: 3px;
+  min-height: 28px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.readOnlySplit span {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 4px;
+  min-width: 0;
+}
+
+.readOnlySplit b {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.splitStack {
+  display: grid;
+  gap: 4px;
+}
+
+.splitStack label {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 4px;
+  align-items: center;
+}
+
+.splitStack span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.positionToggle,
+.positionReadOnly {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 0;
+  background: rgba(148, 163, 184, 0.09);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.positionToggle {
+  cursor: pointer;
+}
+
+.positionToggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.positionToggleOn,
+.positionReadOnlyOn {
+  border-color: rgba(34, 197, 94, 0.62);
+  background: rgba(34, 197, 94, 0.28);
+  box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.16);
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.summary {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.deleteButton {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.16);
+  color: #fecaca;
+}
+
+.rowActions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.rowActions button {
+  min-height: 28px;
+  padding: 4px 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.emptyPanel {
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .tableWrap {
+    overflow-x: auto;
+  }
+
+  .table {
+    min-width: 1280px;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .header {
+    align-items: stretch;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}

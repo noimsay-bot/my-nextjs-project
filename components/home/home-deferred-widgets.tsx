@@ -13,6 +13,11 @@ const HomeNewsPortal = dynamic(
   { ssr: false },
 );
 
+const HomeElectionCard = dynamic(
+  () => import("@/components/election/home-election-card").then((module) => module.HomeElectionCard),
+  { ssr: false },
+);
+
 const PublishedSchedulesPanel = dynamic(
   () => import("@/components/schedule/published-schedules-panel").then((module) => module.PublishedSchedulesPanel),
   { ssr: false },
@@ -62,6 +67,7 @@ export function HomeDeferredWidgets() {
         style={{ width: "100%", marginTop: 16, padding: 0 }}
       />
       <HomeNewsPortal />
+      <HomeElectionCard />
       {showSchedules ? <PublishedSchedulesPanel mode="home" /> : null}
       {showLiveEquipmentStatus ? <LiveEquipmentStatusHomePanel /> : null}
       {showPopup ? <HomePopupNoticeModal /> : null}

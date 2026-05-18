@@ -18,7 +18,7 @@ import type {
 } from "@/lib/equipment/types";
 
 const EQUIPMENT_SCHEMA_GUIDE =
-  "Supabase SQL Editor에서 supabase/incremental_equipment_loans.sql, supabase/incremental_rental_tvu_items.sql, supabase/incremental_regional_tvu_items.sql을 실행해 주세요.";
+  "Supabase SQL Editor에서 supabase/incremental_equipment_loans.sql, supabase/incremental_rental_tvu_items.sql, supabase/incremental_regional_tvu_items.sql, supabase/incremental_equipment_tvu_grid.sql을 실행해 주세요.";
 
 interface EquipmentItemRow {
   id: string;
@@ -411,10 +411,18 @@ function assertCanManageRentalTvu() {
   return session;
 }
 
+function assertCanManageTvuGrid() {
+  const session = getSession();
+  if (!session?.approved || !hasRentalTvuManagerRole(session.actualRole)) {
+    throw new Error("TVU Grid 표시 변경 권한이 없습니다.");
+  }
+  return session;
+}
+
 export function canReturnLoanItem(loanItem: EquipmentLoanItem) {
   const session = getSession();
   if (!session?.approved) return false;
-  return loanItem.loan.borrowerProfileId === session.id || hasDeskAccess(session.role);
+  return loanItem.loan.borrowerProfileId === session.id || hasDeskAccess(session.actualRole);
 }
 
 export async function borrowEquipmentItems(
@@ -526,6 +534,24 @@ export async function renameRentalTvuItem(itemId: string, name: string) {
   }
 }
 
+export async function setTvuGridStatus(itemId: string, isGrid: boolean) {
+  assertCanManageTvuGrid();
+  const normalizedId = itemId.trim();
+  if (!normalizedId) {
+    throw new Error("Grid 표시를 변경할 TVU 장비를 선택해 주세요.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.rpc("set_tvu_grid_status", {
+    p_equipment_item_id: normalizedId,
+    p_is_grid: isGrid,
+  });
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "TVU Grid"));
+  }
+}
+
 export async function saveLiveEquipmentStatusEntries(entries: LiveEquipmentStatusSaveEntry[]) {
   const session = assertCanManageLiveStatus();
   const payload = entries
@@ -555,7 +581,13 @@ export async function saveLiveEquipmentStatusEntries(entries: LiveEquipmentStatu
 }
 
 export async function returnEquipmentLoanItems(loanItemIds: string[]) {
-  assertCanMutate();
+  const session = getSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+  if (isReadOnlyPortalRole(session.role) && !hasDeskAccess(session.actualRole)) {
+    throw new Error("장비 반납 권한이 없습니다.");
+  }
   const normalizedIds = Array.from(new Set(loanItemIds.map((item) => item.trim()).filter(Boolean)));
   if (normalizedIds.length === 0) {
     throw new Error("반납할 장비를 선택해 주세요.");

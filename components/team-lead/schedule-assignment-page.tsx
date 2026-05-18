@@ -14,6 +14,8 @@ import {
 } from "@/lib/schedule/storage";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
+import { fetchElectionScheduleOverlays } from "@/lib/election/storage";
+import type { ElectionScheduleOverlay } from "@/lib/election/types";
 import { getPortalSupabaseClient } from "@/lib/supabase/portal";
 import {
   AssignmentTripTagPhase,
@@ -23,6 +25,8 @@ import {
   createDefaultScheduleAssignmentDayRows,
   createDefaultScheduleAssignmentEntry,
   getScheduleAssignmentBaseTimes,
+  getScheduleAssignmentBigEventDutyOptions,
+  getScheduleAssignmentBigEvents,
   getScheduleAssignmentVisibleTripTagMap,
   getScheduleAssignmentRows,
   getScheduleAssignmentTimeColor,
@@ -66,6 +70,10 @@ const dutyOptions = [
   "오후반차",
   "오전반차",
 ];
+
+function mergeDutyOptions(options: string[], additions: string[]) {
+  return Array.from(new Set([...options, ...additions].map((option) => option.trim()).filter(Boolean)));
+}
 
 const travelOptions: Array<{ value: AssignmentTravelType; label: string }> = [
   { value: "", label: "선택" },
@@ -174,6 +182,36 @@ function formatScheduleAssignmentDisplayName(name: string, hasTripTag: boolean) 
   const trimmed = name.trim();
   if (!trimmed) return "";
   return hasTripTag ? `${trimmed}(출)` : trimmed;
+}
+
+function normalizeElectionStaffName(name: string) {
+  return name.replace(/\s+/g, " ").trim();
+}
+
+function getElectionOverlayPlacesForRow(
+  overlays: ElectionScheduleOverlay[],
+  dateKey: string,
+  rowName: string,
+) {
+  const normalizedRowName = normalizeElectionStaffName(rowName);
+  if (!normalizedRowName) return [];
+
+  const places = new Set<string>();
+  overlays.forEach((overlay) => {
+    if (overlay.electionDate !== dateKey) return;
+
+    const profileName = normalizeElectionStaffName(overlay.cameraStaffProfileName);
+    const savedName = normalizeElectionStaffName(overlay.cameraStaffName);
+    const matched = overlay.cameraStaffUserId
+      ? profileName === normalizedRowName || (!profileName && savedName === normalizedRowName)
+      : savedName === normalizedRowName;
+
+    if (matched && overlay.place.trim()) {
+      places.add(overlay.place.trim());
+    }
+  });
+
+  return Array.from(places);
 }
 
 type ImportMessageTone = "ok" | "warn" | "note";
@@ -816,6 +854,7 @@ export function ScheduleAssignmentPage() {
   const [cellLocks, setCellLocks] = useState<Record<string, ScheduleAssignmentCellLockRow>>({});
   const [cellLockClock, setCellLockClock] = useState(() => Date.now());
   const [scheduleInputLeaders, setScheduleInputLeaders] = useState<Record<string, ScheduleAssignmentInputLeader>>({});
+  const [electionOverlays, setElectionOverlays] = useState<ElectionScheduleOverlay[]>([]);
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
@@ -873,6 +912,27 @@ export function ScheduleAssignmentPage() {
     editingTripTagRef.current = editingTripTag;
     flushDeferredRefreshRef.current();
   }, [editingTripTag]);
+
+  useEffect(() => {
+    if (!selectedMonthKey) {
+      setElectionOverlays([]);
+      return;
+    }
+
+    let mounted = true;
+    void fetchElectionScheduleOverlays(selectedMonthKey)
+      .then((nextOverlays) => {
+        if (mounted) setElectionOverlays(nextOverlays);
+      })
+      .catch((error) => {
+        console.warn("선거 일정배정 오버레이를 불러오지 못했습니다.", error);
+        if (mounted) setElectionOverlays([]);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedMonthKey]);
 
   useEffect(() => {
     selectedMonthKeyRef.current = selectedMonthKey;
@@ -1855,6 +1915,11 @@ export function ScheduleAssignmentPage() {
   }, [selectedMonthKey]);
 
   const selectedMonth = useMemo(() => schedules.find((schedule) => schedule.monthKey === selectedMonthKey) ?? null, [schedules, selectedMonthKey]);
+  const scheduleBigEvents = useMemo(() => getScheduleAssignmentBigEvents(schedules), [schedules]);
+  const effectiveDutyOptions = useMemo(
+    () => mergeDutyOptions(dutyOptions, getScheduleAssignmentBigEventDutyOptions(schedules)),
+    [schedules],
+  );
   const monthEntries = store.entries[selectedMonthKey] ?? {};
   const monthRows = store.rows[selectedMonthKey] ?? {};
   const monthDays = useMemo(() => buildMonthDays(selectedMonth), [selectedMonth]);
@@ -2097,6 +2162,7 @@ export function ScheduleAssignmentPage() {
           const candidateRows = getScheduleAssignmentRows(
             dayItem,
             monthRows[dayItem.dateKey] ?? createDefaultScheduleAssignmentDayRows(),
+            scheduleBigEvents,
           );
           candidateRows.forEach((candidateRow) => {
             if (schedule.monthKey === selectedMonthKey && candidateRow.key === row.key) return;
@@ -2405,7 +2471,7 @@ export function ScheduleAssignmentPage() {
         const storedDayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
         const draftDayRows = editingDayRows[day.dateKey];
         const dayRows = draftDayRows ?? storedDayRows;
-        const rows = getScheduleAssignmentRows(day, dayRows);
+        const rows = getScheduleAssignmentRows(day, dayRows, scheduleBigEvents);
         const isEditingPeople = Boolean(draftDayRows);
         const vacationPeople = day.vacations.map((entry) => parseVacationEntry(entry)).filter((item) => item.name);
         const jcheckPeople = day.assignments["제크"] ?? [];
@@ -2584,7 +2650,9 @@ export function ScheduleAssignmentPage() {
                       const clockOutFieldKey = `${row.key}:clockOut`;
                       const showClockInActions = activeTimeField === clockInFieldKey || entry.clockInConfirmed;
                       const showClockOutActions = activeTimeField === clockOutFieldKey || entry.clockOutConfirmed;
-                      const rowDutyOptions = row.duty && !dutyOptions.includes(row.duty) ? [row.duty, ...dutyOptions] : dutyOptions;
+                      const rowDutyOptions = row.duty && !effectiveDutyOptions.includes(row.duty)
+                        ? [row.duty, ...effectiveDutyOptions]
+                        : effectiveDutyOptions;
                       const baseTimes = getScheduleAssignmentBaseTimes(row.duty, day.dateKey, day);
                       const displayClockIn = entry.clockIn || baseTimes?.clockInText || "";
                       const displayClockOut = entry.clockOut || baseTimes?.clockOutText || "";
@@ -2619,6 +2687,7 @@ export function ScheduleAssignmentPage() {
                       const clockOutLockedByOther =
                         Boolean(clockOutLockState.lock?.locked_by) && clockOutLockState.lock?.locked_by !== sessionUserId;
                       const clockOutReadOnly = !isEditingPeople && clockOutLockedByOther;
+                      const electionPlaces = getElectionOverlayPlacesForRow(electionOverlays, day.dateKey, row.name);
 
                       return (
                         <tr key={row.key}>
@@ -3085,6 +3154,50 @@ export function ScheduleAssignmentPage() {
                                     </div>
                                   );
                                 })}
+                                {electionPlaces.length > 0 ? (
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns: "max-content minmax(0, 1fr)",
+                                      gap: 6,
+                                      alignItems: "center",
+                                      minHeight: 32,
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        minHeight: 24,
+                                        padding: "4px 8px",
+                                        borderRadius: 999,
+                                        border: "1px solid rgba(125,211,252,.46)",
+                                        background: "rgba(14,165,233,.16)",
+                                        color: "#e0f2fe",
+                                        fontSize: 12,
+                                        fontWeight: 900,
+                                        lineHeight: 1,
+                                      }}
+                                    >
+                                      선거
+                                    </span>
+                                    <span
+                                      className="field-input"
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        minHeight: 32,
+                                        background: "rgba(14,165,233,.08)",
+                                        borderColor: "rgba(125,211,252,.35)",
+                                        color: "#e0f2fe",
+                                        overflowWrap: "anywhere",
+                                      }}
+                                    >
+                                      {electionPlaces.join(" / ")}
+                                    </span>
+                                  </div>
+                                ) : null}
                                 {!isEditingPeople ? (
                                   <button type="button" className="btn" style={{ width: "fit-content", padding: "2px 6px", fontSize: 11, lineHeight: 1.1 }} onClick={() => updateMonthEntry(row.key, (current) => { const currentSchedules = getSafeSchedules(current.schedules); return { ...current, schedules: [...currentSchedules, ""], exclusiveVideo: [...getSafeExclusiveVideo(current.exclusiveVideo, currentSchedules.length), false] }; })}>+</button>
                                 ) : null}

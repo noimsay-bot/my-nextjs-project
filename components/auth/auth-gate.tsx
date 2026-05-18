@@ -53,6 +53,10 @@ function hasAccess(
     return true;
   }
 
+  if (pathname.startsWith("/election")) {
+    return true;
+  }
+
   if (pathname.startsWith("/me")) {
     return MY_PAGE_ACCESS_ROLES.has(session.role);
   }

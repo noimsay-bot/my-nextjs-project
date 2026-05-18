@@ -53,6 +53,7 @@ type SidebarNavEntry =
 
 const links: PortalNavLink[] = [
   { href: "/", label: "홈" },
+  { href: "/election", label: "선거" },
   {
     href: "/me",
     label: "마이페이지",
@@ -112,6 +113,7 @@ const links: PortalNavLink[] = [
 
 const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
   "/equipment": "/images/sidebar-icons/tvu-equipment.png",
+  "/election": "/images/sidebar-icons/desk.png",
   "/admin": "/images/sidebar-icons/admin.png",
   "/work-schedule": "/images/sidebar-icons/work-schedule.png",
   "/restaurants": "/images/sidebar-icons/restaurants.png",
@@ -130,6 +132,7 @@ const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
 };
 
 const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"; id: SidebarNavActionId }> = [
+  { kind: "link", href: "/election" },
   { kind: "link", href: "/me" },
   { kind: "link", href: "/work-schedule" },
   { kind: "link", href: "/equipment" },
@@ -247,6 +250,7 @@ function getVisibleLinks(
       return visibleRoleLinks.filter(
         (link) =>
           link.href === "/me" ||
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -259,6 +263,7 @@ function getVisibleLinks(
       return visibleRoleLinks.filter(
         (link) =>
           link.href === "/me" ||
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -270,6 +275,7 @@ function getVisibleLinks(
     case "observer":
       return visibleRoleLinks.filter(
         (link) =>
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -283,6 +289,7 @@ function getVisibleLinks(
         (link) =>
           link.href === "/" ||
           link.href === "/me" ||
+          link.href === "/election" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
@@ -291,6 +298,7 @@ function getVisibleLinks(
     case "reviewer":
       return visibleRoleLinks.filter(
         (link) =>
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -303,6 +311,7 @@ function getVisibleLinks(
       return visibleRoleLinks.filter(
         (link) =>
           link.href === "/me" ||
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -316,6 +325,7 @@ function getVisibleLinks(
       return visibleRoleLinks.filter(
         (link) =>
           link.href === "/me" ||
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -331,6 +341,7 @@ function getVisibleLinks(
       return visibleRoleLinks
         .filter((link) =>
           link.href === "/community" ||
+          link.href === "/election" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/me" ||
@@ -345,6 +356,7 @@ function getVisibleLinks(
     default:
       return visibleRoleLinks.filter(
         (link) =>
+          link.href === "/election" ||
           link.href === "/community" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
@@ -362,6 +374,7 @@ function isLinkActive(pathname: string, href: string) {
     (href === "/work-schedule" && pathname.startsWith("/work-schedule")) ||
     (href === "/restaurants" && pathname.startsWith("/restaurants")) ||
     (href === "/me" && pathname.startsWith("/me")) ||
+    (href === "/election" && pathname.startsWith("/election")) ||
     (href === "/partner/schedule" && pathname.startsWith("/partner")) ||
     (href === "/equipment" && pathname.startsWith("/equipment")) ||
     (href === "/schedule" && pathname.startsWith("/schedule")) ||

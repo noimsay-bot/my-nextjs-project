@@ -4,9 +4,13 @@ import {
   applyScheduleAssignmentNameTagsToSchedule,
   createAssignmentRowKey,
   createCustomAssignmentRowKey,
+  createDefaultScheduleAssignmentDayRows,
   createDefaultScheduleAssignmentEntry,
   formatScheduleAssignmentDisplayName,
+  getScheduleAssignmentBigEventDutyOptions,
+  getScheduleAssignmentBigEvents,
   getScheduleAssignmentGeneralDisplayNames,
+  getScheduleAssignmentRows,
 } from "@/lib/team-lead/storage";
 import type { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import type { ScheduleAssignmentDataStore } from "@/lib/team-lead/storage";
@@ -283,4 +287,59 @@ test("assembly assignment duty is reflected in the schedule management assembly 
 
   expect(linkedDay.assignments["국회"]).toEqual(["김재식"]);
   expect(linkedDay.assignments["일반"]).toEqual(["이지수"]);
+});
+
+test("big event assignments become schedule assignment duties across month boundaries", () => {
+  const maySchedule = {
+    year: 2026,
+    month: 5,
+    monthKey: "2026-05",
+    days: [],
+    nextPointers: {},
+    nextStartDate: "2026-06-01",
+    big_events: [
+      {
+        id: "world-cup",
+        name: "월드컵",
+        assignments: [
+          {
+            id: "world-cup-park",
+            name: "박재현",
+            profile_id: null,
+            start_date: "2026-05-24",
+            end_date: "2026-06-30",
+          },
+        ],
+      },
+    ],
+  } as GeneratedSchedule;
+  const juneDay = {
+    dateKey: "2026-06-10",
+    day: 10,
+    month: 6,
+    year: 2026,
+    dow: 3,
+    isWeekend: false,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: { 일반: ["박재현"] },
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  } as DaySchedule;
+  const juneSchedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    days: [juneDay],
+    nextPointers: {},
+    nextStartDate: "2026-07-01",
+  } as GeneratedSchedule;
+  const bigEvents = getScheduleAssignmentBigEvents([maySchedule, juneSchedule]);
+
+  expect(getScheduleAssignmentBigEventDutyOptions([maySchedule, juneSchedule])).toContain("월드컵");
+  expect(getScheduleAssignmentRows(juneDay, createDefaultScheduleAssignmentDayRows(), bigEvents)[0]?.duty).toBe("월드컵");
 });

@@ -2,6 +2,7 @@ import { getUsers } from "@/lib/auth/storage";
 import {
   createDefaultScheduleAssignmentEntry,
   createDefaultScheduleAssignmentDayRows,
+  getScheduleAssignmentBigEvents,
   getScheduleAssignmentRows,
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
@@ -122,6 +123,7 @@ export function getPressSupportRows(periodYear?: number) {
   });
 
   const schedules = getTeamLeadSchedules();
+  const bigEvents = getScheduleAssignmentBigEvents(schedules);
   const store = getScheduleAssignmentStore();
 
   schedules.forEach((monthSchedule) => {
@@ -141,6 +143,7 @@ export function getPressSupportRows(periodYear?: number) {
         const rows = getScheduleAssignmentRows(
           day,
           monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(),
+          bigEvents,
         );
 
         rows.forEach((row) => {

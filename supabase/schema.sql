@@ -3413,7 +3413,281 @@ begin
 end;
 $$;
 
+create or replace function public.set_tvu_grid_status(
+  p_equipment_item_id uuid,
+  p_is_grid boolean default true
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_now timestamptz := timezone('utc', now());
+  v_is_grid boolean := coalesce(p_is_grid, false);
+  v_updated_count integer := 0;
+begin
+  if v_user_id is null then
+    raise exception '승인된 로그인 세션이 필요합니다.';
+  end if;
+
+  if public.current_profile_approved() is distinct from true
+     or public.current_profile_role() not in ('desk', 'team_lead', 'admin') then
+    raise exception 'TVU Grid 표시 변경 권한이 없습니다.';
+  end if;
+
+  if p_equipment_item_id is null then
+    raise exception 'Grid 표시를 변경할 TVU 장비를 선택해 주세요.';
+  end if;
+
+  update public.equipment_items
+  set
+    metadata = case
+      when v_is_grid then
+        jsonb_set(
+          jsonb_set(
+            jsonb_set(
+              coalesce(metadata, '{}'::jsonb),
+              '{grid}',
+              'true'::jsonb,
+              true
+            ),
+            '{grid_updated_by}',
+            to_jsonb(v_user_id::text),
+            true
+          ),
+          '{grid_updated_at}',
+          to_jsonb(v_now::text),
+          true
+        )
+      else
+        jsonb_set(
+          jsonb_set(
+            coalesce(metadata, '{}'::jsonb) - 'grid',
+            '{grid_updated_by}',
+            to_jsonb(v_user_id::text),
+            true
+          ),
+          '{grid_updated_at}',
+          to_jsonb(v_now::text),
+          true
+        )
+      end,
+    updated_at = v_now
+  where id = p_equipment_item_id
+    and category = 'live'
+    and group_name = 'TVU';
+
+  get diagnostics v_updated_count = row_count;
+
+  if v_updated_count = 0 then
+    raise exception 'Grid 표시를 변경할 TVU 장비를 찾을 수 없습니다.';
+  end if;
+
+  return v_is_grid;
+end;
+$$;
+
 revoke all on function public.set_rental_tvu_items_active(uuid[], boolean) from public;
 revoke all on function public.rename_rental_tvu_item(uuid, text) from public;
+revoke all on function public.set_tvu_grid_status(uuid, boolean) from public;
 grant execute on function public.set_rental_tvu_items_active(uuid[], boolean) to authenticated;
 grant execute on function public.rename_rental_tvu_item(uuid, text) to authenticated;
+grant execute on function public.set_tvu_grid_status(uuid, boolean) to authenticated;
+
+create table if not exists public.election_events (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  election_date date not null,
+  status text not null default 'draft',
+  published_at timestamptz,
+  published_by uuid references public.profiles (id) on delete set null,
+  closed_at timestamptz,
+  closed_by uuid references public.profiles (id) on delete set null,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint election_events_status_check check (status in ('draft', 'published', 'closed'))
+);
+
+create table if not exists public.election_points (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references public.election_events (id) on delete cascade,
+  sort_order integer not null default 0,
+  region text,
+  place text,
+  pool_video text,
+  equipment_name text,
+  equipment_type text,
+  trs text,
+  camera_staff_name text,
+  camera_staff_user_id uuid references public.profiles (id) on delete set null,
+  camera_staff_name_pm text,
+  camera_staff_user_id_pm uuid references public.profiles (id) on delete set null,
+  audio_staff_name text,
+  audio_staff_user_id uuid references public.profiles (id) on delete set null,
+  audio_staff_name_pm text,
+  reporter_name text,
+  reporter_user_id uuid references public.profiles (id) on delete set null,
+  reporter_name_pm text,
+  live_time text,
+  live_time_pm text,
+  address text,
+  note text,
+  live_position text,
+  lighting text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.election_points
+  add column if not exists camera_staff_name_pm text,
+  add column if not exists camera_staff_user_id_pm uuid references public.profiles (id) on delete set null,
+  add column if not exists audio_staff_name_pm text,
+  add column if not exists reporter_name_pm text,
+  add column if not exists live_time_pm text;
+
+create unique index if not exists election_events_single_open_idx
+on public.election_events ((true))
+where status in ('draft', 'published');
+
+create index if not exists election_events_status_date_idx
+on public.election_events (status, election_date);
+
+create index if not exists election_points_event_sort_idx
+on public.election_points (event_id, sort_order);
+
+create index if not exists election_points_camera_staff_user_idx
+on public.election_points (camera_staff_user_id)
+where camera_staff_user_id is not null;
+
+create index if not exists election_points_camera_staff_user_pm_idx
+on public.election_points (camera_staff_user_id_pm)
+where camera_staff_user_id_pm is not null;
+
+drop trigger if exists set_election_events_updated_at on public.election_events;
+create trigger set_election_events_updated_at
+before update on public.election_events
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists set_election_points_updated_at on public.election_points;
+create trigger set_election_points_updated_at
+before update on public.election_points
+for each row
+execute function public.set_updated_at();
+
+alter table public.election_events enable row level security;
+alter table public.election_points enable row level security;
+
+drop policy if exists "election_events_select_desk_or_published" on public.election_events;
+create policy "election_events_select_desk_or_published"
+on public.election_events
+for select
+to authenticated
+using (
+  (
+    public.current_profile_role() in ('desk', 'team_lead', 'admin')
+    and public.current_profile_approved() = true
+  )
+  or (
+    status = 'published'
+    and public.current_profile_approved() = true
+  )
+);
+
+drop policy if exists "election_events_insert_desk" on public.election_events;
+create policy "election_events_insert_desk"
+on public.election_events
+for insert
+to authenticated
+with check (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "election_events_update_desk" on public.election_events;
+create policy "election_events_update_desk"
+on public.election_events
+for update
+to authenticated
+using (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+)
+with check (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "election_events_delete_desk" on public.election_events;
+create policy "election_events_delete_desk"
+on public.election_events
+for delete
+to authenticated
+using (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "election_points_select_desk_or_published" on public.election_points;
+create policy "election_points_select_desk_or_published"
+on public.election_points
+for select
+to authenticated
+using (
+  (
+    public.current_profile_role() in ('desk', 'team_lead', 'admin')
+    and public.current_profile_approved() = true
+  )
+  or (
+    public.current_profile_approved() = true
+    and exists (
+      select 1
+      from public.election_events e
+      where e.id = election_points.event_id
+        and e.status = 'published'
+    )
+  )
+);
+
+drop policy if exists "election_points_insert_desk" on public.election_points;
+create policy "election_points_insert_desk"
+on public.election_points
+for insert
+to authenticated
+with check (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "election_points_update_desk" on public.election_points;
+create policy "election_points_update_desk"
+on public.election_points
+for update
+to authenticated
+using (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+)
+with check (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "election_points_delete_desk" on public.election_points;
+create policy "election_points_delete_desk"
+on public.election_points
+for delete
+to authenticated
+using (
+  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  and public.current_profile_approved() = true
+);
+
+grant select, insert, update, delete on public.election_events to authenticated;
+grant select, insert, update, delete on public.election_points to authenticated;
+
+notify pgrst, 'reload schema';

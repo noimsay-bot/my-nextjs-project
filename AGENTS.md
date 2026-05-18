@@ -40,6 +40,7 @@
 - 휴가: [docs/product/vacation.md](docs/product/vacation.md)
 - 베스트리포트 평가: [docs/product/review-best-report.md](docs/product/review-best-report.md)
 - 장비: [docs/product/equipment.md](docs/product/equipment.md)
+- 선거: [docs/product/election.md](docs/product/election.md)
 - 뉴스 브리핑: [docs/product/news-briefing.md](docs/product/news-briefing.md)
 - 마이페이지: [docs/product/my-page.md](docs/product/my-page.md)
 - 변경 기록 방식: [docs/CHANGELOG_GUIDE.md](docs/CHANGELOG_GUIDE.md)

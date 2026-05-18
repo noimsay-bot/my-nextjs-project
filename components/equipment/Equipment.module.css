@@ -1032,6 +1032,25 @@
   gap: 8px;
 }
 
+.modalListToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.modalListToolbar span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.modalListToolbar button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .modalListItem {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
