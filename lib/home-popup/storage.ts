@@ -1,6 +1,6 @@
 "use client";
 
-import { isReadOnlyPortalRole, type UserRole } from "@/lib/auth/storage";
+import { getSession, isReadOnlyPortalRole, type UserRole } from "@/lib/auth/storage";
 import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
 import {
   getPortalSession,
@@ -11,6 +11,8 @@ import {
 
 const HOME_POPUP_NOTICE_ROW_KEY = "active";
 const HOME_NOTICE_STORE_VERSION = 5;
+const HOME_WORKSPACE_LOCAL_CACHE_VERSION = 1;
+const HOME_WORKSPACE_LOCAL_CACHE_PREFIX = "jtbc-home-workspace-cache-v1";
 
 export const HOME_POPUP_NOTICE_EVENT = "j-home-popup-notice-updated";
 export const HOME_POPUP_NOTICE_STATUS_EVENT = "j-home-popup-notice-status";
@@ -154,6 +156,16 @@ let homeWorkspaceLastFailureAt = 0;
 const HOME_POPUP_WORKSPACE_TTL_MS = 30_000;
 const HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS = 4_000;
 const HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS = 10_000;
+const HOME_WORKSPACE_LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+type PortalSession = Awaited<ReturnType<typeof getPortalSession>> | null;
+
+interface HomeWorkspaceLocalCachePayload {
+  version: number;
+  cachedAt: number;
+  notices: HomeNotice[];
+  ddays: HomeDdayItem[];
+}
 
 function isManagerRole(role: string | null | undefined) {
   return role === "desk" || role === "admin" || role === "team_lead";
@@ -629,6 +641,77 @@ function rowToApplication(row: HomePopupNoticeApplicationRow): HomePopupNoticeAp
   };
 }
 
+function getHomeWorkspaceLocalCacheKey(session: PortalSession) {
+  if (!session?.approved) return null;
+  return `${HOME_WORKSPACE_LOCAL_CACHE_PREFIX}:${session.id}`;
+}
+
+function readHomeWorkspaceLocalCache(session: PortalSession) {
+  if (typeof window === "undefined") return null;
+
+  const storageKey = getHomeWorkspaceLocalCacheKey(session);
+  if (!storageKey) return null;
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as Partial<HomeWorkspaceLocalCachePayload> | null;
+    if (!parsed || parsed.version !== HOME_WORKSPACE_LOCAL_CACHE_VERSION) return null;
+    if (typeof parsed.cachedAt !== "number" || Date.now() - parsed.cachedAt > HOME_WORKSPACE_LOCAL_CACHE_MAX_AGE_MS) {
+      window.localStorage.removeItem(storageKey);
+      return null;
+    }
+
+    const notices = sortNotices(
+      (Array.isArray(parsed.notices) ? parsed.notices : [])
+        .filter((item): item is HomeNotice => Boolean(item && typeof item.id === "string"))
+        .map((item) =>
+          normalizeHomeNotice({
+            ...item,
+            id: item.id,
+            title: item.title,
+            body: item.body,
+          }),
+        )
+        .filter((item) => item.title && item.body),
+    );
+
+    const ddays = sortHomeDdays(
+      getActiveHomeDdays(
+        (Array.isArray(parsed.ddays) ? parsed.ddays : [])
+          .filter((item): item is HomeDdayItem => Boolean(item && typeof item.id === "string"))
+          .map((item) =>
+            normalizeHomeDday({
+              ...item,
+              id: item.id,
+              title: item.title,
+              targetDate: item.targetDate,
+            }),
+          )
+          .filter((item) => item.title && /^\d{4}-\d{2}-\d{2}$/.test(item.targetDate)),
+      ),
+    ).slice(0, 3);
+
+    if (notices.length === 0 && ddays.length === 0) return null;
+    return { notices, ddays };
+  } catch {
+    return null;
+  }
+}
+
+function writeHomeWorkspaceLocalCache(session: PortalSession, notices: HomeNotice[], ddays: HomeDdayItem[]) {
+  if (typeof window === "undefined") return;
+
+  const storageKey = getHomeWorkspaceLocalCacheKey(session);
+  if (!storageKey) return;
+
+  const payload: HomeWorkspaceLocalCachePayload = {
+    version: HOME_WORKSPACE_LOCAL_CACHE_VERSION,
+    cachedAt: Date.now(),
+    notices: sortNotices(notices),
+    ddays: sortHomeDdays(getActiveHomeDdays(ddays)).slice(0, 3),
+  };
+  window.localStorage.setItem(storageKey, JSON.stringify(payload));
+}
+
 function buildStorePayload(
   notices: HomeNotice[],
   ddays: HomeDdayItem[],
@@ -688,6 +771,19 @@ function syncCaches(
   applicationCache = cloneApplications(applications);
   tripCardCache = cloneTripCards(tripCards);
   currentUserAppliedCache = ownApplied;
+  writeHomeWorkspaceLocalCache(getSession(), noticeListCache, homeDdayCache);
+}
+
+export function hydrateHomePopupWorkspaceFromLocal(session: PortalSession = getSession()) {
+  const cachedWorkspace = readHomeWorkspaceLocalCache(session);
+  if (!cachedWorkspace) return false;
+
+  syncCaches(cachedWorkspace.notices, cachedWorkspace.ddays, [], [], [], false, []);
+  homeWorkspaceLoaded = true;
+  homeWorkspaceTripCardsLoaded = false;
+  homeWorkspaceLastFetchedAt = 0;
+  homeWorkspaceSessionKey = getHomeWorkspaceSessionKey(session);
+  return true;
 }
 
 function hasFreshHomePopupWorkspace(
@@ -709,6 +805,7 @@ function markHomePopupWorkspaceFresh(
   homeWorkspaceTripCardsLoaded = homeWorkspaceTripCardsLoaded || Boolean(options.includeTrips);
   homeWorkspaceLastFetchedAt = Date.now();
   homeWorkspaceSessionKey = getHomeWorkspaceSessionKey(session);
+  writeHomeWorkspaceLocalCache(session, noticeListCache, homeDdayCache);
 }
 
 function resetSessionScopedWorkspaceState() {

@@ -303,20 +303,34 @@
   box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.24);
 }
 
+.customTextEditButton,
 .customTextDeleteButton {
   min-height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 4px 8px;
-  border: 1px solid rgba(252, 165, 165, 0.55);
   border-radius: 999px;
-  background: rgba(239, 68, 68, 0.22);
-  color: #fee2e2;
   font-size: 12px;
   font-weight: 900;
   line-height: 1.2;
   cursor: pointer;
+}
+
+.customTextEditButton {
+  border: 1px solid rgba(125, 211, 252, 0.55);
+  background: rgba(14, 165, 233, 0.22);
+  color: #e0f2fe;
+}
+
+.customTextDeleteButton {
+  border: 1px solid rgba(252, 165, 165, 0.55);
+  background: rgba(239, 68, 68, 0.22);
+  color: #fee2e2;
+}
+
+.customTextEditButton:hover {
+  background: rgba(14, 165, 233, 0.32);
 }
 
 .customTextDeleteButton:hover {
@@ -471,6 +485,12 @@
   color: #b91c1c;
 }
 
+:global(html[data-theme="light"]) .customTextEditButton {
+  border-color: rgba(29, 78, 216, 0.24);
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 :global(html[data-theme="light"]) .customTextDetailItem {
   background: #dcfce7;
 }
@@ -562,6 +582,7 @@
     font-size: 12px;
   }
 
+  .customTextEditButton,
   .customTextDeleteButton {
     min-height: 18px;
     padding: 2px 6px;

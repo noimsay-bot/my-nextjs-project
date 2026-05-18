@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchMyScheduleAssignmentsWithPartnerInfo,
@@ -8,6 +7,12 @@ import {
 } from "@/lib/corporate-card/storage";
 import { formatMonthKey } from "@/lib/corporate-card/schedule";
 import { getSession, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
+import {
+  loadMyWorkCalendarCustomTexts,
+  readLocalMyWorkCalendarCustomTexts,
+  saveMyWorkCalendarCustomTexts,
+  type MyWorkCalendarCustomTextMap,
+} from "@/lib/my-page/work-calendar-custom-texts";
 import { getAssignmentDisplayRank, getDayCategoryDisplayLabel } from "@/lib/schedule/constants";
 import { getPublishedSchedules, refreshPublishedSchedules, type PublishedScheduleItem } from "@/lib/schedule/published";
 import styles from "./MyWorkCalendar.module.css";
@@ -31,14 +36,13 @@ type MessageState = {
   text: string;
 };
 
-type CustomTextMap = Record<string, string[]>;
+type CustomTextMap = MyWorkCalendarCustomTextMap;
 
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 const MONTH_GRID_DAYS = 42;
-const CUSTOM_TEXT_STORAGE_PREFIX = "jtbc-my-work-calendar-custom-text-v1";
 const HELP_DISMISSED_STORAGE_PREFIX = "jtbc-my-work-calendar-help-dismissed-v1";
 const MAX_CUSTOM_TEXTS_PER_DAY = 5;
-const CUSTOM_TEXT_HELP_MESSAGE = "날짜를 더블 클릭하면 입력할 수 있습니다. 입력 후 삭제는 오른쪽 클릭해주세요.";
+const CUSTOM_TEXT_HELP_MESSAGE = "날짜를 더블 클릭하면 입력할 수 있습니다. 입력 후 수정/삭제는 오른쪽 클릭해주세요.";
 
 function getTodayDateKey() {
   return formatDateKey(new Date());
@@ -194,10 +198,6 @@ function isRedScheduleDay(day: { isWeekend: boolean; isHoliday: boolean; isCusto
   return day.isWeekend || day.isHoliday || day.isCustomHoliday || day.isWeekdayHoliday;
 }
 
-function getCustomTextStorageKey(sessionId: string | null | undefined) {
-  return `${CUSTOM_TEXT_STORAGE_PREFIX}:${sessionId || "anonymous"}`;
-}
-
 function getHelpDismissedStorageKey(sessionId: string | null | undefined) {
   return `${HELP_DISMISSED_STORAGE_PREFIX}:${sessionId || "anonymous"}`;
 }
@@ -210,39 +210,6 @@ function readHelpDismissed(sessionId: string | null | undefined) {
 function writeHelpDismissed(sessionId: string | null | undefined) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(getHelpDismissedStorageKey(sessionId), "1");
-}
-
-function normalizeCustomTextList(value: unknown) {
-  const values = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
-  return values
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean)
-    .slice(0, MAX_CUSTOM_TEXTS_PER_DAY);
-}
-
-function readCustomTexts(sessionId: string | null | undefined) {
-  if (typeof window === "undefined") return {} as CustomTextMap;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(getCustomTextStorageKey(sessionId)) ?? "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed)
-        .map(([dateKey, value]) => [dateKey, normalizeCustomTextList(value)] as const)
-        .filter(([dateKey, values]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && values.length > 0),
-    ) as CustomTextMap;
-  } catch {
-    return {};
-  }
-}
-
-function writeCustomTexts(sessionId: string | null | undefined, texts: CustomTextMap) {
-  if (typeof window === "undefined") return;
-  const normalized = Object.fromEntries(
-    Object.entries(texts)
-      .map(([dateKey, values]) => [dateKey, normalizeCustomTextList(values)] as const)
-      .filter(([, values]) => values.length > 0),
-  );
-  window.localStorage.setItem(getCustomTextStorageKey(sessionId), JSON.stringify(normalized));
 }
 
 function getCustomTextKey(dateKey: string, index: number) {
@@ -263,9 +230,10 @@ export function MyWorkCalendarPage() {
   const [scheduleItems, setScheduleItems] = useState<MyScheduleAssignmentItem[]>([]);
   const [customTexts, setCustomTexts] = useState<CustomTextMap>({});
   const [editingCustomTextDateKey, setEditingCustomTextDateKey] = useState<string | null>(null);
+  const [editingCustomTextIndex, setEditingCustomTextIndex] = useState<number | null>(null);
   const [customTextDraft, setCustomTextDraft] = useState("");
   const [selectedCustomTextKey, setSelectedCustomTextKey] = useState<string | null>(null);
-  const [deleteCustomTextKey, setDeleteCustomTextKey] = useState<string | null>(null);
+  const [customTextActionKey, setCustomTextActionKey] = useState<string | null>(null);
   const [showHelpDialog, setShowHelpDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<MessageState | null>(null);
@@ -273,13 +241,32 @@ export function MyWorkCalendarPage() {
   useEffect(() => subscribeToAuth(setSession), []);
 
   useEffect(() => {
-    setCustomTexts(readCustomTexts(session?.id));
+    let cancelled = false;
+    setCustomTexts(readLocalMyWorkCalendarCustomTexts(session?.id, session?.username));
     setEditingCustomTextDateKey(null);
+    setEditingCustomTextIndex(null);
     setCustomTextDraft("");
     setSelectedCustomTextKey(null);
-    setDeleteCustomTextKey(null);
+    setCustomTextActionKey(null);
     setShowHelpDialog(!readHelpDismissed(session?.id));
-  }, [session?.id]);
+
+    loadMyWorkCalendarCustomTexts(session?.id, session?.username)
+      .then((texts) => {
+        if (!cancelled) setCustomTexts(texts);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMessage({
+            tone: "warn",
+            text: error instanceof Error ? error.message : "내 일정 입력 내용을 불러오지 못했습니다.",
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.id, session?.username]);
 
   useEffect(() => {
     setSelectedDateKey((current) => (isSameMonthKey(current, monthKey) ? current : `${monthKey}-01`));
@@ -339,6 +326,15 @@ export function MyWorkCalendarPage() {
     .reduce((total, [, values]) => total + values.length, 0);
   const monthScheduleCount = scheduleItems.filter((item) => isSameMonthKey(item.scheduleDate, monthKey)).length + monthCustomTextCount;
 
+  const persistCustomTexts = (texts: CustomTextMap) => {
+    saveMyWorkCalendarCustomTexts(texts, session?.id, session?.username).catch((error) => {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "내 일정 입력 내용을 저장하지 못했습니다.",
+      });
+    });
+  };
+
   const startCustomTextEdit = (dateKey: string) => {
     setSelectedDateKey(dateKey);
     if ((customTexts[dateKey] ?? []).length >= MAX_CUSTOM_TEXTS_PER_DAY) {
@@ -346,9 +342,10 @@ export function MyWorkCalendarPage() {
       return;
     }
     setEditingCustomTextDateKey(dateKey);
+    setEditingCustomTextIndex(null);
     setCustomTextDraft("");
     setSelectedCustomTextKey(null);
-    setDeleteCustomTextKey(null);
+    setCustomTextActionKey(null);
   };
 
   const saveCustomTextDraft = () => {
@@ -357,38 +354,55 @@ export function MyWorkCalendarPage() {
     const nextText = customTextDraft.trim();
     setCustomTexts((current) => {
       const next = { ...current };
-      if (nextText) {
-        const currentValues = next[dateKey] ?? [];
+      const currentValues = next[dateKey] ?? [];
+      if (editingCustomTextIndex !== null) {
+        if (nextText && editingCustomTextIndex >= 0 && editingCustomTextIndex < currentValues.length) {
+          next[dateKey] = currentValues.map((value, index) => (index === editingCustomTextIndex ? nextText : value));
+        }
+      } else if (nextText) {
         if (currentValues.length >= MAX_CUSTOM_TEXTS_PER_DAY) {
           setMessage({ tone: "note", text: "직접 입력은 날짜별 최대 5개까지 가능합니다." });
           return current;
         }
         next[dateKey] = [...currentValues, nextText].slice(0, MAX_CUSTOM_TEXTS_PER_DAY);
       }
-      writeCustomTexts(session?.id, next);
+      persistCustomTexts(next);
       return next;
     });
     setEditingCustomTextDateKey(null);
+    setEditingCustomTextIndex(null);
     setCustomTextDraft("");
-    setDeleteCustomTextKey(null);
+    setCustomTextActionKey(null);
   };
 
   const cancelCustomTextEdit = () => {
     setEditingCustomTextDateKey(null);
+    setEditingCustomTextIndex(null);
     setCustomTextDraft("");
   };
 
   const selectCustomText = (dateKey: string, index: number) => {
     setSelectedDateKey(dateKey);
     setSelectedCustomTextKey(getCustomTextKey(dateKey, index));
-    setDeleteCustomTextKey(null);
+    setCustomTextActionKey(null);
   };
 
-  const showCustomTextDeleteAction = (dateKey: string, index: number) => {
+  const showCustomTextActions = (dateKey: string, index: number) => {
     const key = getCustomTextKey(dateKey, index);
     setSelectedDateKey(dateKey);
     setSelectedCustomTextKey(key);
-    setDeleteCustomTextKey(key);
+    setCustomTextActionKey(key);
+  };
+
+  const startCustomTextUpdate = (dateKey: string, index: number) => {
+    const text = customTexts[dateKey]?.[index];
+    if (!text) return;
+    setSelectedDateKey(dateKey);
+    setSelectedCustomTextKey(getCustomTextKey(dateKey, index));
+    setEditingCustomTextDateKey(dateKey);
+    setEditingCustomTextIndex(index);
+    setCustomTextDraft(text);
+    setCustomTextActionKey(null);
   };
 
   const deleteCustomText = (dateKey: string, index: number) => {
@@ -401,14 +415,14 @@ export function MyWorkCalendarPage() {
       } else {
         delete next[dateKey];
       }
-      writeCustomTexts(session?.id, next);
+      persistCustomTexts(next);
       return next;
     });
     if (selectedCustomTextKey === getCustomTextKey(dateKey, index)) {
       setSelectedCustomTextKey(null);
     }
-    if (deleteCustomTextKey === getCustomTextKey(dateKey, index)) {
-      setDeleteCustomTextKey(null);
+    if (customTextActionKey === getCustomTextKey(dateKey, index)) {
+      setCustomTextActionKey(null);
     }
   };
 
@@ -428,12 +442,6 @@ export function MyWorkCalendarPage() {
               <p className={styles.description}>{CUSTOM_TEXT_HELP_MESSAGE}</p>
             </div>
             <div className={styles.headerActions}>
-              <Link href="/me" className="btn">
-                내 일정 보기
-              </Link>
-              <Link href="/me/work" className="btn primary">
-                내 일정
-              </Link>
               <label className={styles.monthField}>
                 <input
                   className="field-input"
@@ -485,7 +493,7 @@ export function MyWorkCalendarPage() {
               const dayWorkEvents = workByDate.get(day.dateKey) ?? [];
               const dayScheduleItems = schedulesByDate.get(day.dateKey) ?? [];
               const customTextItems = customTexts[day.dateKey] ?? [];
-              const isEditingCustomText = editingCustomTextDateKey === day.dateKey;
+              const isAddingCustomText = editingCustomTextDateKey === day.dateKey && editingCustomTextIndex === null;
               const selected = day.dateKey === selectedDateKey;
               const today = day.dateKey === todayKey;
 
@@ -503,7 +511,7 @@ export function MyWorkCalendarPage() {
                   ].filter(Boolean).join(" ")}
                   onClick={() => {
                     setSelectedDateKey(day.dateKey);
-                    setDeleteCustomTextKey(null);
+                    setCustomTextActionKey(null);
                   }}
                   onDoubleClick={() => startCustomTextEdit(day.dateKey)}
                   onKeyDown={(event) => {
@@ -530,7 +538,7 @@ export function MyWorkCalendarPage() {
                       </span>
                     ))}
                     {dayScheduleItems.length > 1 ? <span className={styles.moreChip}>일정 +{dayScheduleItems.length - 1}</span> : null}
-                    {isEditingCustomText ? (
+                    {isAddingCustomText ? (
                       <input
                         className={styles.customTextInput}
                         value={customTextDraft}
@@ -556,36 +564,74 @@ export function MyWorkCalendarPage() {
                     ) : null}
                     {customTextItems.map((customText, index) => {
                       const customTextKey = getCustomTextKey(day.dateKey, index);
+                      const isUpdatingCustomText = editingCustomTextDateKey === day.dateKey && editingCustomTextIndex === index;
                       return (
                         <span key={customTextKey} className={styles.customTextActionGroup}>
-                          <span
-                            className={`${styles.customTextChip} ${selectedCustomTextKey === customTextKey ? styles.customTextChipSelected : ""}`.trim()}
-                            title="클릭해서 선택, 오른쪽 클릭으로 삭제 버튼 표시"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectCustomText(day.dateKey, index);
-                            }}
-                            onDoubleClick={(event) => event.stopPropagation()}
-                            onContextMenu={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              showCustomTextDeleteAction(day.dateKey, index);
-                            }}
-                          >
-                            {customText}
-                          </span>
-                        {deleteCustomTextKey === customTextKey ? (
-                          <button
-                            type="button"
-                            className={styles.customTextDeleteButton}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              deleteCustomText(day.dateKey, index);
-                            }}
-                          >
-                            삭제
-                          </button>
-                        ) : null}
+                          {isUpdatingCustomText ? (
+                            <input
+                              className={styles.customTextInput}
+                              value={customTextDraft}
+                              autoFocus
+                              maxLength={80}
+                              placeholder="텍스트 입력"
+                              onClick={(event) => event.stopPropagation()}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onChange={(event) => setCustomTextDraft(event.target.value)}
+                              onBlur={saveCustomTextDraft}
+                              onKeyDown={(event) => {
+                                event.stopPropagation();
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  saveCustomTextDraft();
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelCustomTextEdit();
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className={`${styles.customTextChip} ${selectedCustomTextKey === customTextKey ? styles.customTextChipSelected : ""}`.trim()}
+                              title="클릭해서 선택, 오른쪽 클릭으로 수정/삭제 버튼 표시"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectCustomText(day.dateKey, index);
+                              }}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                showCustomTextActions(day.dateKey, index);
+                              }}
+                            >
+                              {customText}
+                            </span>
+                          )}
+                          {customTextActionKey === customTextKey ? (
+                            <>
+                              <button
+                                type="button"
+                                className={styles.customTextEditButton}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  startCustomTextUpdate(day.dateKey, index);
+                                }}
+                              >
+                                수정
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.customTextDeleteButton}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  deleteCustomText(day.dateKey, index);
+                                }}
+                              >
+                                삭제
+                              </button>
+                            </>
+                          ) : null}
                         </span>
                       );
                     })}

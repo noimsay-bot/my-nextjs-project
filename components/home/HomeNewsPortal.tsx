@@ -11,6 +11,7 @@ import {
   getHomeDdays,
   getHomeNotices,
   HOME_POPUP_NOTICE_EVENT,
+  hydrateHomePopupWorkspaceFromLocal,
   refreshHomePopupNoticeWorkspace,
   updateHomeDday,
   type HomeDdayItem,
@@ -90,6 +91,7 @@ export function HomeNewsPortal() {
   const [canDeleteNotice, setCanDeleteNotice] = useState(false);
   const [canManageDdays, setCanManageDdays] = useState(false);
   const hostRef = useRef<HTMLElement | null>(null);
+  const loadRunRef = useRef(0);
 
   const syncNotices = () => {
     setNoticeItems(getHomeNotices().map(toNoticeCardItem));
@@ -97,55 +99,62 @@ export function HomeNewsPortal() {
   };
 
   useEffect(() => {
-    if (typeof document === "undefined") return;
+    if (typeof window === "undefined") return;
 
     let cancelled = false;
-    syncNotices();
 
-    void (async () => {
-      try {
-        await refreshHomePopupNoticeWorkspace({ includeTrips: false });
-        if (!cancelled) {
-          syncNotices();
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncNotices);
-    };
-  }, []);
-
-  useEffect(() => {
     const syncSessionWorkspace = async (nextSessionParam?: Awaited<ReturnType<typeof getSessionAsync>> | null) => {
+      const loadRunId = loadRunRef.current + 1;
+      loadRunRef.current = loadRunId;
       const nextSession = nextSessionParam ?? getSession() ?? (await getSessionAsync());
+      if (cancelled || loadRunRef.current !== loadRunId) return;
+
       setCanDeleteNotice(Boolean(nextSession?.approved && hasDeskAccess(nextSession.role)));
       setCanManageDdays(Boolean(nextSession?.approved && hasDeskAccess(nextSession.role)));
 
-      if (!nextSession?.approved) return;
+      const hasCachedWorkspace = hydrateHomePopupWorkspaceFromLocal(nextSession);
+      syncNotices();
+      if (hasCachedWorkspace) {
+        setLoading(false);
+      }
+
+      if (!nextSession?.approved) {
+        setLoading(false);
+        return;
+      }
 
       try {
         await refreshHomePopupNoticeWorkspace({ includeTrips: false });
-        syncNotices();
+        if (!cancelled && loadRunRef.current === loadRunId) {
+          syncNotices();
+        }
       } catch (error) {
-        console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
+        if (!cancelled && loadRunRef.current === loadRunId) {
+          console.warn(error instanceof Error ? error.message : "공지 정보를 불러오지 못했습니다.");
+        }
+      } finally {
+        if (!cancelled && loadRunRef.current === loadRunId) {
+          setLoading(false);
+        }
       }
     };
 
+    const syncFromEvent = () => {
+      syncNotices();
+      setLoading(false);
+    };
+
     void syncSessionWorkspace();
-    return subscribeToAuth((nextSession) => {
+    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncFromEvent);
+    const unsubscribe = subscribeToAuth((nextSession) => {
       void syncSessionWorkspace(nextSession);
     });
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncFromEvent);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -261,7 +270,7 @@ export function HomeNewsPortal() {
           }
         })();
       }}
-      loading={loading}
+      loading={loading && noticeItems.length === 0}
       canDeleteNotice={canDeleteNotice}
       deletingNoticeId={deletingNoticeId}
       onDeleteNotice={(itemId) => {
