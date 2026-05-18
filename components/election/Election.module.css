@@ -4,23 +4,29 @@
 }
 
 .header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 14px;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: end;
 }
 
 .titleBlock {
+  grid-column: 2;
   display: grid;
   gap: 8px;
+  justify-items: center;
+  min-width: 0;
+  text-align: center;
 }
 
 .titleBlock h1 {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .actions {
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -94,6 +100,8 @@
   white-space: nowrap;
   padding: 6px 4px;
   border: 1px solid var(--line);
+  text-align: center;
+  vertical-align: middle;
 }
 
 .table th:first-child {
@@ -306,10 +314,17 @@ th.positionColumn {
   }
 
   .header {
+    grid-template-columns: 1fr;
     align-items: stretch;
   }
 
+  .titleBlock,
   .actions {
-    justify-content: flex-start;
+    grid-column: 1;
+    justify-self: center;
+  }
+
+  .actions {
+    justify-content: center;
   }
 }
