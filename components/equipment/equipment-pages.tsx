@@ -85,6 +85,7 @@ const LIVE_TRS_OPTIONS = [
   "1756",
   "1761",
   "1762",
+  "1764",
   "1767",
   "1768",
   "1769",
@@ -95,8 +96,8 @@ const LIVE_TRS_OPTIONS = [
   "1774",
   "1775",
   "1776",
-  "1779",
-  "1780",
+  "6415",
+  "8130",
 ] as const;
 const LIVE_TRS_OPTION_SET = new Set<string>(LIVE_TRS_OPTIONS);
 const LIVE_ACCESSORY_GROUPS: readonly LiveAccessoryGroupKey[] = ["pin_mic", "distributor"];

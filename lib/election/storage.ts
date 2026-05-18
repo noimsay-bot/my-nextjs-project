@@ -1,5 +1,5 @@
 import { getSession, type SessionUser } from "@/lib/auth/storage";
-import { getKstDateKey, getMonthRangeFromMonthKey } from "@/lib/election/dates";
+import { addDaysToDateKey, getKstDateKey, getMonthRangeFromMonthKey } from "@/lib/election/dates";
 import type {
   ElectionEvent,
   ElectionPoint,
@@ -79,7 +79,7 @@ export function canManageElection(session: SessionUser | null | undefined) {
 
 function electionStorageError(error: unknown, objectLabel: string) {
   const message = getSupabaseStorageErrorMessage(error, objectLabel);
-  if (message.includes("구조가 아직 적용되지 않았습니다")) {
+  if (message.includes("구조가 아직 적용되지 않았습니다") || (message.includes("column") && message.includes("does not exist"))) {
     return `Supabase ${objectLabel} 구조가 아직 적용되지 않았습니다. ${ELECTION_SCHEMA_GUIDE}`;
   }
   return message;
@@ -252,10 +252,16 @@ async function fetchEventWithPoints(row: ElectionEventRow | null) {
   return rowToEvent(row, points);
 }
 
+async function fetchEventsWithPoints(rows: ElectionEventRow[]) {
+  return Promise.all(rows.map((row) => fetchEventWithPoints(row))).then((events) =>
+    events.filter((event): event is ElectionEvent => Boolean(event)),
+  );
+}
+
 export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {
   const session = await getPortalSession();
   if (!session?.approved) {
-    return { event: null, profiles: [], canManage: false };
+    return { event: null, archivedEvents: [], profiles: [], canManage: false };
   }
 
   const canManage = canManageElection(session);
@@ -273,12 +279,30 @@ export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {
     throw new Error(electionStorageError(error, "election_events"));
   }
 
-  const [event, profiles] = await Promise.all([
+  const archivedEventsPromise = canManage
+    ? supabase
+        .from("election_events")
+        .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
+        .eq("status", "closed")
+        .order("election_date", { ascending: false })
+        .order("updated_at", { ascending: false })
+        .limit(30)
+        .returns<ElectionEventRow[]>()
+    : Promise.resolve({ data: [], error: null });
+
+  const [event, profiles, archivedRowsResult] = await Promise.all([
     fetchEventWithPoints(data ?? null),
     canManage ? fetchProfiles() : Promise.resolve([]),
+    archivedEventsPromise,
   ]);
 
-  return { event, profiles, canManage };
+  if (archivedRowsResult.error) {
+    throw new Error(electionStorageError(archivedRowsResult.error, "election_events"));
+  }
+
+  const archivedEvents = canManage ? await fetchEventsWithPoints(archivedRowsResult.data ?? []) : [];
+
+  return { event, archivedEvents, profiles, canManage };
 }
 
 export async function saveElectionWorkspace(input: ElectionSaveInput) {
@@ -316,16 +340,22 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
     }
     eventId = data.id;
   } else {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("election_events")
       .update({
         title,
         election_date: electionDate,
       })
-      .eq("id", eventId);
+      .eq("id", eventId)
+      .neq("status", "closed")
+      .select("id")
+      .maybeSingle<{ id: string }>();
 
     if (error) {
       throw new Error(electionStorageError(error, "election_events"));
+    }
+    if (!data) {
+      throw new Error("최종 저장된 선거 중계표는 수정할 수 없습니다.");
     }
   }
 
@@ -382,7 +412,7 @@ export async function publishElectionEvent(eventId: string) {
 export async function closeElectionEvent(eventId: string) {
   const session = await getPortalSession();
   if (!canManageElection(session)) {
-    throw new Error("선거 중계표 게시종료 권한이 없습니다.");
+    throw new Error("선거 중계표 최종 저장 권한이 없습니다.");
   }
 
   const supabase = await getPortalSupabaseClient();
@@ -398,6 +428,8 @@ export async function closeElectionEvent(eventId: string) {
   if (error) {
     throw new Error(electionStorageError(error, "election_events"));
   }
+
+  return fetchElectionWorkspace();
 }
 
 export async function fetchTodayPublishedElection() {
@@ -411,6 +443,30 @@ export async function fetchTodayPublishedElection() {
     .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
     .eq("status", "published")
     .eq("election_date", today)
+    .limit(1)
+    .maybeSingle<ElectionEventRow>();
+
+  if (error) {
+    throw new Error(electionStorageError(error, "election_events"));
+  }
+
+  return fetchEventWithPoints(data ?? null);
+}
+
+export async function fetchHomeVisiblePublishedElection() {
+  const session = await getPortalSession();
+  if (!session?.approved) return null;
+
+  const today = getKstDateKey();
+  const tomorrow = addDaysToDateKey(today, 1);
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("election_events")
+    .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
+    .eq("status", "published")
+    .gte("election_date", today)
+    .lte("election_date", tomorrow)
+    .order("election_date", { ascending: true })
     .limit(1)
     .maybeSingle<ElectionEventRow>();
 

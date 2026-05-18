@@ -55,6 +55,7 @@ export interface ElectionProfileOption {
 
 export interface ElectionWorkspace {
   event: ElectionEvent | null;
+  archivedEvents: ElectionEvent[];
   profiles: ElectionProfileOption[];
   canManage: boolean;
 }

@@ -281,6 +281,12 @@ th.positionColumn {
   white-space: nowrap;
 }
 
+.archiveList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .emptyPanel {
   display: grid;
   gap: 10px;

@@ -31,6 +31,15 @@ with seed(category, group_name, name, code, sort_order, metadata) as (
     ('camera_lens', 'ENG렌즈', '어안', 'camera-eng-lens-fisheye', 4705, '{"family":"ENG","kind":"lens"}'::jsonb),
     ('live', '기타 라이브장비', 'tvu 배터리', 'live-tvu-battery', 2004, '{"kind":"tvu_battery"}'::jsonb)
   union all
+  select
+    'live',
+    '기타 라이브장비',
+    concat('VC300 ', n, '번'),
+    concat('live-vc300-', lpad(n::text, 2, '0')),
+    2004 + n,
+    '{"kind":"vc300"}'::jsonb
+  from generate_series(1, 4) as n
+  union all
   select 'camera_lens', '단독 카메라', concat('z-90 ', n, '번'), concat('camera-standalone-z-90-', lpad(n::text, 2, '0')), 4000 + n, '{"family":"standalone","kind":"camera"}'::jsonb
   from generate_series(1, 4) as n
   union all

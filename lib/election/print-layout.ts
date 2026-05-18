@@ -22,7 +22,7 @@ const printColumns = [
 const statusLabels: Record<ElectionStatus, string> = {
   draft: "작성중",
   published: "게시중",
-  closed: "종료",
+  closed: "최종 저장",
 };
 
 export const ELECTION_PRINT_CSS = `

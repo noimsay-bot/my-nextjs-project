@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { fetchTodayPublishedElection } from "@/lib/election/storage";
+import { fetchHomeVisiblePublishedElection } from "@/lib/election/storage";
 import type { ElectionEvent } from "@/lib/election/types";
 import styles from "./Election.module.css";
 
@@ -11,12 +11,12 @@ export function HomeElectionCard() {
 
   useEffect(() => {
     let mounted = true;
-    void fetchTodayPublishedElection()
+    void fetchHomeVisiblePublishedElection()
       .then((nextEvent) => {
         if (mounted) setEvent(nextEvent);
       })
       .catch((error) => {
-        console.warn("오늘 선거 중계표를 불러오지 못했습니다.", error);
+        console.warn("홈 선거 중계표를 불러오지 못했습니다.", error);
         if (mounted) setEvent(null);
       });
 

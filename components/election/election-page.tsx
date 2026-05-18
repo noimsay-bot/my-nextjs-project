@@ -38,7 +38,7 @@ interface DraftEvent {
 const statusLabels: Record<ElectionStatus, string> = {
   draft: "작성중",
   published: "게시중",
-  closed: "종료",
+  closed: "최종 저장",
 };
 
 const poolVideoOptions = [
@@ -322,9 +322,52 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
   );
 }
 
+function ArchivedElectionList({
+  events,
+  selectedEvent,
+  onSelect,
+}: {
+  events: ElectionEvent[];
+  selectedEvent: ElectionEvent | null;
+  onSelect: (eventId: string) => void;
+}) {
+  if (events.length === 0) return null;
+
+  return (
+    <>
+      <article className="panel">
+        <div className={`panel-pad ${styles.emptyPanel}`}>
+          <div className={styles.toolbar}>
+            <div>
+              <span className={styles.statusBadge}>기록</span>
+              <h2 style={{ margin: "10px 0 4px" }}>최종 저장된 선거</h2>
+              <div className={styles.summary}>최근 {events.length}개 선거 중계표</div>
+            </div>
+          </div>
+          <div className={styles.archiveList}>
+            {events.map((event) => (
+              <button
+                key={event.id}
+                type="button"
+                className={`btn ${selectedEvent?.id === event.id ? "primary" : ""}`.trim()}
+                onClick={() => onSelect(event.id)}
+              >
+                {event.title} · {event.electionDate}
+              </button>
+            ))}
+          </div>
+        </div>
+      </article>
+      {selectedEvent ? <ElectionReadOnlyTable event={selectedEvent} /> : null}
+    </>
+  );
+}
+
 export function ElectionPage() {
   const [draft, setDraft] = useState<DraftEvent | null>(null);
   const [publishedEvent, setPublishedEvent] = useState<ElectionEvent | null>(null);
+  const [archivedEvents, setArchivedEvents] = useState<ElectionEvent[]>([]);
+  const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<ElectionProfileOption[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -334,6 +377,10 @@ export function ElectionPage() {
   const [savedDisplayTitle, setSavedDisplayTitle] = useState<string | null>(null);
 
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
+  const selectedArchivedEvent = useMemo(
+    () => archivedEvents.find((event) => event.id === selectedArchiveId) ?? null,
+    [archivedEvents, selectedArchiveId],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -341,8 +388,12 @@ export function ElectionPage() {
       const workspace = await fetchElectionWorkspace();
       setCanManage(workspace.canManage);
       setProfiles(workspace.profiles);
+      setArchivedEvents(workspace.archivedEvents);
       setPublishedEvent(workspace.canManage ? null : workspace.event);
       setDraft(workspace.canManage ? (workspace.event ? eventToDraft(workspace.event) : createBlankDraft()) : null);
+      setSelectedArchiveId((current) =>
+        current && workspace.archivedEvents.some((event) => event.id === current) ? current : null,
+      );
       setSavedDisplayTitle(workspace.event?.title ?? null);
       setMessage(null);
     } catch (error) {
@@ -417,36 +468,32 @@ export function ElectionPage() {
     });
   };
 
-  const saveDraft = async () => {
+  const persistDraft = async (successMessage?: string) => {
     if (!draft) return null;
-    setSaving(true);
-    try {
-      const workspace = await saveElectionWorkspace(draftToSaveInput(draft));
-      setCanManage(workspace.canManage);
-      setProfiles(workspace.profiles);
-      setDraft(workspace.event ? eventToDraft(workspace.event) : createBlankDraft());
-      setSavedDisplayTitle(workspace.event?.title ?? null);
-      setMessage({ tone: "ok", text: "선거 중계표를 저장했습니다." });
-      return workspace.event;
-    } catch (error) {
-      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표 저장에 실패했습니다." });
-      return null;
-    } finally {
-      setSaving(false);
+    const workspace = await saveElectionWorkspace(draftToSaveInput(draft));
+    setCanManage(workspace.canManage);
+    setProfiles(workspace.profiles);
+    setArchivedEvents(workspace.archivedEvents);
+    setDraft(workspace.event ? eventToDraft(workspace.event) : createBlankDraft());
+    setSavedDisplayTitle(workspace.event?.title ?? null);
+    if (successMessage) {
+      setMessage({ tone: "ok", text: successMessage });
     }
+    return workspace.event;
   };
 
   const publishDraft = async () => {
-    const savedEvent = await saveDraft();
-    if (!savedEvent) return;
     setSaving(true);
     try {
+      const savedEvent = await persistDraft();
+      if (!savedEvent) return;
       const workspace = await publishElectionEvent(savedEvent.id);
       setCanManage(workspace.canManage);
       setProfiles(workspace.profiles);
+      setArchivedEvents(workspace.archivedEvents);
       setDraft(workspace.event ? eventToDraft(workspace.event) : createBlankDraft());
       setSavedDisplayTitle(workspace.event?.title ?? null);
-      setMessage({ tone: "ok", text: "선거 중계표를 게시했습니다." });
+      setMessage({ tone: "ok", text: "선거 중계표를 게시했습니다. 게시 중에도 수정 후 다시 게시하면 홈과 공개 페이지에 반영됩니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표 게시에 실패했습니다." });
     } finally {
@@ -454,20 +501,26 @@ export function ElectionPage() {
     }
   };
 
-  const closePublishedEvent = async () => {
-    if (!draft?.id) return;
-    const ok = window.confirm("게시종료 후 저장하시겠습니까?");
+  const finalizeDraft = async () => {
+    if (!draft) return;
+    const ok = window.confirm("최종 저장하면 더 이상 수정할 수 없고 공개 페이지와 홈에서 내려갑니다. 계속하시겠습니까?");
     if (!ok) return;
 
     setSaving(true);
     try {
-      await closeElectionEvent(draft.id);
+      const savedEvent = await persistDraft();
+      if (!savedEvent) return;
+      const workspace = await closeElectionEvent(savedEvent.id);
+      setCanManage(workspace.canManage);
       setDraft(createBlankDraft());
+      setProfiles(workspace.profiles);
+      setArchivedEvents(workspace.archivedEvents);
+      setSelectedArchiveId(savedEvent.id);
       setPublishedEvent(null);
       setSavedDisplayTitle(null);
-      setMessage({ tone: "ok", text: "게시종료했습니다. 새 선거 중계표를 작성할 수 있습니다." });
+      setMessage({ tone: "ok", text: "최종 저장했습니다. 입력칸을 초기화했으니 다음 선거 중계표를 작성할 수 있습니다." });
     } catch (error) {
-      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "게시종료에 실패했습니다." });
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "최종 저장에 실패했습니다." });
     } finally {
       setSaving(false);
     }
@@ -553,17 +606,12 @@ export function ElectionPage() {
             <button type="button" className="btn" disabled={!draft} onClick={printElectionBoard}>
               출력
             </button>
-            <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
-              {saving ? "저장 중" : "저장"}
+            <button type="button" className="btn" disabled={saving || !draft} onClick={finalizeDraft}>
+              {saving ? "최종 저장 중" : "최종 저장"}
             </button>
             <button type="button" className="btn primary" disabled={saving || !draft} onClick={publishDraft}>
               게시
             </button>
-            {currentStatus === "published" ? (
-              <button type="button" className="btn" disabled={saving || !draft?.id} onClick={closePublishedEvent}>
-                게시종료
-              </button>
-            ) : null}
           </div>
         </div>
       </article>
@@ -749,6 +797,12 @@ export function ElectionPage() {
           </article>
         </>
       ) : null}
+
+      <ArchivedElectionList
+        events={archivedEvents}
+        selectedEvent={selectedArchivedEvent}
+        onSelect={setSelectedArchiveId}
+      />
     </section>
   );
 }

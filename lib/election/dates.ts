@@ -9,6 +9,20 @@ export function getKstDateKey(date: Date = new Date()) {
   return KST_DATE_FORMATTER.format(date);
 }
 
+export function addDaysToDateKey(dateKey: string, days: number) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey.trim());
+  if (!matched) {
+    throw new Error("날짜 형식이 올바르지 않습니다.");
+  }
+
+  const date = new Date(Date.UTC(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]) + days));
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 export function getMonthRangeFromMonthKey(monthKey: string) {
   const matched = /^(\d{4})-(\d{2})$/.exec(monthKey.trim());
   if (!matched) {
