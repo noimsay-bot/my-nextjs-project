@@ -182,7 +182,7 @@ function getStatusClassName(status: ElectionStatus) {
 
 function formatElectionBoardTitle(title: string | null | undefined) {
   const trimmed = title?.trim() ?? "";
-  return trimmed ? `${trimmed} 배치표` : "선거 중계표";
+  return trimmed ? `${trimmed} 중계표` : "선거 계획표";
 }
 
 function readOnlyValue(value: string | null | undefined) {
@@ -480,7 +480,7 @@ export function ElectionPage() {
     const title = formatElectionBoardTitle(printSource.title);
     const ok = printHtmlDocument({
       title,
-      pageSize: "A3 landscape",
+      pageSize: "A3 portrait",
       pageMargin: "5mm",
       extraCss: ELECTION_PRINT_CSS,
       bodyHtml: renderElectionPrintHtml({
@@ -546,7 +546,7 @@ export function ElectionPage() {
         <div className={`panel-pad ${styles.header}`}>
           <div className={styles.titleBlock}>
             <span className="chip">선거</span>
-            <h1 className="page-title">{formatElectionBoardTitle(savedDisplayTitle)}</h1>
+            <h1 className="page-title">{formatElectionBoardTitle(draft?.title ?? savedDisplayTitle)}</h1>
             <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
           </div>
           <div className={styles.actions}>

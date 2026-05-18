@@ -113,7 +113,7 @@ const links: PortalNavLink[] = [
 
 const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
   "/equipment": "/images/sidebar-icons/tvu-equipment.png",
-  "/election": "/images/sidebar-icons/desk.png",
+  "/election": "/images/sidebar-icons/election.png",
   "/admin": "/images/sidebar-icons/admin.png",
   "/work-schedule": "/images/sidebar-icons/work-schedule.png",
   "/restaurants": "/images/sidebar-icons/restaurants.png",
