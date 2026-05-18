@@ -574,6 +574,13 @@
   justify-items: start;
 }
 
+.badgeRow {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .globalBadge {
   display: inline-flex;
   min-height: 20px;

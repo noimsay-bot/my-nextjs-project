@@ -760,14 +760,18 @@ function EquipmentItemCard({
       <span className={styles.itemCardTop}>
         <span className={styles.itemNameStack}>
           <strong>{displayName ?? getEquipmentDisplayName(item)}</strong>
-          {showGlobalBadge ? (
-            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-              Global
-            </span>
-          ) : null}
-          {showGridBadge ? (
-            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-              Grid
+          {showGlobalBadge || showGridBadge ? (
+            <span className={styles.badgeRow}>
+              {showGlobalBadge ? (
+                <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                  Global
+                </span>
+              ) : null}
+              {showGridBadge ? (
+                <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                  Grid
+                </span>
+              ) : null}
             </span>
           ) : null}
           {showRentalBadge ? (
@@ -2972,9 +2976,18 @@ export function LiveEquipmentStatusHomePanel() {
                                     <span className={styles.regionalBadge}>자동연동</span>
                                   </>
                                 ) : null}
-                                {isGlobalTvuItem(item) ? (
-                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                    Global
+                                {isGlobalTvuItem(item) || isGridTvuItem(item) ? (
+                                  <span className={styles.badgeRow}>
+                                    {isGlobalTvuItem(item) ? (
+                                      <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                        Global
+                                      </span>
+                                    ) : null}
+                                    {isGridTvuItem(item) ? (
+                                      <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                        Grid
+                                      </span>
+                                    ) : null}
                                   </span>
                                 ) : null}
                                 {isRentalTvuItem(item) ? (
@@ -3187,9 +3200,18 @@ export function LiveEquipmentStatusPage() {
                             <span className={styles.regionalBadge}>자동연동</span>
                           </>
                         ) : null}
-                        {isGlobalTvuItem(item) ? (
-                          <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                            Global
+                        {isGlobalTvuItem(item) || isGridTvuItem(item) ? (
+                          <span className={styles.badgeRow}>
+                            {isGlobalTvuItem(item) ? (
+                              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                Global
+                              </span>
+                            ) : null}
+                            {isGridTvuItem(item) ? (
+                              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                Grid
+                              </span>
+                            ) : null}
                           </span>
                         ) : null}
                         {isRentalTvuItem(item) ? (
