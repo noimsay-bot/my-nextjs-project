@@ -880,6 +880,17 @@ function ConfirmDialog({
   onLiveDetailsChange: (details: LiveLoanDetails) => void;
   onReturnIdsChange: (ids: string[]) => void;
 }) {
+  const actionButtons = (
+    <div className={styles.modalActions}>
+      <button type="button" className="btn primary" disabled={actionPending || (mode === "return" && returnIds.length === 0)} onClick={onConfirm}>
+        확인
+      </button>
+      <button type="button" className="btn" disabled={actionPending} onClick={onClose}>
+        취소
+      </button>
+    </div>
+  );
+
   return (
     <div className={styles.modalBackdrop} role="presentation">
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="equipment-confirm-title">
@@ -888,6 +899,7 @@ function ConfirmDialog({
             <span className="chip">{mode === "borrow" ? "대여 확인" : "반납 확인"}</span>
             <h2 id="equipment-confirm-title" className={styles.modalTitle}>{title}</h2>
           </div>
+          {mode === "return" ? actionButtons : null}
           {mode === "return" ? (
             <div className={styles.modalListToolbar}>
               <span>{returnIds.length}개 선택됨</span>
@@ -941,14 +953,7 @@ function ConfirmDialog({
               </label>
             </div>
           ) : null}
-          <div className={styles.modalActions}>
-            <button type="button" className="btn primary" disabled={actionPending || (mode === "return" && returnIds.length === 0)} onClick={onConfirm}>
-              확인
-            </button>
-            <button type="button" className="btn" disabled={actionPending} onClick={onClose}>
-              취소
-            </button>
-          </div>
+          {mode === "borrow" ? actionButtons : null}
         </div>
       </div>
     </div>

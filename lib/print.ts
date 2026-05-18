@@ -9,7 +9,19 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
-export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml: string }) {
+export function printHtmlDocument({
+  title,
+  bodyHtml,
+  pageSize = "A4 landscape",
+  pageMargin = "8mm",
+  extraCss = "",
+}: {
+  title: string;
+  bodyHtml: string;
+  pageSize?: string;
+  pageMargin?: string;
+  extraCss?: string;
+}) {
   const printWindow = window.open("", "_blank");
   if (!printWindow) return false;
 
@@ -51,8 +63,8 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
       }
 
       @page {
-        size: A4 landscape;
-        margin: 8mm;
+        size: ${pageSize};
+        margin: ${pageMargin};
       }
 
       .schedule-print-sheet {
@@ -182,6 +194,8 @@ export function printHtmlDocument({ title, bodyHtml }: { title: string; bodyHtml
         font-size: 7px;
         line-height: 1.1;
       }
+
+      ${extraCss}
     </style>
   </head>
   <body>${bodyHtml}

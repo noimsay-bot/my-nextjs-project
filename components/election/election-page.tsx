@@ -8,6 +8,7 @@ import {
   saveElectionWorkspace,
 } from "@/lib/election/storage";
 import { getKstDateKey } from "@/lib/election/dates";
+import { ELECTION_PRINT_CSS, renderElectionPrintHtml } from "@/lib/election/print-layout";
 import type {
   ElectionEvent,
   ElectionPointInput,
@@ -15,6 +16,7 @@ import type {
   ElectionSaveInput,
   ElectionStatus,
 } from "@/lib/election/types";
+import { printHtmlDocument } from "@/lib/print";
 import { subscribeToAuth } from "@/lib/auth/storage";
 import styles from "./Election.module.css";
 
@@ -471,6 +473,29 @@ export function ElectionPage() {
     }
   };
 
+  const printElectionBoard = () => {
+    const printSource = canManage ? draft : publishedEvent;
+    if (!printSource) return;
+
+    const title = formatElectionBoardTitle(printSource.title);
+    const ok = printHtmlDocument({
+      title,
+      pageSize: "A3 landscape",
+      pageMargin: "5mm",
+      extraCss: ELECTION_PRINT_CSS,
+      bodyHtml: renderElectionPrintHtml({
+        title,
+        electionDate: printSource.electionDate,
+        status: printSource.status,
+        points: printSource.points,
+      }),
+    });
+
+    if (!ok) {
+      setMessage({ tone: "warn", text: "팝업 차단으로 출력 창을 열지 못했습니다." });
+    }
+  };
+
   if (loading) {
     return (
       <section className={styles.page}>
@@ -491,6 +516,11 @@ export function ElectionPage() {
             <div className={styles.titleBlock}>
               <span className="chip">선거</span>
               <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
+            </div>
+            <div className={styles.actions}>
+              <button type="button" className="btn" disabled={!publishedEvent} onClick={printElectionBoard}>
+                출력
+              </button>
             </div>
           </div>
         </article>
@@ -520,6 +550,9 @@ export function ElectionPage() {
             <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
           </div>
           <div className={styles.actions}>
+            <button type="button" className="btn" disabled={!draft} onClick={printElectionBoard}>
+              출력
+            </button>
             <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
               {saving ? "저장 중" : "저장"}
             </button>
