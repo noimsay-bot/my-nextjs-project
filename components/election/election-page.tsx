@@ -242,6 +242,10 @@ function draftToSaveInput(draft: DraftEvent): ElectionSaveInput {
   };
 }
 
+function withDraftPointSortOrder(points: DraftPoint[]) {
+  return points.map((point, index) => ({ ...point, sortOrder: index }));
+}
+
 function getStatusClassName(status: ElectionStatus) {
   if (status === "published") return `${styles.statusBadge} ${styles.statusPublished}`;
   if (status === "closed") return `${styles.statusBadge} ${styles.statusClosed}`;
@@ -574,9 +578,72 @@ export function ElectionPage() {
         ...current.points.slice(0, insertIndex),
         nextPoint,
         ...current.points.slice(insertIndex),
-      ].map((point, index) => ({ ...point, sortOrder: index }));
+      ];
 
-      return { ...current, points: nextPoints };
+      return { ...current, points: withDraftPointSortOrder(nextPoints) };
+    });
+  };
+
+  const moveRegionGroup = (groupIndex: number, direction: -1 | 1) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const groups = buildDraftPointGroups(current.points);
+      const sourceGroup = groups[groupIndex];
+      const targetGroup = groups[groupIndex + direction];
+      if (!sourceGroup || !targetGroup) return current;
+
+      const sourceStart = sourceGroup.pointIndexes[0];
+      const sourceEnd = sourceGroup.pointIndexes[sourceGroup.pointIndexes.length - 1];
+      const targetStart = targetGroup.pointIndexes[0];
+      const targetEnd = targetGroup.pointIndexes[targetGroup.pointIndexes.length - 1];
+      if (
+        sourceStart === undefined ||
+        sourceEnd === undefined ||
+        targetStart === undefined ||
+        targetEnd === undefined
+      ) {
+        return current;
+      }
+
+      const sourcePoints = current.points.slice(sourceStart, sourceEnd + 1);
+      const targetPoints = current.points.slice(targetStart, targetEnd + 1);
+      const nextPoints =
+        direction < 0
+          ? [
+              ...current.points.slice(0, targetStart),
+              ...sourcePoints,
+              ...targetPoints,
+              ...current.points.slice(sourceEnd + 1),
+            ]
+          : [
+              ...current.points.slice(0, sourceStart),
+              ...targetPoints,
+              ...sourcePoints,
+              ...current.points.slice(targetEnd + 1),
+            ];
+
+      return { ...current, points: withDraftPointSortOrder(nextPoints) };
+    });
+  };
+
+  const movePointWithinGroup = (pointIndexes: number[], index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    if (!pointIndexes.includes(targetIndex)) return;
+
+    setDraft((current) => {
+      if (!current) return current;
+      const groups = buildDraftPointGroups(current.points);
+      const group = groups.find((candidate) => candidate.pointIndexes.includes(index));
+      if (!group?.pointIndexes.includes(targetIndex)) return current;
+
+      const nextPoints = [...current.points];
+      const currentPoint = nextPoints[index];
+      const targetPoint = nextPoints[targetIndex];
+      if (!currentPoint || !targetPoint) return current;
+
+      nextPoints[index] = targetPoint;
+      nextPoints[targetIndex] = currentPoint;
+      return { ...current, points: withDraftPointSortOrder(nextPoints) };
     });
   };
 
@@ -584,7 +651,7 @@ export function ElectionPage() {
     setDraft((current) => {
       if (!current) return current;
       const nextPoints = current.points.filter((_, pointIndex) => pointIndex !== index);
-      return { ...current, points: nextPoints.length ? nextPoints : [createBlankPoint(0)] };
+      return { ...current, points: nextPoints.length ? withDraftPointSortOrder(nextPoints) : [createBlankPoint(0)] };
     });
   };
 
@@ -835,10 +902,14 @@ export function ElectionPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {draftPointGroups.flatMap((group) =>
+                    {draftPointGroups.flatMap((group, groupIndex) =>
                       group.pointIndexes.map((index, groupPointIndex) => {
                           const point = draft.points[index];
                           const split = isPointSplit(point);
+                          const isFirstGroup = groupIndex === 0;
+                          const isLastGroup = groupIndex === draftPointGroups.length - 1;
+                          const isFirstPointInGroup = groupPointIndex === 0;
+                          const isLastPointInGroup = groupPointIndex === group.pointIndexes.length - 1;
 
                           return (
                             <tr key={point.localId}>
@@ -859,6 +930,28 @@ export function ElectionPage() {
                                     </label>
                                     <div className={styles.regionActions}>
                                       <span>{group.pointIndexes.length}개 장소</span>
+                                      <span className={styles.moveButtonGroup}>
+                                        <button
+                                          type="button"
+                                          className={styles.moveButton}
+                                          disabled={saving || isFirstGroup}
+                                          title="지역 위로 이동"
+                                          aria-label={`${group.region || "지역"} 위로 이동`}
+                                          onClick={() => moveRegionGroup(groupIndex, -1)}
+                                        >
+                                          ▲
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={styles.moveButton}
+                                          disabled={saving || isLastGroup}
+                                          title="지역 아래로 이동"
+                                          aria-label={`${group.region || "지역"} 아래로 이동`}
+                                          onClick={() => moveRegionGroup(groupIndex, 1)}
+                                        >
+                                          ▼
+                                        </button>
+                                      </span>
                                       <button
                                         type="button"
                                         className={styles.regionAddButton}
@@ -872,7 +965,31 @@ export function ElectionPage() {
                                 </td>
                               ) : null}
                               <td className={styles.placeColumn}>
-                                <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                                <div className={styles.placeCellContent}>
+                                  <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                                  <span className={styles.placeMoveButtons}>
+                                    <button
+                                      type="button"
+                                      className={styles.moveButton}
+                                      disabled={saving || isFirstPointInGroup}
+                                      title="장소 위로 이동"
+                                      aria-label={`${point.place || "장소"} 위로 이동`}
+                                      onClick={() => movePointWithinGroup(group.pointIndexes, index, -1)}
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={styles.moveButton}
+                                      disabled={saving || isLastPointInGroup}
+                                      title="장소 아래로 이동"
+                                      aria-label={`${point.place || "장소"} 아래로 이동`}
+                                      onClick={() => movePointWithinGroup(group.pointIndexes, index, 1)}
+                                    >
+                                      ▼
+                                    </button>
+                                  </span>
+                                </div>
                               </td>
                               <td>
                                 <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
