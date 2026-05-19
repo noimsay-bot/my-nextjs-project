@@ -791,11 +791,11 @@ export function ElectionPage() {
                                 <span>{group.pointIndexes.length}개 장소</span>
                                 <button
                                   type="button"
-                                  className="btn"
+                                  className={styles.regionAddButton}
                                   disabled={saving}
                                   onClick={() => addPointToGroup(group.pointIndexes, group.region)}
                                 >
-                                  장소 추가
+                                  + 장소
                                 </button>
                               </div>
                             </div>
