@@ -247,6 +247,14 @@ function formatTrsSummary(selectedTrs: readonly string[]) {
   return `${selectedTrs[0]} 외 ${selectedTrs.length - 1}개`;
 }
 
+function getBorrowedTrsValues(loanItems: EquipmentLoanItem[]) {
+  const values = new Set<string>();
+  loanItems.forEach((loanItem) => {
+    parseSelectedTrs(loanItem.loan.liveTrs ?? "").forEach((trs) => values.add(trs));
+  });
+  return values;
+}
+
 function getTodayDateKey() {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -1584,6 +1592,7 @@ function LiveEquipmentGroups({
   currentByItemId,
   onToggle,
   selectedTrsValues,
+  borrowedTrsValues,
   onTrsToggle,
   repairMode = false,
   repairDraftByItemId,
@@ -1599,6 +1608,7 @@ function LiveEquipmentGroups({
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
   selectedTrsValues: string[];
+  borrowedTrsValues: Set<string>;
   onTrsToggle: (trs: string) => void;
   repairMode?: boolean;
   repairDraftByItemId?: RepairDraftByItemId;
@@ -1627,6 +1637,9 @@ function LiveEquipmentGroups({
   const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item) && !isHiddenEquipmentChoiceItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
+    if (currentByItemId.has(item.id) && !rentalTvuMode && !repairMode) {
+      return;
+    }
     if (rentalTvuMode === "deactivate" && isRentalTvuItem(item)) {
       onRentalTvuToggle?.(item.id);
       setExpandedTvuId(null);
@@ -1661,6 +1674,11 @@ function LiveEquipmentGroups({
               const showAccessories = expandedTvuId === item.id;
               const showTrsOptions = expandedTrsTvuId === item.id;
               const rentalDeactivateTarget = rentalTvuMode === "deactivate" && isRentalTvuItem(item);
+              const trsSummary = selectedTrsValues.length > 0
+                ? formatTrsSummary(selectedTrsValues)
+                : borrowedTrsValues.size > 0
+                  ? `${borrowedTrsValues.size}개 대여중`
+                  : "";
               const expandedGroup = expandedAccessoryGroup?.tvuId === item.id
                 ? liveAccessoryGroups.find((group) => group.groupKey === expandedAccessoryGroup.groupKey)
                 : null;
@@ -1673,7 +1691,7 @@ function LiveEquipmentGroups({
                     onToggle={() => handleTvuToggle(item)}
                     onDoubleClick={canManageTvuGrid && !repairMode && !rentalTvuMode ? () => onTvuGridToggle?.(item) : undefined}
                     doubleClickTitle={canManageTvuGrid ? "더블클릭으로 Grid 표시를 추가/삭제" : undefined}
-                    allowBorrowedClick={rentalDeactivateTarget ? false : tvuAccessoryItems.length > 0}
+                    allowBorrowedClick={false}
                     tone="live"
                     repairMode={repairMode}
                     repairDraftByItemId={repairDraftByItemId}
@@ -1701,11 +1719,13 @@ function LiveEquipmentGroups({
                         >
                           <span className={styles.itemCardTop}>
                             <strong>TRS</strong>
-                            {selectedTrsValues.length > 0 ? <small>{formatTrsSummary(selectedTrsValues)}</small> : null}
+                            {trsSummary ? <small>{trsSummary}</small> : null}
                           </span>
                         </button>
                         {liveAccessoryGroups.map((group) => {
                           const summary = getLiveAccessorySummary(group.items, selectedIds);
+                          const borrowedCount = group.items.filter((accessoryItem) => currentByItemId.has(accessoryItem.id)).length;
+                          const borrowedSummary = borrowedCount > 0 ? `${borrowedCount}개 대여중` : "";
                           const expanded = expandedGroup?.groupKey === group.groupKey;
                           return (
                             <button
@@ -1728,7 +1748,7 @@ function LiveEquipmentGroups({
                             >
                               <span className={styles.itemCardTop}>
                                 <strong>{group.label}</strong>
-                                {summary ? <small>{summary}</small> : null}
+                                {summary || borrowedSummary ? <small>{summary || borrowedSummary}</small> : null}
                               </span>
                             </button>
                           );
@@ -1737,20 +1757,26 @@ function LiveEquipmentGroups({
                       {showTrsOptions ? (
                         <div className={styles.trsOptionPanel}>
                           <div className={styles.trsOptionGrid}>
-                            {LIVE_TRS_OPTIONS.map((trs) => (
-                              <button
-                                key={trs}
-                                type="button"
-                                className={[
-                                  styles.trsOptionButton,
-                                  selectedTrsValues.includes(trs) ? styles.trsOptionButtonSelected : "",
-                                ].join(" ").trim()}
-                                onClick={() => onTrsToggle(trs)}
-                                aria-pressed={selectedTrsValues.includes(trs)}
-                              >
-                                {trs}
-                              </button>
-                            ))}
+                            {LIVE_TRS_OPTIONS.map((trs) => {
+                              const selected = selectedTrsValues.includes(trs);
+                              const borrowed = borrowedTrsValues.has(trs);
+                              return (
+                                <button
+                                  key={trs}
+                                  type="button"
+                                  className={[
+                                    styles.trsOptionButton,
+                                    selected ? styles.trsOptionButtonSelected : "",
+                                  ].join(" ").trim()}
+                                  onClick={() => onTrsToggle(trs)}
+                                  aria-pressed={selected}
+                                  disabled={borrowed}
+                                >
+                                  <span>{trs}</span>
+                                  {borrowed ? <small>대여중</small> : null}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       ) : null}
@@ -2141,6 +2167,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   const selectedIds = useMemo(() => selectedEntries.map((selection) => selection.id), [selectedEntries]);
   const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
+  const borrowedTrsValues = useMemo(() => getBorrowedTrsValues(currentLoanItems), [currentLoanItems]);
   const selectedItemSelections = useMemo(
     () => selectedEntries.filter((selection): selection is Extract<BorrowSelection, { kind: "item" }> => selection.kind === "item"),
     [selectedEntries],
@@ -2247,6 +2274,13 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     if (hasSelectedTvu || !liveDetails.trs) return;
     setLiveDetails((current) => ({ ...current, trs: "" }));
   }, [hasSelectedTvu, liveDetails.trs]);
+
+  useEffect(() => {
+    if (!liveDetails.trs || borrowedTrsValues.size === 0) return;
+    const nextTrs = formatSelectedTrs(parseSelectedTrs(liveDetails.trs).filter((trs) => !borrowedTrsValues.has(trs)));
+    if (nextTrs === liveDetails.trs) return;
+    setLiveDetails((current) => ({ ...current, trs: nextTrs }));
+  }, [borrowedTrsValues, liveDetails.trs]);
 
   const sortedEngProfiles = useMemo(() => (
     profiles
@@ -2719,7 +2753,11 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                 selectedIds={repairMode || rentalTvuMode ? [] : selectedIds}
                 currentByItemId={currentByItemId}
                 selectedTrsValues={rentalTvuMode ? [] : selectedTrsValues}
-                onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
+                borrowedTrsValues={borrowedTrsValues}
+                onTrsToggle={(trs) => {
+                  if (borrowedTrsValues.has(trs)) return;
+                  setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }));
+                }}
                 onToggle={rentalTvuMode ? () => undefined : repairMode ? toggleRepairDraft : toggleSelection}
                 repairMode={repairMode}
                 repairDraftByItemId={repairDraftByItemId}
