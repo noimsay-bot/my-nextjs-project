@@ -3053,8 +3053,10 @@ export function LiveEquipmentStatusPage() {
   const [statusToggleItemId, setStatusToggleItemId] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ showLoading = true }: { showLoading?: boolean } = {}) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
       const [nextItems, nextCurrent, nextStatusEntries, nextElectionOverlays] = await Promise.all([
         fetchEquipmentItems(["live"]),
@@ -3074,7 +3076,9 @@ export function LiveEquipmentStatusPage() {
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비현황을 불러오지 못했습니다." });
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -3196,7 +3200,7 @@ export function LiveEquipmentStatusPage() {
       } else {
         await borrowLiveEquipmentStatusItem(item.id, liveDetails);
       }
-      await load();
+      await load({ showLoading: false });
       setMessage({ tone: "ok", text: nextMessage });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비 상태 변경에 실패했습니다." });
