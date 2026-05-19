@@ -38,11 +38,12 @@ export const ELECTION_PRINT_CSS = `
 
   .election-print-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8mm;
     align-items: end;
     padding-bottom: 2mm;
     border-bottom: 2px solid #111827;
+    text-align: center;
   }
 
   .election-print-title {
@@ -56,6 +57,7 @@ export const ELECTION_PRINT_CSS = `
   .election-print-meta {
     display: flex;
     flex-wrap: wrap;
+    justify-content: center;
     gap: 2mm 4mm;
     margin-top: 2mm;
     color: #334155;
@@ -67,7 +69,7 @@ export const ELECTION_PRINT_CSS = `
     color: #0f172a;
     font-size: 9pt;
     font-weight: 900;
-    text-align: right;
+    text-align: center;
     white-space: nowrap;
   }
 
@@ -107,6 +109,12 @@ export const ELECTION_PRINT_CSS = `
 
   .election-print-table tbody tr:nth-child(even) td {
     background: #f8fafc;
+  }
+
+  .election-print-region-cell {
+    background: #e0f2fe !important;
+    font-weight: 900;
+    vertical-align: middle !important;
   }
 
   .election-print-col-number { width: 3.2%; }
@@ -190,7 +198,24 @@ function isLivePositionChecked(value: string | null | undefined) {
   return normalized === "checked" || normalized === "true" || normalized === "yes" || normalized === "1";
 }
 
-function renderPointRow(point: ElectionPrintPoint, index: number) {
+function buildPrintPointGroups(points: ElectionPrintPoint[]) {
+  const groups: Array<{ region: string; points: ElectionPrintPoint[] }> = [];
+
+  points.forEach((point) => {
+    const region = point.region.trim();
+    const previousGroup = groups.at(-1);
+    if (previousGroup && previousGroup.region === region) {
+      previousGroup.points.push(point);
+      return;
+    }
+
+    groups.push({ region, points: [point] });
+  });
+
+  return groups;
+}
+
+function renderPointRow(point: ElectionPrintPoint, index: number, regionCellHtml: string) {
   const livePositionClassName = isLivePositionChecked(point.livePosition)
     ? "election-print-position election-print-position--on"
     : "election-print-position";
@@ -198,7 +223,7 @@ function renderPointRow(point: ElectionPrintPoint, index: number) {
   return `
     <tr>
       <td>${index + 1}</td>
-      <td>${printableValue(point.region)}</td>
+      ${regionCellHtml}
       <td>${printableValue(point.place)}</td>
       <td>${printableValue(point.poolVideo)}</td>
       <td>${printableValue(point.equipmentName)}</td>
@@ -226,8 +251,21 @@ export function renderElectionPrintHtml({
   status: ElectionStatus;
   points: ElectionPrintPoint[];
 }) {
+  let pointIndex = 0;
   const rowsHtml = points.length
-    ? points.map(renderPointRow).join("")
+    ? buildPrintPointGroups(points)
+        .flatMap((group) =>
+          group.points.map((point, groupPointIndex) => {
+            const regionCellHtml =
+              groupPointIndex === 0
+                ? `<td class="election-print-region-cell" rowspan="${group.points.length}">${printableValue(group.region)}</td>`
+                : "";
+            const rowHtml = renderPointRow(point, pointIndex, regionCellHtml);
+            pointIndex += 1;
+            return rowHtml;
+          }),
+        )
+        .join("")
     : `<tr><td colspan="${printColumns.length}"><span class="election-print-empty">입력된 중계 포인트가 없습니다.</span></td></tr>`;
 
   return `

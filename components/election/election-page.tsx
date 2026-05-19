@@ -23,6 +23,8 @@ import styles from "./Election.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type DayPart = "am" | "pm";
+type PrintPaperSize = "A3" | "A4";
+type PrintOrientation = "portrait" | "landscape";
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -82,6 +84,16 @@ const tableColumns = [
 
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
+
+const printPaperSizeLabels: Record<PrintPaperSize, string> = {
+  A3: "A3",
+  A4: "A4",
+};
+
+const printOrientationLabels: Record<PrintOrientation, string> = {
+  portrait: "세로",
+  landscape: "가로",
+};
 
 function getTableColumnClassName(column: string) {
   return column === "중계자리" ? styles.positionColumn : undefined;
@@ -444,6 +456,8 @@ export function ElectionPage() {
   const [message, setMessage] = useState<Message | null>(null);
   const [splitRowIds, setSplitRowIds] = useState<Record<string, true>>({});
   const [savedDisplayTitle, setSavedDisplayTitle] = useState<string | null>(null);
+  const [printPaperSize, setPrintPaperSize] = useState<PrintPaperSize>("A3");
+  const [printOrientation, setPrintOrientation] = useState<PrintOrientation>("portrait");
   const authReloadKeyRef = useRef(getAuthReloadKey(getSession()));
 
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
@@ -639,7 +653,7 @@ export function ElectionPage() {
     const title = formatElectionBoardTitle(printSource.title);
     const ok = printHtmlDocument({
       title,
-      pageSize: "A3 portrait",
+      pageSize: `${printPaperSize} ${printOrientation}`,
       pageMargin: "5mm",
       extraCss: ELECTION_PRINT_CSS,
       bodyHtml: renderElectionPrintHtml({
@@ -675,10 +689,34 @@ export function ElectionPage() {
             <div className={styles.titleBlock}>
               <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
             </div>
-            <div className={styles.actions}>
-              <button type="button" className="btn" disabled={!publishedEvent} onClick={printElectionBoard}>
-                출력
-              </button>
+          <div className={styles.actions}>
+            <div className={styles.printOptions} aria-label="출력 설정">
+              <select
+                className="field-select"
+                value={printPaperSize}
+                onChange={(event) => setPrintPaperSize(event.target.value as PrintPaperSize)}
+              >
+                {Object.entries(printPaperSizeLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="field-select"
+                value={printOrientation}
+                onChange={(event) => setPrintOrientation(event.target.value as PrintOrientation)}
+              >
+                {Object.entries(printOrientationLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button type="button" className="btn" disabled={!publishedEvent} onClick={printElectionBoard}>
+              출력
+            </button>
             </div>
           </div>
         </article>
@@ -707,6 +745,30 @@ export function ElectionPage() {
             <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
           </div>
           <div className={styles.actions}>
+            <div className={styles.printOptions} aria-label="출력 설정">
+              <select
+                className="field-select"
+                value={printPaperSize}
+                onChange={(event) => setPrintPaperSize(event.target.value as PrintPaperSize)}
+              >
+                {Object.entries(printPaperSizeLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="field-select"
+                value={printOrientation}
+                onChange={(event) => setPrintOrientation(event.target.value as PrintOrientation)}
+              >
+                {Object.entries(printOrientationLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button type="button" className="btn" disabled={!draft} onClick={printElectionBoard}>
               출력
             </button>
