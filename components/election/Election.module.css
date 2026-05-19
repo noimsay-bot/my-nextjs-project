@@ -164,53 +164,49 @@ th.positionColumn {
   white-space: nowrap;
 }
 
-.regionHeaderRow td {
-  padding: 5px 6px;
-  border-top-color: rgba(148, 163, 184, 0.36);
-  border-bottom-color: rgba(148, 163, 184, 0.22);
-  background: rgba(148, 163, 184, 0.13);
+.mergedRegionCell {
+  width: 8%;
+  min-width: 92px;
+  background: rgba(148, 163, 184, 0.1);
+  vertical-align: middle !important;
 }
 
-.regionHeader {
+.regionCellContent {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
   min-width: 0;
-  gap: 8px;
-  align-items: center;
 }
 
 .regionField {
   display: grid;
-  grid-template-columns: 34px minmax(140px, 240px);
-  gap: 6px;
-  align-items: center;
+  gap: 4px;
   min-width: 0;
   color: rgba(226, 232, 240, 0.74);
   font-size: 11px;
   font-weight: 900;
-  text-align: left;
+  text-align: center;
 }
 
 .regionField input {
-  height: 28px;
-  padding: 4px 7px;
+  height: 30px;
+  padding: 4px 5px;
   border-radius: 0 !important;
   border-color: rgba(148, 163, 184, 0.24);
   background: rgba(15, 23, 42, 0.28);
   color: var(--text);
   font-weight: 900;
-  text-align: left;
+  text-align: center;
 }
 
 .regionActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   color: rgba(226, 232, 240, 0.62);
   font-size: 11px;
   font-weight: 900;
-  white-space: nowrap;
 }
 
 .regionAddButton {
@@ -237,10 +233,6 @@ th.positionColumn {
 .regionAddButton:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.groupChildCell {
-  background: rgba(148, 163, 184, 0.08);
 }
 
 .readOnlyRegionCell {
@@ -395,15 +387,6 @@ th.positionColumn {
 
   .formGrid {
     grid-template-columns: 1fr;
-  }
-
-  .regionHeader {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .regionField {
-    grid-template-columns: 36px minmax(0, 1fr);
   }
 
   .regionActions {

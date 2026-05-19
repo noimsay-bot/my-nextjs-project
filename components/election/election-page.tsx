@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   closeElectionEvent,
   fetchElectionWorkspace,
@@ -773,35 +773,8 @@ export function ElectionPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {draftPointGroups.map((group) => (
-                      <Fragment key={group.key}>
-                        <tr key={`${group.key}-region`} className={styles.regionHeaderRow}>
-                          <td colSpan={tableColumns.length}>
-                            <div className={styles.regionHeader}>
-                              <label className={styles.regionField}>
-                                <span>지역</span>
-                                <input
-                                  className="field-input"
-                                  value={group.region}
-                                  onChange={(event) => updateGroupRegion(group.pointIndexes, event.target.value)}
-                                  placeholder="예: 정당"
-                                />
-                              </label>
-                              <div className={styles.regionActions}>
-                                <span>{group.pointIndexes.length}개 장소</span>
-                                <button
-                                  type="button"
-                                  className={styles.regionAddButton}
-                                  disabled={saving}
-                                  onClick={() => addPointToGroup(group.pointIndexes, group.region)}
-                                >
-                                  + 장소
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                        {group.pointIndexes.map((index) => {
+                    {draftPointGroups.flatMap((group) =>
+                      group.pointIndexes.map((index, groupPointIndex) => {
                           const point = draft.points[index];
                           const split = isPointSplit(point);
 
@@ -810,7 +783,32 @@ export function ElectionPage() {
                               <td className={styles.numberCell}>
                                 {index + 1}.
                               </td>
-                              <td className={styles.groupChildCell} aria-label={group.region || "미분류 지역"} />
+                              {groupPointIndex === 0 ? (
+                                <td rowSpan={group.pointIndexes.length} className={styles.mergedRegionCell}>
+                                  <div className={styles.regionCellContent}>
+                                    <label className={styles.regionField}>
+                                      <span>지역</span>
+                                      <input
+                                        className="field-input"
+                                        value={group.region}
+                                        onChange={(event) => updateGroupRegion(group.pointIndexes, event.target.value)}
+                                        placeholder="예: 정당"
+                                      />
+                                    </label>
+                                    <div className={styles.regionActions}>
+                                      <span>{group.pointIndexes.length}개 장소</span>
+                                      <button
+                                        type="button"
+                                        className={styles.regionAddButton}
+                                        disabled={saving}
+                                        onClick={() => addPointToGroup(group.pointIndexes, group.region)}
+                                      >
+                                        + 장소
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+                              ) : null}
                               <td className={styles.placeColumn}>
                                 <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
                               </td>
@@ -921,9 +919,8 @@ export function ElectionPage() {
                               </td>
                             </tr>
                           );
-                        })}
-                      </Fragment>
-                    ))}
+                        }),
+                      )}
                   </tbody>
                 </table>
               </div>
