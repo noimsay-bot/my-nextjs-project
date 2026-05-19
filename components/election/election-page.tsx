@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   closeElectionEvent,
   fetchElectionWorkspace,
@@ -17,7 +17,8 @@ import type {
   ElectionStatus,
 } from "@/lib/election/types";
 import { printHtmlDocument } from "@/lib/print";
-import { subscribeToAuth } from "@/lib/auth/storage";
+import { getSession, subscribeToAuth } from "@/lib/auth/storage";
+import type { SessionUser } from "@/lib/auth/storage";
 import styles from "./Election.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
@@ -33,6 +34,12 @@ interface DraftEvent {
   electionDate: string;
   status: ElectionStatus;
   points: DraftPoint[];
+}
+
+interface DraftPointGroup {
+  key: string;
+  region: string;
+  pointIndexes: number[];
 }
 
 const statusLabels: Record<ElectionStatus, string> = {
@@ -127,6 +134,55 @@ function createBlankDraft(): DraftEvent {
   };
 }
 
+function getAuthReloadKey(session: SessionUser | null) {
+  if (!session) return "anonymous";
+  return `${session.id}:${session.approved}:${session.actualRole}`;
+}
+
+function buildDraftPointGroups(points: DraftPoint[]): DraftPointGroup[] {
+  const groups: DraftPointGroup[] = [];
+
+  points.forEach((point, index) => {
+    const region = point.region.trim();
+
+    const previousGroup = groups.at(-1);
+    if (previousGroup && previousGroup.region === region) {
+      previousGroup.pointIndexes.push(index);
+      return;
+    }
+
+    groups.push({
+      key: `${point.localId}-${index}`,
+      region,
+      pointIndexes: [index],
+    });
+  });
+
+  return groups;
+}
+
+function buildReadOnlyPointGroups(points: ElectionEvent["points"]): Array<{ key: string; region: string; points: ElectionEvent["points"] }> {
+  const groups: Array<{ key: string; region: string; points: ElectionEvent["points"] }> = [];
+
+  points.forEach((point, index) => {
+    const region = point.region.trim();
+
+    const previousGroup = groups.at(-1);
+    if (previousGroup && previousGroup.region === region) {
+      previousGroup.points.push(point);
+      return;
+    }
+
+    groups.push({
+      key: `${point.id}-${index}`,
+      region,
+      points: [point],
+    });
+  });
+
+  return groups;
+}
+
 function eventToDraft(event: ElectionEvent): DraftEvent {
   return {
     id: event.id,
@@ -170,7 +226,7 @@ function draftToSaveInput(draft: DraftEvent): ElectionSaveInput {
     id: draft.id,
     title: draft.title,
     electionDate: draft.electionDate,
-    points: draft.points.map((point, index) => ({ ...point, sortOrder: index })),
+    points: draft.points.map((point, index) => ({ ...point, region: point.region.trim(), sortOrder: index })),
   };
 }
 
@@ -265,6 +321,9 @@ function SplitTextInput({
 }
 
 function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
+  const pointGroups = buildReadOnlyPointGroups(event.points);
+  let pointNumber = 0;
+
   return (
     <article className="panel">
       <div className={`panel-pad ${styles.emptyPanel}`}>
@@ -286,30 +345,40 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
               </tr>
             </thead>
             <tbody>
-              {event.points.length ? (
-                event.points.map((point, index) => (
-                  <tr key={point.id}>
-                    <td className={styles.numberCell}>{index + 1}.</td>
-                    <td>{readOnlyValue(point.region)}</td>
-                    <td>{readOnlyValue(point.place)}</td>
-                    <td>{readOnlyValue(point.poolVideo)}</td>
-                    <td>{readOnlyValue(point.equipmentName)}</td>
-                    <td>{readOnlyValue(point.trs)}</td>
-                    <td>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
-                    <td>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                    <td>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
-                    <td>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
-                    <td>{readOnlyValue(point.address)}</td>
-                    <td>{readOnlyValue(point.note)}</td>
-                    <td className={styles.positionColumn}>
-                      <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
-                    </td>
-                    <td>{readOnlyValue(point.lighting)}</td>
-                  </tr>
-                ))
+              {pointGroups.length ? (
+                pointGroups.flatMap((group) =>
+                  group.points.map((point, groupPointIndex) => {
+                    pointNumber += 1;
+
+                    return (
+                      <tr key={point.id}>
+                        <td className={styles.numberCell}>{pointNumber}.</td>
+                        {groupPointIndex === 0 ? (
+                          <td rowSpan={group.points.length} className={styles.readOnlyRegionCell}>
+                            {readOnlyValue(group.region)}
+                          </td>
+                        ) : null}
+                        <td>{readOnlyValue(point.place)}</td>
+                        <td>{readOnlyValue(point.poolVideo)}</td>
+                        <td>{readOnlyValue(point.equipmentName)}</td>
+                        <td>{readOnlyValue(point.trs)}</td>
+                        <td>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                        <td>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                        <td>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                        <td>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                        <td>{readOnlyValue(point.address)}</td>
+                        <td>{readOnlyValue(point.note)}</td>
+                        <td className={styles.positionColumn}>
+                          <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                        </td>
+                        <td>{readOnlyValue(point.lighting)}</td>
+                      </tr>
+                    );
+                  }),
+                )
               ) : (
                 <tr>
-                  <td colSpan={15}>
+                  <td colSpan={tableColumns.length - 1}>
                     <div className="status note">입력된 중계 포인트가 없습니다.</div>
                   </td>
                 </tr>
@@ -375,12 +444,14 @@ export function ElectionPage() {
   const [message, setMessage] = useState<Message | null>(null);
   const [splitRowIds, setSplitRowIds] = useState<Record<string, true>>({});
   const [savedDisplayTitle, setSavedDisplayTitle] = useState<string | null>(null);
+  const authReloadKeyRef = useRef(getAuthReloadKey(getSession()));
 
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
   const selectedArchivedEvent = useMemo(
     () => archivedEvents.find((event) => event.id === selectedArchiveId) ?? null,
     [archivedEvents, selectedArchiveId],
   );
+  const draftPointGroups = useMemo(() => (draft ? buildDraftPointGroups(draft.points) : []), [draft]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -407,7 +478,16 @@ export function ElectionPage() {
     void load();
   }, [load]);
 
-  useEffect(() => subscribeToAuth(() => void load()), [load]);
+  useEffect(
+    () =>
+      subscribeToAuth((nextSession) => {
+        const nextKey = getAuthReloadKey(nextSession);
+        if (authReloadKeyRef.current === nextKey) return;
+        authReloadKeyRef.current = nextKey;
+        void load();
+      }),
+    [load],
+  );
 
   const updateDraft = (patch: Partial<Pick<DraftEvent, "title" | "electionDate">>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -419,6 +499,17 @@ export function ElectionPage() {
       return {
         ...current,
         points: current.points.map((point, pointIndex) => (pointIndex === index ? { ...point, ...patch } : point)),
+      };
+    });
+  };
+
+  const updateGroupRegion = (pointIndexes: number[], region: string) => {
+    const indexSet = new Set(pointIndexes);
+    setDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        points: current.points.map((point, pointIndex) => (indexSet.has(pointIndex) ? { ...point, region } : point)),
       };
     });
   };
@@ -453,10 +544,25 @@ export function ElectionPage() {
     updatePoint(index, { cameraStaffNamePm: value, cameraStaffUserIdPm: userId });
   };
 
-  const addPoint = () => {
+  const addRegion = () => {
     setDraft((current) => {
       if (!current) return current;
       return { ...current, points: [...current.points, createBlankPoint(current.points.length)] };
+    });
+  };
+
+  const addPointToGroup = (pointIndexes: number[], region: string) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const insertIndex = Math.max(...pointIndexes) + 1;
+      const nextPoint = { ...createBlankPoint(insertIndex), region };
+      const nextPoints = [
+        ...current.points.slice(0, insertIndex),
+        nextPoint,
+        ...current.points.slice(insertIndex),
+      ].map((point, index) => ({ ...point, sortOrder: index }));
+
+      return { ...current, points: nextPoints };
     });
   };
 
@@ -648,8 +754,8 @@ export function ElectionPage() {
             <div className={`panel-pad ${styles.emptyPanel}`}>
               <div className={styles.toolbar}>
                 <div className={styles.summary}>{draft.points.length}개 포인트</div>
-                <button type="button" className="btn" disabled={saving} onClick={addPoint}>
-                  행 추가
+                <button type="button" className="btn" disabled={saving} onClick={addRegion}>
+                  지역 추가
                 </button>
               </div>
               <datalist id="election-profile-options">
@@ -667,127 +773,157 @@ export function ElectionPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {draft.points.map((point, index) => {
-                      const split = isPointSplit(point);
-                      return (
-                      <tr key={point.localId}>
-                        <td className={styles.numberCell}>
-                          {index + 1}.
-                        </td>
-                        <td>
-                          <input className="field-input" value={point.region} onChange={(event) => updatePoint(index, { region: event.target.value })} />
-                        </td>
-                        <td className={styles.placeColumn}>
-                          <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
-                        </td>
-                        <td>
-                          <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
-                            <option value="">선택</option>
-                            {getPoolVideoOptions(point.poolVideo).map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
-                        </td>
-                        <td>
-                          <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
-                        </td>
-                        <td className={styles.staffColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.cameraStaffName}
-                              afternoon={point.cameraStaffNamePm}
-                              listId="election-profile-options"
-                              onMorningChange={(value) => updateCameraStaff(index, "am", value)}
-                              onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
-                            />
-                          ) : (
-                            <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
-                          )}
-                        </td>
-                        <td className={styles.staffColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.audioStaffName}
-                              afternoon={point.audioStaffNamePm}
-                              onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
-                              onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
-                            />
-                          ) : (
-                            <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
-                          )}
-                        </td>
-                        <td className={styles.staffColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.liveTime}
-                              afternoon={point.liveTimePm}
-                              onMorningChange={(value) => updatePoint(index, { liveTime: value })}
-                              onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
-                            />
-                          ) : (
-                            <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
-                          )}
-                        </td>
-                        <td className={styles.staffColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.reporterName}
-                              afternoon={point.reporterNamePm}
-                              onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
-                              onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
-                            />
-                          ) : (
-                            <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
-                          )}
-                        </td>
-                        <td className={styles.wideColumn}>
-                          <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
-                        </td>
-                        <td className={styles.wideColumn}>
-                          <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
-                        </td>
-                        <td className={styles.positionColumn}>
-                          <label
-                            className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
-                            title="중계자리"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isLivePositionChecked(point.livePosition)}
-                              onChange={(event) =>
-                                updatePoint(index, {
-                                  livePosition: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
-                                })
-                              }
-                            />
-                          </label>
-                        </td>
-                        <td>
-                          <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
-                        </td>
-                        <td>
-                          <div className={styles.rowActions}>
-                            <button
-                              type="button"
-                              className="btn"
-                              disabled={saving}
-                              onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
-                            >
-                              {split ? "합치기" : "오전/오후"}
-                            </button>
-                          <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
-                            삭제
-                          </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                    })}
+                    {draftPointGroups.map((group) => (
+                      <Fragment key={group.key}>
+                        <tr key={`${group.key}-region`} className={styles.regionHeaderRow}>
+                          <td colSpan={tableColumns.length}>
+                            <div className={styles.regionHeader}>
+                              <label className={styles.regionField}>
+                                <span>지역</span>
+                                <input
+                                  className="field-input"
+                                  value={group.region}
+                                  onChange={(event) => updateGroupRegion(group.pointIndexes, event.target.value)}
+                                  placeholder="예: 정당"
+                                />
+                              </label>
+                              <div className={styles.regionActions}>
+                                <span>{group.pointIndexes.length}개 장소</span>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  disabled={saving}
+                                  onClick={() => addPointToGroup(group.pointIndexes, group.region)}
+                                >
+                                  장소 추가
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                        {group.pointIndexes.map((index) => {
+                          const point = draft.points[index];
+                          const split = isPointSplit(point);
+
+                          return (
+                            <tr key={point.localId}>
+                              <td className={styles.numberCell}>
+                                {index + 1}.
+                              </td>
+                              <td className={styles.groupChildCell} aria-label={group.region || "미분류 지역"} />
+                              <td className={styles.placeColumn}>
+                                <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                              </td>
+                              <td>
+                                <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
+                                  <option value="">선택</option>
+                                  {getPoolVideoOptions(point.poolVideo).map((option) => (
+                                    <option key={option} value={option}>
+                                      {option}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
+                              </td>
+                              <td>
+                                <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
+                              </td>
+                              <td className={styles.staffColumn}>
+                                {split ? (
+                                  <SplitTextInput
+                                    morning={point.cameraStaffName}
+                                    afternoon={point.cameraStaffNamePm}
+                                    listId="election-profile-options"
+                                    onMorningChange={(value) => updateCameraStaff(index, "am", value)}
+                                    onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
+                                  />
+                                ) : (
+                                  <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
+                                )}
+                              </td>
+                              <td className={styles.staffColumn}>
+                                {split ? (
+                                  <SplitTextInput
+                                    morning={point.audioStaffName}
+                                    afternoon={point.audioStaffNamePm}
+                                    onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
+                                    onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
+                                  />
+                                ) : (
+                                  <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
+                                )}
+                              </td>
+                              <td className={styles.staffColumn}>
+                                {split ? (
+                                  <SplitTextInput
+                                    morning={point.liveTime}
+                                    afternoon={point.liveTimePm}
+                                    onMorningChange={(value) => updatePoint(index, { liveTime: value })}
+                                    onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
+                                  />
+                                ) : (
+                                  <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
+                                )}
+                              </td>
+                              <td className={styles.staffColumn}>
+                                {split ? (
+                                  <SplitTextInput
+                                    morning={point.reporterName}
+                                    afternoon={point.reporterNamePm}
+                                    onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
+                                    onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
+                                  />
+                                ) : (
+                                  <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
+                                )}
+                              </td>
+                              <td className={styles.wideColumn}>
+                                <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
+                              </td>
+                              <td className={styles.wideColumn}>
+                                <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
+                              </td>
+                              <td className={styles.positionColumn}>
+                                <label
+                                  className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
+                                  title="중계자리"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isLivePositionChecked(point.livePosition)}
+                                    onChange={(event) =>
+                                      updatePoint(index, {
+                                        livePosition: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
+                                      })
+                                    }
+                                  />
+                                </label>
+                              </td>
+                              <td>
+                                <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
+                              </td>
+                              <td>
+                                <div className={styles.rowActions}>
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    disabled={saving}
+                                    onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
+                                  >
+                                    {split ? "합치기" : "오전/오후"}
+                                  </button>
+                                  <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
+                                    삭제
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
                   </tbody>
                 </table>
               </div>

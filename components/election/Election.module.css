@@ -164,6 +164,60 @@ th.positionColumn {
   white-space: nowrap;
 }
 
+.regionHeaderRow td {
+  padding: 7px 8px;
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.regionHeader {
+  display: flex;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.regionField {
+  display: grid;
+  grid-template-columns: 38px minmax(160px, 280px);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+}
+
+.regionField input {
+  height: 32px;
+  border-radius: 0 !important;
+  background: rgba(15, 23, 42, 0.82);
+  color: var(--text);
+  font-weight: 900;
+  text-align: left;
+}
+
+.regionActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.groupChildCell {
+  background: rgba(15, 23, 42, 0.26);
+}
+
+.readOnlyRegionCell {
+  background: rgba(15, 23, 42, 0.34);
+  vertical-align: middle !important;
+}
+
 .readOnlyCell {
   display: block;
   min-height: 28px;
@@ -311,6 +365,19 @@ th.positionColumn {
 
   .formGrid {
     grid-template-columns: 1fr;
+  }
+
+  .regionHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .regionField {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .regionActions {
+    justify-content: space-between;
   }
 
   .header {
