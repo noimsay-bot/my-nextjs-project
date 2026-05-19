@@ -1,13 +1,19 @@
 create table if not exists public.customer_support_messages (
   id uuid primary key default gen_random_uuid(),
+  requester_id uuid references public.profiles (id) on delete set null,
   body text not null check (char_length(trim(body)) between 1 and 2000),
   attachments jsonb not null default '[]'::jsonb,
   status text not null default 'open' check (status in ('open', 'processed')),
   processed_at timestamptz,
   processed_by uuid references public.profiles (id) on delete set null,
+  processed_feedback text,
+  feedback_seen_at timestamptz,
   updated_at timestamptz not null default timezone('utc', now()),
   created_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.customer_support_messages
+add column if not exists requester_id uuid references public.profiles (id) on delete set null;
 
 alter table public.customer_support_messages
 add column if not exists attachments jsonb not null default '[]'::jsonb;
@@ -20,6 +26,12 @@ add column if not exists processed_at timestamptz;
 
 alter table public.customer_support_messages
 add column if not exists processed_by uuid references public.profiles (id) on delete set null;
+
+alter table public.customer_support_messages
+add column if not exists processed_feedback text;
+
+alter table public.customer_support_messages
+add column if not exists feedback_seen_at timestamptz;
 
 alter table public.customer_support_messages
 add column if not exists updated_at timestamptz not null default timezone('utc', now());
@@ -36,6 +48,10 @@ on public.customer_support_messages (created_at desc);
 
 create index if not exists customer_support_messages_status_created_at_idx
 on public.customer_support_messages (status, created_at desc);
+
+create index if not exists customer_support_messages_requester_feedback_idx
+on public.customer_support_messages (requester_id, status, feedback_seen_at, processed_at desc)
+where requester_id is not null;
 
 drop trigger if exists set_customer_support_messages_updated_at on public.customer_support_messages;
 create trigger set_customer_support_messages_updated_at
@@ -58,6 +74,17 @@ on public.customer_support_messages
 for select
 to authenticated
 using (public.is_admin());
+
+drop policy if exists "customer_support_messages_select_own_processed_feedback" on public.customer_support_messages;
+create policy "customer_support_messages_select_own_processed_feedback"
+on public.customer_support_messages
+for select
+to authenticated
+using (
+  requester_id = auth.uid()
+  and status = 'processed'
+  and public.current_profile_approved() = true
+);
 
 drop policy if exists "customer_support_messages_update_admins" on public.customer_support_messages;
 create policy "customer_support_messages_update_admins"
@@ -130,8 +157,11 @@ using (
   and public.is_admin()
 );
 
+drop function if exists public.mark_customer_support_message_processed(uuid);
+
 create or replace function public.mark_customer_support_message_processed(
-  p_message_id uuid
+  p_message_id uuid,
+  p_feedback text default null
 )
 returns public.customer_support_messages
 language plpgsql
@@ -154,7 +184,12 @@ begin
   set
     status = 'processed',
     processed_at = timezone('utc', now()),
-    processed_by = v_user_id
+    processed_by = v_user_id,
+    processed_feedback = nullif(trim(coalesce(p_feedback, '')), ''),
+    feedback_seen_at = case
+      when requester_id is null then timezone('utc', now())
+      else null
+    end
   where id = p_message_id
   returning * into v_row;
 
@@ -166,5 +201,43 @@ begin
 end;
 $$;
 
-revoke execute on function public.mark_customer_support_message_processed(uuid) from public, anon;
-grant execute on function public.mark_customer_support_message_processed(uuid) to authenticated;
+revoke execute on function public.mark_customer_support_message_processed(uuid, text) from public, anon;
+grant execute on function public.mark_customer_support_message_processed(uuid, text) to authenticated;
+
+create or replace function public.mark_customer_support_feedback_seen(
+  p_message_id uuid
+)
+returns public.customer_support_messages
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_row public.customer_support_messages;
+begin
+  if v_user_id is null then
+    raise exception '승인된 로그인 세션이 필요합니다.';
+  end if;
+
+  if public.current_profile_approved() is distinct from true then
+    raise exception '승인된 로그인 세션이 필요합니다.';
+  end if;
+
+  update public.customer_support_messages
+  set feedback_seen_at = timezone('utc', now())
+  where id = p_message_id
+    and requester_id = v_user_id
+    and status = 'processed'
+  returning * into v_row;
+
+  if v_row.id is null then
+    raise exception '확인할 고객센터 처리완료 알림을 찾을 수 없습니다.';
+  end if;
+
+  return v_row;
+end;
+$$;
+
+revoke execute on function public.mark_customer_support_feedback_seen(uuid) from public, anon;
+grant execute on function public.mark_customer_support_feedback_seen(uuid) to authenticated;

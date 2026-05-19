@@ -22,6 +22,13 @@ import {
   getPortalAccessState,
   subscribeToPortalAccessState,
 } from "@/lib/portal/access-state";
+import {
+  acknowledgeCustomerSupportFeedbackNotification,
+  CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT,
+  getOpenCustomerSupportMessageCount,
+  getPendingCustomerSupportFeedbackNotification,
+  type CustomerSupportFeedbackNotification,
+} from "@/lib/portal/customer-support";
 import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
 import {
   getMemberLevelProgressPercent,
@@ -410,6 +417,55 @@ function formatNextLevelLabel(memberLevel: MemberLevelSnapshot | null) {
   return `Lv${nextLevel}`;
 }
 
+function formatCustomerSupportFeedbackDate(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("ko-KR");
+}
+
+function CustomerSupportFeedbackPopup({
+  notification,
+  onConfirm,
+}: {
+  notification: CustomerSupportFeedbackNotification;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="customer-support-feedback-backdrop" role="presentation">
+      <section
+        className="customer-support-feedback-popup"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="customer-support-feedback-title"
+      >
+        <div className="customer-support-feedback-popup__header">
+          <span className="customer-support-status customer-support-status--processed">처리완료</span>
+          <h2 id="customer-support-feedback-title">고객센터 문의가 처리되었습니다</h2>
+          {notification.processedAt ? (
+            <span className="muted">{formatCustomerSupportFeedbackDate(notification.processedAt)}</span>
+          ) : null}
+        </div>
+        <div className="customer-support-feedback-popup__body">
+          <div>
+            <strong>문의 내용</strong>
+            <p>{notification.body}</p>
+          </div>
+          <div>
+            <strong>관리자 피드백</strong>
+            <p>{notification.processedFeedback || "관리자가 문의를 처리완료했습니다."}</p>
+          </div>
+        </div>
+        <div className="customer-support-feedback-popup__footer">
+          <button type="button" className="btn primary" onClick={onConfirm}>
+            확인
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SidebarItemIcon({ src, label }: { src?: string; label: string }) {
   return (
     <span className="portal-sidebar-link__icon" aria-hidden="true">
@@ -430,6 +486,7 @@ function PortalSidebar({
   visibleLinks,
   experienceDraftRole,
   adminSession,
+  adminCustomerSupportOpenCount,
   canOpenAdminArea,
   onCycleTheme,
   onOpenCustomerSupport,
@@ -446,6 +503,7 @@ function PortalSidebar({
   visibleLinks: typeof links;
   experienceDraftRole: UserRole;
   adminSession: SessionUser | null;
+  adminCustomerSupportOpenCount: number;
   canOpenAdminArea: boolean;
   onCycleTheme: () => void;
   onOpenCustomerSupport: () => void;
@@ -631,6 +689,7 @@ function PortalSidebar({
               const hasChildren = Boolean(link.children?.length);
               const isExpanded = expandedMenus[link.href] ?? false;
               const iconSrc = SIDEBAR_ICON_BY_HREF[link.href];
+              const showAdminCustomerSupportBadge = link.href === "/admin" && adminCustomerSupportOpenCount > 0;
 
               return (
                 <SidebarMenuItem key={link.href} className={hasChildren ? "portal-sidebar__menu-item--has-children" : undefined}>
@@ -654,6 +713,11 @@ function PortalSidebar({
                       >
                         <SidebarItemIcon src={iconSrc} label={link.label} />
                         <span className="portal-sidebar-link__label">{link.label}</span>
+                        {showAdminCustomerSupportBadge ? (
+                          <span className="portal-sidebar-link__badge" aria-label={`미처리 고객센터 ${adminCustomerSupportOpenCount}건`}>
+                            {adminCustomerSupportOpenCount.toLocaleString("ko-KR")}
+                          </span>
+                        ) : null}
                         <span className={`portal-sidebar-link__chevron ${isExpanded ? "is-expanded" : ""}`.trim()} aria-hidden="true">
                           ▾
                         </span>
@@ -720,6 +784,11 @@ function PortalSidebar({
                     >
                       <SidebarItemIcon src={iconSrc} label={link.label} />
                       <span className="portal-sidebar-link__label">{link.label}</span>
+                      {showAdminCustomerSupportBadge ? (
+                        <span className="portal-sidebar-link__badge" aria-label={`미처리 고객센터 ${adminCustomerSupportOpenCount}건`}>
+                          {adminCustomerSupportOpenCount.toLocaleString("ko-KR")}
+                        </span>
+                      ) : null}
                     </Link>
                   )}
                 </SidebarMenuItem>
@@ -798,6 +867,8 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const [mobileSidebarTriggerTop, setMobileSidebarTriggerTop] = useState(MOBILE_SIDEBAR_TRIGGER_DEFAULT_TOP);
   const [isDraggingMobileSidebarTrigger, setIsDraggingMobileSidebarTrigger] = useState(false);
   const [customerSupportOpen, setCustomerSupportOpen] = useState(false);
+  const [customerSupportFeedback, setCustomerSupportFeedback] = useState<CustomerSupportFeedbackNotification | null>(null);
+  const [adminCustomerSupportOpenCount, setAdminCustomerSupportOpenCount] = useState(0);
   const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(false);
   const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>("member");
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
@@ -815,6 +886,58 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
     setSession(getSession());
     setTheme(readStoredTheme());
   }, []);
+
+  useEffect(() => {
+    if (!session?.approved) {
+      setCustomerSupportFeedback(null);
+      return;
+    }
+
+    let mounted = true;
+    const syncCustomerSupportFeedback = () => {
+      void getPendingCustomerSupportFeedbackNotification().then((notification) => {
+        if (!mounted) return;
+        setCustomerSupportFeedback(notification);
+      });
+    };
+
+    syncCustomerSupportFeedback();
+    window.addEventListener("focus", syncCustomerSupportFeedback);
+    const intervalId = window.setInterval(syncCustomerSupportFeedback, 60_000);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("focus", syncCustomerSupportFeedback);
+      window.clearInterval(intervalId);
+    };
+  }, [session?.approved, session?.id]);
+
+  useEffect(() => {
+    if (!session?.approved || !hasAdminAccess(session.actualRole)) {
+      setAdminCustomerSupportOpenCount(0);
+      return;
+    }
+
+    let mounted = true;
+    const syncAdminCustomerSupportCount = () => {
+      void getOpenCustomerSupportMessageCount().then((count) => {
+        if (!mounted) return;
+        setAdminCustomerSupportOpenCount(count);
+      });
+    };
+
+    syncAdminCustomerSupportCount();
+    window.addEventListener("focus", syncAdminCustomerSupportCount);
+    window.addEventListener(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT, syncAdminCustomerSupportCount);
+    const intervalId = window.setInterval(syncAdminCustomerSupportCount, 60_000);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("focus", syncAdminCustomerSupportCount);
+      window.removeEventListener(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT, syncAdminCustomerSupportCount);
+      window.clearInterval(intervalId);
+    };
+  }, [session?.approved, session?.actualRole, session?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -1093,6 +1216,14 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
     setRoleExperience(nextExperienceRole);
     router.refresh();
   };
+
+  const confirmCustomerSupportFeedback = () => {
+    const notification = customerSupportFeedback;
+    if (!notification) return;
+    setCustomerSupportFeedback(null);
+    void acknowledgeCustomerSupportFeedbackNotification(notification.id);
+  };
+
   return (
     <div
       className="portal-sidebar-layout"
@@ -1114,6 +1245,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         visibleLinks={visibleLinks}
         experienceDraftRole={experienceDraftRole}
         adminSession={adminSession}
+        adminCustomerSupportOpenCount={adminCustomerSupportOpenCount}
         canOpenAdminArea={canOpenAdminArea}
         onCycleTheme={cycleTheme}
         onOpenCustomerSupport={() => setCustomerSupportOpen(true)}
@@ -1136,6 +1268,12 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         }}
       />
       <CustomerSupportDialog open={customerSupportOpen} onClose={() => setCustomerSupportOpen(false)} />
+      {customerSupportFeedback ? (
+        <CustomerSupportFeedbackPopup
+          notification={customerSupportFeedback}
+          onConfirm={confirmCustomerSupportFeedback}
+        />
+      ) : null}
       <SidebarInset>
         <div className="shell portal-shell-main">
           <section ref={headerRef} className="panel portal-header-shell">

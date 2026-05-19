@@ -12,14 +12,18 @@ const CUSTOMER_SUPPORT_ATTACHMENT_BUCKET = "customer-support-attachments";
 const MAX_CUSTOMER_SUPPORT_BODY_LENGTH = 2000;
 const MAX_CUSTOMER_SUPPORT_ATTACHMENT_COUNT = 3;
 const MAX_CUSTOMER_SUPPORT_ATTACHMENT_SIZE = 5 * 1024 * 1024;
+export const CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT = "customer-support-admin-count-change";
 
 interface CustomerSupportMessageRow {
   id: string;
+  requester_id: string | null;
   body: string;
   attachments: unknown;
   status: string | null;
   processed_at: string | null;
   processed_by: string | null;
+  processed_feedback: string | null;
+  feedback_seen_at: string | null;
   created_at: string;
 }
 
@@ -38,12 +42,15 @@ export interface CustomerSupportAttachment {
 
 export interface CustomerSupportMessage {
   id: string;
+  requesterId: string | null;
   body: string;
   attachments: CustomerSupportAttachment[];
   status: "open" | "processed";
   processedAt: string | null;
   processedBy: string | null;
   processedByName: string | null;
+  processedFeedback: string | null;
+  feedbackSeenAt: string | null;
   createdAt: string;
 }
 
@@ -51,6 +58,14 @@ export interface CustomerSupportMessageWorkspace {
   items: CustomerSupportMessage[];
   schemaMissing: boolean;
   message: string | null;
+}
+
+export interface CustomerSupportFeedbackNotification {
+  id: string;
+  body: string;
+  processedAt: string | null;
+  processedFeedback: string | null;
+  createdAt: string;
 }
 
 function isSupportedCustomerSupportImage(file: File) {
@@ -87,12 +102,15 @@ function formatCustomerSupportMessage(
   }));
   return {
     id: row.id,
+    requesterId: row.requester_id,
     body: row.body,
     attachments,
     status: row.status === "processed" ? "processed" : "open",
     processedAt: row.processed_at,
     processedBy: row.processed_by,
     processedByName: row.processed_by ? processedByNameMap.get(row.processed_by) ?? null : null,
+    processedFeedback: row.processed_feedback?.trim() || null,
+    feedbackSeenAt: row.feedback_seen_at,
     createdAt: row.created_at,
   };
 }
@@ -200,6 +218,7 @@ export async function submitCustomerSupportMessage(body: string, files: File[] =
     }
 
     const { error } = await supabase.from(CUSTOMER_SUPPORT_TABLE).insert({
+      requester_id: session.id,
       body: normalizedBody,
       attachments: uploadedAttachments.map(({ path, name, type, size }) => ({ path, name, type, size })),
     });
@@ -239,7 +258,7 @@ export async function getAdminCustomerSupportMessages(): Promise<CustomerSupport
     const supabase = await getPortalSupabaseClient();
     const { data, error } = await supabase
       .from(CUSTOMER_SUPPORT_TABLE)
-      .select("id, body, attachments, status, processed_at, processed_by, created_at")
+      .select("id, requester_id, body, attachments, status, processed_at, processed_by, processed_feedback, feedback_seen_at, created_at")
       .order("created_at", { ascending: false })
       .limit(50)
       .returns<CustomerSupportMessageRow[]>();
@@ -274,7 +293,28 @@ export async function getAdminCustomerSupportMessages(): Promise<CustomerSupport
   }
 }
 
-export async function markCustomerSupportMessageProcessed(messageId: string) {
+export async function getOpenCustomerSupportMessageCount(): Promise<number> {
+  const session = await getPortalSession();
+  if (!session?.approved || (session.role !== "admin" && session.role !== "team_lead")) {
+    return 0;
+  }
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { count, error } = await supabase
+      .from(CUSTOMER_SUPPORT_TABLE)
+      .select("id", { count: "exact", head: true })
+      .neq("status", "processed");
+
+    if (error) return 0;
+
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function markCustomerSupportMessageProcessed(messageId: string, feedback = "") {
   const session = await getPortalSession();
   if (!session?.approved || (session.role !== "admin" && session.role !== "team_lead")) {
     return {
@@ -287,6 +327,7 @@ export async function markCustomerSupportMessageProcessed(messageId: string) {
     const supabase = await getPortalSupabaseClient();
     const { error } = await supabase.rpc("mark_customer_support_message_processed", {
       p_message_id: messageId,
+      p_feedback: feedback.trim() || null,
     });
 
     if (error) {
@@ -303,6 +344,64 @@ export async function markCustomerSupportMessageProcessed(messageId: string) {
   }
 
   return { ok: true as const, message: "처리완료로 변경했습니다." };
+}
+
+export async function getPendingCustomerSupportFeedbackNotification(): Promise<CustomerSupportFeedbackNotification | null> {
+  const session = await getPortalSession();
+  if (!session?.approved) return null;
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from(CUSTOMER_SUPPORT_TABLE)
+      .select("id, body, processed_at, processed_feedback, created_at")
+      .eq("requester_id", session.id)
+      .eq("status", "processed")
+      .is("feedback_seen_at", null)
+      .order("processed_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle<Pick<CustomerSupportMessageRow, "id" | "body" | "processed_at" | "processed_feedback" | "created_at">>();
+
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      body: data.body,
+      processedAt: data.processed_at,
+      processedFeedback: data.processed_feedback?.trim() || null,
+      createdAt: data.created_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function acknowledgeCustomerSupportFeedbackNotification(messageId: string) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    return { ok: false as const, message: "승인된 로그인 세션이 필요합니다." };
+  }
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { error } = await supabase.rpc("mark_customer_support_feedback_seen", {
+      p_message_id: messageId,
+    });
+
+    if (error) {
+      return {
+        ok: false as const,
+        message: getSupabaseStorageErrorMessage(error, CUSTOMER_SUPPORT_TABLE),
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "고객센터 처리완료 알림을 확인 처리하지 못했습니다.",
+    };
+  }
+
+  return { ok: true as const, message: "확인했습니다." };
 }
 
 export async function deleteCustomerSupportMessage(messageId: string) {

@@ -11,6 +11,7 @@ import {
 } from "@/lib/team-lead/storage";
 import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
 import {
+  CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT,
   deleteCustomerSupportMessage,
   getAdminCustomerSupportMessages,
   markCustomerSupportMessageProcessed,
@@ -82,6 +83,10 @@ const adminRoleOrder: Record<RoleOption, number> = {
   observer: 6,
   member: 7,
 };
+
+function notifyCustomerSupportAdminCountChanged() {
+  window.dispatchEvent(new Event(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT));
+}
 
 const permissionGuides = [
   {
@@ -298,6 +303,7 @@ export default function AdminPage() {
   const [processingSupportId, setProcessingSupportId] = useState<string | null>(null);
   const [deletingSupportId, setDeletingSupportId] = useState<string | null>(null);
   const [expandedProcessedSupportIds, setExpandedProcessedSupportIds] = useState<Set<string>>(() => new Set());
+  const [customerSupportFeedbackDrafts, setCustomerSupportFeedbackDrafts] = useState<Record<string, string>>({});
   const [draftRoles, setDraftRoles] = useState<Record<string, RoleOption>>({});
 
   async function refresh() {
@@ -351,10 +357,17 @@ export default function AdminPage() {
     [customerSupport.items],
   );
 
+  function updateCustomerSupportFeedbackDraft(messageId: string, value: string) {
+    setCustomerSupportFeedbackDrafts((current) => ({
+      ...current,
+      [messageId]: value,
+    }));
+  }
+
   async function handleCustomerSupportProcessed(messageId: string) {
     setProcessingSupportId(messageId);
     setMessage("");
-    const result = await markCustomerSupportMessageProcessed(messageId);
+    const result = await markCustomerSupportMessageProcessed(messageId, customerSupportFeedbackDrafts[messageId] ?? "");
     setProcessingSupportId(null);
     if (!result.ok) {
       setMessage(result.message);
@@ -365,8 +378,14 @@ export default function AdminPage() {
       next.delete(messageId);
       return next;
     });
+    setCustomerSupportFeedbackDrafts((current) => {
+      const next = { ...current };
+      delete next[messageId];
+      return next;
+    });
     setMessage(result.message);
     await refresh();
+    notifyCustomerSupportAdminCountChanged();
   }
 
   async function handleCustomerSupportDelete(messageId: string) {
@@ -387,6 +406,7 @@ export default function AdminPage() {
     });
     setMessage(result.message);
     await refresh();
+    notifyCustomerSupportAdminCountChanged();
   }
 
   function toggleProcessedCustomerSupport(messageId: string) {
@@ -478,6 +498,28 @@ export default function AdminPage() {
                             ))}
                           </div>
                         ) : null}
+                        {isProcessed ? (
+                          item.processedFeedback ? (
+                            <div className="status ok" style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
+                              피드백: {item.processedFeedback}
+                            </div>
+                          ) : null
+                        ) : (
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+                              처리 피드백
+                            </span>
+                            <textarea
+                              className="field-textarea"
+                              value={customerSupportFeedbackDrafts[item.id] ?? ""}
+                              maxLength={1000}
+                              placeholder="문의자에게 보여줄 처리 내용이나 안내를 작성하세요."
+                              style={{ minHeight: 84, lineHeight: 1.55 }}
+                              disabled={processingSupportId === item.id || isDeleting}
+                              onChange={(event) => updateCustomerSupportFeedbackDraft(item.id, event.target.value)}
+                            />
+                          </label>
+                        )}
                       </>
                     ) : (
                       <span className="muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
