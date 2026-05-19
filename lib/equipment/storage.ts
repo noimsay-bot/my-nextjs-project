@@ -393,7 +393,7 @@ function assertCanManageRepair() {
 
 function assertCanManageLiveStatus() {
   const session = getSession();
-  if (!session?.approved || !hasDeskAccess(session.role)) {
+  if (!session?.approved || !hasDeskAccess(session.actualRole)) {
     throw new Error("라이브장비 현황판 저장 권한이 없습니다.");
   }
   return session;
@@ -451,6 +451,35 @@ export async function borrowEquipmentItems(
 
   if (error) {
     throw new Error(getEquipmentStorageErrorMessage(error, "equipment loan"));
+  }
+}
+
+export async function borrowLiveEquipmentStatusItem(itemId: string, liveDetails: LiveLoanDetails = {
+  trs: "",
+  cameraReporter: "",
+  audioMan: "",
+  location: "",
+  note: "",
+}) {
+  assertCanManageLiveStatus();
+  const normalizedId = itemId.trim();
+  if (!normalizedId) {
+    throw new Error("대여 처리할 라이브장비를 선택해 주세요.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase.rpc("borrow_equipment_items", {
+    p_equipment_item_ids: [normalizedId],
+    p_loan_type: "live",
+    p_live_trs: liveDetails.trs?.trim() || null,
+    p_live_camera_reporter: liveDetails.cameraReporter?.trim() || null,
+    p_live_audio_man: liveDetails.audioMan?.trim() || null,
+    p_live_location: liveDetails.location?.trim() || null,
+    p_live_note: liveDetails.note?.trim() || null,
+  });
+
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "live equipment loan"));
   }
 }
 

@@ -925,6 +925,26 @@
   overflow-wrap: anywhere;
 }
 
+.liveStatusToggle {
+  display: inline-flex;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.liveStatusToggle:disabled {
+  cursor: default;
+}
+
+.liveStatusToggle:not(:disabled):focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 3px;
+}
+
 .liveStatusTable .itemNameStack {
   min-width: 96px;
   justify-items: start;

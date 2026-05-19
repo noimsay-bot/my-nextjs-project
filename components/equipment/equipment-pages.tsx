@@ -13,6 +13,7 @@ import { getEngScheduleBadges, loadEngScheduleHighlights, type EngScheduleBadge,
 import {
   borrowEngSets,
   borrowEquipmentItems,
+  borrowLiveEquipmentStatusItem,
   canReturnLoanItem,
   fetchEquipmentItems,
   fetchLiveEquipmentItemsForManagement,
@@ -3049,6 +3050,7 @@ export function LiveEquipmentStatusPage() {
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [statusToggleItemId, setStatusToggleItemId] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
 
   const load = useCallback(async () => {
@@ -3094,7 +3096,7 @@ export function LiveEquipmentStatusPage() {
   const regionalTvuItems = useMemo(() => items.filter(isRegionalTransmissionTvuItem), [items]);
   const tvuItems = useMemo(() => items.filter((item) => isTvuItem(item) && !isRegionalTransmissionTvuItem(item)), [items]);
   const statusBoardItems = useMemo(() => [...tvuItems, ...regionalTvuItems], [regionalTvuItems, tvuItems]);
-  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.role));
+  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.actualRole));
   const hasDirtyDrafts = useMemo(() => (
     editMode && statusBoardItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
   ), [drafts, editBaselineDrafts, editMode, statusBoardItems]);
@@ -3160,6 +3162,48 @@ export function LiveEquipmentStatusPage() {
     setEditMode(false);
     setMessage({ tone: "note", text: "수정을 취소했습니다." });
   };
+  const toggleLiveBorrowStatus = async (
+    item: EquipmentItem,
+    loanItem: EquipmentLoanItem | undefined,
+    electionOverlay: ElectionTvuOverlay | null,
+    liveDetails: LiveLoanDetails,
+  ) => {
+    if (!canManageLiveStatus) {
+      setMessage({ tone: "warn", text: "라이브장비 현황판 저장 권한이 없습니다." });
+      return;
+    }
+    if (editMode) {
+      setMessage({ tone: "note", text: "수정 모드에서는 상태를 변경할 수 없습니다." });
+      return;
+    }
+    if (electionOverlay) {
+      setMessage({ tone: "note", text: "선거 자동연동 상태는 현황판에서 직접 변경할 수 없습니다." });
+      return;
+    }
+    if (!loanItem && item.isUnderRepair) {
+      setMessage({ tone: "note", text: "수리중인 장비는 대여중으로 변경할 수 없습니다." });
+      return;
+    }
+    if (statusToggleItemId || saving || loading) return;
+
+    setStatusToggleItemId(item.id);
+    try {
+      const nextMessage = loanItem
+        ? `${getEquipmentDisplayName(item)} 상태를 대여가능으로 변경했습니다.`
+        : `${getEquipmentDisplayName(item)} 상태를 대여중으로 변경했습니다.`;
+      if (loanItem) {
+        await returnEquipmentLoanItems([loanItem.id]);
+      } else {
+        await borrowLiveEquipmentStatusItem(item.id, liveDetails);
+      }
+      await load();
+      setMessage({ tone: "ok", text: nextMessage });
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비 상태 변경에 실패했습니다." });
+    } finally {
+      setStatusToggleItemId(null);
+    }
+  };
 
   const renderLiveStatusTable = (tableItems: EquipmentItem[], title: string, isRegionalTable = false) => (
     <section className={styles.liveStatusTableSection}>
@@ -3190,6 +3234,16 @@ export function LiveEquipmentStatusPage() {
                 const draft = editMode ? drafts[item.id] ?? baseDisplayDraft : displayDraft;
                 const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
                 const noteValue = draft.note || "-";
+                const statusToggleDisabled = (
+                  !canManageLiveStatus ||
+                  editMode ||
+                  saving ||
+                  loading ||
+                  Boolean(statusToggleItemId) ||
+                  Boolean(electionOverlay) ||
+                  (!loanItem && item.isUnderRepair)
+                );
+                const statusToggleLabel = loanItem ? "대여가능으로 변경" : "대여중으로 변경";
                 return (
                   <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
                     <td>
@@ -3308,12 +3362,21 @@ export function LiveEquipmentStatusPage() {
                       )}
                     </td>
                     <td>
-                      <StatusPill
-                        borrowed={Boolean(loanItem || electionOverlay)}
-                        repairing={item.isUnderRepair}
-                        availableLabel={isRegionalTable ? "사용 가능" : "대여가능"}
-                        borrowedLabel={electionOverlay ? "선거중계" : "대여중"}
-                      />
+                      <button
+                        type="button"
+                        className={styles.liveStatusToggle}
+                        disabled={statusToggleDisabled}
+                        aria-label={`${getEquipmentDisplayName(item)} ${statusToggleLabel}`}
+                        title={`${getEquipmentDisplayName(item)} ${statusToggleLabel}`}
+                        onDoubleClick={() => void toggleLiveBorrowStatus(item, loanItem, electionOverlay, baseDisplayDraft)}
+                      >
+                        <StatusPill
+                          borrowed={Boolean(loanItem || electionOverlay)}
+                          repairing={item.isUnderRepair}
+                          availableLabel={isRegionalTable ? "사용 가능" : "대여가능"}
+                          borrowedLabel={electionOverlay ? "선거중계" : "대여중"}
+                        />
+                      </button>
                     </td>
                   </tr>
                 );

@@ -567,7 +567,6 @@ export function ElectionPage() {
         <article className="panel">
           <div className={`panel-pad ${styles.header}`}>
             <div className={styles.titleBlock}>
-              <span className="chip">선거</span>
               <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
             </div>
             <div className={styles.actions}>
@@ -598,7 +597,6 @@ export function ElectionPage() {
       <article className="panel">
         <div className={`panel-pad ${styles.header}`}>
           <div className={styles.titleBlock}>
-            <span className="chip">선거</span>
             <h1 className="page-title">{formatElectionBoardTitle(draft?.title ?? savedDisplayTitle)}</h1>
             <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
           </div>
