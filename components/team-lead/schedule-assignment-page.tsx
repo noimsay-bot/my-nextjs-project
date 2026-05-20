@@ -33,6 +33,8 @@ import {
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
   refreshTeamLeadAssignmentMonth,
+  refreshTeamLeadAssignmentMonths,
+  refreshTeamLeadState,
   saveScheduleAssignmentStore,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
@@ -48,6 +50,13 @@ import {
 type PortalSupabaseClient = Awaited<ReturnType<typeof getPortalSupabaseClient>>;
 type PortalRealtimeChannel = ReturnType<PortalSupabaseClient["channel"]>;
 type AssignmentSaveMode = "immediate" | "deferred";
+type ScheduleAssignmentSearchScope = "previousYear" | "lastSixMonths" | "selectedMonth" | "custom" | "all";
+
+interface SubmittedScheduleAssignmentSearchRange {
+  all: boolean;
+  monthKeys: string[];
+  label: string;
+}
 
 const dutyOptions = [
   "조근",
@@ -100,11 +109,20 @@ const CELL_LOCK_RENEW_INTERVAL_MS = 3_000;
 const CELL_LOCK_CLOCK_INTERVAL_MS = 1_000;
 const ASSIGNMENT_SAVE_IMMEDIATE_DEBOUNCE_MS = 250;
 const ASSIGNMENT_SAVE_DEFERRED_DEBOUNCE_MS = 1_000;
+const SEARCH_PREVIOUS_YEAR_MONTH_COUNT = 12;
+const SEARCH_LAST_SIX_MONTH_COUNT = 6;
 const tripPhaseLabels: Record<AssignmentTripTagPhase, string> = {
   "": "",
   departure: "출장출발",
   ongoing: "출장중",
   return: "출장복귀",
+};
+const searchScopeLabels: Record<ScheduleAssignmentSearchScope, string> = {
+  previousYear: "이전 1년",
+  lastSixMonths: "최근 6개월",
+  selectedMonth: "현재 월",
+  custom: "직접 선택",
+  all: "전체",
 };
 
 function getTripTagStyle(travelType: AssignmentTravelType, phase: AssignmentTripTagPhase = "") {
@@ -292,6 +310,21 @@ interface ImportedWorkbookRow {
   travelType: AssignmentTravelType;
 }
 
+interface ScheduleAssignmentSearchResult {
+  id: string;
+  monthKey: string;
+  dateKey: string;
+  dateLabel: string;
+  name: string;
+  duty: string;
+  clockIn: string;
+  clockOut: string;
+  scheduleTexts: string[];
+  scheduleCount: number;
+  travelLabel: string;
+  electionPlaces: string[];
+}
+
 const historicalImportMonthMap = {
   "2025-12": { year: 2025, month: 12, label: "2025년 12월" },
   "2026-01": { year: 2026, month: 1, label: "2026년 1월" },
@@ -320,6 +353,51 @@ function getTodayDateKey() {
 
 function getTodayMonthKey() {
   return getTodayDateKey().slice(0, 7);
+}
+
+function normalizeSearchMonthKey(monthKey: string) {
+  const trimmed = monthKey.trim();
+  return /^\d{4}-\d{2}$/.test(trimmed) ? trimmed : "";
+}
+
+function addMonthsToMonthKey(monthKey: string, offset: number) {
+  const normalized = normalizeSearchMonthKey(monthKey);
+  if (!normalized) return "";
+  const [yearText, monthText] = normalized.split("-");
+  const date = new Date(Number(yearText), Number(monthText) - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getMonthKeysInRange(startMonthKey: string, endMonthKey: string) {
+  const normalizedStart = normalizeSearchMonthKey(startMonthKey);
+  const normalizedEnd = normalizeSearchMonthKey(endMonthKey);
+  if (!normalizedStart || !normalizedEnd) return [];
+
+  const start = normalizedStart <= normalizedEnd ? normalizedStart : normalizedEnd;
+  const end = normalizedStart <= normalizedEnd ? normalizedEnd : normalizedStart;
+  const keys: string[] = [];
+  let cursor = start;
+
+  while (cursor && cursor <= end && keys.length < 240) {
+    keys.push(cursor);
+    cursor = addMonthsToMonthKey(cursor, 1);
+  }
+
+  return keys;
+}
+
+function getPreviousMonthKeys(baseMonthKey: string, count: number) {
+  const normalizedBase = normalizeSearchMonthKey(baseMonthKey);
+  if (!normalizedBase) return [];
+  const startMonthKey = addMonthsToMonthKey(normalizedBase, -(Math.max(1, count) - 1));
+  return getMonthKeysInRange(startMonthKey, normalizedBase);
+}
+
+function formatSearchRangeLabel(monthKeys: string[]) {
+  if (monthKeys.length === 0) return "";
+  const first = monthKeys[0];
+  const last = monthKeys[monthKeys.length - 1];
+  return first === last ? first : `${first} ~ ${last}`;
 }
 
 function createScheduleAssignmentCellLockKey(
@@ -450,6 +528,22 @@ const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"] as const
 
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[dow] ?? "";
+}
+
+function normalizeScheduleAssignmentSearchText(value: string) {
+  return value.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function getScheduleAssignmentSearchTerms(query: string) {
+  return query
+    .split(/\s+/)
+    .map((term) => normalizeScheduleAssignmentSearchText(term))
+    .filter(Boolean);
+}
+
+function matchesScheduleAssignmentSearchTerms(values: string[], terms: string[]) {
+  const haystack = normalizeScheduleAssignmentSearchText(values.filter(Boolean).join(" "));
+  return terms.every((term) => haystack.includes(term));
 }
 
 function formatManualTime(value: string) {
@@ -855,8 +949,17 @@ export function ScheduleAssignmentPage() {
   const [cellLockClock, setCellLockClock] = useState(() => Date.now());
   const [scheduleInputLeaders, setScheduleInputLeaders] = useState<Record<string, ScheduleAssignmentInputLeader>>({});
   const [electionOverlays, setElectionOverlays] = useState<ElectionScheduleOverlay[]>([]);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchScope, setSearchScope] = useState<ScheduleAssignmentSearchScope>("previousYear");
+  const [customSearchStartMonth, setCustomSearchStartMonth] = useState("");
+  const [customSearchEndMonth, setCustomSearchEndMonth] = useState("");
+  const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
+  const [submittedSearchRange, setSubmittedSearchRange] = useState<SubmittedScheduleAssignmentSearchRange | null>(null);
+  const [searchResultsOpen, setSearchResultsOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
   const todayCardRef = useRef<HTMLElement | null>(null);
   const dayCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingSearchJumpDateKeyRef = useRef<string | null>(null);
   const autoScrolledMonthKeyRef = useRef<string | null>(null);
   const jumpToTodayPendingRef = useRef(false);
   const lastFocusRefreshAtRef = useRef(0);
@@ -1939,7 +2042,122 @@ export function ScheduleAssignmentPage() {
     return map;
   }, [schedules]);
 
-  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [schedules, store]);
+  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(schedules, store), [schedules, store]);
+  const submittedSearchTerms = useMemo(
+    () => getScheduleAssignmentSearchTerms(submittedSearchQuery),
+    [submittedSearchQuery],
+  );
+  const searchBaseMonthKey = selectedMonthKey || schedules[schedules.length - 1]?.monthKey || todayMonthKey;
+  const resolvedSearchMonthKeys = useMemo(() => {
+    if (!searchBaseMonthKey) return [];
+    if (searchScope === "selectedMonth") return [searchBaseMonthKey];
+    if (searchScope === "lastSixMonths") return getPreviousMonthKeys(searchBaseMonthKey, SEARCH_LAST_SIX_MONTH_COUNT);
+    if (searchScope === "previousYear") return getPreviousMonthKeys(searchBaseMonthKey, SEARCH_PREVIOUS_YEAR_MONTH_COUNT);
+    if (searchScope === "custom") {
+      return getMonthKeysInRange(
+        customSearchStartMonth || addMonthsToMonthKey(searchBaseMonthKey, -(SEARCH_PREVIOUS_YEAR_MONTH_COUNT - 1)),
+        customSearchEndMonth || searchBaseMonthKey,
+      );
+    }
+    return schedules.map((schedule) => schedule.monthKey);
+  }, [customSearchEndMonth, customSearchStartMonth, schedules, searchBaseMonthKey, searchScope]);
+
+  useEffect(() => {
+    if (!searchBaseMonthKey) return;
+    setCustomSearchStartMonth((current) =>
+      current || addMonthsToMonthKey(searchBaseMonthKey, -(SEARCH_PREVIOUS_YEAR_MONTH_COUNT - 1)),
+    );
+    setCustomSearchEndMonth((current) => current || searchBaseMonthKey);
+  }, [searchBaseMonthKey]);
+
+  const scheduleSearchResults = useMemo<ScheduleAssignmentSearchResult[]>(() => {
+    if (submittedSearchTerms.length === 0 || !submittedSearchRange) return [];
+
+    const submittedMonthKeySet = submittedSearchRange.all ? null : new Set(submittedSearchRange.monthKeys);
+    const searchSchedules = submittedSearchRange.all
+      ? schedules
+      : schedules.filter((schedule) => submittedMonthKeySet?.has(schedule.monthKey));
+
+    return searchSchedules.flatMap((schedule) => {
+      const searchMonthEntries = store.entries[schedule.monthKey] ?? {};
+      const searchMonthRows = store.rows[schedule.monthKey] ?? {};
+      const searchDays = buildMonthDays(schedule);
+
+      return searchDays.flatMap((day) => {
+        const storedDayRows = searchMonthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+        const dayRows = schedule.monthKey === selectedMonthKey
+          ? editingDayRows[day.dateKey] ?? storedDayRows
+          : storedDayRows;
+        const rows = getScheduleAssignmentRows(day, dayRows, scheduleBigEvents);
+        const dateLabel = `${day.month}월 ${day.day}일 ${getWeekdayLabel(day.dow)}요일`;
+
+        return rows.flatMap((row) => {
+          const entry = searchMonthEntries[row.key] ?? createDefaultScheduleAssignmentEntry();
+          const scheduleTexts = getSafeSchedules(entry.schedules).map((item) => item.trim()).filter(Boolean);
+          const scheduleCount = scheduleTexts.length;
+          const baseTimes = getScheduleAssignmentBaseTimes(row.duty, day.dateKey, allDaysIndex.get(day.dateKey) ?? null);
+          const clockIn = entry.clockIn || baseTimes?.clockInText || "";
+          const clockOut = entry.clockOut || baseTimes?.clockOutText || "";
+          const visibleTripTag = visibleTripTagMap.get(row.key) ?? null;
+          const travelLabel = [
+            visibleTripTag?.tripTagLabel || entry.tripTagLabel || entry.travelType,
+            visibleTripTag?.phase ? tripPhaseLabels[visibleTripTag.phase] : entry.tripTagPhase ? tripPhaseLabels[entry.tripTagPhase] : "",
+          ]
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .join(" ");
+          const electionPlaces =
+            schedule.monthKey === selectedMonthKey
+              ? getElectionOverlayPlacesForRow(electionOverlays, day.dateKey, row.name)
+              : [];
+          const searchableValues = [
+            day.dateKey,
+            dateLabel,
+            row.name,
+            row.duty,
+            clockIn,
+            clockOut,
+            String(scheduleCount),
+            travelLabel,
+            ...scheduleTexts,
+            ...electionPlaces,
+          ];
+
+          if (!matchesScheduleAssignmentSearchTerms(searchableValues, submittedSearchTerms)) {
+            return [];
+          }
+
+          return [
+            {
+              id: `${schedule.monthKey}:${day.dateKey}:${row.key}`,
+              monthKey: schedule.monthKey,
+              dateKey: day.dateKey,
+              dateLabel,
+              name: row.name,
+              duty: row.duty,
+              clockIn,
+              clockOut,
+              scheduleTexts,
+              scheduleCount,
+              travelLabel,
+              electionPlaces,
+            },
+          ];
+        });
+      });
+    });
+  }, [
+    allDaysIndex,
+    editingDayRows,
+    electionOverlays,
+    scheduleBigEvents,
+    schedules,
+    selectedMonthKey,
+    store,
+    submittedSearchRange,
+    submittedSearchTerms,
+    visibleTripTagMap,
+  ]);
 
   useEffect(() => {
     if (selectedMonthKey !== todayMonthKey) return;
@@ -1955,6 +2173,18 @@ export function ScheduleAssignmentPage() {
 
     return () => window.clearTimeout(timer);
   }, [monthDays, selectedMonthKey, todayDateKey, todayMonthKey]);
+
+  useEffect(() => {
+    if (!searchResultsOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSearchResultsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [searchResultsOpen]);
 
   const jumpToToday = () => {
     autoScrolledMonthKeyRef.current = null;
@@ -1976,6 +2206,88 @@ export function ScheduleAssignmentPage() {
   const jumpToDate = (dateKey: string) => {
     scrollCardToTop(dayCardRefs.current[dateKey] ?? null, "smooth");
   };
+
+  const submitSearch = async () => {
+    const nextQuery = searchDraft.trim();
+    const allSearch = searchScope === "all";
+    const nextRange: SubmittedScheduleAssignmentSearchRange = {
+      all: allSearch,
+      monthKeys: allSearch ? [] : resolvedSearchMonthKeys,
+      label: allSearch
+        ? "전체"
+        : [searchScopeLabels[searchScope], formatSearchRangeLabel(resolvedSearchMonthKeys)]
+            .filter(Boolean)
+            .join(" · "),
+    };
+
+    if (!nextQuery) {
+      setSubmittedSearchQuery("");
+      setSubmittedSearchRange(null);
+      setSearchResultsOpen(false);
+      return;
+    }
+
+    if (!nextRange.all && nextRange.monthKeys.length === 0) {
+      setImportMessage({ tone: "warn", text: "검색할 월 범위를 선택해 주세요." });
+      return;
+    }
+
+    const hasBlockingDrafts =
+      pendingAssignmentWritesRef.current > 0 ||
+      Object.keys(editingDayRowsRef.current).length > 0 ||
+      Boolean(editingTripTagRef.current);
+
+    setSearchLoading(true);
+    try {
+      if (hasBlockingDrafts) {
+        setImportMessage({
+          tone: "note",
+          text: "수정 중인 일정배정이 있어 현재 화면에 불러온 데이터 기준으로 검색합니다.",
+        });
+      } else if (nextRange.all) {
+        await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
+        await refreshTeamLeadState();
+      } else {
+        await refreshTeamLeadAssignmentMonths(nextRange.monthKeys);
+      }
+
+      setSchedules(getTeamLeadSchedules());
+      setStore(getScheduleAssignmentStore());
+    } catch (error) {
+      setImportMessage({
+        tone: "warn",
+        text: error instanceof Error ? `검색 범위 데이터를 불러오지 못했습니다: ${error.message}` : "검색 범위 데이터를 불러오지 못했습니다.",
+      });
+    } finally {
+      setSearchLoading(false);
+    }
+
+    setSubmittedSearchQuery(nextQuery);
+    setSubmittedSearchRange(nextRange);
+    setSearchResultsOpen(Boolean(nextQuery));
+  };
+
+  const openSearchResult = (result: ScheduleAssignmentSearchResult) => {
+    setSearchResultsOpen(false);
+    if (result.monthKey !== selectedMonthKey) {
+      pendingSearchJumpDateKeyRef.current = result.dateKey;
+      setSelectedMonthKey(result.monthKey);
+      return;
+    }
+    window.setTimeout(() => jumpToDate(result.dateKey), 0);
+  };
+
+  useEffect(() => {
+    const pendingDateKey = pendingSearchJumpDateKeyRef.current;
+    if (!pendingDateKey || !monthDays.some((day) => day.dateKey === pendingDateKey)) return;
+
+    const timer = window.setTimeout(() => {
+      jumpToDate(pendingDateKey);
+      pendingSearchJumpDateKeyRef.current = null;
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [monthDays, selectedMonthKey]);
 
   const getStoreMonthSnapshot = (targetStore: ScheduleAssignmentDataStore, monthKey: string) =>
     JSON.stringify({
@@ -2462,10 +2774,126 @@ export function ScheduleAssignmentPage() {
               ))}
             </div>
           </div>
+          <form
+            className="schedule-assignment-search-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitSearch();
+            }}
+          >
+            <label className="schedule-assignment-search-field">
+              <span className="sr-only">일정배정 검색</span>
+              <input
+                className="field-input"
+                type="search"
+                value={searchDraft}
+                placeholder="이름, 근무유형, 일정 검색"
+                disabled={searchLoading}
+                onChange={(event) => setSearchDraft(event.target.value)}
+              />
+            </label>
+            <label className="schedule-assignment-search-scope">
+              <span className="sr-only">검색 범위</span>
+              <select
+                className="field-select"
+                value={searchScope}
+                disabled={searchLoading}
+                onChange={(event) => setSearchScope(event.target.value as ScheduleAssignmentSearchScope)}
+              >
+                <option value="previousYear">이전 1년</option>
+                <option value="lastSixMonths">최근 6개월</option>
+                <option value="selectedMonth">현재 월</option>
+                <option value="custom">직접 선택</option>
+                <option value="all">전체 검색</option>
+              </select>
+            </label>
+            {searchScope === "custom" ? (
+              <div className="schedule-assignment-search-custom-range">
+                <label>
+                  <span className="sr-only">검색 시작 월</span>
+                  <input
+                    className="field-input"
+                    type="month"
+                    value={customSearchStartMonth}
+                    disabled={searchLoading}
+                    onChange={(event) => setCustomSearchStartMonth(event.target.value)}
+                  />
+                </label>
+                <span className="muted" aria-hidden="true">~</span>
+                <label>
+                  <span className="sr-only">검색 종료 월</span>
+                  <input
+                    className="field-input"
+                    type="month"
+                    value={customSearchEndMonth}
+                    disabled={searchLoading}
+                    onChange={(event) => setCustomSearchEndMonth(event.target.value)}
+                  />
+                </label>
+              </div>
+            ) : null}
+            <button type="submit" className="btn white" disabled={searchLoading}>
+              {searchLoading ? "검색 중" : "검색"}
+            </button>
+            {submittedSearchQuery ? (
+              <button type="button" className="btn" disabled={searchLoading} onClick={() => setSearchResultsOpen(true)}>
+                결과 {scheduleSearchResults.length}
+              </button>
+            ) : null}
+          </form>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
           {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>
+
+      {searchResultsOpen ? (
+        <div className="schedule-assignment-search-overlay" role="dialog" aria-modal="false" aria-label="일정배정 검색 결과">
+          <div className="schedule-assignment-search-window">
+            <div className="schedule-assignment-search-window__head">
+              <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                <strong>검색 결과</strong>
+                <span className="muted">
+                  {submittedSearchQuery}
+                  {submittedSearchRange?.label ? ` · ${submittedSearchRange.label}` : ""} · {scheduleSearchResults.length}건
+                </span>
+              </div>
+              <button type="button" className="btn" onClick={() => setSearchResultsOpen(false)}>
+                닫기
+              </button>
+            </div>
+            <div className="schedule-assignment-search-results">
+              {scheduleSearchResults.length > 0 ? (
+                scheduleSearchResults.map((result) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    className="schedule-assignment-search-result"
+                    onClick={() => openSearchResult(result)}
+                  >
+                    <span className="schedule-assignment-search-result__date">{result.dateLabel}</span>
+                    <span className="schedule-assignment-search-result__main">
+                      <strong>{result.name}</strong>
+                      <span>{result.duty || "-"}</span>
+                    </span>
+                    <span className="schedule-assignment-search-result__meta">
+                      {[result.clockIn && `출근 ${result.clockIn}`, result.clockOut && `퇴근 ${result.clockOut}`, `일정 ${result.scheduleCount}`]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    {result.scheduleTexts.length > 0 || result.travelLabel || result.electionPlaces.length > 0 ? (
+                      <span className="schedule-assignment-search-result__detail">
+                        {[...result.scheduleTexts, result.travelLabel, ...result.electionPlaces].filter(Boolean).join(" / ")}
+                      </span>
+                    ) : null}
+                  </button>
+                ))
+              ) : (
+                <div className="status note">검색 결과가 없습니다.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {monthDays.map((day) => {
         const storedDayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { usePendingScheduleChangeRequestCount } from "@/components/schedule/use-pending-schedule-change-request-count";
 
 const items = [
   { href: "/schedule/write", label: "근무표 관리" },
@@ -13,6 +14,7 @@ const items = [
 
 export function ScheduleManagementLinks({ inline = false }: { inline?: boolean }) {
   const pathname = usePathname();
+  const pendingChangeRequestCount = usePendingScheduleChangeRequestCount();
 
   return (
     <div
@@ -37,7 +39,12 @@ export function ScheduleManagementLinks({ inline = false }: { inline?: boolean }
               boxShadow: active ? "0 10px 24px rgba(8,145,178,.24)" : "none",
             }}
           >
-            {item.label}
+            <span>{item.label}</span>
+            {item.href === "/schedule/write" && pendingChangeRequestCount > 0 ? (
+              <span className="schedule-change-request-count-badge" aria-label={`대기 중인 근무 변경 요청 ${pendingChangeRequestCount}건`}>
+                {pendingChangeRequestCount}
+              </span>
+            ) : null}
           </Link>
         );
       })}

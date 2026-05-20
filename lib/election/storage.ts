@@ -135,28 +135,6 @@ function rowToEvent(row: ElectionEventRow, points: ElectionPoint[]): ElectionEve
   };
 }
 
-function pointHasContent(point: ElectionPointInput) {
-  return [
-    point.region,
-    point.place,
-    point.poolVideo,
-    isDefaultEquipmentNameOnly(point.equipmentName) ? "" : point.equipmentName,
-    point.trs,
-    point.cameraStaffName,
-    point.cameraStaffNamePm,
-    point.audioStaffName,
-    point.audioStaffNamePm,
-    point.reporterName,
-    point.reporterNamePm,
-    point.liveTime,
-    point.liveTimePm,
-    point.address,
-    point.note,
-    point.livePosition,
-    point.lighting,
-  ].some((value) => value.trim());
-}
-
 function normalizeNullableText(value: string) {
   const trimmed = value.trim();
   return trimmed || null;
@@ -311,11 +289,8 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
     throw new Error("선거 중계표 저장 권한이 없습니다.");
   }
 
-  const title = input.title.trim();
+  const title = input.title.trim() || "선거";
   const electionDate = input.electionDate.trim();
-  if (!title) {
-    throw new Error("선거명을 입력해 주세요.");
-  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(electionDate)) {
     throw new Error("선거일을 선택해 주세요.");
   }
@@ -368,9 +343,7 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
     throw new Error(electionStorageError(deleteError, "election_points"));
   }
 
-  const pointRows = input.points
-    .filter(pointHasContent)
-    .map((point, index) => pointInputToRow(eventId, point, index));
+  const pointRows = input.points.map((point, index) => pointInputToRow(eventId, point, index));
 
   if (pointRows.length > 0) {
     const { error: insertError } = await supabase.from("election_points").insert(pointRows);

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DeskPopupNoticeManager } from "@/components/schedule/desk-popup-notice-manager";
+import { usePendingScheduleChangeRequestCount } from "@/components/schedule/use-pending-schedule-change-request-count";
 import { getSession } from "@/lib/auth/storage";
 
 const items = [
@@ -19,6 +20,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
   const headerRef = useRef<HTMLElement | null>(null);
   const isStickyPage = pathname.startsWith("/schedule/schedule-assignment");
   const session = getSession();
+  const pendingChangeRequestCount = usePendingScheduleChangeRequestCount();
   const visibleItems = session?.role === "admin"
     ? items.filter((item) => item.href === "/schedule/write")
     : items;
@@ -91,7 +93,12 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
                     pathname === "/schedule/press-support"));
               return (
                 <Link key={item.href} href={item.href} className={`btn ${active ? "white" : ""}`}>
-                  {item.label}
+                  <span>{item.label}</span>
+                  {item.href === "/schedule/write" && pendingChangeRequestCount > 0 ? (
+                    <span className="schedule-change-request-count-badge" aria-label={`대기 중인 근무 변경 요청 ${pendingChangeRequestCount}건`}>
+                      {pendingChangeRequestCount}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}

@@ -13,7 +13,6 @@ import { getEngScheduleBadges, loadEngScheduleHighlights, type EngScheduleBadge,
 import {
   borrowEngSets,
   borrowEquipmentItems,
-  borrowLiveEquipmentStatusItem,
   canReturnLoanItem,
   fetchEquipmentItems,
   fetchLiveEquipmentItemsForManagement,
@@ -86,7 +85,6 @@ const LIVE_TRS_OPTIONS = [
   "1756",
   "1761",
   "1762",
-  "1764",
   "1767",
   "1768",
   "1769",
@@ -97,8 +95,8 @@ const LIVE_TRS_OPTIONS = [
   "1774",
   "1775",
   "1776",
-  "6415",
-  "8130",
+  "1779",
+  "1780",
 ] as const;
 const LIVE_TRS_OPTION_SET = new Set<string>(LIVE_TRS_OPTIONS);
 const LIVE_ACCESSORY_GROUPS: readonly LiveAccessoryGroupKey[] = ["pin_mic", "distributor"];
@@ -245,14 +243,6 @@ function toggleSelectedTrs(currentValue: string, trs: string) {
 function formatTrsSummary(selectedTrs: readonly string[]) {
   if (selectedTrs.length <= 2) return formatSelectedTrs(selectedTrs);
   return `${selectedTrs[0]} 외 ${selectedTrs.length - 1}개`;
-}
-
-function getBorrowedTrsValues(loanItems: EquipmentLoanItem[]) {
-  const values = new Set<string>();
-  loanItems.forEach((loanItem) => {
-    parseSelectedTrs(loanItem.loan.liveTrs ?? "").forEach((trs) => values.add(trs));
-  });
-  return values;
 }
 
 function getTodayDateKey() {
@@ -770,18 +760,14 @@ function EquipmentItemCard({
       <span className={styles.itemCardTop}>
         <span className={styles.itemNameStack}>
           <strong>{displayName ?? getEquipmentDisplayName(item)}</strong>
-          {showGlobalBadge || showGridBadge ? (
-            <span className={styles.badgeRow}>
-              {showGlobalBadge ? (
-                <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                  Global
-                </span>
-              ) : null}
-              {showGridBadge ? (
-                <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                  Grid
-                </span>
-              ) : null}
+          {showGlobalBadge ? (
+            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+              Global
+            </span>
+          ) : null}
+          {showGridBadge ? (
+            <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+              Grid
             </span>
           ) : null}
           {showRentalBadge ? (
@@ -894,17 +880,6 @@ function ConfirmDialog({
   onLiveDetailsChange: (details: LiveLoanDetails) => void;
   onReturnIdsChange: (ids: string[]) => void;
 }) {
-  const actionButtons = (
-    <div className={styles.modalActions}>
-      <button type="button" className="btn primary" disabled={actionPending || (mode === "return" && returnIds.length === 0)} onClick={onConfirm}>
-        확인
-      </button>
-      <button type="button" className="btn" disabled={actionPending} onClick={onClose}>
-        취소
-      </button>
-    </div>
-  );
-
   return (
     <div className={styles.modalBackdrop} role="presentation">
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="equipment-confirm-title">
@@ -913,7 +888,6 @@ function ConfirmDialog({
             <span className="chip">{mode === "borrow" ? "대여 확인" : "반납 확인"}</span>
             <h2 id="equipment-confirm-title" className={styles.modalTitle}>{title}</h2>
           </div>
-          {mode === "return" ? actionButtons : null}
           {mode === "return" ? (
             <div className={styles.modalListToolbar}>
               <span>{returnIds.length}개 선택됨</span>
@@ -967,7 +941,14 @@ function ConfirmDialog({
               </label>
             </div>
           ) : null}
-          {mode === "borrow" ? actionButtons : null}
+          <div className={styles.modalActions}>
+            <button type="button" className="btn primary" disabled={actionPending || (mode === "return" && returnIds.length === 0)} onClick={onConfirm}>
+              확인
+            </button>
+            <button type="button" className="btn" disabled={actionPending} onClick={onClose}>
+              취소
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1592,7 +1573,6 @@ function LiveEquipmentGroups({
   currentByItemId,
   onToggle,
   selectedTrsValues,
-  borrowedTrsValues,
   onTrsToggle,
   repairMode = false,
   repairDraftByItemId,
@@ -1608,7 +1588,6 @@ function LiveEquipmentGroups({
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
   selectedTrsValues: string[];
-  borrowedTrsValues: Set<string>;
   onTrsToggle: (trs: string) => void;
   repairMode?: boolean;
   repairDraftByItemId?: RepairDraftByItemId;
@@ -1637,9 +1616,6 @@ function LiveEquipmentGroups({
   const otherItems = items.filter((item) => !isTvuItem(item) && !isTvuInlineAccessoryItem(item) && !isHiddenEquipmentChoiceItem(item));
 
   const handleTvuToggle = (item: EquipmentItem) => {
-    if (currentByItemId.has(item.id) && !rentalTvuMode && !repairMode) {
-      return;
-    }
     if (rentalTvuMode === "deactivate" && isRentalTvuItem(item)) {
       onRentalTvuToggle?.(item.id);
       setExpandedTvuId(null);
@@ -1674,11 +1650,6 @@ function LiveEquipmentGroups({
               const showAccessories = expandedTvuId === item.id;
               const showTrsOptions = expandedTrsTvuId === item.id;
               const rentalDeactivateTarget = rentalTvuMode === "deactivate" && isRentalTvuItem(item);
-              const trsSummary = selectedTrsValues.length > 0
-                ? formatTrsSummary(selectedTrsValues)
-                : borrowedTrsValues.size > 0
-                  ? `${borrowedTrsValues.size}개 대여중`
-                  : "";
               const expandedGroup = expandedAccessoryGroup?.tvuId === item.id
                 ? liveAccessoryGroups.find((group) => group.groupKey === expandedAccessoryGroup.groupKey)
                 : null;
@@ -1691,7 +1662,7 @@ function LiveEquipmentGroups({
                     onToggle={() => handleTvuToggle(item)}
                     onDoubleClick={canManageTvuGrid && !repairMode && !rentalTvuMode ? () => onTvuGridToggle?.(item) : undefined}
                     doubleClickTitle={canManageTvuGrid ? "더블클릭으로 Grid 표시를 추가/삭제" : undefined}
-                    allowBorrowedClick={false}
+                    allowBorrowedClick={rentalDeactivateTarget ? false : tvuAccessoryItems.length > 0 || canManageTvuGrid}
                     tone="live"
                     repairMode={repairMode}
                     repairDraftByItemId={repairDraftByItemId}
@@ -1719,13 +1690,11 @@ function LiveEquipmentGroups({
                         >
                           <span className={styles.itemCardTop}>
                             <strong>TRS</strong>
-                            {trsSummary ? <small>{trsSummary}</small> : null}
+                            {selectedTrsValues.length > 0 ? <small>{formatTrsSummary(selectedTrsValues)}</small> : null}
                           </span>
                         </button>
                         {liveAccessoryGroups.map((group) => {
                           const summary = getLiveAccessorySummary(group.items, selectedIds);
-                          const borrowedCount = group.items.filter((accessoryItem) => currentByItemId.has(accessoryItem.id)).length;
-                          const borrowedSummary = borrowedCount > 0 ? `${borrowedCount}개 대여중` : "";
                           const expanded = expandedGroup?.groupKey === group.groupKey;
                           return (
                             <button
@@ -1748,7 +1717,7 @@ function LiveEquipmentGroups({
                             >
                               <span className={styles.itemCardTop}>
                                 <strong>{group.label}</strong>
-                                {summary || borrowedSummary ? <small>{summary || borrowedSummary}</small> : null}
+                                {summary ? <small>{summary}</small> : null}
                               </span>
                             </button>
                           );
@@ -1757,26 +1726,20 @@ function LiveEquipmentGroups({
                       {showTrsOptions ? (
                         <div className={styles.trsOptionPanel}>
                           <div className={styles.trsOptionGrid}>
-                            {LIVE_TRS_OPTIONS.map((trs) => {
-                              const selected = selectedTrsValues.includes(trs);
-                              const borrowed = borrowedTrsValues.has(trs);
-                              return (
-                                <button
-                                  key={trs}
-                                  type="button"
-                                  className={[
-                                    styles.trsOptionButton,
-                                    selected ? styles.trsOptionButtonSelected : "",
-                                  ].join(" ").trim()}
-                                  onClick={() => onTrsToggle(trs)}
-                                  aria-pressed={selected}
-                                  disabled={borrowed}
-                                >
-                                  <span>{trs}</span>
-                                  {borrowed ? <small>대여중</small> : null}
-                                </button>
-                              );
-                            })}
+                            {LIVE_TRS_OPTIONS.map((trs) => (
+                              <button
+                                key={trs}
+                                type="button"
+                                className={[
+                                  styles.trsOptionButton,
+                                  selectedTrsValues.includes(trs) ? styles.trsOptionButtonSelected : "",
+                                ].join(" ").trim()}
+                                onClick={() => onTrsToggle(trs)}
+                                aria-pressed={selectedTrsValues.includes(trs)}
+                              >
+                                {trs}
+                              </button>
+                            ))}
                           </div>
                         </div>
                       ) : null}
@@ -1873,10 +1836,13 @@ function RentalTvuCard({
   selected,
   selectionMode,
   canManage,
+  canManageTvuGrid,
   editing,
   editName,
   disabled,
+  gridPending,
   onToggle,
+  onTvuGridToggle,
   onStartEdit,
   onEditNameChange,
   onConfirmEdit,
@@ -1886,15 +1852,22 @@ function RentalTvuCard({
   selected: boolean;
   selectionMode: boolean;
   canManage: boolean;
+  canManageTvuGrid: boolean;
   editing: boolean;
   editName: string;
   disabled: boolean;
+  gridPending: boolean;
   onToggle: () => void;
+  onTvuGridToggle: () => void;
   onStartEdit: () => void;
   onEditNameChange: (value: string) => void;
   onConfirmEdit: () => void;
   onCancelEdit: () => void;
 }) {
+  const canToggleGrid = canManageTvuGrid && !selectionMode && !editing;
+  const showGridBadge = isGridTvuItem(item);
+  const cardDisabled = disabled || gridPending || (!selectionMode && !canToggleGrid);
+
   return (
     <article
       className={[
@@ -1907,13 +1880,29 @@ function RentalTvuCard({
       <button
         type="button"
         className={styles.rentalTvuCardMain}
-        disabled={!selectionMode || disabled}
-        onClick={onToggle}
+        disabled={cardDisabled}
+        onClick={() => {
+          if (selectionMode) {
+            onToggle();
+          }
+        }}
+        onDoubleClick={(event) => {
+          if (!canToggleGrid) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onTvuGridToggle();
+        }}
         aria-pressed={selected}
+        title={canToggleGrid ? "더블클릭으로 Grid 표시를 추가/삭제" : undefined}
       >
         <span className={styles.itemCardTop}>
           <span className={styles.itemNameStack}>
             <strong>{getEquipmentDisplayName(item)}</strong>
+            {showGridBadge ? (
+              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                Grid
+              </span>
+            ) : null}
             <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
               임대
             </span>
@@ -1964,6 +1953,8 @@ function RentalTvuSection({
   mode,
   selectedIds,
   canManage,
+  canManageTvuGrid = false,
+  gridPendingItemId = null,
   actionPending,
   editingItemId,
   editName,
@@ -1971,6 +1962,7 @@ function RentalTvuSection({
   onModeCancel,
   onModeConfirm,
   onSelectionToggle,
+  onTvuGridToggle,
   onEditStart,
   onEditNameChange,
   onEditConfirm,
@@ -1981,6 +1973,8 @@ function RentalTvuSection({
   mode: RentalTvuMode | null;
   selectedIds: string[];
   canManage: boolean;
+  canManageTvuGrid?: boolean;
+  gridPendingItemId?: string | null;
   actionPending: boolean;
   editingItemId: string | null;
   editName: string;
@@ -1988,6 +1982,7 @@ function RentalTvuSection({
   onModeCancel: () => void;
   onModeConfirm: () => void;
   onSelectionToggle: (itemId: string) => void;
+  onTvuGridToggle?: (item: EquipmentItem) => void;
   onEditStart: (item: EquipmentItem) => void;
   onEditNameChange: (value: string) => void;
   onEditConfirm: () => void;
@@ -2040,10 +2035,13 @@ function RentalTvuSection({
               selected={selectedIds.includes(item.id)}
               selectionMode={mode === "activate"}
               canManage={canManage}
+              canManageTvuGrid={canManageTvuGrid}
               editing={editingItemId === item.id}
               editName={editName}
               disabled={actionPending}
+              gridPending={gridPendingItemId === item.id}
               onToggle={() => onSelectionToggle(item.id)}
+              onTvuGridToggle={() => onTvuGridToggle?.(item)}
               onStartEdit={() => onEditStart(item)}
               onEditNameChange={onEditNameChange}
               onConfirmEdit={onEditConfirm}
@@ -2167,7 +2165,6 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   const selectedIds = useMemo(() => selectedEntries.map((selection) => selection.id), [selectedEntries]);
   const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
-  const borrowedTrsValues = useMemo(() => getBorrowedTrsValues(currentLoanItems), [currentLoanItems]);
   const selectedItemSelections = useMemo(
     () => selectedEntries.filter((selection): selection is Extract<BorrowSelection, { kind: "item" }> => selection.kind === "item"),
     [selectedEntries],
@@ -2274,13 +2271,6 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     if (hasSelectedTvu || !liveDetails.trs) return;
     setLiveDetails((current) => ({ ...current, trs: "" }));
   }, [hasSelectedTvu, liveDetails.trs]);
-
-  useEffect(() => {
-    if (!liveDetails.trs || borrowedTrsValues.size === 0) return;
-    const nextTrs = formatSelectedTrs(parseSelectedTrs(liveDetails.trs).filter((trs) => !borrowedTrsValues.has(trs)));
-    if (nextTrs === liveDetails.trs) return;
-    setLiveDetails((current) => ({ ...current, trs: nextTrs }));
-  }, [borrowedTrsValues, liveDetails.trs]);
 
   const sortedEngProfiles = useMemo(() => (
     profiles
@@ -2753,11 +2743,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                 selectedIds={repairMode || rentalTvuMode ? [] : selectedIds}
                 currentByItemId={currentByItemId}
                 selectedTrsValues={rentalTvuMode ? [] : selectedTrsValues}
-                borrowedTrsValues={borrowedTrsValues}
-                onTrsToggle={(trs) => {
-                  if (borrowedTrsValues.has(trs)) return;
-                  setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }));
-                }}
+                onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
                 onToggle={rentalTvuMode ? () => undefined : repairMode ? toggleRepairDraft : toggleSelection}
                 repairMode={repairMode}
                 repairDraftByItemId={repairDraftByItemId}
@@ -2784,6 +2770,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                   mode={rentalTvuMode}
                   selectedIds={rentalTvuSelectionIds}
                   canManage={canManageRentalTvu}
+                  canManageTvuGrid={canManageTvuGrid}
+                  gridPendingItemId={gridPendingItemId}
                   actionPending={actionPending}
                   editingItemId={rentalTvuEditItemId}
                   editName={rentalTvuEditName}
@@ -2791,6 +2779,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                   onModeCancel={cancelRentalTvuMode}
                   onModeConfirm={confirmRentalTvuMode}
                   onSelectionToggle={toggleRentalTvuSelection}
+                  onTvuGridToggle={toggleTvuGrid}
                   onEditStart={startRentalTvuRename}
                   onEditNameChange={setRentalTvuEditName}
                   onEditConfirm={confirmRentalTvuRename}
@@ -3016,18 +3005,14 @@ export function LiveEquipmentStatusHomePanel() {
                                     <span className={styles.regionalBadge}>자동연동</span>
                                   </>
                                 ) : null}
-                                {isGlobalTvuItem(item) || isGridTvuItem(item) ? (
-                                  <span className={styles.badgeRow}>
-                                    {isGlobalTvuItem(item) ? (
-                                      <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                        Global
-                                      </span>
-                                    ) : null}
-                                    {isGridTvuItem(item) ? (
-                                      <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                        Grid
-                                      </span>
-                                    ) : null}
+                                {isGlobalTvuItem(item) ? (
+                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                    Global
+                                  </span>
+                                ) : null}
+                                {isGridTvuItem(item) ? (
+                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                                    Grid
                                   </span>
                                 ) : null}
                                 {isRentalTvuItem(item) ? (
@@ -3088,13 +3073,10 @@ export function LiveEquipmentStatusPage() {
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [statusToggleItemId, setStatusToggleItemId] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
 
-  const load = useCallback(async ({ showLoading = true }: { showLoading?: boolean } = {}) => {
-    if (showLoading) {
-      setLoading(true);
-    }
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
       const [nextItems, nextCurrent, nextStatusEntries, nextElectionOverlays] = await Promise.all([
         fetchEquipmentItems(["live"]),
@@ -3114,9 +3096,7 @@ export function LiveEquipmentStatusPage() {
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비현황을 불러오지 못했습니다." });
     } finally {
-      if (showLoading) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, []);
 
@@ -3138,7 +3118,7 @@ export function LiveEquipmentStatusPage() {
   const regionalTvuItems = useMemo(() => items.filter(isRegionalTransmissionTvuItem), [items]);
   const tvuItems = useMemo(() => items.filter((item) => isTvuItem(item) && !isRegionalTransmissionTvuItem(item)), [items]);
   const statusBoardItems = useMemo(() => [...tvuItems, ...regionalTvuItems], [regionalTvuItems, tvuItems]);
-  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.actualRole));
+  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.role));
   const hasDirtyDrafts = useMemo(() => (
     editMode && statusBoardItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
   ), [drafts, editBaselineDrafts, editMode, statusBoardItems]);
@@ -3204,48 +3184,6 @@ export function LiveEquipmentStatusPage() {
     setEditMode(false);
     setMessage({ tone: "note", text: "수정을 취소했습니다." });
   };
-  const toggleLiveBorrowStatus = async (
-    item: EquipmentItem,
-    loanItem: EquipmentLoanItem | undefined,
-    electionOverlay: ElectionTvuOverlay | null,
-    liveDetails: LiveLoanDetails,
-  ) => {
-    if (!canManageLiveStatus) {
-      setMessage({ tone: "warn", text: "라이브장비 현황판 저장 권한이 없습니다." });
-      return;
-    }
-    if (editMode) {
-      setMessage({ tone: "note", text: "수정 모드에서는 상태를 변경할 수 없습니다." });
-      return;
-    }
-    if (electionOverlay) {
-      setMessage({ tone: "note", text: "선거 자동연동 상태는 현황판에서 직접 변경할 수 없습니다." });
-      return;
-    }
-    if (!loanItem && item.isUnderRepair) {
-      setMessage({ tone: "note", text: "수리중인 장비는 대여중으로 변경할 수 없습니다." });
-      return;
-    }
-    if (statusToggleItemId || saving || loading) return;
-
-    setStatusToggleItemId(item.id);
-    try {
-      const nextMessage = loanItem
-        ? `${getEquipmentDisplayName(item)} 상태를 대여가능으로 변경했습니다.`
-        : `${getEquipmentDisplayName(item)} 상태를 대여중으로 변경했습니다.`;
-      if (loanItem) {
-        await returnEquipmentLoanItems([loanItem.id]);
-      } else {
-        await borrowLiveEquipmentStatusItem(item.id, liveDetails);
-      }
-      await load({ showLoading: false });
-      setMessage({ tone: "ok", text: nextMessage });
-    } catch (error) {
-      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비 상태 변경에 실패했습니다." });
-    } finally {
-      setStatusToggleItemId(null);
-    }
-  };
 
   const renderLiveStatusTable = (tableItems: EquipmentItem[], title: string, isRegionalTable = false) => (
     <section className={styles.liveStatusTableSection}>
@@ -3276,16 +3214,6 @@ export function LiveEquipmentStatusPage() {
                 const draft = editMode ? drafts[item.id] ?? baseDisplayDraft : displayDraft;
                 const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
                 const noteValue = draft.note || "-";
-                const statusToggleDisabled = (
-                  !canManageLiveStatus ||
-                  editMode ||
-                  saving ||
-                  loading ||
-                  Boolean(statusToggleItemId) ||
-                  Boolean(electionOverlay) ||
-                  (!loanItem && item.isUnderRepair)
-                );
-                const statusToggleLabel = loanItem ? "대여가능으로 변경" : "대여중으로 변경";
                 return (
                   <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
                     <td>
@@ -3297,18 +3225,14 @@ export function LiveEquipmentStatusPage() {
                             <span className={styles.regionalBadge}>자동연동</span>
                           </>
                         ) : null}
-                        {isGlobalTvuItem(item) || isGridTvuItem(item) ? (
-                          <span className={styles.badgeRow}>
-                            {isGlobalTvuItem(item) ? (
-                              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                Global
-                              </span>
-                            ) : null}
-                            {isGridTvuItem(item) ? (
-                              <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                Grid
-                              </span>
-                            ) : null}
+                        {isGlobalTvuItem(item) ? (
+                          <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                            Global
+                          </span>
+                        ) : null}
+                        {isGridTvuItem(item) ? (
+                          <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
+                            Grid
                           </span>
                         ) : null}
                         {isRentalTvuItem(item) ? (
@@ -3404,21 +3328,12 @@ export function LiveEquipmentStatusPage() {
                       )}
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        className={styles.liveStatusToggle}
-                        disabled={statusToggleDisabled}
-                        aria-label={`${getEquipmentDisplayName(item)} ${statusToggleLabel}`}
-                        title={`${getEquipmentDisplayName(item)} ${statusToggleLabel}`}
-                        onDoubleClick={() => void toggleLiveBorrowStatus(item, loanItem, electionOverlay, baseDisplayDraft)}
-                      >
-                        <StatusPill
-                          borrowed={Boolean(loanItem || electionOverlay)}
-                          repairing={item.isUnderRepair}
-                          availableLabel={isRegionalTable ? "사용 가능" : "대여가능"}
-                          borrowedLabel={electionOverlay ? "선거중계" : "대여중"}
-                        />
-                      </button>
+                      <StatusPill
+                        borrowed={Boolean(loanItem || electionOverlay)}
+                        repairing={item.isUnderRepair}
+                        availableLabel={isRegionalTable ? "사용 가능" : "대여가능"}
+                        borrowedLabel={electionOverlay ? "선거중계" : "대여중"}
+                      />
                     </td>
                   </tr>
                 );

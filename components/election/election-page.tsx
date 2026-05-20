@@ -8,7 +8,6 @@ import {
   saveElectionWorkspace,
 } from "@/lib/election/storage";
 import { getKstDateKey } from "@/lib/election/dates";
-import { ELECTION_PRINT_CSS, renderElectionPrintHtml } from "@/lib/election/print-layout";
 import type {
   ElectionEvent,
   ElectionPointInput,
@@ -16,15 +15,12 @@ import type {
   ElectionSaveInput,
   ElectionStatus,
 } from "@/lib/election/types";
-import { printHtmlDocument } from "@/lib/print";
-import { getSession, subscribeToAuth } from "@/lib/auth/storage";
-import type { SessionUser } from "@/lib/auth/storage";
+import { subscribeToAuth } from "@/lib/auth/storage";
 import styles from "./Election.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type DayPart = "am" | "pm";
-type PrintPaperSize = "A3" | "A4";
-type PrintOrientation = "portrait" | "landscape";
+type AutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -38,16 +34,10 @@ interface DraftEvent {
   points: DraftPoint[];
 }
 
-interface DraftPointGroup {
-  key: string;
-  region: string;
-  pointIndexes: number[];
-}
-
 const statusLabels: Record<ElectionStatus, string> = {
   draft: "작성중",
   published: "게시중",
-  closed: "최종 저장",
+  closed: "종료",
 };
 
 const poolVideoOptions = [
@@ -84,16 +74,7 @@ const tableColumns = [
 
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
-
-const printPaperSizeLabels: Record<PrintPaperSize, string> = {
-  A3: "A3",
-  A4: "A4",
-};
-
-const printOrientationLabels: Record<PrintOrientation, string> = {
-  portrait: "세로",
-  landscape: "가로",
-};
+const AUTO_SAVE_DEBOUNCE_MS = 900;
 
 function getTableColumnClassName(column: string) {
   return column === "중계자리" ? styles.positionColumn : undefined;
@@ -146,55 +127,6 @@ function createBlankDraft(): DraftEvent {
   };
 }
 
-function getAuthReloadKey(session: SessionUser | null) {
-  if (!session) return "anonymous";
-  return `${session.id}:${session.approved}:${session.actualRole}`;
-}
-
-function buildDraftPointGroups(points: DraftPoint[]): DraftPointGroup[] {
-  const groups: DraftPointGroup[] = [];
-
-  points.forEach((point, index) => {
-    const region = point.region.trim();
-
-    const previousGroup = groups.at(-1);
-    if (previousGroup && previousGroup.region === region) {
-      previousGroup.pointIndexes.push(index);
-      return;
-    }
-
-    groups.push({
-      key: `${point.localId}-${index}`,
-      region,
-      pointIndexes: [index],
-    });
-  });
-
-  return groups;
-}
-
-function buildReadOnlyPointGroups(points: ElectionEvent["points"]): Array<{ key: string; region: string; points: ElectionEvent["points"] }> {
-  const groups: Array<{ key: string; region: string; points: ElectionEvent["points"] }> = [];
-
-  points.forEach((point, index) => {
-    const region = point.region.trim();
-
-    const previousGroup = groups.at(-1);
-    if (previousGroup && previousGroup.region === region) {
-      previousGroup.points.push(point);
-      return;
-    }
-
-    groups.push({
-      key: `${point.id}-${index}`,
-      region,
-      points: [point],
-    });
-  });
-
-  return groups;
-}
-
 function eventToDraft(event: ElectionEvent): DraftEvent {
   return {
     id: event.id,
@@ -208,7 +140,7 @@ function eventToDraft(event: ElectionEvent): DraftEvent {
           region: point.region,
           place: point.place,
           poolVideo: point.poolVideo,
-          equipmentName: point.equipmentName,
+          equipmentName: point.equipmentName || DEFAULT_EQUIPMENT_NAME,
           equipmentType: point.equipmentType,
           trs: point.trs,
           cameraStaffName: point.cameraStaffName,
@@ -238,12 +170,18 @@ function draftToSaveInput(draft: DraftEvent): ElectionSaveInput {
     id: draft.id,
     title: draft.title,
     electionDate: draft.electionDate,
-    points: draft.points.map((point, index) => ({ ...point, region: point.region.trim(), sortOrder: index })),
+    points: draft.points.map((point, index) => ({ ...point, sortOrder: index })),
   };
 }
 
-function withDraftPointSortOrder(points: DraftPoint[]) {
-  return points.map((point, index) => ({ ...point, sortOrder: index }));
+function getDraftSaveSignature(draft: DraftEvent | null) {
+  if (!draft) return "";
+  const input = draftToSaveInput(draft);
+  return JSON.stringify({
+    title: input.title,
+    electionDate: input.electionDate,
+    points: input.points,
+  });
 }
 
 function getStatusClassName(status: ElectionStatus) {
@@ -254,7 +192,7 @@ function getStatusClassName(status: ElectionStatus) {
 
 function formatElectionBoardTitle(title: string | null | undefined) {
   const trimmed = title?.trim() ?? "";
-  return trimmed ? `${trimmed} 중계표` : "선거 계획표";
+  return trimmed ? `${trimmed} 배치표` : "선거 중계표";
 }
 
 function readOnlyValue(value: string | null | undefined) {
@@ -337,9 +275,6 @@ function SplitTextInput({
 }
 
 function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
-  const pointGroups = buildReadOnlyPointGroups(event.points);
-  let pointNumber = 0;
-
   return (
     <article className="panel">
       <div className={`panel-pad ${styles.emptyPanel}`}>
@@ -361,40 +296,30 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
               </tr>
             </thead>
             <tbody>
-              {pointGroups.length ? (
-                pointGroups.flatMap((group) =>
-                  group.points.map((point, groupPointIndex) => {
-                    pointNumber += 1;
-
-                    return (
-                      <tr key={point.id}>
-                        <td className={styles.numberCell}>{pointNumber}.</td>
-                        {groupPointIndex === 0 ? (
-                          <td rowSpan={group.points.length} className={styles.readOnlyRegionCell}>
-                            {readOnlyValue(group.region)}
-                          </td>
-                        ) : null}
-                        <td>{readOnlyValue(point.place)}</td>
-                        <td>{readOnlyValue(point.poolVideo)}</td>
-                        <td>{readOnlyValue(point.equipmentName)}</td>
-                        <td>{readOnlyValue(point.trs)}</td>
-                        <td>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
-                        <td>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                        <td>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
-                        <td>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
-                        <td>{readOnlyValue(point.address)}</td>
-                        <td>{readOnlyValue(point.note)}</td>
-                        <td className={styles.positionColumn}>
-                          <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
-                        </td>
-                        <td>{readOnlyValue(point.lighting)}</td>
-                      </tr>
-                    );
-                  }),
-                )
+              {event.points.length ? (
+                event.points.map((point, index) => (
+                  <tr key={point.id}>
+                    <td className={styles.numberCell}>{index + 1}.</td>
+                    <td>{readOnlyValue(point.region)}</td>
+                    <td>{readOnlyValue(point.place)}</td>
+                    <td>{readOnlyValue(point.poolVideo)}</td>
+                    <td>{readOnlyValue(point.equipmentName)}</td>
+                    <td>{readOnlyValue(point.trs)}</td>
+                    <td>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                    <td>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                    <td>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                    <td>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                    <td>{readOnlyValue(point.address)}</td>
+                    <td>{readOnlyValue(point.note)}</td>
+                    <td className={styles.positionColumn}>
+                      <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                    </td>
+                    <td>{readOnlyValue(point.lighting)}</td>
+                  </tr>
+                ))
               ) : (
                 <tr>
-                  <td colSpan={tableColumns.length - 1}>
+                  <td colSpan={15}>
                     <div className="status note">입력된 중계 포인트가 없습니다.</div>
                   </td>
                 </tr>
@@ -407,52 +332,9 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
   );
 }
 
-function ArchivedElectionList({
-  events,
-  selectedEvent,
-  onSelect,
-}: {
-  events: ElectionEvent[];
-  selectedEvent: ElectionEvent | null;
-  onSelect: (eventId: string) => void;
-}) {
-  if (events.length === 0) return null;
-
-  return (
-    <>
-      <article className="panel">
-        <div className={`panel-pad ${styles.emptyPanel}`}>
-          <div className={styles.toolbar}>
-            <div>
-              <span className={styles.statusBadge}>기록</span>
-              <h2 style={{ margin: "10px 0 4px" }}>최종 저장된 선거</h2>
-              <div className={styles.summary}>최근 {events.length}개 선거 중계표</div>
-            </div>
-          </div>
-          <div className={styles.archiveList}>
-            {events.map((event) => (
-              <button
-                key={event.id}
-                type="button"
-                className={`btn ${selectedEvent?.id === event.id ? "primary" : ""}`.trim()}
-                onClick={() => onSelect(event.id)}
-              >
-                {event.title} · {event.electionDate}
-              </button>
-            ))}
-          </div>
-        </div>
-      </article>
-      {selectedEvent ? <ElectionReadOnlyTable event={selectedEvent} /> : null}
-    </>
-  );
-}
-
 export function ElectionPage() {
   const [draft, setDraft] = useState<DraftEvent | null>(null);
   const [publishedEvent, setPublishedEvent] = useState<ElectionEvent | null>(null);
-  const [archivedEvents, setArchivedEvents] = useState<ElectionEvent[]>([]);
-  const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<ElectionProfileOption[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -460,52 +342,140 @@ export function ElectionPage() {
   const [message, setMessage] = useState<Message | null>(null);
   const [splitRowIds, setSplitRowIds] = useState<Record<string, true>>({});
   const [savedDisplayTitle, setSavedDisplayTitle] = useState<string | null>(null);
-  const [printPaperSize, setPrintPaperSize] = useState<PrintPaperSize>("A3");
-  const [printOrientation, setPrintOrientation] = useState<PrintOrientation>("portrait");
-  const authReloadKeyRef = useRef(getAuthReloadKey(getSession()));
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("idle");
+  const draftRef = useRef<DraftEvent | null>(null);
+  const autoSaveReadyRef = useRef(false);
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const autoSaveInFlightRef = useRef(false);
+  const autoSavePendingRef = useRef(false);
+  const lastSavedSignatureRef = useRef("");
 
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
-  const selectedArchivedEvent = useMemo(
-    () => archivedEvents.find((event) => event.id === selectedArchiveId) ?? null,
-    [archivedEvents, selectedArchiveId],
-  );
-  const draftPointGroups = useMemo(() => (draft ? buildDraftPointGroups(draft.points) : []), [draft]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  const clearAutoSaveTimer = useCallback(() => {
+    if (autoSaveTimerRef.current === null) return;
+    window.clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = null;
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
+    autoSaveReadyRef.current = false;
+    clearAutoSaveTimer();
     try {
       const workspace = await fetchElectionWorkspace();
+      const nextDraft = workspace.canManage ? (workspace.event ? eventToDraft(workspace.event) : createBlankDraft()) : null;
       setCanManage(workspace.canManage);
       setProfiles(workspace.profiles);
-      setArchivedEvents(workspace.archivedEvents);
       setPublishedEvent(workspace.canManage ? null : workspace.event);
-      setDraft(workspace.canManage ? (workspace.event ? eventToDraft(workspace.event) : createBlankDraft()) : null);
-      setSelectedArchiveId((current) =>
-        current && workspace.archivedEvents.some((event) => event.id === current) ? current : null,
-      );
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      lastSavedSignatureRef.current = getDraftSaveSignature(nextDraft);
       setSavedDisplayTitle(workspace.event?.title ?? null);
+      setAutoSaveStatus("idle");
       setMessage(null);
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표를 불러오지 못했습니다." });
     } finally {
+      autoSaveReadyRef.current = true;
       setLoading(false);
     }
-  }, []);
+  }, [clearAutoSaveTimer]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(
-    () =>
-      subscribeToAuth((nextSession) => {
-        const nextKey = getAuthReloadKey(nextSession);
-        if (authReloadKeyRef.current === nextKey) return;
-        authReloadKeyRef.current = nextKey;
-        void load();
-      }),
-    [load],
-  );
+  useEffect(() => subscribeToAuth(() => void load()), [load]);
+
+  const persistDraftSnapshot = useCallback(async (snapshot: DraftEvent, options?: { showMessage?: boolean }) => {
+    const signature = getDraftSaveSignature(snapshot);
+    const workspace = await saveElectionWorkspace(draftToSaveInput(snapshot));
+    if (!workspace.event) {
+      throw new Error("저장한 선거 중계표를 다시 불러오지 못했습니다.");
+    }
+
+    lastSavedSignatureRef.current = signature;
+    setCanManage(workspace.canManage);
+    setProfiles(workspace.profiles);
+    setSavedDisplayTitle(workspace.event.title);
+    setDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        id: workspace.event?.id ?? current.id,
+        status: workspace.event?.status ?? current.status,
+      };
+    });
+
+    if (options?.showMessage) {
+      setMessage({ tone: "ok", text: "선거 중계표를 저장했습니다." });
+    }
+
+    return workspace.event;
+  }, []);
+
+  const runAutoSave = useCallback(async () => {
+    const snapshot = draftRef.current;
+    if (!snapshot || !canManage) return;
+
+    const signature = getDraftSaveSignature(snapshot);
+    if (!signature || signature === lastSavedSignatureRef.current) {
+      setAutoSaveStatus("saved");
+      return;
+    }
+
+    if (autoSaveInFlightRef.current) {
+      autoSavePendingRef.current = true;
+      return;
+    }
+
+    autoSaveInFlightRef.current = true;
+    setAutoSaveStatus("saving");
+    try {
+      await persistDraftSnapshot(snapshot);
+      setAutoSaveStatus("saved");
+    } catch (error) {
+      setAutoSaveStatus("error");
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표 자동 저장에 실패했습니다." });
+    } finally {
+      autoSaveInFlightRef.current = false;
+      const currentSignature = getDraftSaveSignature(draftRef.current);
+      if (autoSavePendingRef.current || (currentSignature && currentSignature !== lastSavedSignatureRef.current)) {
+        autoSavePendingRef.current = false;
+        clearAutoSaveTimer();
+        autoSaveTimerRef.current = window.setTimeout(() => {
+          autoSaveTimerRef.current = null;
+          void runAutoSave();
+        }, AUTO_SAVE_DEBOUNCE_MS);
+      }
+    }
+  }, [canManage, clearAutoSaveTimer, persistDraftSnapshot]);
+
+  useEffect(() => {
+    if (!autoSaveReadyRef.current || !canManage || !draft) return;
+    const signature = getDraftSaveSignature(draft);
+    if (signature === lastSavedSignatureRef.current) return;
+
+    setAutoSaveStatus("pending");
+    clearAutoSaveTimer();
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void runAutoSave();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+
+    return clearAutoSaveTimer;
+  }, [canManage, clearAutoSaveTimer, draft, runAutoSave]);
+
+  useEffect(() => {
+    return () => {
+      clearAutoSaveTimer();
+    };
+  }, [clearAutoSaveTimer]);
 
   const updateDraft = (patch: Partial<Pick<DraftEvent, "title" | "electionDate">>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -517,17 +487,6 @@ export function ElectionPage() {
       return {
         ...current,
         points: current.points.map((point, pointIndex) => (pointIndex === index ? { ...point, ...patch } : point)),
-      };
-    });
-  };
-
-  const updateGroupRegion = (pointIndexes: number[], region: string) => {
-    const indexSet = new Set(pointIndexes);
-    setDraft((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        points: current.points.map((point, pointIndex) => (indexSet.has(pointIndex) ? { ...point, region } : point)),
       };
     });
   };
@@ -562,88 +521,10 @@ export function ElectionPage() {
     updatePoint(index, { cameraStaffNamePm: value, cameraStaffUserIdPm: userId });
   };
 
-  const addRegion = () => {
+  const addPoint = () => {
     setDraft((current) => {
       if (!current) return current;
       return { ...current, points: [...current.points, createBlankPoint(current.points.length)] };
-    });
-  };
-
-  const addPointToGroup = (pointIndexes: number[], region: string) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const insertIndex = Math.max(...pointIndexes) + 1;
-      const nextPoint = { ...createBlankPoint(insertIndex), region };
-      const nextPoints = [
-        ...current.points.slice(0, insertIndex),
-        nextPoint,
-        ...current.points.slice(insertIndex),
-      ];
-
-      return { ...current, points: withDraftPointSortOrder(nextPoints) };
-    });
-  };
-
-  const moveRegionGroup = (groupIndex: number, direction: -1 | 1) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const groups = buildDraftPointGroups(current.points);
-      const sourceGroup = groups[groupIndex];
-      const targetGroup = groups[groupIndex + direction];
-      if (!sourceGroup || !targetGroup) return current;
-
-      const sourceStart = sourceGroup.pointIndexes[0];
-      const sourceEnd = sourceGroup.pointIndexes[sourceGroup.pointIndexes.length - 1];
-      const targetStart = targetGroup.pointIndexes[0];
-      const targetEnd = targetGroup.pointIndexes[targetGroup.pointIndexes.length - 1];
-      if (
-        sourceStart === undefined ||
-        sourceEnd === undefined ||
-        targetStart === undefined ||
-        targetEnd === undefined
-      ) {
-        return current;
-      }
-
-      const sourcePoints = current.points.slice(sourceStart, sourceEnd + 1);
-      const targetPoints = current.points.slice(targetStart, targetEnd + 1);
-      const nextPoints =
-        direction < 0
-          ? [
-              ...current.points.slice(0, targetStart),
-              ...sourcePoints,
-              ...targetPoints,
-              ...current.points.slice(sourceEnd + 1),
-            ]
-          : [
-              ...current.points.slice(0, sourceStart),
-              ...targetPoints,
-              ...sourcePoints,
-              ...current.points.slice(targetEnd + 1),
-            ];
-
-      return { ...current, points: withDraftPointSortOrder(nextPoints) };
-    });
-  };
-
-  const movePointWithinGroup = (pointIndexes: number[], index: number, direction: -1 | 1) => {
-    const targetIndex = index + direction;
-    if (!pointIndexes.includes(targetIndex)) return;
-
-    setDraft((current) => {
-      if (!current) return current;
-      const groups = buildDraftPointGroups(current.points);
-      const group = groups.find((candidate) => candidate.pointIndexes.includes(index));
-      if (!group?.pointIndexes.includes(targetIndex)) return current;
-
-      const nextPoints = [...current.points];
-      const currentPoint = nextPoints[index];
-      const targetPoint = nextPoints[targetIndex];
-      if (!currentPoint || !targetPoint) return current;
-
-      nextPoints[index] = targetPoint;
-      nextPoints[targetIndex] = currentPoint;
-      return { ...current, points: withDraftPointSortOrder(nextPoints) };
     });
   };
 
@@ -651,36 +532,37 @@ export function ElectionPage() {
     setDraft((current) => {
       if (!current) return current;
       const nextPoints = current.points.filter((_, pointIndex) => pointIndex !== index);
-      return { ...current, points: nextPoints.length ? withDraftPointSortOrder(nextPoints) : [createBlankPoint(0)] };
+      return { ...current, points: nextPoints.length ? nextPoints : [createBlankPoint(0)] };
     });
   };
 
-  const persistDraft = async (successMessage?: string) => {
+  const saveDraft = async () => {
     if (!draft) return null;
-    const workspace = await saveElectionWorkspace(draftToSaveInput(draft));
-    setCanManage(workspace.canManage);
-    setProfiles(workspace.profiles);
-    setArchivedEvents(workspace.archivedEvents);
-    setDraft(workspace.event ? eventToDraft(workspace.event) : createBlankDraft());
-    setSavedDisplayTitle(workspace.event?.title ?? null);
-    if (successMessage) {
-      setMessage({ tone: "ok", text: successMessage });
+    clearAutoSaveTimer();
+    setSaving(true);
+    try {
+      const savedEvent = await persistDraftSnapshot(draft, { showMessage: true });
+      setAutoSaveStatus("saved");
+      return savedEvent;
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표 저장에 실패했습니다." });
+      return null;
+    } finally {
+      setSaving(false);
     }
-    return workspace.event;
   };
 
   const publishDraft = async () => {
+    const savedEvent = await saveDraft();
+    if (!savedEvent) return;
     setSaving(true);
     try {
-      const savedEvent = await persistDraft();
-      if (!savedEvent) return;
       const workspace = await publishElectionEvent(savedEvent.id);
       setCanManage(workspace.canManage);
       setProfiles(workspace.profiles);
-      setArchivedEvents(workspace.archivedEvents);
       setDraft(workspace.event ? eventToDraft(workspace.event) : createBlankDraft());
       setSavedDisplayTitle(workspace.event?.title ?? null);
-      setMessage({ tone: "ok", text: "선거 중계표를 게시했습니다. 게시 중에도 수정 후 다시 게시하면 홈과 공개 페이지에 반영됩니다." });
+      setMessage({ tone: "ok", text: "선거 중계표를 게시했습니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표 게시에 실패했습니다." });
     } finally {
@@ -688,51 +570,26 @@ export function ElectionPage() {
     }
   };
 
-  const finalizeDraft = async () => {
-    if (!draft) return;
-    const ok = window.confirm("최종 저장하면 더 이상 수정할 수 없고 공개 페이지와 홈에서 내려갑니다. 계속하시겠습니까?");
+  const closePublishedEvent = async () => {
+    if (!draft?.id) return;
+    const ok = window.confirm("게시종료 후 저장하시겠습니까?");
     if (!ok) return;
 
     setSaving(true);
     try {
-      const savedEvent = await persistDraft();
-      if (!savedEvent) return;
-      const workspace = await closeElectionEvent(savedEvent.id);
-      setCanManage(workspace.canManage);
-      setDraft(createBlankDraft());
-      setProfiles(workspace.profiles);
-      setArchivedEvents(workspace.archivedEvents);
-      setSelectedArchiveId(savedEvent.id);
+      await closeElectionEvent(draft.id);
+      const nextDraft = createBlankDraft();
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      lastSavedSignatureRef.current = getDraftSaveSignature(nextDraft);
       setPublishedEvent(null);
       setSavedDisplayTitle(null);
-      setMessage({ tone: "ok", text: "최종 저장했습니다. 입력칸을 초기화했으니 다음 선거 중계표를 작성할 수 있습니다." });
+      setAutoSaveStatus("idle");
+      setMessage({ tone: "ok", text: "게시종료했습니다. 새 선거 중계표를 작성할 수 있습니다." });
     } catch (error) {
-      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "최종 저장에 실패했습니다." });
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "게시종료에 실패했습니다." });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const printElectionBoard = () => {
-    const printSource = canManage ? draft : publishedEvent;
-    if (!printSource) return;
-
-    const title = formatElectionBoardTitle(printSource.title);
-    const ok = printHtmlDocument({
-      title,
-      pageSize: `${printPaperSize} ${printOrientation}`,
-      pageMargin: "5mm",
-      extraCss: ELECTION_PRINT_CSS,
-      bodyHtml: renderElectionPrintHtml({
-        title,
-        electionDate: printSource.electionDate,
-        status: printSource.status,
-        points: printSource.points,
-      }),
-    });
-
-    if (!ok) {
-      setMessage({ tone: "warn", text: "팝업 차단으로 출력 창을 열지 못했습니다." });
     }
   };
 
@@ -754,36 +611,8 @@ export function ElectionPage() {
         <article className="panel">
           <div className={`panel-pad ${styles.header}`}>
             <div className={styles.titleBlock}>
+              <span className="chip">선거</span>
               <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
-            </div>
-          <div className={styles.actions}>
-            <div className={styles.printOptions} aria-label="출력 설정">
-              <select
-                className="field-select"
-                value={printPaperSize}
-                onChange={(event) => setPrintPaperSize(event.target.value as PrintPaperSize)}
-              >
-                {Object.entries(printPaperSizeLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="field-select"
-                value={printOrientation}
-                onChange={(event) => setPrintOrientation(event.target.value as PrintOrientation)}
-              >
-                {Object.entries(printOrientationLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button type="button" className="btn" disabled={!publishedEvent} onClick={printElectionBoard}>
-              출력
-            </button>
             </div>
           </div>
         </article>
@@ -808,43 +637,33 @@ export function ElectionPage() {
       <article className="panel">
         <div className={`panel-pad ${styles.header}`}>
           <div className={styles.titleBlock}>
-            <h1 className="page-title">{formatElectionBoardTitle(draft?.title ?? savedDisplayTitle)}</h1>
+            <span className="chip">선거</span>
+            <h1 className="page-title">{formatElectionBoardTitle(savedDisplayTitle)}</h1>
             <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
           </div>
           <div className={styles.actions}>
-            <div className={styles.printOptions} aria-label="출력 설정">
-              <select
-                className="field-select"
-                value={printPaperSize}
-                onChange={(event) => setPrintPaperSize(event.target.value as PrintPaperSize)}
-              >
-                {Object.entries(printPaperSizeLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="field-select"
-                value={printOrientation}
-                onChange={(event) => setPrintOrientation(event.target.value as PrintOrientation)}
-              >
-                {Object.entries(printOrientationLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button type="button" className="btn" disabled={!draft} onClick={printElectionBoard}>
-              출력
-            </button>
-            <button type="button" className="btn" disabled={saving || !draft} onClick={finalizeDraft}>
-              {saving ? "최종 저장 중" : "최종 저장"}
+            <span className={styles.autoSaveStatus} aria-live="polite">
+              {autoSaveStatus === "pending"
+                ? "자동 저장 대기"
+                : autoSaveStatus === "saving"
+                  ? "자동 저장 중"
+                  : autoSaveStatus === "saved"
+                    ? "자동 저장됨"
+                    : autoSaveStatus === "error"
+                      ? "자동 저장 실패"
+                      : "자동 저장"}
+            </span>
+            <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
+              {saving ? "저장 중" : "저장"}
             </button>
             <button type="button" className="btn primary" disabled={saving || !draft} onClick={publishDraft}>
               게시
             </button>
+            {currentStatus === "published" ? (
+              <button type="button" className="btn" disabled={saving || !draft?.id} onClick={closePublishedEvent}>
+                게시종료
+              </button>
+            ) : null}
           </div>
         </div>
       </article>
@@ -883,8 +702,8 @@ export function ElectionPage() {
             <div className={`panel-pad ${styles.emptyPanel}`}>
               <div className={styles.toolbar}>
                 <div className={styles.summary}>{draft.points.length}개 포인트</div>
-                <button type="button" className="btn" disabled={saving} onClick={addRegion}>
-                  지역 추가
+                <button type="button" className="btn" disabled={saving} onClick={addPoint}>
+                  행 추가
                 </button>
               </div>
               <datalist id="election-profile-options">
@@ -902,204 +721,127 @@ export function ElectionPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {draftPointGroups.flatMap((group, groupIndex) =>
-                      group.pointIndexes.map((index, groupPointIndex) => {
-                          const point = draft.points[index];
-                          const split = isPointSplit(point);
-                          const isFirstGroup = groupIndex === 0;
-                          const isLastGroup = groupIndex === draftPointGroups.length - 1;
-                          const isFirstPointInGroup = groupPointIndex === 0;
-                          const isLastPointInGroup = groupPointIndex === group.pointIndexes.length - 1;
-
-                          return (
-                            <tr key={point.localId}>
-                              <td className={styles.numberCell}>
-                                {index + 1}.
-                              </td>
-                              {groupPointIndex === 0 ? (
-                                <td rowSpan={group.pointIndexes.length} className={styles.mergedRegionCell}>
-                                  <div className={styles.regionCellContent}>
-                                    <label className={styles.regionField}>
-                                      <span>지역</span>
-                                      <input
-                                        className="field-input"
-                                        value={group.region}
-                                        onChange={(event) => updateGroupRegion(group.pointIndexes, event.target.value)}
-                                        placeholder="예: 정당"
-                                      />
-                                    </label>
-                                    <div className={styles.regionActions}>
-                                      <span>{group.pointIndexes.length}개 장소</span>
-                                      <span className={styles.moveButtonGroup}>
-                                        <button
-                                          type="button"
-                                          className={styles.moveButton}
-                                          disabled={saving || isFirstGroup}
-                                          title="지역 위로 이동"
-                                          aria-label={`${group.region || "지역"} 위로 이동`}
-                                          onClick={() => moveRegionGroup(groupIndex, -1)}
-                                        >
-                                          ▲
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className={styles.moveButton}
-                                          disabled={saving || isLastGroup}
-                                          title="지역 아래로 이동"
-                                          aria-label={`${group.region || "지역"} 아래로 이동`}
-                                          onClick={() => moveRegionGroup(groupIndex, 1)}
-                                        >
-                                          ▼
-                                        </button>
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className={styles.regionAddButton}
-                                        disabled={saving}
-                                        onClick={() => addPointToGroup(group.pointIndexes, group.region)}
-                                      >
-                                        + 장소
-                                      </button>
-                                    </div>
-                                  </div>
-                                </td>
-                              ) : null}
-                              <td className={styles.placeColumn}>
-                                <div className={styles.placeCellContent}>
-                                  <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
-                                  <span className={styles.placeMoveButtons}>
-                                    <button
-                                      type="button"
-                                      className={styles.moveButton}
-                                      disabled={saving || isFirstPointInGroup}
-                                      title="장소 위로 이동"
-                                      aria-label={`${point.place || "장소"} 위로 이동`}
-                                      onClick={() => movePointWithinGroup(group.pointIndexes, index, -1)}
-                                    >
-                                      ▲
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={styles.moveButton}
-                                      disabled={saving || isLastPointInGroup}
-                                      title="장소 아래로 이동"
-                                      aria-label={`${point.place || "장소"} 아래로 이동`}
-                                      onClick={() => movePointWithinGroup(group.pointIndexes, index, 1)}
-                                    >
-                                      ▼
-                                    </button>
-                                  </span>
-                                </div>
-                              </td>
-                              <td>
-                                <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
-                                  <option value="">선택</option>
-                                  {getPoolVideoOptions(point.poolVideo).map((option) => (
-                                    <option key={option} value={option}>
-                                      {option}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td>
-                                <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
-                              </td>
-                              <td>
-                                <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
-                              </td>
-                              <td className={styles.staffColumn}>
-                                {split ? (
-                                  <SplitTextInput
-                                    morning={point.cameraStaffName}
-                                    afternoon={point.cameraStaffNamePm}
-                                    listId="election-profile-options"
-                                    onMorningChange={(value) => updateCameraStaff(index, "am", value)}
-                                    onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
-                                  />
-                                ) : (
-                                  <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
-                                )}
-                              </td>
-                              <td className={styles.staffColumn}>
-                                {split ? (
-                                  <SplitTextInput
-                                    morning={point.audioStaffName}
-                                    afternoon={point.audioStaffNamePm}
-                                    onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
-                                    onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
-                                  />
-                                ) : (
-                                  <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
-                                )}
-                              </td>
-                              <td className={styles.staffColumn}>
-                                {split ? (
-                                  <SplitTextInput
-                                    morning={point.liveTime}
-                                    afternoon={point.liveTimePm}
-                                    onMorningChange={(value) => updatePoint(index, { liveTime: value })}
-                                    onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
-                                  />
-                                ) : (
-                                  <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
-                                )}
-                              </td>
-                              <td className={styles.staffColumn}>
-                                {split ? (
-                                  <SplitTextInput
-                                    morning={point.reporterName}
-                                    afternoon={point.reporterNamePm}
-                                    onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
-                                    onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
-                                  />
-                                ) : (
-                                  <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
-                                )}
-                              </td>
-                              <td className={styles.wideColumn}>
-                                <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
-                              </td>
-                              <td className={styles.wideColumn}>
-                                <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
-                              </td>
-                              <td className={styles.positionColumn}>
-                                <label
-                                  className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
-                                  title="중계자리"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isLivePositionChecked(point.livePosition)}
-                                    onChange={(event) =>
-                                      updatePoint(index, {
-                                        livePosition: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
-                                      })
-                                    }
-                                  />
-                                </label>
-                              </td>
-                              <td>
-                                <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
-                              </td>
-                              <td>
-                                <div className={styles.rowActions}>
-                                  <button
-                                    type="button"
-                                    className="btn"
-                                    disabled={saving}
-                                    onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
-                                  >
-                                    {split ? "합치기" : "오전/오후"}
-                                  </button>
-                                  <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
-                                    삭제
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        }),
-                      )}
+                    {draft.points.map((point, index) => {
+                      const split = isPointSplit(point);
+                      return (
+                      <tr key={point.localId}>
+                        <td className={styles.numberCell}>
+                          {index + 1}.
+                        </td>
+                        <td>
+                          <input className="field-input" value={point.region} onChange={(event) => updatePoint(index, { region: event.target.value })} />
+                        </td>
+                        <td className={styles.placeColumn}>
+                          <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                        </td>
+                        <td>
+                          <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
+                            <option value="">선택</option>
+                            {getPoolVideoOptions(point.poolVideo).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
+                        </td>
+                        <td>
+                          <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
+                            <SplitTextInput
+                              morning={point.cameraStaffName}
+                              afternoon={point.cameraStaffNamePm}
+                              listId="election-profile-options"
+                              onMorningChange={(value) => updateCameraStaff(index, "am", value)}
+                              onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
+                            />
+                          ) : (
+                            <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
+                          )}
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
+                            <SplitTextInput
+                              morning={point.audioStaffName}
+                              afternoon={point.audioStaffNamePm}
+                              onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
+                              onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
+                            />
+                          ) : (
+                            <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
+                          )}
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
+                            <SplitTextInput
+                              morning={point.liveTime}
+                              afternoon={point.liveTimePm}
+                              onMorningChange={(value) => updatePoint(index, { liveTime: value })}
+                              onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
+                            />
+                          ) : (
+                            <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
+                          )}
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
+                            <SplitTextInput
+                              morning={point.reporterName}
+                              afternoon={point.reporterNamePm}
+                              onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
+                              onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
+                            />
+                          ) : (
+                            <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
+                          )}
+                        </td>
+                        <td className={styles.wideColumn}>
+                          <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
+                        </td>
+                        <td className={styles.wideColumn}>
+                          <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
+                        </td>
+                        <td className={styles.positionColumn}>
+                          <label
+                            className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
+                            title="중계자리"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isLivePositionChecked(point.livePosition)}
+                              onChange={(event) =>
+                                updatePoint(index, {
+                                  livePosition: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
+                                })
+                              }
+                            />
+                          </label>
+                        </td>
+                        <td>
+                          <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
+                        </td>
+                        <td>
+                          <div className={styles.rowActions}>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={saving}
+                              onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
+                            >
+                              {split ? "합치기" : "오전/오후"}
+                            </button>
+                          <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
+                            삭제
+                          </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1107,12 +849,6 @@ export function ElectionPage() {
           </article>
         </>
       ) : null}
-
-      <ArchivedElectionList
-        events={archivedEvents}
-        selectedEvent={selectedArchivedEvent}
-        onSelect={setSelectedArchiveId}
-      />
     </section>
   );
 }

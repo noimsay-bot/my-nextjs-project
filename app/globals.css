@@ -3207,6 +3207,135 @@ html[data-theme="light"] .schedule-current-trips-card__empty {
   min-width: 0;
 }
 
+.schedule-change-request-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.28);
+  flex: 0 0 auto;
+}
+
+.btn.white .schedule-change-request-count-badge {
+  color: #ffffff !important;
+}
+
+.schedule-assignment-search-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 420px) minmax(150px, 190px) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.schedule-assignment-search-field,
+.schedule-assignment-search-scope {
+  min-width: 0;
+}
+
+.schedule-assignment-search-custom-range {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.schedule-assignment-search-custom-range label {
+  width: min(180px, 100%);
+}
+
+.schedule-assignment-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: start center;
+  padding: clamp(72px, 11vh, 118px) 16px 24px;
+  background: rgba(2, 6, 23, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.schedule-assignment-search-window {
+  width: min(760px, 100%);
+  max-height: min(72vh, 720px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--panel-shadow);
+}
+
+.schedule-assignment-search-window__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.schedule-assignment-search-results {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.schedule-assignment-search-result {
+  appearance: none;
+  width: 100%;
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-assignment-search-result:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.schedule-assignment-search-result__date,
+.schedule-assignment-search-result__meta,
+.schedule-assignment-search-result__detail {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.schedule-assignment-search-result__main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.schedule-assignment-search-result__main strong {
+  font-size: 17px;
+}
+
+.schedule-assignment-search-result__detail {
+  overflow-wrap: anywhere;
+}
+
 .schedule-assignment-top-button,
 .schedule-assignment-today-button {
   width: 72px;
@@ -3384,6 +3513,14 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
 @media (max-width: 960px) {
   .schedule-assignment-page-shell {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-assignment-search-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .schedule-assignment-search-custom-range label {
+    width: 100%;
   }
 
   .schedule-assignment-page-rail {
