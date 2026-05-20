@@ -14,6 +14,7 @@ import {
   getCommunityBoardPosts,
   getHomeDdays,
   getHomeNotices,
+  hydrateHomePopupWorkspaceFromLocal,
   HOME_POPUP_NOTICE_EVENT,
   refreshHomePopupNoticeWorkspace,
   saveHomeDday,
@@ -206,10 +207,12 @@ export default function HomeNoticeBoardPage() {
     setCommunityComments(getCommunityBoardComments());
   }, []);
 
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
+  const loadWorkspace = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    if (options.showLoading !== false) {
+      setLoading(true);
+    }
     try {
-      await refreshHomePopupNoticeWorkspace({ includeTrips: false, force: true });
+      await refreshHomePopupNoticeWorkspace({ includeTrips: false });
       syncFromCache();
       setMessage(null);
     } catch (error) {
@@ -224,15 +227,22 @@ export default function HomeNoticeBoardPage() {
 
   useEffect(() => {
     if (session?.approved) {
+      const hasCachedWorkspace = hydrateHomePopupWorkspaceFromLocal(session);
+      if (hasCachedWorkspace) {
+        syncFromCache();
+        setLoading(false);
+        void loadWorkspace({ showLoading: false });
+        return;
+      }
       void loadWorkspace();
     } else if (session) {
       // 세션은 있으나 승인되지 않은 경우 로딩을 멈추고 빈 목록을 표시
       setLoading(false);
     }
-  }, [loadWorkspace, session?.approved, session]);
+  }, [loadWorkspace, session?.approved, session, syncFromCache]);
 
   useEffect(() => {
-    const onFocus = () => void loadWorkspace();
+    const onFocus = () => void loadWorkspace({ showLoading: false });
     const onStorageUpdate = () => syncFromCache();
 
     window.addEventListener("focus", onFocus);

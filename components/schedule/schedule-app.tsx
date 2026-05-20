@@ -2631,6 +2631,7 @@ export function ScheduleApp() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                   const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
@@ -2759,7 +2760,7 @@ export function ScheduleApp() {
                                           text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                           className="schedule-name-chip__text"
                                           minFontSize={9}
-                                          maxFontSize={editMode ? 16 : 18}
+                                          maxFontSize={(editMode ? 16 : 18) + tripDisplayFontSizeBoost}
                                           style={{ minWidth: 0 }}
                                         />
                                         {personObject.pending && !editMode ? <span style={{ fontSize: 13 }}>근무변경요청중</span> : null}
@@ -3330,6 +3331,7 @@ export function ScheduleApp() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                   const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const conflicted = conflictSet.has(`${category}-${name}`) || duplicateNameSet.has(assignmentDisplay.name.trim());
@@ -3381,7 +3383,7 @@ export function ScheduleApp() {
                                         text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                         className="schedule-name-chip__text"
                                         minFontSize={9}
-                                        maxFontSize={18}
+                                        maxFontSize={18 + tripDisplayFontSizeBoost}
                                       />
                                     </div>
                                   );

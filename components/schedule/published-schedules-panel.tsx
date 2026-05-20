@@ -2233,6 +2233,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                             scheduleAssignmentStore,
                                             visibleTripTagMap,
                                           );
+                                          const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                           const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                           const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                           const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
@@ -2346,7 +2347,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                   text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                                   className="schedule-name-chip__text"
                                                   minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
-                                                  maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                                  maxFontSize={(isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18) + tripDisplayFontSizeBoost}
                                                   style={{
                                                     display: "inline-block",
                                                     flex: "0 1 auto",
@@ -2614,6 +2615,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                   const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
@@ -2727,7 +2729,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           text={getAssignmentChipText(assignmentDisplayText, nameTag)}
                                           className="schedule-name-chip__text"
                                           minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
-                                          maxFontSize={isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18}
+                                          maxFontSize={(isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18) + tripDisplayFontSizeBoost}
                                           style={{
                                             display: "inline-block",
                                             flex: "0 1 auto",

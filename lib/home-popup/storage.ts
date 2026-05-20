@@ -11,8 +11,8 @@ import {
 
 const HOME_POPUP_NOTICE_ROW_KEY = "active";
 const HOME_NOTICE_STORE_VERSION = 5;
-const HOME_WORKSPACE_LOCAL_CACHE_VERSION = 1;
-const HOME_WORKSPACE_LOCAL_CACHE_PREFIX = "jtbc-home-workspace-cache-v1";
+const HOME_WORKSPACE_LOCAL_CACHE_VERSION = 2;
+const HOME_WORKSPACE_LOCAL_CACHE_PREFIX = "jtbc-home-workspace-cache-v2";
 
 export const HOME_POPUP_NOTICE_EVENT = "j-home-popup-notice-updated";
 export const HOME_POPUP_NOTICE_STATUS_EVENT = "j-home-popup-notice-status";
@@ -136,6 +136,10 @@ type RefreshHomePopupNoticeWorkspaceOptions = {
   includeTrips?: boolean;
 };
 
+type PersistHomeWorkspaceOptions = {
+  preserveExistingCommunityIfEmpty?: boolean;
+};
+
 let noticeCache: HomePopupNotice | null = null;
 let noticeListCache: HomeNotice[] = [];
 let homeDdayCache: HomeDdayItem[] = [];
@@ -165,6 +169,8 @@ interface HomeWorkspaceLocalCachePayload {
   cachedAt: number;
   notices: HomeNotice[];
   ddays: HomeDdayItem[];
+  communityPosts: CommunityBoardPost[];
+  communityComments: CommunityBoardComment[];
 }
 
 function isManagerRole(role: string | null | undefined) {
@@ -690,14 +696,53 @@ function readHomeWorkspaceLocalCache(session: PortalSession) {
       ),
     ).slice(0, 3);
 
-    if (notices.length === 0 && ddays.length === 0) return null;
-    return { notices, ddays };
+    const communityPosts = sortCommunityPosts(
+      (Array.isArray(parsed.communityPosts) ? parsed.communityPosts : [])
+        .filter((item): item is CommunityBoardPost => Boolean(item && typeof item.id === "string"))
+        .map((item) =>
+          normalizeCommunityBoardPost({
+            ...item,
+            id: item.id,
+            title: item.title,
+            body: item.body,
+            authorId: item.authorId,
+            authorName: item.authorName,
+            attachment: item.attachment,
+          }),
+        )
+        .filter((item) => item.title && item.body && item.authorId && item.authorName),
+    );
+
+    const communityComments = sortCommunityComments(
+      (Array.isArray(parsed.communityComments) ? parsed.communityComments : [])
+        .filter((item): item is CommunityBoardComment => Boolean(item && typeof item.id === "string"))
+        .map((item) =>
+          normalizeCommunityBoardComment({
+            ...item,
+            id: item.id,
+            targetKey: item.targetKey,
+            authorId: item.authorId,
+            authorName: item.authorName,
+            content: item.content,
+          }),
+        )
+        .filter((item) => item.targetKey && item.authorId && item.authorName && item.content),
+    );
+
+    if (notices.length === 0 && ddays.length === 0 && communityPosts.length === 0 && communityComments.length === 0) return null;
+    return { notices, ddays, communityPosts, communityComments };
   } catch {
     return null;
   }
 }
 
-function writeHomeWorkspaceLocalCache(session: PortalSession, notices: HomeNotice[], ddays: HomeDdayItem[]) {
+function writeHomeWorkspaceLocalCache(
+  session: PortalSession,
+  notices: HomeNotice[],
+  ddays: HomeDdayItem[],
+  communityPosts: CommunityBoardPost[],
+  communityComments: CommunityBoardComment[],
+) {
   if (typeof window === "undefined") return;
 
   const storageKey = getHomeWorkspaceLocalCacheKey(session);
@@ -708,6 +753,8 @@ function writeHomeWorkspaceLocalCache(session: PortalSession, notices: HomeNotic
     cachedAt: Date.now(),
     notices: sortNotices(notices),
     ddays: sortHomeDdays(getActiveHomeDdays(ddays)).slice(0, 3),
+    communityPosts: sortCommunityPosts(communityPosts),
+    communityComments: sortCommunityComments(communityComments),
   };
   window.localStorage.setItem(storageKey, JSON.stringify(payload));
 }
@@ -771,14 +818,22 @@ function syncCaches(
   applicationCache = cloneApplications(applications);
   tripCardCache = cloneTripCards(tripCards);
   currentUserAppliedCache = ownApplied;
-  writeHomeWorkspaceLocalCache(getSession(), noticeListCache, homeDdayCache);
+  writeHomeWorkspaceLocalCache(getSession(), noticeListCache, homeDdayCache, communityPostCache, communityCommentCache);
 }
 
 export function hydrateHomePopupWorkspaceFromLocal(session: PortalSession = getSession()) {
   const cachedWorkspace = readHomeWorkspaceLocalCache(session);
   if (!cachedWorkspace) return false;
 
-  syncCaches(cachedWorkspace.notices, cachedWorkspace.ddays, [], [], [], false, []);
+  syncCaches(
+    cachedWorkspace.notices,
+    cachedWorkspace.ddays,
+    cachedWorkspace.communityPosts,
+    cachedWorkspace.communityComments,
+    [],
+    false,
+    [],
+  );
   homeWorkspaceLoaded = true;
   homeWorkspaceTripCardsLoaded = false;
   homeWorkspaceLastFetchedAt = 0;
@@ -805,7 +860,7 @@ function markHomePopupWorkspaceFresh(
   homeWorkspaceTripCardsLoaded = homeWorkspaceTripCardsLoaded || Boolean(options.includeTrips);
   homeWorkspaceLastFetchedAt = Date.now();
   homeWorkspaceSessionKey = getHomeWorkspaceSessionKey(session);
-  writeHomeWorkspaceLocalCache(session, noticeListCache, homeDdayCache);
+  writeHomeWorkspaceLocalCache(session, noticeListCache, homeDdayCache, communityPostCache, communityCommentCache);
 }
 
 function resetSessionScopedWorkspaceState() {
@@ -974,6 +1029,59 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
   }
 }
 
+async function requestCommunityWorkspaceMutation(payload: Record<string, unknown>) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("/api/home/public-workspace", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const body = (await response.json().catch(() => null)) as
+      | ({ message?: string } & Partial<HomePublicWorkspaceResponse>)
+      | null;
+
+    if (!response.ok) {
+      throw new Error(
+        typeof body?.message === "string"
+          ? body.message
+          : "커뮤니티 데이터를 저장하지 못했습니다.",
+      );
+    }
+
+    return normalizeHomePublicWorkspaceResponse(body);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("커뮤니티 데이터 저장 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function syncCommunityWorkspaceMutation(payload: Record<string, unknown>) {
+  const workspace = await requestCommunityWorkspaceMutation(payload);
+  syncCaches(
+    workspace.notices,
+    workspace.ddays,
+    workspace.communityPosts,
+    workspace.communityComments,
+    workspace.applications.length > 0 ? workspace.applications : getHomePopupNoticeApplications(),
+    workspace.applications.length > 0 ? workspace.ownApplied : currentUserAppliedCache,
+    workspace.tripCards && workspace.tripCards.length > 0 ? workspace.tripCards : getHomePublicTripCards(),
+  );
+  const session = await getPortalSession();
+  markHomePopupWorkspaceFresh(session, { includeTrips: false });
+  return workspace;
+}
+
 async function selectHomePopupNoticeRow(supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>) {
   const preferred = await supabase
     .from("home_popup_notice_state")
@@ -992,6 +1100,21 @@ async function selectHomePopupNoticeRow(supabase: Awaited<ReturnType<typeof getP
     .maybeSingle<HomePopupNoticeStateRow>();
 }
 
+async function getHomeWorkspaceForWrite() {
+  const session = await getPortalSession();
+  const workspace = await fetchHomePublicWorkspace({ includeTrips: false });
+  syncCaches(
+    workspace.notices,
+    workspace.ddays,
+    workspace.communityPosts,
+    workspace.communityComments,
+    workspace.applications,
+    workspace.ownApplied,
+  );
+  markHomePopupWorkspaceFresh(session, { includeTrips: false });
+  return buildCachedWorkspaceResult();
+}
+
 async function persistNotices(
   notices: HomeNotice[],
   ddays: HomeDdayItem[],
@@ -999,8 +1122,25 @@ async function persistNotices(
   communityComments: CommunityBoardComment[],
   sessionId: string,
   supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>,
+  options: PersistHomeWorkspaceOptions = {},
 ) {
-  const payload = buildRowPayload(notices, ddays, communityPosts, communityComments, sessionId);
+  let safeCommunityPosts = communityPosts;
+  let safeCommunityComments = communityComments;
+  if (options.preserveExistingCommunityIfEmpty !== false && (communityPosts.length === 0 || communityComments.length === 0)) {
+    const { data: currentRow, error: currentError } = await selectHomePopupNoticeRow(supabase);
+    if (currentError) {
+      throw new Error(getSupabaseStorageErrorMessage(currentError, "home_popup_notice_state"));
+    }
+    const currentWorkspace = parseStorePayload(currentRow ?? null);
+    if (communityPosts.length === 0 && currentWorkspace.communityPosts.length > 0) {
+      safeCommunityPosts = currentWorkspace.communityPosts;
+    }
+    if (communityComments.length === 0 && currentWorkspace.communityComments.length > 0) {
+      safeCommunityComments = currentWorkspace.communityComments;
+    }
+  }
+
+  const payload = buildRowPayload(notices, ddays, safeCommunityPosts, safeCommunityComments, sessionId);
 
   let { data, error } = await supabase
     .from("home_popup_notice_state")
@@ -1125,14 +1265,7 @@ export async function saveHomeDday(input: { title: string; targetDate: string })
   }
 
   const { title, targetDate } = validateHomeDdayInput(input);
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? {
-        notices: getHomeNotices(),
-        ddays: getHomeDdays(),
-        communityPosts: getCommunityBoardPosts(),
-        communityComments: getCommunityBoardComments(),
-      }
-    : await refreshHomePopupNoticeWorkspace();
+  const workspace = await getHomeWorkspaceForWrite();
 
   if (workspace.ddays.length >= 3) {
     throw new Error("디데이는 최대 3개까지 등록할 수 있습니다.");
@@ -1155,6 +1288,7 @@ export async function saveHomeDday(input: { title: string; targetDate: string })
     workspace.communityComments,
     session.id,
     supabase,
+    { preserveExistingCommunityIfEmpty: false },
   );
 
   syncCaches(
@@ -1181,14 +1315,7 @@ export async function deleteHomeDday(ddayId: string) {
     throw new Error("삭제할 디데이를 찾지 못했습니다.");
   }
 
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? {
-        notices: getHomeNotices(),
-        ddays: getHomeDdays(),
-        communityPosts: getCommunityBoardPosts(),
-        communityComments: getCommunityBoardComments(),
-      }
-    : await refreshHomePopupNoticeWorkspace();
+  const workspace = await getHomeWorkspaceForWrite();
 
   if (!workspace.ddays.some((item) => item.id === trimmedDdayId)) {
     throw new Error("삭제할 디데이를 찾지 못했습니다.");
@@ -1202,6 +1329,7 @@ export async function deleteHomeDday(ddayId: string) {
     workspace.communityComments,
     session.id,
     supabase,
+    { preserveExistingCommunityIfEmpty: false },
   );
 
   syncCaches(
@@ -1229,14 +1357,7 @@ export async function updateHomeDday(input: { ddayId: string; title: string; tar
   }
 
   const { title, targetDate } = validateHomeDdayInput(input);
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? {
-        notices: getHomeNotices(),
-        ddays: getHomeDdays(),
-        communityPosts: getCommunityBoardPosts(),
-        communityComments: getCommunityBoardComments(),
-      }
-    : await refreshHomePopupNoticeWorkspace();
+  const workspace = await getHomeWorkspaceForWrite();
 
   const target = workspace.ddays.find((item) => item.id === ddayId) ?? null;
   if (!target) {
@@ -1260,6 +1381,7 @@ export async function updateHomeDday(input: { ddayId: string; title: string; tar
     workspace.communityComments,
     session.id,
     supabase,
+    { preserveExistingCommunityIfEmpty: false },
   );
 
   syncCaches(
@@ -1299,9 +1421,7 @@ export async function saveHomeNotice(input: {
     throw new Error("종료일 형식을 다시 확인해 주세요.");
   }
 
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? { notices: getHomeNotices(), ddays: getHomeDdays(), communityPosts: getCommunityBoardPosts() }
-    : await refreshHomePopupNoticeWorkspace();
+  const workspace = await getHomeWorkspaceForWrite();
   const existingNotices = workspace.notices;
   const now = new Date().toISOString();
   const nextNotice = normalizeHomeNotice({
@@ -1331,9 +1451,10 @@ export async function saveHomeNotice(input: {
     nextNotices,
     workspace.ddays,
     workspace.communityPosts,
-    getCommunityBoardComments(),
+    workspace.communityComments,
     session.id,
     supabase,
+    { preserveExistingCommunityIfEmpty: false },
   );
   syncCaches(persistedWorkspace.notices, persistedWorkspace.ddays, persistedWorkspace.communityPosts, persistedWorkspace.communityComments, [], false);
   emitHomePopupNoticeStatus({
@@ -1366,9 +1487,7 @@ export async function deleteHomeNotice(noticeId: string) {
     throw new Error("삭제할 공지를 찾지 못했습니다.");
   }
 
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? { notices: getHomeNotices(), ddays: getHomeDdays(), communityPosts: getCommunityBoardPosts() }
-    : await refreshHomePopupNoticeWorkspace();
+  const workspace = await getHomeWorkspaceForWrite();
   const existingNotices = workspace.notices;
   const targetNotice = existingNotices.find((notice) => notice.id === trimmedNoticeId) ?? null;
   if (!targetNotice) {
@@ -1388,8 +1507,16 @@ export async function deleteHomeNotice(noticeId: string) {
   }
 
   const nextNotices = existingNotices.filter((notice) => notice.id !== trimmedNoticeId);
-  const nextComments = getCommunityBoardComments().filter((comment) => comment.targetKey !== `notice:${trimmedNoticeId}`);
-  const persistedWorkspace = await persistNotices(nextNotices, workspace.ddays, workspace.communityPosts, nextComments, session.id, supabase);
+  const nextComments = workspace.communityComments.filter((comment) => comment.targetKey !== `notice:${trimmedNoticeId}`);
+  const persistedWorkspace = await persistNotices(
+    nextNotices,
+    workspace.ddays,
+    workspace.communityPosts,
+    nextComments,
+    session.id,
+    supabase,
+    { preserveExistingCommunityIfEmpty: false },
+  );
   const nextActivePopup = getActivePopupNotice(persistedWorkspace.notices);
   const currentApplications =
     nextActivePopup?.id && noticeCache?.id === nextActivePopup.id ? getHomePopupNoticeApplications() : [];
@@ -1428,9 +1555,7 @@ export async function updateHomeNotice(input: {
     throw new Error("제목과 본문을 모두 입력해 주세요.");
   }
 
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? { notices: getHomeNotices(), ddays: getHomeDdays(), communityPosts: getCommunityBoardPosts() }
-    : await refreshHomePopupNoticeWorkspace();
+  const workspace = await getHomeWorkspaceForWrite();
   const targetNotice = workspace.notices.find((notice) => notice.id === noticeId) ?? null;
   if (!targetNotice) {
     throw new Error("수정할 공지를 찾지 못했습니다.");
@@ -1451,9 +1576,10 @@ export async function updateHomeNotice(input: {
     nextNotices,
     workspace.ddays,
     workspace.communityPosts,
-    getCommunityBoardComments(),
+    workspace.communityComments,
     session.id,
     supabase,
+    { preserveExistingCommunityIfEmpty: false },
   );
   syncCaches(
     persistedWorkspace.notices,
@@ -1474,17 +1600,26 @@ export async function closeHomePopupNotice() {
     throw new Error("DESK 권한이 필요합니다.");
   }
 
-  const currentPopup = noticeCache ?? (await refreshHomePopupNoticeWorkspace()).notice;
+  const workspace = await getHomeWorkspaceForWrite();
+  const currentPopup = workspace.notice;
   if (!currentPopup) {
-    syncCaches(getHomeNotices(), getHomeDdays(), getCommunityBoardPosts(), getCommunityBoardComments(), [], false);
+    syncCaches(workspace.notices, workspace.ddays, workspace.communityPosts, workspace.communityComments, [], false);
     emitHomePopupNoticeEvent();
     return null;
   }
 
-  const nextNotices = getHomeNotices().filter((notice) => notice.id !== currentPopup.id);
+  const nextNotices = workspace.notices.filter((notice) => notice.id !== currentPopup.id);
   const supabase = await getPortalSupabaseClient();
-  const nextComments = getCommunityBoardComments().filter((comment) => comment.targetKey !== `notice:${currentPopup.id}`);
-  const persistedWorkspace = await persistNotices(nextNotices, getHomeDdays(), getCommunityBoardPosts(), nextComments, session.id, supabase);
+  const nextComments = workspace.communityComments.filter((comment) => comment.targetKey !== `notice:${currentPopup.id}`);
+  const persistedWorkspace = await persistNotices(
+    nextNotices,
+    workspace.ddays,
+    workspace.communityPosts,
+    nextComments,
+    session.id,
+    supabase,
+    { preserveExistingCommunityIfEmpty: false },
+  );
   syncCaches(persistedWorkspace.notices, persistedWorkspace.ddays, persistedWorkspace.communityPosts, persistedWorkspace.communityComments, [], false);
   emitHomePopupNoticeStatus({ ok: true, message: "팝업 종료를 반영했습니다." });
   emitHomePopupNoticeEvent();
@@ -1528,7 +1663,8 @@ export async function closeHomePopupNoticeApplications() {
     throw new Error("DESK 권한이 필요합니다.");
   }
 
-  const currentPopup = noticeCache ?? (await refreshHomePopupNoticeWorkspace()).notice;
+  const workspace = await getHomeWorkspaceForWrite();
+  const currentPopup = workspace.notice;
   if (!currentPopup?.id) {
     applicationCache = [];
     currentUserAppliedCache = false;
@@ -1546,7 +1682,7 @@ export async function closeHomePopupNoticeApplications() {
     throw new Error(getSupabaseStorageErrorMessage(error, "home_popup_notice_applications"));
   }
 
-  const nextNotices = getHomeNotices().map((notice) =>
+  const nextNotices = workspace.notices.map((notice) =>
     notice.id === currentPopup.id
       ? normalizeHomeNotice({
           ...notice,
@@ -1557,11 +1693,12 @@ export async function closeHomePopupNoticeApplications() {
   );
   const persistedWorkspace = await persistNotices(
     nextNotices,
-    getHomeDdays(),
-    getCommunityBoardPosts(),
-    getCommunityBoardComments(),
+    workspace.ddays,
+    workspace.communityPosts,
+    workspace.communityComments,
     session.id,
     supabase,
+    { preserveExistingCommunityIfEmpty: false },
   );
   syncCaches(persistedWorkspace.notices, persistedWorkspace.ddays, persistedWorkspace.communityPosts, persistedWorkspace.communityComments, [], false);
   emitHomePopupNoticeStatus({ ok: true, message: "신청을 마감했습니다." });
@@ -1594,58 +1731,16 @@ export async function saveCommunityBoardPost(input: {
     throw new Error("제목과 본문을 모두 입력해 주세요.");
   }
 
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || homeDdayCache.length > 0
-    ? { notices: getHomeNotices(), ddays: getHomeDdays(), communityPosts: getCommunityBoardPosts() }
-    : await refreshHomePopupNoticeWorkspace();
-  const now = new Date().toISOString();
-  const nextPost = normalizeCommunityBoardPost({
-    id: crypto.randomUUID(),
+  const workspace = await syncCommunityWorkspaceMutation({
+    action: "createPost",
     category: input.category,
     title,
     body,
-    authorId: session.id,
-    authorName: session.username,
     attachment,
-    createdAt: now,
-    updatedAt: now,
   });
-
-  let nextNotices = workspace.notices;
-  if (input.category === "notice") {
-    const shadowNotice = normalizeHomeNotice({
-      id: `shadow:${nextPost.id}`,
-      title,
-      body,
-      kind: "general",
-      tone: "normal",
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    });
-    nextNotices = sortNotices([shadowNotice, ...nextNotices]);
-  }
-
-  const nextPosts = sortCommunityPosts([nextPost, ...workspace.communityPosts]);
-  const supabase = await getPortalSupabaseClient();
-  const persistedWorkspace = await persistNotices(
-    nextNotices,
-    workspace.ddays,
-    nextPosts,
-    getCommunityBoardComments(),
-    session.id,
-    supabase,
-  );
-  syncCaches(
-    persistedWorkspace.notices,
-    persistedWorkspace.ddays,
-    persistedWorkspace.communityPosts,
-    persistedWorkspace.communityComments,
-    getHomePopupNoticeApplications(),
-    currentUserAppliedCache,
-  );
   emitHomePopupNoticeStatus({ ok: true, message: "커뮤니티 글을 등록했습니다." });
   emitHomePopupNoticeEvent();
-  return nextPost;
+  return workspace.communityPosts[0] ?? null;
 }
 
 export async function updateCommunityBoardPost(input: {
@@ -1693,46 +1788,14 @@ export async function updateCommunityBoardPost(input: {
     );
   }
 
-  const nextPosts = workspace.communityPosts.map((post) =>
-    post.id === postId
-      ? normalizeCommunityBoardPost({
-          ...post,
-          title,
-          body,
-          attachment,
-          updatedAt: new Date().toISOString(),
-        })
-      : post,
-  );
-
-  const nextNotices = workspace.notices.map((notice) =>
-    notice.id === `shadow:${postId}`
-      ? normalizeHomeNotice({
-          ...notice,
-          title,
-          body,
-          updatedAt: new Date().toISOString(),
-        })
-      : notice,
-  );
-
-  const supabase = await getPortalSupabaseClient();
-  const persistedWorkspace = await persistNotices(
-    nextNotices,
-    workspace.ddays,
-    nextPosts,
-    getCommunityBoardComments(),
-    session.id,
-    supabase,
-  );
-  syncCaches(
-    persistedWorkspace.notices,
-    persistedWorkspace.ddays,
-    persistedWorkspace.communityPosts,
-    persistedWorkspace.communityComments,
-    getHomePopupNoticeApplications(),
-    currentUserAppliedCache,
-  );
+  await syncCommunityWorkspaceMutation({
+    action: "updatePost",
+    postId,
+    category: targetPost.category,
+    title,
+    body,
+    attachment,
+  });
   emitHomePopupNoticeStatus({ ok: true, message: "커뮤니티 글을 수정했습니다." });
   emitHomePopupNoticeEvent();
   return getCommunityBoardPosts();
@@ -1772,20 +1835,10 @@ export async function deleteCommunityBoardPost(postId: string) {
     );
   }
 
-  const nextPosts = workspace.communityPosts.filter((post) => post.id !== trimmedPostId);
-  const nextNotices = workspace.notices.filter((notice) => notice.id !== `shadow:${trimmedPostId}`);
-
-  const supabase = await getPortalSupabaseClient();
-  const nextComments = getCommunityBoardComments().filter((comment) => comment.targetKey !== `manual:${trimmedPostId}`);
-  const persistedWorkspace = await persistNotices(nextNotices, workspace.ddays, nextPosts, nextComments, session.id, supabase);
-  syncCaches(
-    persistedWorkspace.notices,
-    persistedWorkspace.ddays,
-    persistedWorkspace.communityPosts,
-    persistedWorkspace.communityComments,
-    getHomePopupNoticeApplications(),
-    currentUserAppliedCache,
-  );
+  await syncCommunityWorkspaceMutation({
+    action: "deletePost",
+    postId: trimmedPostId,
+  });
   emitHomePopupNoticeStatus({ ok: true, message: "커뮤니티 글을 삭제했습니다." });
   emitHomePopupNoticeEvent();
   return getCommunityBoardPosts();
@@ -1809,14 +1862,12 @@ export async function saveCommunityBoardComment(input: {
     throw new Error("댓글을 남길 게시글을 찾지 못했습니다.");
   }
 
-  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0 || communityCommentCache.length > 0 || homeDdayCache.length > 0
+  const workspace = noticeListCache.length > 0 || communityPostCache.length > 0
     ? {
         notices: getHomeNotices(),
-        ddays: getHomeDdays(),
         communityPosts: getCommunityBoardPosts(),
-        communityComments: getCommunityBoardComments(),
       }
-    : await refreshHomePopupNoticeWorkspace();
+    : await refreshHomePopupNoticeWorkspace({ includeTrips: false });
   const targetExists =
     workspace.notices.some((notice) => `notice:${notice.id}` === targetKey) ||
     workspace.communityPosts.some((post) => `manual:${post.id}` === targetKey);
@@ -1824,37 +1875,14 @@ export async function saveCommunityBoardComment(input: {
     throw new Error("댓글을 남길 게시글을 찾지 못했습니다.");
   }
 
-  const now = new Date().toISOString();
-  const nextComment = normalizeCommunityBoardComment({
-    id: crypto.randomUUID(),
+  const nextWorkspace = await syncCommunityWorkspaceMutation({
+    action: "createComment",
     targetKey,
-    authorId: session.id,
-    authorName: session.username,
     content,
-    createdAt: now,
-    updatedAt: now,
   });
-  const nextComments = sortCommunityComments([nextComment, ...workspace.communityComments]);
-  const supabase = await getPortalSupabaseClient();
-  const persistedWorkspace = await persistNotices(
-    workspace.notices,
-    workspace.ddays,
-    workspace.communityPosts,
-    nextComments,
-    session.id,
-    supabase,
-  );
-  syncCaches(
-    persistedWorkspace.notices,
-    persistedWorkspace.ddays,
-    persistedWorkspace.communityPosts,
-    persistedWorkspace.communityComments,
-    getHomePopupNoticeApplications(),
-    currentUserAppliedCache,
-  );
   emitHomePopupNoticeStatus({ ok: true, message: "댓글을 등록했습니다." });
   emitHomePopupNoticeEvent();
-  return nextComment;
+  return nextWorkspace.communityComments[0] ?? null;
 }
 
 export async function applyToHomePopupNotice() {

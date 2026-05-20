@@ -12,6 +12,7 @@ type AssignmentTripTagPhase = "" | "departure" | "ongoing" | "return";
 
 interface ProfileRow {
   id: string;
+  name?: string | null;
   role: AppRole;
   approved: boolean;
 }
@@ -235,6 +236,10 @@ function isMissingExpiresAtColumnError(error: unknown) {
   return isMissingColumnError(error, "expires_at");
 }
 
+function isMissingAuditColumnError(error: unknown) {
+  return isMissingColumnError(error, "created_by") || isMissingColumnError(error, "updated_by");
+}
+
 function normalizeTone(value: unknown) {
   return value === "urgent" ? "urgent" : "normal";
 }
@@ -243,7 +248,7 @@ function normalizeKind(value: unknown) {
   return value === "general" ? "general" : "popup";
 }
 
-function normalizeCommunityCategory(value: unknown) {
+function normalizeCommunityCategory(value: unknown): CommunityBoardPost["category"] {
   if (value === "family" || value === "celebration" || value === "resource") return value;
   return "notice";
 }
@@ -520,6 +525,89 @@ function rowToApplication(row: HomePopupNoticeApplicationRow): HomePopupNoticeAp
   };
 }
 
+function canWriteCommunityCategory(
+  category: CommunityBoardPost["category"],
+  profile: ProfileRow,
+) {
+  if (!profile.approved || profile.role === "observer") return false;
+  if (category === "notice") return isManagerRole(profile.role);
+  return true;
+}
+
+function validateCommunityPostInput(input: unknown) {
+  const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const category = normalizeCommunityCategory(record.category);
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  const body = typeof record.body === "string" ? record.body.trim() : "";
+  const attachment = normalizeCommunityBoardAttachment(record.attachment);
+
+  if (!title || !body) {
+    throw new Error("제목과 본문을 모두 입력해 주세요.");
+  }
+
+  return { category, title, body, attachment };
+}
+
+function validateCommunityCommentInput(input: unknown) {
+  const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const targetKey = typeof record.targetKey === "string" ? record.targetKey.trim() : "";
+  const content = typeof record.content === "string" ? record.content.trim() : "";
+
+  if (!targetKey) {
+    throw new Error("댓글을 남길 게시글을 찾지 못했습니다.");
+  }
+  if (!content) {
+    throw new Error("댓글 내용을 입력해 주세요.");
+  }
+  if (content.length > 300) {
+    throw new Error("댓글은 300자 이내로 입력해 주세요.");
+  }
+
+  return { targetKey, content };
+}
+
+function buildStorePayload(
+  notices: HomeNotice[],
+  ddays: HomeDdayItem[],
+  communityPosts: CommunityBoardPost[],
+  communityComments: CommunityBoardComment[],
+) {
+  return JSON.stringify({
+    version: 5,
+    notices: sortNotices(notices),
+    ddays: getActiveHomeDdays(ddays).slice(0, 3),
+    communityPosts: sortCommunityPosts(communityPosts),
+    communityComments: sortCommunityComments(communityComments),
+  } satisfies HomeNoticeStorePayload);
+}
+
+function buildRowPayload(
+  notices: HomeNotice[],
+  ddays: HomeDdayItem[],
+  communityPosts: CommunityBoardPost[],
+  communityComments: CommunityBoardComment[],
+  profileId: string,
+) {
+  const sortedNotices = sortNotices(notices);
+  const activePopup = getActivePopupNotice(sortedNotices);
+  const latestNotice = sortedNotices[0] ?? null;
+  const representativeNotice = sortedNotices.find((notice) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(notice.id)) ?? null;
+  const now = new Date().toISOString();
+
+  return {
+    key: "active",
+    notice_id: activePopup?.id ?? representativeNotice?.id ?? crypto.randomUUID(),
+    title: activePopup?.title ?? latestNotice?.title ?? "",
+    body: buildStorePayload(sortedNotices, ddays, communityPosts, communityComments),
+    is_active: Boolean(activePopup),
+    expires_at: activePopup?.expiresAt ?? null,
+    created_at: now,
+    updated_at: now,
+    created_by: profileId,
+    updated_by: profileId,
+  };
+}
+
 async function selectHomePopupNoticeRow(admin: ReturnType<typeof createAdminClient>) {
   const preferred = await admin
     .from("home_popup_notice_state")
@@ -536,6 +624,72 @@ async function selectHomePopupNoticeRow(admin: ReturnType<typeof createAdminClie
     .select("key, notice_id, title, body, is_active, created_at, updated_at")
     .eq("key", "active")
     .maybeSingle<HomePopupNoticeStateRow>();
+}
+
+async function persistHomeWorkspace(
+  admin: ReturnType<typeof createAdminClient>,
+  workspace: {
+    notices: HomeNotice[];
+    ddays: HomeDdayItem[];
+    communityPosts: CommunityBoardPost[];
+    communityComments: CommunityBoardComment[];
+  },
+  profileId: string,
+) {
+  const payload = buildRowPayload(
+    workspace.notices,
+    workspace.ddays,
+    workspace.communityPosts,
+    workspace.communityComments,
+    profileId,
+  );
+
+  let { data, error } = await admin
+    .from("home_popup_notice_state")
+    .upsert(payload as never)
+    .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
+    .maybeSingle<HomePopupNoticeStateRow>();
+
+  if (error && (isMissingExpiresAtColumnError(error) || isMissingAuditColumnError(error))) {
+    const fallbackPayload = {
+      key: payload.key,
+      notice_id: payload.notice_id,
+      title: payload.title,
+      body: payload.body,
+      is_active: payload.is_active,
+      created_at: payload.created_at,
+      updated_at: payload.updated_at,
+    };
+
+    ({ data, error } = await admin
+      .from("home_popup_notice_state")
+      .upsert(fallbackPayload as never)
+      .select("key, notice_id, title, body, is_active, created_at, updated_at")
+      .maybeSingle<HomePopupNoticeStateRow>());
+  }
+
+  if (error) {
+    throw new Error("커뮤니티 게시글 저장에 실패했습니다.");
+  }
+
+  return parseStorePayload(data ?? null);
+}
+
+function buildWorkspaceJson(
+  workspace: ReturnType<typeof parseStorePayload>,
+  applications: HomePopupNoticeApplication[] = [],
+  ownApplied = false,
+) {
+  const activePopup = getActivePopupNotice(workspace.notices);
+  return {
+    notice: activePopup,
+    notices: workspace.notices,
+    ddays: workspace.ddays,
+    communityPosts: workspace.communityPosts,
+    communityComments: workspace.communityComments,
+    applications,
+    ownApplied,
+  };
 }
 
 function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
@@ -905,6 +1059,232 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         message: error instanceof Error ? error.message : "공개 홈 데이터를 불러오지 못했습니다.",
+      },
+      { status: error instanceof Error && error.message.includes("지연") ? 503 : 500 },
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    if (!hasSupabaseAdminEnv()) {
+      return NextResponse.json({ message: "Supabase 관리자 환경변수가 없습니다." }, { status: 500 });
+    }
+
+    const supabase = await createServerClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await withTimeout(supabase.auth.getUser(), "로그인 세션 확인이 지연되고 있습니다.");
+
+    if (userError || !user) {
+      return NextResponse.json({ message: "로그인 세션을 확인하지 못했습니다." }, { status: 401 });
+    }
+
+    const admin = createAdminClient();
+    const { data: profile, error: profileError } = await withTimeout(
+      admin
+        .from("profiles")
+        .select("id, name, role, approved")
+        .eq("id", user.id)
+        .maybeSingle<ProfileRow>(),
+      "프로필 확인이 지연되고 있습니다.",
+    );
+
+    if (profileError || !profile || !profile.approved) {
+      return NextResponse.json({ message: "승인된 계정이 필요합니다." }, { status: 403 });
+    }
+
+    const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const action = typeof payload?.action === "string" ? payload.action : "";
+    const { data: noticeRow, error: noticeError } = await withTimeout(
+      selectHomePopupNoticeRow(admin),
+      "커뮤니티 게시글 조회가 지연되고 있습니다.",
+    );
+
+    if (noticeError) {
+      throw new Error("커뮤니티 게시글 조회에 실패했습니다.");
+    }
+
+    const workspace = parseStorePayload(noticeRow ?? null);
+    const now = new Date().toISOString();
+    const authorName = profile.name?.trim() || user.email || "사용자";
+
+    if (action === "createPost") {
+      const input = validateCommunityPostInput(payload);
+      if (!canWriteCommunityCategory(input.category, profile)) {
+        return NextResponse.json(
+          {
+            message: input.category === "notice"
+              ? "공지 게시판은 DESK 또는 총괄팀장 권한자만 작성할 수 있습니다."
+              : "Observer 등급은 커뮤니티 글을 작성할 수 없습니다.",
+          },
+          { status: 403 },
+        );
+      }
+
+      const nextPost = normalizeCommunityBoardPost({
+        id: crypto.randomUUID(),
+        category: input.category,
+        title: input.title,
+        body: input.body,
+        authorId: profile.id,
+        authorName,
+        attachment: input.attachment,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const nextNotices = input.category === "notice"
+        ? sortNotices([
+            normalizeHomeNotice({
+              id: `shadow:${nextPost.id}`,
+              title: input.title,
+              body: input.body,
+              kind: "general",
+              tone: "normal",
+              isActive: true,
+              applicationEnabled: false,
+              expiresAt: null,
+              createdAt: now,
+              updatedAt: now,
+            }),
+            ...workspace.notices,
+          ])
+        : workspace.notices;
+      const nextWorkspace = await persistHomeWorkspace(
+        admin,
+        {
+          notices: nextNotices,
+          ddays: workspace.ddays,
+          communityPosts: sortCommunityPosts([nextPost, ...workspace.communityPosts]),
+          communityComments: workspace.communityComments,
+        },
+        profile.id,
+      );
+
+      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace), post: nextPost });
+    }
+
+    if (action === "updatePost") {
+      const postId = typeof payload?.postId === "string" ? payload.postId.trim() : "";
+      const input = validateCommunityPostInput(payload);
+      const targetPost = workspace.communityPosts.find((post) => post.id === postId) ?? null;
+      if (!targetPost) {
+        return NextResponse.json({ message: "수정할 글을 찾지 못했습니다." }, { status: 404 });
+      }
+      const canManage =
+        targetPost.category === "notice"
+          ? isManagerRole(profile.role)
+          : isManagerRole(profile.role) || targetPost.authorId === profile.id;
+      if (!canManage || profile.role === "observer") {
+        return NextResponse.json({ message: "작성자 또는 DESK 권한이 필요합니다." }, { status: 403 });
+      }
+
+      const nextPosts = workspace.communityPosts.map((post) =>
+        post.id === postId
+          ? normalizeCommunityBoardPost({
+              ...post,
+              title: input.title,
+              body: input.body,
+              attachment: targetPost.category === "resource" ? input.attachment : null,
+              updatedAt: now,
+            })
+          : post,
+      );
+      const nextNotices = workspace.notices.map((notice) =>
+        notice.id === `shadow:${postId}`
+          ? normalizeHomeNotice({
+              ...notice,
+              title: input.title,
+              body: input.body,
+              updatedAt: now,
+            })
+          : notice,
+      );
+      const nextWorkspace = await persistHomeWorkspace(
+        admin,
+        {
+          notices: nextNotices,
+          ddays: workspace.ddays,
+          communityPosts: nextPosts,
+          communityComments: workspace.communityComments,
+        },
+        profile.id,
+      );
+
+      return NextResponse.json(buildWorkspaceJson(nextWorkspace));
+    }
+
+    if (action === "deletePost") {
+      const postId = typeof payload?.postId === "string" ? payload.postId.trim() : "";
+      const targetPost = workspace.communityPosts.find((post) => post.id === postId) ?? null;
+      if (!targetPost) {
+        return NextResponse.json({ message: "삭제할 글을 찾지 못했습니다." }, { status: 404 });
+      }
+      const canManage =
+        targetPost.category === "notice"
+          ? isManagerRole(profile.role)
+          : isManagerRole(profile.role) || targetPost.authorId === profile.id;
+      if (!canManage || profile.role === "observer") {
+        return NextResponse.json({ message: "작성자 또는 DESK 권한이 필요합니다." }, { status: 403 });
+      }
+
+      const nextWorkspace = await persistHomeWorkspace(
+        admin,
+        {
+          notices: workspace.notices.filter((notice) => notice.id !== `shadow:${postId}`),
+          ddays: workspace.ddays,
+          communityPosts: workspace.communityPosts.filter((post) => post.id !== postId),
+          communityComments: workspace.communityComments.filter((comment) => comment.targetKey !== `manual:${postId}`),
+        },
+        profile.id,
+      );
+
+      return NextResponse.json(buildWorkspaceJson(nextWorkspace));
+    }
+
+    if (action === "createComment") {
+      if (profile.role === "observer") {
+        return NextResponse.json({ message: "Observer 등급은 댓글을 등록할 수 없습니다." }, { status: 403 });
+      }
+
+      const input = validateCommunityCommentInput(payload);
+      const targetExists =
+        workspace.notices.some((notice) => `notice:${notice.id}` === input.targetKey) ||
+        workspace.communityPosts.some((post) => `manual:${post.id}` === input.targetKey);
+
+      if (!targetExists) {
+        return NextResponse.json({ message: "댓글을 남길 게시글을 찾지 못했습니다." }, { status: 404 });
+      }
+
+      const nextComment = normalizeCommunityBoardComment({
+        id: crypto.randomUUID(),
+        targetKey: input.targetKey,
+        authorId: profile.id,
+        authorName,
+        content: input.content,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const nextWorkspace = await persistHomeWorkspace(
+        admin,
+        {
+          notices: workspace.notices,
+          ddays: workspace.ddays,
+          communityPosts: workspace.communityPosts,
+          communityComments: sortCommunityComments([nextComment, ...workspace.communityComments]),
+        },
+        profile.id,
+      );
+
+      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace), comment: nextComment });
+    }
+
+    return NextResponse.json({ message: "지원하지 않는 커뮤니티 작업입니다." }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        message: error instanceof Error ? error.message : "커뮤니티 작업을 처리하지 못했습니다.",
       },
       { status: error instanceof Error && error.message.includes("지연") ? 503 : 500 },
     );
