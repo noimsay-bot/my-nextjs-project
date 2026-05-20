@@ -4887,6 +4887,16 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   }
 }
 
+@media print {
+  body.election-print-mode {
+    background: #fff !important;
+  }
+
+  body.election-print-mode * {
+    visibility: hidden !important;
+  }
+}
+
 @media (max-width: 380px) {
   .portal-sidebar-sublink {
     min-height: auto;

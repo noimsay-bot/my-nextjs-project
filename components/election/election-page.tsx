@@ -21,6 +21,8 @@ import styles from "./Election.module.css";
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type DayPart = "am" | "pm";
 type AutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
+type PrintPaperSize = "A3" | "A4";
+type PrintOrientation = "portrait" | "landscape";
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -72,15 +74,31 @@ const tableColumns = [
   "관리",
 ];
 
+const staffNameColumns = new Set(["촬영기자", "오디오맨", "취재기자"]);
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
 const AUTO_SAVE_DEBOUNCE_MS = 900;
+const ELECTION_PRINT_STYLE_ID = "election-print-page-style";
 
 function getTableColumnClassName(column: string) {
+  if (column === "코리아풀영상") return styles.poolVideoColumn;
+  if (staffNameColumns.has(column)) return styles.nameColumn;
+  if (column === "중계시간") return styles.staffColumn;
+  if (column === "주소") return styles.addressColumn;
+  if (column === "비고") return styles.wideColumn;
   return column === "중계자리" ? styles.positionColumn : undefined;
 }
 
 function renderTableColumnLabel(column: string) {
+  if (column === "코리아풀영상") {
+    return (
+      <>
+        코리아풀
+        <br />
+        영상
+      </>
+    );
+  }
   if (column === "중계자리") {
     return (
       <>
@@ -171,6 +189,59 @@ function ReorderMenu({
         </button>
       </span>
     </details>
+  );
+}
+
+function upsertElectionPrintPageStyle(paperSize: PrintPaperSize, orientation: PrintOrientation) {
+  const styleText = `@page { size: ${paperSize} ${orientation}; margin: 10mm; }`;
+  let styleElement = document.getElementById(ELECTION_PRINT_STYLE_ID) as HTMLStyleElement | null;
+  if (!styleElement) {
+    styleElement = document.createElement("style");
+    styleElement.id = ELECTION_PRINT_STYLE_ID;
+    document.head.appendChild(styleElement);
+  }
+  styleElement.textContent = styleText;
+}
+
+function ElectionPrintControls({
+  paperSize,
+  orientation,
+  disabled,
+  onPaperSizeChange,
+  onOrientationChange,
+  onPrint,
+}: {
+  paperSize: PrintPaperSize;
+  orientation: PrintOrientation;
+  disabled?: boolean;
+  onPaperSizeChange: (value: PrintPaperSize) => void;
+  onOrientationChange: (value: PrintOrientation) => void;
+  onPrint: () => void;
+}) {
+  return (
+    <div className={styles.printControls}>
+      <select
+        className="field-select"
+        value={paperSize}
+        aria-label="출력 용지"
+        onChange={(event) => onPaperSizeChange(event.target.value as PrintPaperSize)}
+      >
+        <option value="A3">A3</option>
+        <option value="A4">A4</option>
+      </select>
+      <select
+        className="field-select"
+        value={orientation}
+        aria-label="출력 방향"
+        onChange={(event) => onOrientationChange(event.target.value as PrintOrientation)}
+      >
+        <option value="portrait">세로</option>
+        <option value="landscape">가로</option>
+      </select>
+      <button type="button" className="btn" disabled={disabled} onClick={onPrint}>
+        출력
+      </button>
+    </div>
   );
 }
 
@@ -368,6 +439,67 @@ function SplitTextInput({
   );
 }
 
+function ElectionPrintableTable({
+  title,
+  electionDate,
+  points,
+}: {
+  title: string;
+  electionDate: string;
+  points: ElectionPointInput[];
+}) {
+  return (
+    <article className={styles.printSheet}>
+      <header className={styles.printHeader}>
+        <h1>{formatElectionBoardTitle(title)}</h1>
+        <span>{electionDate}</span>
+      </header>
+      <table className={styles.printTable}>
+        <thead>
+          <tr>
+            {tableColumns.slice(0, -1).map((column) => (
+              <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {points.length ? (
+            points.map((point, index) => {
+              const regionRowSpan = getRegionRowSpan(points, index);
+              return (
+                <tr key={`${point.sortOrder}-${index}`}>
+                  <td className={styles.numberCell}>{index + 1}.</td>
+                  {regionRowSpan > 0 ? (
+                    <td rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}>{readOnlyValue(point.region)}</td>
+                  ) : null}
+                  <td>{readOnlyValue(point.place)}</td>
+                  <td className={styles.poolVideoColumn}>{readOnlyValue(point.poolVideo)}</td>
+                  <td>{readOnlyValue(point.equipmentName)}</td>
+                  <td>{readOnlyValue(point.trs)}</td>
+                  <td className={styles.nameColumn}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                  <td className={styles.nameColumn}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                  <td className={styles.staffColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                  <td className={styles.nameColumn}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                  <td className={styles.addressColumn}>{readOnlyValue(point.address)}</td>
+                  <td className={styles.wideColumn}>{readOnlyValue(point.note)}</td>
+                  <td className={styles.positionColumn}>
+                    <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                  </td>
+                  <td>{readOnlyValue(point.lighting)}</td>
+                </tr>
+              );
+            })
+          ) : (
+            <tr>
+              <td colSpan={14}>입력된 중계 포인트가 없습니다.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </article>
+  );
+}
+
 function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
   return (
     <article className="panel">
@@ -402,15 +534,15 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
                       </td>
                     ) : null}
                     <td>{readOnlyValue(point.place)}</td>
-                    <td>{readOnlyValue(point.poolVideo)}</td>
+                    <td className={styles.poolVideoColumn}>{readOnlyValue(point.poolVideo)}</td>
                     <td>{readOnlyValue(point.equipmentName)}</td>
                     <td>{readOnlyValue(point.trs)}</td>
-                    <td>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
-                    <td>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                    <td>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
-                    <td>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
-                    <td>{readOnlyValue(point.address)}</td>
-                    <td>{readOnlyValue(point.note)}</td>
+                    <td className={styles.nameColumn}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                    <td className={styles.nameColumn}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                    <td className={styles.staffColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                    <td className={styles.nameColumn}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                    <td className={styles.addressColumn}>{readOnlyValue(point.address)}</td>
+                    <td className={styles.wideColumn}>{readOnlyValue(point.note)}</td>
                     <td className={styles.positionColumn}>
                       <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
                     </td>
@@ -444,6 +576,8 @@ export function ElectionPage() {
   const [splitRowIds, setSplitRowIds] = useState<Record<string, true>>({});
   const [savedDisplayTitle, setSavedDisplayTitle] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("idle");
+  const [printPaperSize, setPrintPaperSize] = useState<PrintPaperSize>("A3");
+  const [printOrientation, setPrintOrientation] = useState<PrintOrientation>("portrait");
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -577,6 +711,24 @@ export function ElectionPage() {
       clearAutoSaveTimer();
     };
   }, [clearAutoSaveTimer]);
+
+  useEffect(() => {
+    const clearPrintMode = () => {
+      document.body.classList.remove("election-print-mode");
+    };
+
+    window.addEventListener("afterprint", clearPrintMode);
+    return () => {
+      window.removeEventListener("afterprint", clearPrintMode);
+      clearPrintMode();
+    };
+  }, []);
+
+  const printElectionBoard = () => {
+    upsertElectionPrintPageStyle(printPaperSize, printOrientation);
+    document.body.classList.add("election-print-mode");
+    window.setTimeout(() => window.print(), 0);
+  };
 
   const updateDraft = (patch: Partial<Pick<DraftEvent, "title" | "electionDate">>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -785,24 +937,41 @@ export function ElectionPage() {
 
   if (!canManage) {
     return (
-      <section className={styles.page}>
-        <article className="panel">
-          <div className={`panel-pad ${styles.header}`}>
-            <div className={styles.titleBlock}>
-              <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
-            </div>
-          </div>
-        </article>
-        {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-        {publishedEvent ? (
-          <ElectionReadOnlyTable event={publishedEvent} />
-        ) : (
+      <section className={`${styles.page} ${styles.printRoot}`.trim()}>
+        <div className={styles.screenOnly}>
           <article className="panel">
-            <div className="panel-pad">
-              <div className="status note">게시된 선거 중계표가 없습니다.</div>
+            <div className={`panel-pad ${styles.header}`}>
+              <div className={styles.titleBlock}>
+                <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
+              </div>
+              <div className={styles.actions}>
+                <ElectionPrintControls
+                  paperSize={printPaperSize}
+                  orientation={printOrientation}
+                  disabled={!publishedEvent}
+                  onPaperSizeChange={setPrintPaperSize}
+                  onOrientationChange={setPrintOrientation}
+                  onPrint={printElectionBoard}
+                />
+              </div>
             </div>
           </article>
-        )}
+          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+          {publishedEvent ? (
+            <ElectionReadOnlyTable event={publishedEvent} />
+          ) : (
+            <article className="panel">
+              <div className="panel-pad">
+                <div className="status note">게시된 선거 중계표가 없습니다.</div>
+              </div>
+            </article>
+          )}
+        </div>
+        {publishedEvent ? (
+          <div className={styles.printOnly}>
+            <ElectionPrintableTable title={publishedEvent.title} electionDate={publishedEvent.electionDate} points={publishedEvent.points} />
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -810,69 +979,80 @@ export function ElectionPage() {
   const currentStatus = draft?.status ?? "draft";
 
   return (
-    <section className={styles.page}>
-      <article className="panel">
-        <div className={`panel-pad ${styles.header}`}>
-          <div className={styles.titleBlock}>
-            <h1 className="page-title">{formatElectionBoardTitle(savedDisplayTitle)}</h1>
-            <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
-          </div>
-          <div className={styles.actions}>
-            <span className={styles.autoSaveStatus} aria-live="polite">
-              {autoSaveStatus === "pending"
-                ? "자동 저장 대기"
-                : autoSaveStatus === "saving"
-                  ? "자동 저장 중"
-                  : autoSaveStatus === "saved"
-                    ? "자동 저장됨"
-                    : autoSaveStatus === "error"
-                      ? "자동 저장 실패"
-                      : "자동 저장"}
-            </span>
-            <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
-              {saving ? "저장 중" : "저장"}
-            </button>
-            <button type="button" className="btn primary" disabled={saving || !draft} onClick={publishDraft}>
-              게시
-            </button>
-            {currentStatus === "published" ? (
-              <button type="button" className="btn" disabled={saving || !draft?.id} onClick={closePublishedEvent}>
-                게시종료
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </article>
-
-      {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-
-      {draft ? (
-        <>
-          <article className="panel">
-            <div className={`panel-pad ${styles.formGrid}`}>
-              <div className={styles.field}>
-                <label htmlFor="election-title">선거명</label>
-                <input
-                  id="election-title"
-                  className="field-input"
-                  value={draft.title}
-                  maxLength={120}
-                  onChange={(event) => updateDraft({ title: event.target.value })}
-                  placeholder="예: 제9회 전국동시지방선거"
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="election-date">선거일</label>
-                <input
-                  id="election-date"
-                  className="field-input"
-                  type="date"
-                  value={draft.electionDate}
-                  onChange={(event) => updateDraft({ electionDate: event.target.value })}
-                />
+    <section className={`${styles.page} ${styles.printRoot}`.trim()}>
+      <div className={styles.screenOnly}>
+        <article className="panel">
+          <div className={`panel-pad ${styles.header}`}>
+            <div className={styles.titleBlock}>
+              <h1 className="page-title">{formatElectionBoardTitle(savedDisplayTitle)}</h1>
+              <div className={styles.statusLine}>
+                <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
+                <span className={styles.autoSaveStatus} aria-live="polite">
+                  {autoSaveStatus === "pending"
+                    ? "자동 저장 대기"
+                    : autoSaveStatus === "saving"
+                      ? "자동 저장 중"
+                      : autoSaveStatus === "saved"
+                        ? "자동 저장됨"
+                        : autoSaveStatus === "error"
+                          ? "자동 저장 실패"
+                          : "자동 저장"}
+                </span>
               </div>
             </div>
-          </article>
+            <div className={styles.actions}>
+              <ElectionPrintControls
+                paperSize={printPaperSize}
+                orientation={printOrientation}
+                disabled={!draft}
+                onPaperSizeChange={setPrintPaperSize}
+                onOrientationChange={setPrintOrientation}
+                onPrint={printElectionBoard}
+              />
+              <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
+                {saving ? "최종저장 중" : "최종저장"}
+              </button>
+              <button type="button" className="btn primary" disabled={saving || !draft} onClick={publishDraft}>
+                게시
+              </button>
+              {currentStatus === "published" ? (
+                <button type="button" className="btn" disabled={saving || !draft?.id} onClick={closePublishedEvent}>
+                  게시종료
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </article>
+
+        {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+
+        {draft ? (
+          <>
+            <article className="panel">
+              <div className={`panel-pad ${styles.formGrid}`}>
+                <div className={styles.field}>
+                  <label htmlFor="election-title">선거명</label>
+                  <input
+                    id="election-title"
+                    className="field-input"
+                    value={draft.title}
+                    maxLength={120}
+                    onChange={(event) => updateDraft({ title: event.target.value })}
+                    placeholder="예: 제9회 전국동시지방선거"
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor="election-date">선거일</label>
+                  <input
+                    id="election-date"
+                    className="field-input"
+                    type="date"
+                    value={draft.electionDate}
+                    onChange={(event) => updateDraft({ electionDate: event.target.value })}
+                  />
+                </div>
+              </div>
+            </article>
 
           <article className="panel">
             <div className={`panel-pad ${styles.emptyPanel}`}>
@@ -951,7 +1131,7 @@ export function ElectionPage() {
                             ) : null}
                           </div>
                         </td>
-                        <td>
+                        <td className={styles.poolVideoColumn}>
                           <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
                             <option value="">선택</option>
                             {getPoolVideoOptions(point.poolVideo).map((option) => (
@@ -967,7 +1147,7 @@ export function ElectionPage() {
                         <td>
                           <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
                         </td>
-                        <td className={styles.staffColumn}>
+                        <td className={styles.nameColumn}>
                           {split ? (
                             <SplitTextInput
                               morning={point.cameraStaffName}
@@ -980,7 +1160,7 @@ export function ElectionPage() {
                             <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
                           )}
                         </td>
-                        <td className={styles.staffColumn}>
+                        <td className={styles.nameColumn}>
                           {split ? (
                             <SplitTextInput
                               morning={point.audioStaffName}
@@ -1004,7 +1184,7 @@ export function ElectionPage() {
                             <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
                           )}
                         </td>
-                        <td className={styles.staffColumn}>
+                        <td className={styles.nameColumn}>
                           {split ? (
                             <SplitTextInput
                               morning={point.reporterName}
@@ -1016,7 +1196,7 @@ export function ElectionPage() {
                             <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
                           )}
                         </td>
-                        <td className={styles.wideColumn}>
+                        <td className={styles.addressColumn}>
                           <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
                         </td>
                         <td className={styles.wideColumn}>
@@ -1063,8 +1243,18 @@ export function ElectionPage() {
                 </table>
               </div>
             </div>
-          </article>
-        </>
+            </article>
+          </>
+        ) : null}
+      </div>
+      {draft ? (
+        <div className={styles.printOnly}>
+          <ElectionPrintableTable
+            title={draft.title}
+            electionDate={draft.electionDate}
+            points={draft.points}
+          />
+        </div>
       ) : null}
     </section>
   );

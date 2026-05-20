@@ -3,6 +3,15 @@
   gap: 16px;
 }
 
+.printRoot {
+  min-width: 0;
+}
+
+.screenOnly {
+  display: grid;
+  gap: 16px;
+}
+
 .header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -23,6 +32,14 @@
   text-align: center;
 }
 
+.statusLine {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
 .actions {
   grid-column: 3;
   display: flex;
@@ -32,13 +49,34 @@
   justify-self: end;
 }
 
+.printControls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.printControls select {
+  width: 76px;
+  min-width: 76px;
+  height: 38px;
+  padding: 6px 8px;
+  border-radius: 0 !important;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  text-align-last: center;
+}
+
 .autoSaveStatus {
   display: inline-flex;
   align-items: center;
-  min-height: 38px;
+  min-height: 24px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
+  line-height: 1;
 }
 
 .statusBadge,
@@ -122,7 +160,7 @@
   padding: 5px 4px;
   border: 1px solid var(--line);
   text-align: center;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .regionColumn {
@@ -150,23 +188,24 @@
 
 .cellActionButton {
   display: inline-flex;
-  width: 24px;
-  height: 24px;
+  width: 17px;
+  height: 17px;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid rgba(148, 163, 184, 0.34);
+  border: 1px solid rgba(125, 211, 252, 0.52);
   border-radius: 0;
-  background: rgba(15, 23, 42, 0.36);
-  color: #e2e8f0;
-  font-size: 14px;
+  background: rgba(186, 230, 253, 0.18);
+  color: #bae6fd;
+  font-size: 10px;
   font-weight: 900;
   line-height: 1;
   cursor: pointer;
 }
 
 .cellActionButton:hover:not(:disabled) {
-  border-color: rgba(125, 211, 252, 0.62);
+  border-color: rgba(186, 230, 253, 0.8);
+  background: rgba(186, 230, 253, 0.28);
   color: #e0f2fe;
 }
 
@@ -195,8 +234,8 @@
   left: 50%;
   display: flex;
   gap: 3px;
-  padding: 4px;
-  border: 1px solid rgba(148, 163, 184, 0.34);
+  padding: 3px;
+  border: 1px solid rgba(125, 211, 252, 0.44);
   background: rgba(15, 23, 42, 0.94);
   transform: translateX(-50%);
 }
@@ -217,8 +256,26 @@
   width: 9%;
 }
 
+.poolVideoColumn {
+  width: 6%;
+}
+
+th.poolVideoColumn {
+  white-space: normal;
+  font-size: 11px;
+  line-height: 1.1;
+}
+
 .staffColumn {
   width: 8%;
+}
+
+.nameColumn {
+  width: 6%;
+}
+
+.addressColumn {
+  width: 15%;
 }
 
 .wideColumn {
@@ -389,6 +446,76 @@ th.positionColumn {
   gap: 10px;
 }
 
+.printOnly {
+  display: none;
+}
+
+.printSheet {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  color: #000;
+  background: #fff;
+}
+
+.printHeader {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  text-align: center;
+}
+
+.printHeader h1 {
+  margin: 0;
+  color: #000;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.printHeader span {
+  color: #111;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.printTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: #000;
+  font-size: 8px;
+  line-height: 1.25;
+}
+
+.printTable th,
+.printTable td {
+  min-height: 20px;
+  padding: 3px 2px;
+  border: 1px solid #111;
+  color: #000;
+  text-align: center;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.printTable th {
+  font-weight: 900;
+  white-space: normal;
+}
+
+.printTable .numberCell {
+  width: 20px;
+  color: #000;
+  font-size: 8px;
+}
+
+.printTable .positionColumn {
+  width: 24px;
+  padding-right: 1px !important;
+  padding-left: 1px !important;
+}
+
 @media (max-width: 720px) {
   .tableWrap {
     overflow-x: auto;
@@ -416,5 +543,79 @@ th.positionColumn {
   .actions {
     justify-content: center;
     justify-self: center;
+  }
+}
+
+@media print {
+  :global(body.election-print-mode) .printRoot,
+  :global(body.election-print-mode) .printRoot * {
+    visibility: visible !important;
+  }
+
+  :global(body.election-print-mode) .printRoot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    width: 100%;
+    min-height: auto;
+    padding: 0 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  :global(body.election-print-mode) .screenOnly {
+    display: none !important;
+  }
+
+  :global(body.election-print-mode) .printOnly {
+    display: block !important;
+  }
+
+  :global(body.election-print-mode) .printSheet {
+    gap: 7px;
+    width: 100%;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  :global(body.election-print-mode) .printHeader h1 {
+    color: #000 !important;
+    font-size: 18px;
+  }
+
+  :global(body.election-print-mode) .printHeader span {
+    color: #111 !important;
+  }
+
+  :global(body.election-print-mode) .printTable {
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  :global(body.election-print-mode) .printTable th,
+  :global(body.election-print-mode) .printTable td {
+    border-color: #111 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  :global(body.election-print-mode) .readOnlyCell,
+  :global(body.election-print-mode) .readOnlySplit,
+  :global(body.election-print-mode) .readOnlySplit b,
+  :global(body.election-print-mode) .numberCell {
+    color: #000 !important;
+  }
+
+  :global(body.election-print-mode) .positionReadOnly {
+    width: 12px;
+    height: 12px;
+    border-color: #111 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  :global(body.election-print-mode) .positionReadOnlyOn {
+    background: #111 !important;
   }
 }
