@@ -4,6 +4,7 @@ import { getSession, hasAdminAccess } from "@/lib/auth/storage";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/client";
 
 export type CelebrationIntensity = "light" | "normal" | "strong";
+export type CelebrationRecurrence = "none" | "yearly";
 
 export interface CelebrationEvent {
   id: string;
@@ -15,6 +16,7 @@ export interface CelebrationEvent {
   is_active: boolean;
   starts_at: string | null;
   ends_at: string | null;
+  recurrence: CelebrationRecurrence;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -27,11 +29,12 @@ export interface CelebrationEventDraft {
   intensity: CelebrationIntensity;
   starts_at: string;
   ends_at: string;
+  recurrence: CelebrationRecurrence;
   is_active: boolean;
 }
 
 const CELEBRATION_COLUMNS =
-  "id, title, message, button_label, effect, intensity, is_active, starts_at, ends_at, created_by, created_at, updated_at";
+  "id, title, message, button_label, effect, intensity, is_active, starts_at, ends_at, recurrence, created_by, created_at, updated_at";
 export const CELEBRATION_EVENT_CHANGED_EVENT = "portal-celebration-event-changed";
 
 function emitCelebrationEventChanged() {
@@ -43,16 +46,77 @@ function normalizeIntensity(value: unknown): CelebrationIntensity {
   return value === "light" || value === "strong" ? value : "normal";
 }
 
+function normalizeRecurrence(value: unknown): CelebrationRecurrence {
+  return value === "yearly" ? "yearly" : "none";
+}
+
+function getKstDateParts(value: Date | string | number) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const getPart = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  const year = getPart("year");
+  const month = getPart("month");
+  const day = getPart("day");
+  if (![year, month, day].every(Number.isFinite)) return null;
+  return { year, month, day };
+}
+
+function getMonthDayStamp(value: Date | string | number) {
+  const parts = getKstDateParts(value);
+  if (!parts) return null;
+  return parts.month * 100 + parts.day;
+}
+
+function isYearlyCelebrationInWindow(event: CelebrationEvent, now: Date) {
+  if (!event.starts_at) return false;
+  const startTime = new Date(event.starts_at).getTime();
+  if (Number.isNaN(startTime) || startTime > now.getTime()) return false;
+
+  const today = getMonthDayStamp(now);
+  const startDay = getMonthDayStamp(event.starts_at);
+  const endDay = event.ends_at ? getMonthDayStamp(event.ends_at) : startDay;
+  if (!today || !startDay || !endDay) return false;
+
+  if (startDay <= endDay) {
+    return today >= startDay && today <= endDay;
+  }
+
+  return today >= startDay || today <= endDay;
+}
+
+export function isCelebrationEventCurrentlyVisible(event: CelebrationEvent, now = new Date()) {
+  if (!event.is_active) return false;
+
+  if (event.recurrence === "yearly") {
+    return isYearlyCelebrationInWindow(event, now);
+  }
+
+  const nowTime = now.getTime();
+  const startsAt = event.starts_at ? new Date(event.starts_at).getTime() : null;
+  const endsAt = event.ends_at ? new Date(event.ends_at).getTime() : null;
+  if (startsAt !== null && (Number.isNaN(startsAt) || startsAt > nowTime)) return false;
+  if (endsAt !== null && (Number.isNaN(endsAt) || endsAt < nowTime)) return false;
+  return true;
+}
+
 function normalizeRow(row: CelebrationEvent): CelebrationEvent {
   return {
     ...row,
     intensity: normalizeIntensity(row.intensity),
+    recurrence: normalizeRecurrence(row.recurrence),
   };
 }
 
 function requireAdminSession() {
   const session = getSession();
-  if (!session?.approved || !hasAdminAccess(session.role)) {
+  if (!session?.approved || !hasAdminAccess(session.actualRole)) {
     throw new Error("관리자 권한이 필요합니다.");
   }
 
@@ -75,18 +139,16 @@ export async function getActiveCelebrationEvent() {
     .from("portal_celebration_events")
     .select(CELEBRATION_COLUMNS)
     .eq("is_active", true)
-    .or(`starts_at.is.null,starts_at.lte.${now}`)
-    .or(`ends_at.is.null,ends_at.gte.${now}`)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<CelebrationEvent>();
+    .limit(100)
+    .returns<CelebrationEvent[]>();
 
   if (error) {
     console.warn("축하 현수막 이벤트를 불러오지 못했습니다.", error);
     return null;
   }
 
-  return data ? normalizeRow(data) : null;
+  return (data ?? []).map(normalizeRow).find((event) => isCelebrationEventCurrentlyVisible(event, new Date(now))) ?? null;
 }
 
 export async function getRecentCelebrationEvents() {
@@ -129,6 +191,7 @@ export async function createCelebrationEvent(
     is_active: draft.is_active,
     starts_at: toNullableDateTime(draft.starts_at),
     ends_at: toNullableDateTime(draft.ends_at),
+    recurrence: draft.recurrence,
     created_by: session.id,
   };
 

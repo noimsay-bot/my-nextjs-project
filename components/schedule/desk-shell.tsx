@@ -102,7 +102,7 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            {session?.role === "admin" ? null : <DeskPopupNoticeManager inline showMeta={false} />}
+            <DeskPopupNoticeManager inline showMeta={false} />
           </div>
         </div>
       </article>

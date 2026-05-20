@@ -124,7 +124,7 @@ export const ELECTION_PRINT_CSS = `
   .election-print-col-equipment { width: 7%; }
   .election-print-col-trs { width: 5.2%; }
   .election-print-col-staff { width: 7%; }
-  .election-print-col-time { width: 7%; }
+  .election-print-col-time { width: 8.5%; }
   .election-print-col-address { width: 14.6%; }
   .election-print-col-note { width: 10.8%; }
   .election-print-col-position { width: 4%; }

@@ -7,10 +7,12 @@ import {
   createCelebrationEvent,
   deleteCelebrationEvent,
   getRecentCelebrationEvents,
+  isCelebrationEventCurrentlyVisible,
   updateCelebrationEventActive,
   type CelebrationEvent,
   type CelebrationEventDraft,
   type CelebrationIntensity,
+  type CelebrationRecurrence,
 } from "@/lib/celebrations/storage";
 import { getSession, hasAdminAccess } from "@/lib/auth/storage";
 
@@ -21,6 +23,7 @@ const defaultDraft: CelebrationEventDraft = {
   intensity: "normal",
   starts_at: "",
   ends_at: "",
+  recurrence: "none",
   is_active: true,
 };
 
@@ -28,6 +31,11 @@ const intensityLabels: Record<CelebrationIntensity, string> = {
   light: "light",
   normal: "normal",
   strong: "strong",
+};
+
+const recurrenceLabels: Record<CelebrationRecurrence, string> = {
+  none: "반복 없음",
+  yearly: "매년 반복",
 };
 
 function formatDateTime(value: string | null) {
@@ -40,6 +48,11 @@ function formatDateTime(value: string | null) {
 function formatStatus(event: CelebrationEvent) {
   if (!event.is_active) return "비활성";
   const now = Date.now();
+  if (event.recurrence === "yearly") {
+    const startsAt = event.starts_at ? new Date(event.starts_at).getTime() : null;
+    if (startsAt && startsAt > now) return "반복예약";
+    return isCelebrationEventCurrentlyVisible(event) ? "오늘 노출" : "매년 반복";
+  }
   const startsAt = event.starts_at ? new Date(event.starts_at).getTime() : null;
   const endsAt = event.ends_at ? new Date(event.ends_at).getTime() : null;
   if (startsAt && startsAt > now) return "예약";
@@ -59,7 +72,7 @@ export default function AdminCelebrationsPage() {
 
   const canManage = useMemo(() => {
     const session = getSession();
-    return Boolean(session?.approved && hasAdminAccess(session.role));
+    return Boolean(session?.approved && hasAdminAccess(session.actualRole));
   }, []);
 
   async function refreshEvents() {
@@ -100,6 +113,7 @@ export default function AdminCelebrationsPage() {
       is_active: draft.is_active,
       starts_at: null,
       ends_at: null,
+      recurrence: draft.recurrence,
       created_by: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -110,7 +124,7 @@ export default function AdminCelebrationsPage() {
     setSaving(true);
     setMessage("");
     try {
-      await createCelebrationEvent(draft, { deactivateExisting });
+      await createCelebrationEvent(draft, { deactivateExisting: draft.recurrence === "none" && deactivateExisting });
       setMessage("축하 현수막을 게시했습니다.");
       setDraft(defaultDraft);
       await refreshEvents();
@@ -178,7 +192,24 @@ export default function AdminCelebrationsPage() {
               </select>
             </label>
             <label style={{ display: "grid", gap: 8 }}>
-              <span className="muted">starts_at</span>
+              <span className="muted">반복</span>
+              <select
+                className="field-select"
+                value={draft.recurrence}
+                onChange={(event) => updateDraft("recurrence", event.target.value as CelebrationRecurrence)}
+              >
+                {Object.entries(recurrenceLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                생일은 시작일을 생일 날짜로 넣고 매년 반복을 선택하세요.
+              </span>
+            </label>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span className="muted">{draft.recurrence === "yearly" ? "반복 기준 시작일" : "예약 시작일"}</span>
               <input
                 className="field-input"
                 type="datetime-local"
@@ -187,13 +218,18 @@ export default function AdminCelebrationsPage() {
               />
             </label>
             <label style={{ display: "grid", gap: 8 }}>
-              <span className="muted">ends_at</span>
+              <span className="muted">{draft.recurrence === "yearly" ? "반복 종료 기준일" : "종료일"}</span>
               <input
                 className="field-input"
                 type="datetime-local"
                 value={draft.ends_at}
                 onChange={(event) => updateDraft("ends_at", event.target.value)}
               />
+              {draft.recurrence === "yearly" ? (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  비워 두면 시작일의 월/일 하루만 매년 노출됩니다.
+                </span>
+              ) : null}
             </label>
           </div>
 
@@ -209,10 +245,11 @@ export default function AdminCelebrationsPage() {
             <label className="celebration-admin-check">
               <input
                 type="checkbox"
-                checked={deactivateExisting}
+                checked={draft.recurrence === "yearly" ? false : deactivateExisting}
+                disabled={draft.recurrence === "yearly"}
                 onChange={(event) => setDeactivateExisting(event.target.checked)}
               />
-              <span>새 이벤트 게시 시 기존 활성 이벤트 비활성화</span>
+              <span>{draft.recurrence === "yearly" ? "매년반복 이벤트는 기존 이벤트를 유지합니다" : "새 이벤트 게시 시 기존 활성 이벤트 비활성화"}</span>
             </label>
           </div>
 
@@ -246,7 +283,7 @@ export default function AdminCelebrationsPage() {
                   </div>
                   {event.message ? <span className="muted">{event.message}</span> : null}
                   <span className="muted" style={{ fontSize: 13 }}>
-                    {formatDateTime(event.starts_at)} ~ {formatDateTime(event.ends_at)} · {event.intensity} · {event.id}
+                    {formatDateTime(event.starts_at)} ~ {formatDateTime(event.ends_at)} · {recurrenceLabels[event.recurrence]} · {event.intensity} · {event.id}
                   </span>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>

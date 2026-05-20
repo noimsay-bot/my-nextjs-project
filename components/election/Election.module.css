@@ -270,6 +270,10 @@ th.poolVideoColumn {
   width: 8%;
 }
 
+.timeColumn {
+  width: 9%;
+}
+
 .nameColumn {
   width: 6%;
 }

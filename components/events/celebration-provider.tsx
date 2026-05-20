@@ -11,18 +11,29 @@ import { createClient, hasSupabaseEnv } from "@/lib/supabase/client";
 
 const CELEBRATION_POLL_INTERVAL_MS = 30_000;
 
-function getDismissedKey(eventId: string) {
-  return `celebration-dismissed:${eventId}`;
+function getKstYearStamp(now = new Date()) {
+  const year = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+  }).format(now);
+  return year;
 }
 
-function isEventDismissed(eventId: string) {
+function getDismissedKey(event: CelebrationEvent) {
+  if (event.recurrence === "yearly") {
+    return `celebration-dismissed:${event.id}:${getKstYearStamp()}`;
+  }
+  return `celebration-dismissed:${event.id}`;
+}
+
+function isEventDismissed(event: CelebrationEvent) {
   if (typeof window === "undefined") return true;
-  return window.localStorage.getItem(getDismissedKey(eventId)) === "true";
+  return window.localStorage.getItem(getDismissedKey(event)) === "true";
 }
 
-function markEventDismissed(eventId: string) {
+function markEventDismissed(event: CelebrationEvent) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(getDismissedKey(eventId), "true");
+  window.localStorage.setItem(getDismissedKey(event), "true");
 }
 
 export function CelebrationProvider({ children }: { children: React.ReactNode }) {
@@ -42,7 +53,7 @@ export function CelebrationProvider({ children }: { children: React.ReactNode })
         return;
       }
 
-      if (isEventDismissed(activeEvent.id)) {
+      if (isEventDismissed(activeEvent)) {
         setEvent((current) => (current?.id === activeEvent.id ? null : current));
         return;
       }
@@ -94,7 +105,7 @@ export function CelebrationProvider({ children }: { children: React.ReactNode })
 
   const handleDismiss = () => {
     if (!event) return;
-    markEventDismissed(event.id);
+    markEventDismissed(event);
     setEvent(null);
   };
 

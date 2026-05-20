@@ -19,6 +19,7 @@ create table if not exists public.portal_celebration_events (
   is_active boolean not null default true,
   starts_at timestamptz,
   ends_at timestamptz,
+  recurrence text not null default 'none',
   created_by uuid references auth.users (id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -26,6 +27,8 @@ create table if not exists public.portal_celebration_events (
     check (effect in ('confetti')),
   constraint portal_celebration_events_intensity_check
     check (intensity in ('light', 'normal', 'strong')),
+  constraint portal_celebration_events_recurrence_check
+    check (recurrence in ('none', 'yearly')),
   constraint portal_celebration_events_date_range_check
     check (starts_at is null or ends_at is null or starts_at <= ends_at)
 );
@@ -48,8 +51,42 @@ for select
 to authenticated
 using (
   is_active = true
-  and (starts_at is null or starts_at <= now())
-  and (ends_at is null or ends_at >= now())
+  and (
+    (
+      recurrence = 'none'
+      and (starts_at is null or starts_at <= now())
+      and (ends_at is null or ends_at >= now())
+    )
+    or (
+      recurrence = 'yearly'
+      and starts_at is not null
+      and starts_at <= now()
+      and (
+        (
+          ends_at is null
+          and to_char(timezone('Asia/Seoul', now()), 'MMDD') = to_char(timezone('Asia/Seoul', starts_at), 'MMDD')
+        )
+        or (
+          ends_at is not null
+          and (
+            (
+              to_char(timezone('Asia/Seoul', starts_at), 'MMDD') <= to_char(timezone('Asia/Seoul', ends_at), 'MMDD')
+              and to_char(timezone('Asia/Seoul', now()), 'MMDD')
+                between to_char(timezone('Asia/Seoul', starts_at), 'MMDD')
+                and to_char(timezone('Asia/Seoul', ends_at), 'MMDD')
+            )
+            or (
+              to_char(timezone('Asia/Seoul', starts_at), 'MMDD') > to_char(timezone('Asia/Seoul', ends_at), 'MMDD')
+              and (
+                to_char(timezone('Asia/Seoul', now()), 'MMDD') >= to_char(timezone('Asia/Seoul', starts_at), 'MMDD')
+                or to_char(timezone('Asia/Seoul', now()), 'MMDD') <= to_char(timezone('Asia/Seoul', ends_at), 'MMDD')
+              )
+            )
+          )
+        )
+      )
+    )
+  )
 );
 
 drop policy if exists "portal_celebration_events_admin_select_all" on public.portal_celebration_events;

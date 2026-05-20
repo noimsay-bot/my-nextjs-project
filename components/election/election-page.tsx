@@ -83,7 +83,7 @@ const ELECTION_PRINT_STYLE_ID = "election-print-page-style";
 function getTableColumnClassName(column: string) {
   if (column === "코리아풀영상") return styles.poolVideoColumn;
   if (staffNameColumns.has(column)) return styles.nameColumn;
-  if (column === "중계시간") return styles.staffColumn;
+  if (column === "중계시간") return styles.timeColumn;
   if (column === "주소") return styles.addressColumn;
   if (column === "비고") return styles.wideColumn;
   return column === "중계자리" ? styles.positionColumn : undefined;
@@ -355,6 +355,14 @@ function getStatusClassName(status: ElectionStatus) {
   return `${styles.statusBadge} ${styles.statusDraft}`;
 }
 
+function getAutoSaveStatusLabel(status: AutoSaveStatus) {
+  if (status === "pending") return "자동 저장 대기";
+  if (status === "saving") return "자동 저장 중";
+  if (status === "saved") return "자동 저장됨";
+  if (status === "error") return "자동 저장 실패";
+  return null;
+}
+
 function formatElectionBoardTitle(title: string | null | undefined) {
   const trimmed = title?.trim() ?? "";
   return trimmed ? `${trimmed} 배치표` : "선거 중계표";
@@ -418,22 +426,24 @@ function SplitTextInput({
   onMorningChange,
   onAfternoonChange,
   listId,
+  placeholder,
 }: {
   morning: string;
   afternoon: string;
   onMorningChange: (value: string) => void;
   onAfternoonChange: (value: string) => void;
   listId?: string;
+  placeholder?: string;
 }) {
   return (
     <div className={styles.splitStack}>
       <label>
         <span>오전</span>
-        <input className="field-input" list={listId} value={morning} onChange={(event) => onMorningChange(event.target.value)} />
+        <input className="field-input" list={listId} value={morning} placeholder={placeholder} onChange={(event) => onMorningChange(event.target.value)} />
       </label>
       <label>
         <span>오후</span>
-        <input className="field-input" list={listId} value={afternoon} onChange={(event) => onAfternoonChange(event.target.value)} />
+        <input className="field-input" list={listId} value={afternoon} placeholder={placeholder} onChange={(event) => onAfternoonChange(event.target.value)} />
       </label>
     </div>
   );
@@ -478,7 +488,7 @@ function ElectionPrintableTable({
                   <td>{readOnlyValue(point.trs)}</td>
                   <td className={styles.nameColumn}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
                   <td className={styles.nameColumn}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                  <td className={styles.staffColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                  <td className={styles.timeColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
                   <td className={styles.nameColumn}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
                   <td className={styles.addressColumn}>{readOnlyValue(point.address)}</td>
                   <td className={styles.wideColumn}>{readOnlyValue(point.note)}</td>
@@ -539,7 +549,7 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
                     <td>{readOnlyValue(point.trs)}</td>
                     <td className={styles.nameColumn}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
                     <td className={styles.nameColumn}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                    <td className={styles.staffColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                    <td className={styles.timeColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
                     <td className={styles.nameColumn}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
                     <td className={styles.addressColumn}>{readOnlyValue(point.address)}</td>
                     <td className={styles.wideColumn}>{readOnlyValue(point.note)}</td>
@@ -660,7 +670,7 @@ export function ElectionPage() {
 
     const signature = getDraftSaveSignature(snapshot);
     if (!signature || signature === lastSavedSignatureRef.current) {
-      setAutoSaveStatus("saved");
+      setAutoSaveStatus("idle");
       return;
     }
 
@@ -711,6 +721,14 @@ export function ElectionPage() {
       clearAutoSaveTimer();
     };
   }, [clearAutoSaveTimer]);
+
+  useEffect(() => {
+    if (autoSaveStatus !== "saved") return;
+    const timer = window.setTimeout(() => {
+      setAutoSaveStatus((current) => (current === "saved" ? "idle" : current));
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [autoSaveStatus]);
 
   useEffect(() => {
     const clearPrintMode = () => {
@@ -872,7 +890,7 @@ export function ElectionPage() {
     setSaving(true);
     try {
       const savedEvent = await persistDraftSnapshot(draft, { showMessage: true });
-      setAutoSaveStatus("saved");
+      setAutoSaveStatus("idle");
       return savedEvent;
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "선거 중계표 저장에 실패했습니다." });
@@ -977,6 +995,7 @@ export function ElectionPage() {
   }
 
   const currentStatus = draft?.status ?? "draft";
+  const autoSaveStatusLabel = getAutoSaveStatusLabel(autoSaveStatus);
 
   return (
     <section className={`${styles.page} ${styles.printRoot}`.trim()}>
@@ -987,17 +1006,11 @@ export function ElectionPage() {
               <h1 className="page-title">{formatElectionBoardTitle(savedDisplayTitle)}</h1>
               <div className={styles.statusLine}>
                 <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
-                <span className={styles.autoSaveStatus} aria-live="polite">
-                  {autoSaveStatus === "pending"
-                    ? "자동 저장 대기"
-                    : autoSaveStatus === "saving"
-                      ? "자동 저장 중"
-                      : autoSaveStatus === "saved"
-                        ? "자동 저장됨"
-                        : autoSaveStatus === "error"
-                          ? "자동 저장 실패"
-                          : "자동 저장"}
-                </span>
+                {autoSaveStatusLabel ? (
+                  <span className={styles.autoSaveStatus} aria-live="polite">
+                    {autoSaveStatusLabel}
+                  </span>
+                ) : null}
               </div>
             </div>
             <div className={styles.actions}>
@@ -1172,16 +1185,17 @@ export function ElectionPage() {
                             <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
                           )}
                         </td>
-                        <td className={styles.staffColumn}>
+                        <td className={styles.timeColumn}>
                           {split ? (
                             <SplitTextInput
                               morning={point.liveTime}
                               afternoon={point.liveTimePm}
+                              placeholder="10:00 - 12:00"
                               onMorningChange={(value) => updatePoint(index, { liveTime: value })}
                               onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
                             />
                           ) : (
-                            <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
+                            <input className="field-input" value={point.liveTime} placeholder="10:00 - 12:00" onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
                           )}
                         </td>
                         <td className={styles.nameColumn}>

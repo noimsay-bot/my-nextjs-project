@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { getSession, hasAdminAccess, subscribeToAuth } from "@/lib/auth/storage";
+import {
+  createCelebrationEvent,
+  type CelebrationEventDraft,
+  type CelebrationIntensity,
+  type CelebrationRecurrence,
+} from "@/lib/celebrations/storage";
 import {
   closeHomePopupNoticeApplications,
   closeHomePopupNotice,
@@ -57,6 +64,33 @@ function getNoticeToneStyle(tone: HomeNoticeTone) {
 
 type MessageTone = "ok" | "warn" | "note";
 
+const defaultCelebrationDraft: CelebrationEventDraft = {
+  title: "축 ○○○ 생일",
+  message: "오늘의 주인공을 축하합니다.",
+  button_label: "확인하고 닫기",
+  intensity: "normal",
+  starts_at: "",
+  ends_at: "",
+  recurrence: "yearly",
+  is_active: true,
+};
+
+const celebrationIntensityLabels: Record<CelebrationIntensity, string> = {
+  light: "가볍게",
+  normal: "보통",
+  strong: "강하게",
+};
+
+const celebrationRecurrenceLabels: Record<CelebrationRecurrence, string> = {
+  none: "반복 없음",
+  yearly: "매년 반복",
+};
+
+function canManageCelebrationFromSession() {
+  const session = getSession();
+  return Boolean(session?.approved && hasAdminAccess(session.actualRole));
+}
+
 export function DeskPopupNoticeManager({
   inline = false,
   showButtons = true,
@@ -83,6 +117,9 @@ export function DeskPopupNoticeManager({
   const [message, setMessage] = useState<{ tone: MessageTone; text: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
+  const [canManageCelebrations, setCanManageCelebrations] = useState(canManageCelebrationFromSession);
+  const [celebrationDraft, setCelebrationDraft] = useState<CelebrationEventDraft>(defaultCelebrationDraft);
+  const [celebrationDeactivateExisting, setCelebrationDeactivateExisting] = useState(false);
 
   const syncFromCache = () => {
     setActivePopup(getHomePopupNotice());
@@ -110,6 +147,12 @@ export function DeskPopupNoticeManager({
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    return subscribeToAuth((session) => {
+      setCanManageCelebrations(Boolean(session?.approved && hasAdminAccess(session.actualRole)));
+    });
   }, []);
 
   useEffect(() => {
@@ -156,7 +199,16 @@ export function DeskPopupNoticeManager({
     setPopupTone("normal");
     setPopupExpiresAt(activePopup?.isActive ? toDateTimeLocalValue(activePopup.expiresAt) : "");
     setPopupWithApplication(activePopup?.applicationEnabled ?? true);
+    setCelebrationDraft(defaultCelebrationDraft);
+    setCelebrationDeactivateExisting(false);
     setComposerOpen(true);
+  };
+
+  const updateCelebrationDraft = <Key extends keyof CelebrationEventDraft>(
+    key: Key,
+    value: CelebrationEventDraft[Key],
+  ) => {
+    setCelebrationDraft((current) => ({ ...current, [key]: value }));
   };
 
   const handleSaveGeneralNotice = async () => {
@@ -204,6 +256,26 @@ export function DeskPopupNoticeManager({
       setMessage({
         tone: "warn",
         text: error instanceof Error ? error.message : "팝업 공지를 저장하지 못했습니다.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveCelebration = async () => {
+    setSubmitting(true);
+    try {
+      await createCelebrationEvent(celebrationDraft, {
+        deactivateExisting:
+          celebrationDraft.recurrence === "none" && celebrationDeactivateExisting,
+      });
+      setCelebrationDraft(defaultCelebrationDraft);
+      setCelebrationDeactivateExisting(false);
+      setMessage({ tone: "ok", text: "축하 현수막을 저장했습니다." });
+    } catch (error) {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "축하 현수막을 저장하지 못했습니다.",
       });
     } finally {
       setSubmitting(false);
@@ -336,7 +408,7 @@ export function DeskPopupNoticeManager({
               <div
                 className="panel"
                 style={{
-                  width: "min(980px, 100%)",
+                  width: "min(1180px, 100%)",
                   background: "rgb(15,23,42)",
                   border: "1px solid rgba(148,163,184,.26)",
                   boxShadow: "0 28px 80px rgba(0,0,0,.48)",
@@ -344,7 +416,7 @@ export function DeskPopupNoticeManager({
               >
                 <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                    <div className="chip">홈 공지</div>
+                    <div className="chip">홈 공지 · 축하 현수막</div>
                     <button className="btn" type="button" onClick={() => setComposerOpen(false)}>
                       닫기
                     </button>
@@ -431,6 +503,124 @@ export function DeskPopupNoticeManager({
                         </button>
                       </div>
                     </section>
+
+                    {canManageCelebrations ? (
+                      <section
+                        style={{
+                          display: "grid",
+                          gap: 10,
+                          border: "1px solid rgba(255,255,255,.12)",
+                          borderRadius: 16,
+                          padding: 14,
+                          background: "rgba(255,255,255,.04)",
+                        }}
+                      >
+                        <strong>축하 현수막 만들기</strong>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>제목</span>
+                          <input
+                            className="field-input"
+                            value={celebrationDraft.title}
+                            onChange={(event) => updateCelebrationDraft("title", event.target.value)}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>문구</span>
+                          <textarea
+                            className="field-input"
+                            rows={4}
+                            value={celebrationDraft.message}
+                            onChange={(event) => updateCelebrationDraft("message", event.target.value)}
+                            style={{ resize: "vertical" }}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>닫기 버튼 문구</span>
+                          <input
+                            className="field-input"
+                            value={celebrationDraft.button_label}
+                            onChange={(event) => updateCelebrationDraft("button_label", event.target.value)}
+                          />
+                        </label>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>효과 강도</span>
+                            <select
+                              className="field-select"
+                              value={celebrationDraft.intensity}
+                              onChange={(event) => updateCelebrationDraft("intensity", event.target.value as CelebrationIntensity)}
+                            >
+                              {Object.entries(celebrationIntensityLabels).map(([value, label]) => (
+                                <option key={value} value={value}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label style={{ display: "grid", gap: 6 }}>
+                            <span>반복</span>
+                            <select
+                              className="field-select"
+                              value={celebrationDraft.recurrence}
+                              onChange={(event) => updateCelebrationDraft("recurrence", event.target.value as CelebrationRecurrence)}
+                            >
+                              {Object.entries(celebrationRecurrenceLabels).map(([value, label]) => (
+                                <option key={value} value={value}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>{celebrationDraft.recurrence === "yearly" ? "반복 기준 시작일" : "예약 시작일"}</span>
+                          <input
+                            className="field-input"
+                            type="datetime-local"
+                            value={celebrationDraft.starts_at}
+                            onChange={(event) => updateCelebrationDraft("starts_at", event.target.value)}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>{celebrationDraft.recurrence === "yearly" ? "반복 종료 기준일" : "종료일"}</span>
+                          <input
+                            className="field-input"
+                            type="datetime-local"
+                            value={celebrationDraft.ends_at}
+                            onChange={(event) => updateCelebrationDraft("ends_at", event.target.value)}
+                          />
+                          <span className="muted">
+                            생일은 생일 날짜를 시작일로 넣고 매년 반복을 선택하세요. 종료일을 비우면 해당 하루만 매년 노출됩니다.
+                          </span>
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={celebrationDraft.is_active}
+                            onChange={(event) => updateCelebrationDraft("is_active", event.target.checked)}
+                          />
+                          <span>게시 즉시 활성화</span>
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={celebrationDraft.recurrence === "yearly" ? false : celebrationDeactivateExisting}
+                            disabled={celebrationDraft.recurrence === "yearly"}
+                            onChange={(event) => setCelebrationDeactivateExisting(event.target.checked)}
+                          />
+                          <span>
+                            {celebrationDraft.recurrence === "yearly"
+                              ? "매년 반복 현수막은 기존 현수막을 유지합니다"
+                              : "저장 시 기존 활성 현수막 끄기"}
+                          </span>
+                        </label>
+                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                          <button className="btn primary" type="button" disabled={submitting} onClick={() => void handleSaveCelebration()}>
+                            축하 현수막 등록
+                          </button>
+                        </div>
+                      </section>
+                    ) : null}
                   </div>
                 </div>
               </div>
