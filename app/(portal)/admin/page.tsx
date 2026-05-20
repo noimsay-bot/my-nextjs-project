@@ -166,6 +166,11 @@ function formatDateTime(value: string | null | undefined) {
   return date.toLocaleString("ko-KR");
 }
 
+function formatCustomerSupportRequester(item: CustomerSupportMessageWorkspace["items"][number]) {
+  if (!item.requesterName || !item.requesterRole) return "익명 접수";
+  return `${roleLabels[item.requesterRole]} ${item.requesterName}`;
+}
+
 const emptyPageVisitAnalytics: PageVisitAnalytics = {
   week: [],
   month: [],
@@ -507,7 +512,7 @@ export default function AdminPage() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <strong>익명 접수</strong>
+                        <strong>{formatCustomerSupportRequester(item)}</strong>
                         <span className={`customer-support-status customer-support-status--${item.status}`}>
                           {isProcessed ? "처리완료" : "접수"}
                         </span>

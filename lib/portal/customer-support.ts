@@ -1,5 +1,6 @@
 "use client";
 
+import type { UserRole } from "@/lib/auth/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -13,6 +14,7 @@ const MAX_CUSTOMER_SUPPORT_BODY_LENGTH = 2000;
 const MAX_CUSTOMER_SUPPORT_ATTACHMENT_COUNT = 3;
 const MAX_CUSTOMER_SUPPORT_ATTACHMENT_SIZE = 5 * 1024 * 1024;
 export const CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT = "customer-support-admin-count-change";
+const CUSTOMER_SUPPORT_REAL_NAME_ROLES = new Set<UserRole>(["desk", "team_lead"]);
 
 interface CustomerSupportMessageRow {
   id: string;
@@ -27,9 +29,15 @@ interface CustomerSupportMessageRow {
   created_at: string;
 }
 
-interface ProfileNameRow {
+interface ProfileSummaryRow {
   id: string;
   name: string;
+  role: UserRole | null;
+}
+
+interface ProfileSummary {
+  name: string;
+  role: UserRole | null;
 }
 
 export interface CustomerSupportAttachment {
@@ -43,6 +51,8 @@ export interface CustomerSupportAttachment {
 export interface CustomerSupportMessage {
   id: string;
   requesterId: string | null;
+  requesterName: string | null;
+  requesterRole: UserRole | null;
   body: string;
   attachments: CustomerSupportAttachment[];
   status: "open" | "processed";
@@ -66,6 +76,10 @@ export interface CustomerSupportFeedbackNotification {
   processedAt: string | null;
   processedFeedback: string | null;
   createdAt: string;
+}
+
+export function shouldSendCustomerSupportWithRealName(role: UserRole | null | undefined) {
+  return Boolean(role && CUSTOMER_SUPPORT_REAL_NAME_ROLES.has(role));
 }
 
 function isSupportedCustomerSupportImage(file: File) {
@@ -93,9 +107,13 @@ function normalizeCustomerSupportAttachments(value: unknown): CustomerSupportAtt
 
 function formatCustomerSupportMessage(
   row: CustomerSupportMessageRow,
-  processedByNameMap: Map<string, string>,
+  profileSummaryMap: Map<string, ProfileSummary>,
   signedUrlMap: Map<string, string>,
 ): CustomerSupportMessage {
+  const requesterProfile = row.requester_id ? profileSummaryMap.get(row.requester_id) ?? null : null;
+  const requesterName = shouldSendCustomerSupportWithRealName(requesterProfile?.role)
+    ? requesterProfile?.name.trim() || null
+    : null;
   const attachments = normalizeCustomerSupportAttachments(row.attachments).map((attachment) => ({
     ...attachment,
     url: signedUrlMap.get(attachment.path) ?? null,
@@ -103,12 +121,14 @@ function formatCustomerSupportMessage(
   return {
     id: row.id,
     requesterId: row.requester_id,
+    requesterName,
+    requesterRole: requesterName ? requesterProfile?.role ?? null : null,
     body: row.body,
     attachments,
     status: row.status === "processed" ? "processed" : "open",
     processedAt: row.processed_at,
     processedBy: row.processed_by,
-    processedByName: row.processed_by ? processedByNameMap.get(row.processed_by) ?? null : null,
+    processedByName: row.processed_by ? profileSummaryMap.get(row.processed_by)?.name ?? null : null,
     processedFeedback: row.processed_feedback?.trim() || null,
     feedbackSeenAt: row.feedback_seen_at,
     createdAt: row.created_at,
@@ -139,19 +159,19 @@ async function createCustomerSupportAttachmentUrls(paths: string[]) {
   );
 }
 
-async function getProfileNameMap(profileIds: string[]) {
+async function getProfileSummaryMap(profileIds: string[]) {
   const uniqueIds = Array.from(new Set(profileIds.filter(Boolean)));
-  if (uniqueIds.length === 0) return new Map<string, string>();
+  if (uniqueIds.length === 0) return new Map<string, ProfileSummary>();
 
   const supabase = await getPortalSupabaseClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, name")
+    .select("id, name, role")
     .in("id", uniqueIds)
-    .returns<ProfileNameRow[]>();
+    .returns<ProfileSummaryRow[]>();
 
-  if (error) return new Map<string, string>();
-  return new Map((data ?? []).map((row) => [row.id, row.name] as const));
+  if (error) return new Map<string, ProfileSummary>();
+  return new Map((data ?? []).map((row) => [row.id, { name: row.name, role: row.role }] as const));
 }
 
 export async function submitCustomerSupportMessage(body: string, files: File[] = []) {
@@ -277,10 +297,10 @@ export async function getAdminCustomerSupportMessages(): Promise<CustomerSupport
     const rows = data ?? [];
     const attachmentPaths = rows.flatMap((row) => normalizeCustomerSupportAttachments(row.attachments).map((attachment) => attachment.path));
     const signedUrlMap = await createCustomerSupportAttachmentUrls(attachmentPaths);
-    const processedByNameMap = await getProfileNameMap(rows.map((row) => row.processed_by ?? ""));
+    const profileSummaryMap = await getProfileSummaryMap(rows.flatMap((row) => [row.requester_id ?? "", row.processed_by ?? ""]));
 
     return {
-      items: rows.map((row) => formatCustomerSupportMessage(row, processedByNameMap, signedUrlMap)),
+      items: rows.map((row) => formatCustomerSupportMessage(row, profileSummaryMap, signedUrlMap)),
       schemaMissing: false,
       message: null,
     };

@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { submitCustomerSupportMessage } from "@/lib/portal/customer-support";
+import { getSession } from "@/lib/auth/storage";
+import { shouldSendCustomerSupportWithRealName, submitCustomerSupportMessage } from "@/lib/portal/customer-support";
 
 const CUSTOMER_SUPPORT_PLACEHOLDER =
   "익명으로 전송됩니다. 사이트 오류 신고, 기능제안, 개선 제안 등 관리자에게 전달할 내용을 작성해주세요";
+const CUSTOMER_SUPPORT_REAL_NAME_GUIDE =
+  "실명으로 전송됩니다. 사이트 오류 신고, 기능제안, 개선 제안 등 관리자에게 전달할 내용을 작성해주세요";
 
 type CustomerSupportDialogProps = {
   open: boolean;
@@ -14,6 +17,10 @@ type CustomerSupportDialogProps = {
 export function CustomerSupportDialog({ open, onClose }: CustomerSupportDialogProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const session = getSession();
+  const placeholder = shouldSendCustomerSupportWithRealName(session?.actualRole)
+    ? `${session?.username ? `${session.username}님 ` : ""}${CUSTOMER_SUPPORT_REAL_NAME_GUIDE}`
+    : CUSTOMER_SUPPORT_PLACEHOLDER;
   const [body, setBody] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentPreviews, setAttachmentPreviews] = useState<string[]>([]);
@@ -119,7 +126,7 @@ export function CustomerSupportDialog({ open, onClose }: CustomerSupportDialogPr
         <textarea
           ref={textareaRef}
           className="field-textarea customer-support-dialog__textarea"
-          placeholder={CUSTOMER_SUPPORT_PLACEHOLDER}
+          placeholder={placeholder}
           value={body}
           maxLength={2000}
           onChange={(event) => setBody(event.target.value)}
