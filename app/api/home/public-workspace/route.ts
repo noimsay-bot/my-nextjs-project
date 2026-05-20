@@ -221,6 +221,20 @@ function isExpired(expiresAt: string | null | undefined) {
   return time <= Date.now();
 }
 
+function isMissingColumnError(error: unknown, columnName: string) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const message = typeof record.message === "string" ? record.message : "";
+  const details = typeof record.details === "string" ? record.details : "";
+  const hint = typeof record.hint === "string" ? record.hint : "";
+  const combined = `${message}\n${details}\n${hint}`.toLowerCase();
+  return combined.includes(columnName.toLowerCase()) && combined.includes("does not exist");
+}
+
+function isMissingExpiresAtColumnError(error: unknown) {
+  return isMissingColumnError(error, "expires_at");
+}
+
 function normalizeTone(value: unknown) {
   return value === "urgent" ? "urgent" : "normal";
 }
@@ -504,6 +518,24 @@ function rowToApplication(row: HomePopupNoticeApplicationRow): HomePopupNoticeAp
     applicantName: row.applicant_name,
     createdAt: row.created_at,
   };
+}
+
+async function selectHomePopupNoticeRow(admin: ReturnType<typeof createAdminClient>) {
+  const preferred = await admin
+    .from("home_popup_notice_state")
+    .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
+    .eq("key", "active")
+    .maybeSingle<HomePopupNoticeStateRow>();
+
+  if (!preferred.error || !isMissingExpiresAtColumnError(preferred.error)) {
+    return preferred;
+  }
+
+  return admin
+    .from("home_popup_notice_state")
+    .select("key, notice_id, title, body, is_active, created_at, updated_at")
+    .eq("key", "active")
+    .maybeSingle<HomePopupNoticeStateRow>();
 }
 
 function createAssignmentRowKey(dateKey: string, category: string, index: number, name: string) {
@@ -803,13 +835,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "승인된 계정이 필요합니다." }, { status: 403 });
     }
 
-    const [{ data: noticeRow }, { data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
+    const [{ data: noticeRow, error: noticeError }, { data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
       Promise.all([
-        admin
-          .from("home_popup_notice_state")
-          .select("key, notice_id, title, body, is_active, expires_at, created_at, updated_at")
-          .eq("key", "active")
-          .maybeSingle<HomePopupNoticeStateRow>(),
+        selectHomePopupNoticeRow(admin),
         includeTrips
           ? admin
             .from("schedule_months")
@@ -827,6 +855,10 @@ export async function GET(request: Request) {
       ]),
       "홈 워크스페이스 조회가 지연되고 있습니다.",
     );
+
+    if (noticeError) {
+      throw new Error("커뮤니티 게시글 조회에 실패했습니다.");
+    }
 
     const workspace = parseStorePayload(noticeRow ?? null);
     const activePopup = getActivePopupNotice(workspace.notices);

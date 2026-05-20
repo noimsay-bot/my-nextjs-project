@@ -209,7 +209,7 @@ export default function HomeNoticeBoardPage() {
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
     try {
-      await refreshHomePopupNoticeWorkspace({ includeTrips: false });
+      await refreshHomePopupNoticeWorkspace({ includeTrips: false, force: true });
       syncFromCache();
       setMessage(null);
     } catch (error) {
@@ -250,10 +250,14 @@ export default function HomeNoticeBoardPage() {
   }, []);
 
   const boardItemsByCategory = useMemo<Record<CommunityBoardCategory, CommunityListItem[]>>(() => {
-    const autoNoticeItems = notices
-      .filter((n) => !n.id.startsWith("shadow:"))
-      .map(toAutomaticNoticeItem);
     const manualItems = communityPosts.map(toManualPostItem);
+    const manualPostIds = new Set(communityPosts.map((post) => post.id));
+    const autoNoticeItems = notices
+      .filter((notice) => {
+        if (!notice.id.startsWith("shadow:")) return true;
+        return !manualPostIds.has(notice.id.slice("shadow:".length));
+      })
+      .map(toAutomaticNoticeItem);
     return {
       notice: [...autoNoticeItems, ...manualItems.filter((item) => item.category === "notice")].sort((left, right) =>
         right.updatedAt.localeCompare(left.updatedAt),

@@ -2262,7 +2262,7 @@ export function ScheduleApp() {
                         minHeight: 216,
                         opacity: day.isOverflowMonth ? 0.55 : 1,
                         background: dayCardStyle.background,
-                        border: isToday ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+                        border: isToday ? "3px solid rgba(56,189,248,.92)" : dayCardStyle.border,
                         boxShadow: isToday ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
                       }}
                     >
@@ -3239,7 +3239,7 @@ export function ScheduleApp() {
                           minHeight: 232,
                           opacity: day.isOverflowMonth ? 0.55 : 1,
                           background: dayCardStyle.background,
-                          border: isToday ? "2px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+                          border: isToday ? "3px solid rgba(56,189,248,.92)" : dayCardStyle.border,
                           boxShadow: isToday ? "0 0 0 2px rgba(125,211,252,.18), 0 12px 28px rgba(14,165,233,.16)" : undefined,
                         }}
                       >

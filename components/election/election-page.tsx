@@ -57,6 +57,7 @@ const poolVideoOptions = [
 ] as const;
 
 const tableColumns = [
+  "관리",
   "#",
   "지역",
   "장소",
@@ -71,9 +72,9 @@ const tableColumns = [
   "비고",
   "중계자리",
   "조명",
-  "관리",
 ];
 
+const readOnlyTableColumns = tableColumns.filter((column) => column !== "관리");
 const staffNameColumns = new Set(["촬영기자", "오디오맨", "취재기자"]);
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
@@ -81,6 +82,8 @@ const AUTO_SAVE_DEBOUNCE_MS = 900;
 const ELECTION_PRINT_STYLE_ID = "election-print-page-style";
 
 function getTableColumnClassName(column: string) {
+  if (column === "관리") return styles.managementColumn;
+  if (column === "#") return styles.numberColumn;
   if (column === "코리아풀영상") return styles.poolVideoColumn;
   if (staffNameColumns.has(column)) return styles.nameColumn;
   if (column === "중계시간") return styles.timeColumn;
@@ -365,7 +368,7 @@ function getAutoSaveStatusLabel(status: AutoSaveStatus) {
 
 function formatElectionBoardTitle(title: string | null | undefined) {
   const trimmed = title?.trim() ?? "";
-  return trimmed ? `${trimmed} 배치표` : "선거 중계표";
+  return trimmed ? `${trimmed} 취재 배치표` : "취재 배치표";
 }
 
 function readOnlyValue(value: string | null | undefined) {
@@ -467,7 +470,7 @@ function ElectionPrintableTable({
       <table className={styles.printTable}>
         <thead>
           <tr>
-            {tableColumns.slice(0, -1).map((column) => (
+            {readOnlyTableColumns.map((column) => (
               <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
             ))}
           </tr>
@@ -501,7 +504,7 @@ function ElectionPrintableTable({
             })
           ) : (
             <tr>
-              <td colSpan={14}>입력된 중계 포인트가 없습니다.</td>
+              <td colSpan={readOnlyTableColumns.length}>입력된 중계 포인트가 없습니다.</td>
             </tr>
           )}
         </tbody>
@@ -526,7 +529,7 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
           <table className={`table-like ${styles.table}`}>
             <thead>
               <tr>
-                {tableColumns.slice(0, -1).map((column) => (
+                {readOnlyTableColumns.map((column) => (
                   <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
                 ))}
               </tr>
@@ -562,7 +565,7 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
                 })
               ) : (
                 <tr>
-                  <td colSpan={15}>
+                  <td colSpan={readOnlyTableColumns.length}>
                     <div className="status note">입력된 중계 포인트가 없습니다.</div>
                   </td>
                 </tr>
@@ -1096,6 +1099,21 @@ export function ElectionPage() {
                       const hasRegionText = Boolean(normalizeRegionValue(point.region));
                       return (
                       <tr key={point.localId}>
+                        <td className={styles.managementColumn}>
+                          <div className={styles.rowActions}>
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={saving}
+                              onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
+                            >
+                              {split ? "합치기" : "오전/오후"}
+                            </button>
+                            <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
+                              삭제
+                            </button>
+                          </div>
+                        </td>
                         <td className={styles.numberCell}>
                           {index + 1}.
                         </td>
@@ -1234,21 +1252,6 @@ export function ElectionPage() {
                         </td>
                         <td>
                           <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
-                        </td>
-                        <td>
-                          <div className={styles.rowActions}>
-                            <button
-                              type="button"
-                              className="btn"
-                              disabled={saving}
-                              onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
-                            >
-                              {split ? "합치기" : "오전/오후"}
-                            </button>
-                          <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
-                            삭제
-                          </button>
-                          </div>
                         </td>
                       </tr>
                     );
