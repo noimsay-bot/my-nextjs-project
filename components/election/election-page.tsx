@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   closeElectionEvent,
@@ -73,27 +72,6 @@ const tableColumns = [
   "관리",
 ];
 
-type MergeColumnKey =
-  | "region"
-  | "place"
-  | "poolVideo"
-  | "equipmentName"
-  | "trs"
-  | "cameraStaff"
-  | "audioStaff"
-  | "liveTime"
-  | "reporter"
-  | "address"
-  | "note"
-  | "lighting";
-
-interface MergeColumnConfig {
-  getValues: (point: ElectionPointInput) => string[];
-  getPatch: (point: ElectionPointInput) => Partial<DraftPoint>;
-  getEmptyPatch: () => Partial<DraftPoint>;
-  hasValue?: (point: ElectionPointInput) => boolean;
-}
-
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
 const AUTO_SAVE_DEBOUNCE_MS = 900;
@@ -115,169 +93,85 @@ function renderTableColumnLabel(column: string) {
   return column;
 }
 
-function normalizeMergeValue(value: string | null | undefined) {
+function normalizeRegionValue(value: string | null | undefined) {
   return value?.trim() ?? "";
 }
 
-function isDefaultEquipmentNameOnly(value: string | null | undefined) {
-  return normalizeMergeValue(value).toUpperCase() === DEFAULT_EQUIPMENT_NAME;
+function getRegionGroupRange(points: Pick<ElectionPointInput, "region">[], index: number) {
+  const region = normalizeRegionValue(points[index]?.region);
+  if (!region) return { start: index, end: index };
+
+  let start = index;
+  while (start > 0 && normalizeRegionValue(points[start - 1]?.region) === region) {
+    start -= 1;
+  }
+
+  let end = index;
+  while (end < points.length - 1 && normalizeRegionValue(points[end + 1]?.region) === region) {
+    end += 1;
+  }
+
+  return { start, end };
 }
 
-function hasAnyMergeValue(values: string[]) {
-  return values.some((value) => normalizeMergeValue(value));
+function isRegionCellCoveredByPreviousRow(points: Pick<ElectionPointInput, "region">[], index: number) {
+  if (index <= 0) return false;
+  const region = normalizeRegionValue(points[index]?.region);
+  return Boolean(region && normalizeRegionValue(points[index - 1]?.region) === region);
 }
 
-const mergeColumnConfigs: Record<MergeColumnKey, MergeColumnConfig> = {
-  region: {
-    getValues: (point) => [point.region],
-    getPatch: (point) => ({ region: point.region }),
-    getEmptyPatch: () => ({ region: "" }),
-  },
-  place: {
-    getValues: (point) => [point.place],
-    getPatch: (point) => ({ place: point.place }),
-    getEmptyPatch: () => ({ place: "" }),
-  },
-  poolVideo: {
-    getValues: (point) => [point.poolVideo],
-    getPatch: (point) => ({ poolVideo: point.poolVideo }),
-    getEmptyPatch: () => ({ poolVideo: "" }),
-  },
-  equipmentName: {
-    getValues: (point) => [isDefaultEquipmentNameOnly(point.equipmentName) ? "" : point.equipmentName],
-    getPatch: (point) => ({ equipmentName: point.equipmentName }),
-    getEmptyPatch: () => ({ equipmentName: DEFAULT_EQUIPMENT_NAME }),
-    hasValue: (point) => Boolean(normalizeMergeValue(point.equipmentName) && !isDefaultEquipmentNameOnly(point.equipmentName)),
-  },
-  trs: {
-    getValues: (point) => [point.trs],
-    getPatch: (point) => ({ trs: point.trs }),
-    getEmptyPatch: () => ({ trs: "" }),
-  },
-  cameraStaff: {
-    getValues: (point) => [point.cameraStaffName, point.cameraStaffUserId ?? "", point.cameraStaffNamePm, point.cameraStaffUserIdPm ?? ""],
-    getPatch: (point) => ({
-      cameraStaffName: point.cameraStaffName,
-      cameraStaffUserId: point.cameraStaffUserId,
-      cameraStaffNamePm: point.cameraStaffNamePm,
-      cameraStaffUserIdPm: point.cameraStaffUserIdPm,
-    }),
-    getEmptyPatch: () => ({
-      cameraStaffName: "",
-      cameraStaffUserId: null,
-      cameraStaffNamePm: "",
-      cameraStaffUserIdPm: null,
-    }),
-  },
-  audioStaff: {
-    getValues: (point) => [point.audioStaffName, point.audioStaffUserId ?? "", point.audioStaffNamePm],
-    getPatch: (point) => ({
-      audioStaffName: point.audioStaffName,
-      audioStaffUserId: point.audioStaffUserId,
-      audioStaffNamePm: point.audioStaffNamePm,
-    }),
-    getEmptyPatch: () => ({
-      audioStaffName: "",
-      audioStaffUserId: null,
-      audioStaffNamePm: "",
-    }),
-  },
-  liveTime: {
-    getValues: (point) => [point.liveTime, point.liveTimePm],
-    getPatch: (point) => ({ liveTime: point.liveTime, liveTimePm: point.liveTimePm }),
-    getEmptyPatch: () => ({ liveTime: "", liveTimePm: "" }),
-  },
-  reporter: {
-    getValues: (point) => [point.reporterName, point.reporterUserId ?? "", point.reporterNamePm],
-    getPatch: (point) => ({
-      reporterName: point.reporterName,
-      reporterUserId: point.reporterUserId,
-      reporterNamePm: point.reporterNamePm,
-    }),
-    getEmptyPatch: () => ({
-      reporterName: "",
-      reporterUserId: null,
-      reporterNamePm: "",
-    }),
-  },
-  address: {
-    getValues: (point) => [point.address],
-    getPatch: (point) => ({ address: point.address }),
-    getEmptyPatch: () => ({ address: "" }),
-  },
-  note: {
-    getValues: (point) => [point.note],
-    getPatch: (point) => ({ note: point.note }),
-    getEmptyPatch: () => ({ note: "" }),
-  },
-  lighting: {
-    getValues: (point) => [point.lighting],
-    getPatch: (point) => ({ lighting: point.lighting }),
-    getEmptyPatch: () => ({ lighting: "" }),
-  },
-};
-
-function getMergeColumnConfig(columnKey: MergeColumnKey) {
-  return mergeColumnConfigs[columnKey];
+function getRegionRowSpan(points: Pick<ElectionPointInput, "region">[], index: number) {
+  if (isRegionCellCoveredByPreviousRow(points, index)) return 0;
+  const range = getRegionGroupRange(points, index);
+  return range.end - range.start + 1;
 }
 
-function hasMergeColumnValue(point: ElectionPointInput, columnKey: MergeColumnKey) {
-  const config = getMergeColumnConfig(columnKey);
-  return config.hasValue ? config.hasValue(point) : hasAnyMergeValue(config.getValues(point));
+function canMoveRegionGroup(points: Pick<ElectionPointInput, "region">[], index: number, direction: "up" | "down") {
+  const range = getRegionGroupRange(points, index);
+  return direction === "up" ? range.start > 0 : range.end < points.length - 1;
 }
 
-function areMergeColumnValuesEqual(
-  left: ElectionPointInput,
-  right: ElectionPointInput,
-  columnKey: MergeColumnKey,
-) {
-  const config = getMergeColumnConfig(columnKey);
-  const leftValues = config.getValues(left);
-  const rightValues = config.getValues(right);
-  if (leftValues.length !== rightValues.length) return false;
-  return leftValues.every((value, index) => normalizeMergeValue(value) === normalizeMergeValue(rightValues[index]));
+function canMovePointWithinRegion(points: Pick<ElectionPointInput, "region">[], index: number, direction: "up" | "down") {
+  const range = getRegionGroupRange(points, index);
+  return direction === "up" ? index > range.start : index < range.end;
 }
 
-function isCellCoveredByPreviousRow(
-  points: ElectionPointInput[],
-  rowIndex: number,
-  columnKey: MergeColumnKey,
-) {
-  if (rowIndex <= 0) return false;
-  const current = points[rowIndex];
-  const previous = points[rowIndex - 1];
+function ReorderMenu({
+  label,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+}: {
+  label: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  if (!canMoveUp && !canMoveDown) {
+    return (
+      <button type="button" className={styles.cellActionButton} disabled title={`${label} 이동`} aria-label={`${label} 이동`}>
+        ↕
+      </button>
+    );
+  }
+
   return (
-    hasMergeColumnValue(current, columnKey) &&
-    hasMergeColumnValue(previous, columnKey) &&
-    areMergeColumnValuesEqual(previous, current, columnKey)
+    <details className={styles.reorderMenu}>
+      <summary className={styles.cellActionButton} title={`${label} 이동`} aria-label={`${label} 이동`}>
+        ↕
+      </summary>
+      <span className={styles.reorderMenuPanel}>
+        <button type="button" className={styles.cellActionButton} disabled={!canMoveUp} onClick={onMoveUp} title={`${label} 위로`} aria-label={`${label} 위로`}>
+          ↑
+        </button>
+        <button type="button" className={styles.cellActionButton} disabled={!canMoveDown} onClick={onMoveDown} title={`${label} 아래로`} aria-label={`${label} 아래로`}>
+          ↓
+        </button>
+      </span>
+    </details>
   );
-}
-
-function getMergeStartIndex(points: ElectionPointInput[], rowIndex: number, columnKey: MergeColumnKey) {
-  let startIndex = rowIndex;
-  while (startIndex > 0 && isCellCoveredByPreviousRow(points, startIndex, columnKey)) {
-    startIndex -= 1;
-  }
-  return startIndex;
-}
-
-function getMergeRowSpan(points: ElectionPointInput[], rowIndex: number, columnKey: MergeColumnKey) {
-  if (isCellCoveredByPreviousRow(points, rowIndex, columnKey)) return 0;
-  const point = points[rowIndex];
-  if (!point || !hasMergeColumnValue(point, columnKey)) return 1;
-
-  let rowSpan = 1;
-  for (let nextIndex = rowIndex + 1; nextIndex < points.length; nextIndex += 1) {
-    const nextPoint = points[nextIndex];
-    if (
-      !hasMergeColumnValue(nextPoint, columnKey) ||
-      !areMergeColumnValuesEqual(point, nextPoint, columnKey)
-    ) {
-      break;
-    }
-    rowSpan += 1;
-  }
-  return rowSpan;
 }
 
 function createLocalId() {
@@ -424,28 +318,6 @@ function readOnlySplitValue(morning: string | null | undefined, afternoon: strin
   );
 }
 
-function ReadOnlyMergedCell({
-  points,
-  index,
-  columnKey,
-  className,
-  children,
-}: {
-  points: ElectionPointInput[];
-  index: number;
-  columnKey: MergeColumnKey;
-  className?: string;
-  children: ReactNode;
-}) {
-  const rowSpan = getMergeRowSpan(points, index, columnKey);
-  if (rowSpan === 0) return null;
-  return (
-    <td rowSpan={rowSpan > 1 ? rowSpan : undefined} className={className}>
-      {children}
-    </td>
-  );
-}
-
 function hasAfternoonValues(point: ElectionPointInput) {
   return Boolean(
     point.cameraStaffNamePm.trim() ||
@@ -519,50 +391,33 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
             </thead>
             <tbody>
               {event.points.length ? (
-                event.points.map((point, index) => (
+                event.points.map((point, index) => {
+                  const regionRowSpan = getRegionRowSpan(event.points, index);
+                  return (
                   <tr key={point.id}>
                     <td className={styles.numberCell}>{index + 1}.</td>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="region">
-                      {readOnlyValue(point.region)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="place">
-                      {readOnlyValue(point.place)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="poolVideo">
-                      {readOnlyValue(point.poolVideo)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="equipmentName">
-                      {readOnlyValue(point.equipmentName)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="trs">
-                      {readOnlyValue(point.trs)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="cameraStaff">
-                      {readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="audioStaff">
-                      {readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="liveTime">
-                      {readOnlySplitValue(point.liveTime, point.liveTimePm)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="reporter">
-                      {readOnlySplitValue(point.reporterName, point.reporterNamePm)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="address">
-                      {readOnlyValue(point.address)}
-                    </ReadOnlyMergedCell>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="note">
-                      {readOnlyValue(point.note)}
-                    </ReadOnlyMergedCell>
+                    {regionRowSpan > 0 ? (
+                      <td rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}>
+                        {readOnlyValue(point.region)}
+                      </td>
+                    ) : null}
+                    <td>{readOnlyValue(point.place)}</td>
+                    <td>{readOnlyValue(point.poolVideo)}</td>
+                    <td>{readOnlyValue(point.equipmentName)}</td>
+                    <td>{readOnlyValue(point.trs)}</td>
+                    <td>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                    <td>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                    <td>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                    <td>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                    <td>{readOnlyValue(point.address)}</td>
+                    <td>{readOnlyValue(point.note)}</td>
                     <td className={styles.positionColumn}>
                       <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
                     </td>
-                    <ReadOnlyMergedCell points={event.points} index={index} columnKey="lighting">
-                      {readOnlyValue(point.lighting)}
-                    </ReadOnlyMergedCell>
+                    <td>{readOnlyValue(point.lighting)}</td>
                   </tr>
-                ))
+                  );
+                })
               ) : (
                 <tr>
                   <td colSpan={15}>
@@ -737,104 +592,81 @@ export function ElectionPage() {
     });
   };
 
-  const updateMergedPoint = (index: number, columnKey: MergeColumnKey, patch: Partial<DraftPoint>) => {
+  const updateRegionGroup = (index: number, region: string) => {
     setDraft((current) => {
       if (!current) return current;
-      const rowSpan = Math.max(1, getMergeRowSpan(current.points, index, columnKey));
+      const range = getRegionGroupRange(current.points, index);
       return {
         ...current,
         points: current.points.map((point, pointIndex) =>
-          pointIndex >= index && pointIndex < index + rowSpan ? { ...point, ...patch } : point,
+          pointIndex >= range.start && pointIndex <= range.end ? { ...point, region } : point,
         ),
       };
     });
   };
 
-  const mergeCellWithPrevious = (index: number, columnKey: MergeColumnKey) => {
-    setDraft((current) => {
-      if (!current || index <= 0) return current;
-      const sourceStartIndex = getMergeStartIndex(current.points, index - 1, columnKey);
-      const sourcePoint = current.points[sourceStartIndex];
-      if (!sourcePoint || !hasMergeColumnValue(sourcePoint, columnKey)) return current;
-
-      const rowSpan = Math.max(1, getMergeRowSpan(current.points, index, columnKey));
-      const patch = getMergeColumnConfig(columnKey).getPatch(sourcePoint);
-      return {
-        ...current,
-        points: current.points.map((point, pointIndex) =>
-          pointIndex >= index && pointIndex < index + rowSpan ? { ...point, ...patch } : point,
-        ),
-      };
-    });
-  };
-
-  const unmergeCell = (index: number, columnKey: MergeColumnKey) => {
+  const addPointToRegion = (index: number) => {
     setDraft((current) => {
       if (!current) return current;
-      const rowSpan = getMergeRowSpan(current.points, index, columnKey);
-      if (rowSpan <= 1) return current;
-
-      const emptyPatch = getMergeColumnConfig(columnKey).getEmptyPatch();
+      const range = getRegionGroupRange(current.points, index);
+      const region = current.points[range.start]?.region ?? "";
+      if (!region.trim()) return current;
+      const nextPoint = {
+        ...createBlankPoint(current.points.length),
+        region,
+      };
       return {
         ...current,
-        points: current.points.map((point, pointIndex) =>
-          pointIndex > index && pointIndex < index + rowSpan ? { ...point, ...emptyPatch } : point,
-        ),
+        points: [
+          ...current.points.slice(0, range.end + 1),
+          nextPoint,
+          ...current.points.slice(range.end + 1),
+        ],
       };
     });
   };
 
-  const renderMergedCell = ({
-    index,
-    columnKey,
-    className,
-    children,
-  }: {
-    index: number;
-    columnKey: MergeColumnKey;
-    className?: string;
-    children: ReactNode;
-  }) => {
-    if (!draft) return null;
-    const rowSpan = getMergeRowSpan(draft.points, index, columnKey);
-    if (rowSpan === 0) return null;
+  const moveRegionGroup = (index: number, direction: "up" | "down") => {
+    setDraft((current) => {
+      if (!current) return current;
+      const range = getRegionGroupRange(current.points, index);
+      if (direction === "up") {
+        if (range.start <= 0) return current;
+        const previousRange = getRegionGroupRange(current.points, range.start - 1);
+        return {
+          ...current,
+          points: [
+            ...current.points.slice(0, previousRange.start),
+            ...current.points.slice(range.start, range.end + 1),
+            ...current.points.slice(previousRange.start, range.start),
+            ...current.points.slice(range.end + 1),
+          ],
+        };
+      }
 
-    const previousCanMerge = index > 0 && hasMergeColumnValue(draft.points[index - 1], columnKey);
-    const control = rowSpan > 1 ? (
-      <button
-        type="button"
-        className={`${styles.mergeCellControl} ${styles.mergeCellControlActive}`.trim()}
-        disabled={saving}
-        onClick={() => unmergeCell(index, columnKey)}
-        title="셀 병합 해제"
-        aria-label="셀 병합 해제"
-      >
-        ⤢
-      </button>
-    ) : previousCanMerge ? (
-      <button
-        type="button"
-        className={styles.mergeCellControl}
-        disabled={saving}
-        onClick={() => mergeCellWithPrevious(index, columnKey)}
-        title="윗행과 셀 병합"
-        aria-label="윗행과 셀 병합"
-      >
-        ↕
-      </button>
-    ) : null;
+      if (range.end >= current.points.length - 1) return current;
+      const nextRange = getRegionGroupRange(current.points, range.end + 1);
+      return {
+        ...current,
+        points: [
+          ...current.points.slice(0, range.start),
+          ...current.points.slice(nextRange.start, nextRange.end + 1),
+          ...current.points.slice(range.start, range.end + 1),
+          ...current.points.slice(nextRange.end + 1),
+        ],
+      };
+    });
+  };
 
-    return (
-      <td
-        rowSpan={rowSpan > 1 ? rowSpan : undefined}
-        className={`${styles.mergeableCell} ${className ?? ""}`.trim()}
-      >
-        <div className={styles.mergeCellInner}>
-          {children}
-          {control}
-        </div>
-      </td>
-    );
+  const movePointWithinRegion = (index: number, direction: "up" | "down") => {
+    setDraft((current) => {
+      if (!current) return current;
+      if (!canMovePointWithinRegion(current.points, index, direction)) return current;
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      const nextPoints = [...current.points];
+      [nextPoints[index], nextPoints[targetIndex]] = [nextPoints[targetIndex], nextPoints[index]];
+      return { ...current, points: nextPoints };
+    });
   };
 
   const isPointSplit = (point: DraftPoint) => Boolean(splitRowIds[point.localId] || hasAfternoonValues(point));
@@ -861,10 +693,10 @@ export function ElectionPage() {
   const updateCameraStaff = (index: number, part: DayPart, value: string) => {
     const userId = resolveProfileIdByName(profiles, value);
     if (part === "am") {
-      updateMergedPoint(index, "cameraStaff", { cameraStaffName: value, cameraStaffUserId: userId });
+      updatePoint(index, { cameraStaffName: value, cameraStaffUserId: userId });
       return;
     }
-    updateMergedPoint(index, "cameraStaff", { cameraStaffNamePm: value, cameraStaffUserIdPm: userId });
+    updatePoint(index, { cameraStaffNamePm: value, cameraStaffUserIdPm: userId });
   };
 
   const addPoint = () => {
@@ -1067,59 +899,76 @@ export function ElectionPage() {
                   <tbody>
                     {draft.points.map((point, index) => {
                       const split = isPointSplit(point);
+                      const regionRowSpan = getRegionRowSpan(draft.points, index);
+                      const hasRegionText = Boolean(normalizeRegionValue(point.region));
                       return (
                       <tr key={point.localId}>
                         <td className={styles.numberCell}>
                           {index + 1}.
                         </td>
-                        {renderMergedCell({
-                          index,
-                          columnKey: "region",
-                          children: (
-                            <input className="field-input" value={point.region} onChange={(event) => updateMergedPoint(index, "region", { region: event.target.value })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "place",
-                          className: styles.placeColumn,
-                          children: (
-                            <input className="field-input" value={point.place} onChange={(event) => updateMergedPoint(index, "place", { place: event.target.value })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "poolVideo",
-                          children: (
-                            <select className="field-select" value={point.poolVideo} onChange={(event) => updateMergedPoint(index, "poolVideo", { poolVideo: event.target.value })}>
-                              <option value="">선택</option>
-                              {getPoolVideoOptions(point.poolVideo).map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "equipmentName",
-                          children: (
-                            <input className="field-input" value={point.equipmentName} onChange={(event) => updateMergedPoint(index, "equipmentName", { equipmentName: event.target.value })} placeholder="TVU-21" />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "trs",
-                          children: (
-                            <input className="field-input" value={point.trs} onChange={(event) => updateMergedPoint(index, "trs", { trs: event.target.value })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "cameraStaff",
-                          className: styles.staffColumn,
-                          children: split ? (
+                        {regionRowSpan > 0 ? (
+                          <td
+                            className={styles.regionColumn}
+                            rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
+                          >
+                            <div className={styles.regionCellInner}>
+                              <input className="field-input" value={point.region} onChange={(event) => updateRegionGroup(index, event.target.value)} />
+                              {hasRegionText ? (
+                                <div className={styles.cellActionRow}>
+                                  <button
+                                    type="button"
+                                    className={styles.cellActionButton}
+                                    disabled={saving}
+                                    onClick={() => addPointToRegion(index)}
+                                    title="같은 지역 하위 행 추가"
+                                    aria-label="같은 지역 하위 행 추가"
+                                  >
+                                    +
+                                  </button>
+                                  <ReorderMenu
+                                    label="지역"
+                                    canMoveUp={canMoveRegionGroup(draft.points, index, "up")}
+                                    canMoveDown={canMoveRegionGroup(draft.points, index, "down")}
+                                    onMoveUp={() => moveRegionGroup(index, "up")}
+                                    onMoveDown={() => moveRegionGroup(index, "down")}
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
+                        <td className={styles.placeColumn}>
+                          <div className={styles.placeCellInner}>
+                            <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                            {hasRegionText ? (
+                              <ReorderMenu
+                                label="장소"
+                                canMoveUp={canMovePointWithinRegion(draft.points, index, "up")}
+                                canMoveDown={canMovePointWithinRegion(draft.points, index, "down")}
+                                onMoveUp={() => movePointWithinRegion(index, "up")}
+                                onMoveDown={() => movePointWithinRegion(index, "down")}
+                              />
+                            ) : null}
+                          </div>
+                        </td>
+                        <td>
+                          <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
+                            <option value="">선택</option>
+                            {getPoolVideoOptions(point.poolVideo).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
+                        </td>
+                        <td>
+                          <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
                             <SplitTextInput
                               morning={point.cameraStaffName}
                               afternoon={point.cameraStaffNamePm}
@@ -1129,69 +978,50 @@ export function ElectionPage() {
                             />
                           ) : (
                             <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "audioStaff",
-                          className: styles.staffColumn,
-                          children: split ? (
+                          )}
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
                             <SplitTextInput
                               morning={point.audioStaffName}
                               afternoon={point.audioStaffNamePm}
-                              onMorningChange={(value) => updateMergedPoint(index, "audioStaff", { audioStaffName: value, audioStaffUserId: null })}
-                              onAfternoonChange={(value) => updateMergedPoint(index, "audioStaff", { audioStaffNamePm: value })}
+                              onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
+                              onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
                             />
                           ) : (
-                            <input className="field-input" value={point.audioStaffName} onChange={(event) => updateMergedPoint(index, "audioStaff", { audioStaffName: event.target.value, audioStaffUserId: null })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "liveTime",
-                          className: styles.staffColumn,
-                          children: split ? (
+                            <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
+                          )}
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
                             <SplitTextInput
                               morning={point.liveTime}
                               afternoon={point.liveTimePm}
-                              onMorningChange={(value) => updateMergedPoint(index, "liveTime", { liveTime: value })}
-                              onAfternoonChange={(value) => updateMergedPoint(index, "liveTime", { liveTimePm: value })}
+                              onMorningChange={(value) => updatePoint(index, { liveTime: value })}
+                              onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
                             />
                           ) : (
-                            <input className="field-input" value={point.liveTime} onChange={(event) => updateMergedPoint(index, "liveTime", { liveTime: event.target.value })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "reporter",
-                          className: styles.staffColumn,
-                          children: split ? (
+                            <input className="field-input" value={point.liveTime} onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
+                          )}
+                        </td>
+                        <td className={styles.staffColumn}>
+                          {split ? (
                             <SplitTextInput
                               morning={point.reporterName}
                               afternoon={point.reporterNamePm}
-                              onMorningChange={(value) => updateMergedPoint(index, "reporter", { reporterName: value, reporterUserId: null })}
-                              onAfternoonChange={(value) => updateMergedPoint(index, "reporter", { reporterNamePm: value })}
+                              onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
+                              onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
                             />
                           ) : (
-                            <input className="field-input" value={point.reporterName} onChange={(event) => updateMergedPoint(index, "reporter", { reporterName: event.target.value, reporterUserId: null })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "address",
-                          className: styles.wideColumn,
-                          children: (
-                            <input className="field-input" value={point.address} onChange={(event) => updateMergedPoint(index, "address", { address: event.target.value })} />
-                          ),
-                        })}
-                        {renderMergedCell({
-                          index,
-                          columnKey: "note",
-                          className: styles.wideColumn,
-                          children: (
-                            <input className="field-input" value={point.note} onChange={(event) => updateMergedPoint(index, "note", { note: event.target.value })} />
-                          ),
-                        })}
+                            <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
+                          )}
+                        </td>
+                        <td className={styles.wideColumn}>
+                          <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
+                        </td>
+                        <td className={styles.wideColumn}>
+                          <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
+                        </td>
                         <td className={styles.positionColumn}>
                           <label
                             className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
@@ -1208,13 +1038,9 @@ export function ElectionPage() {
                             />
                           </label>
                         </td>
-                        {renderMergedCell({
-                          index,
-                          columnKey: "lighting",
-                          children: (
-                            <input className="field-input" value={point.lighting} onChange={(event) => updateMergedPoint(index, "lighting", { lighting: event.target.value })} />
-                          ),
-                        })}
+                        <td>
+                          <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
+                        </td>
                         <td>
                           <div className={styles.rowActions}>
                             <button
