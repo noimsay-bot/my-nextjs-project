@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AdminProfileItem,
   deleteAdminProfile,
@@ -180,6 +180,28 @@ const emptyCustomerSupportWorkspace: CustomerSupportMessageWorkspace = {
   message: null,
 };
 
+function getCustomerSupportWorkspaceWithoutHiddenItems(
+  workspace: CustomerSupportMessageWorkspace,
+  hiddenIds: Set<string>,
+): CustomerSupportMessageWorkspace {
+  if (hiddenIds.size === 0) return workspace;
+  return {
+    ...workspace,
+    items: workspace.items.filter((item) => !hiddenIds.has(item.id)),
+  };
+}
+
+function compareCustomerSupportMessageCreatedAtDesc(
+  left: CustomerSupportMessageWorkspace["items"][number],
+  right: CustomerSupportMessageWorkspace["items"][number],
+) {
+  const leftTime = new Date(left.createdAt).getTime();
+  const rightTime = new Date(right.createdAt).getTime();
+  const normalizedLeftTime = Number.isFinite(leftTime) ? leftTime : 0;
+  const normalizedRightTime = Number.isFinite(rightTime) ? rightTime : 0;
+  return normalizedRightTime - normalizedLeftTime;
+}
+
 const visitRangeLabels: Record<PageVisitRange, string> = {
   week: "최근 7일",
   month: "이번 달",
@@ -305,6 +327,7 @@ export default function AdminPage() {
   const [expandedProcessedSupportIds, setExpandedProcessedSupportIds] = useState<Set<string>>(() => new Set());
   const [customerSupportFeedbackDrafts, setCustomerSupportFeedbackDrafts] = useState<Record<string, string>>({});
   const [draftRoles, setDraftRoles] = useState<Record<string, RoleOption>>({});
+  const hiddenCustomerSupportIdsRef = useRef<Set<string>>(new Set());
 
   async function refresh() {
     setLoading(true);
@@ -318,7 +341,10 @@ export default function AdminPage() {
       setProfiles(workspace.profiles);
       setMemberLevelMap(nextMemberLevelMap);
       setVisitAnalytics(analytics);
-      setCustomerSupport(customerSupportWorkspace);
+      setCustomerSupport(getCustomerSupportWorkspaceWithoutHiddenItems(
+        customerSupportWorkspace,
+        hiddenCustomerSupportIdsRef.current,
+      ));
       setDraftRoles(
         Object.fromEntries(workspace.profiles.map((profile) => [profile.id, profile.role])),
       );
@@ -389,23 +415,45 @@ export default function AdminPage() {
   }
 
   async function handleCustomerSupportDelete(messageId: string) {
-    const confirmed = window.confirm("이 고객센터 접수 내용을 삭제하시겠습니까?");
-    if (!confirmed) return;
+    if (hiddenCustomerSupportIdsRef.current.has(messageId)) return;
+    const removedItem = customerSupport.items.find((item) => item.id === messageId) ?? null;
+    hiddenCustomerSupportIdsRef.current.add(messageId);
     setDeletingSupportId(messageId);
     setMessage("");
-    const result = await deleteCustomerSupportMessage(messageId);
-    setDeletingSupportId(null);
-    if (!result.ok) {
-      setMessage(result.message);
-      return;
-    }
+    setCustomerSupport((current) => getCustomerSupportWorkspaceWithoutHiddenItems(
+      current,
+      hiddenCustomerSupportIdsRef.current,
+    ));
     setExpandedProcessedSupportIds((current) => {
       const next = new Set(current);
       next.delete(messageId);
       return next;
     });
+    setCustomerSupportFeedbackDrafts((current) => {
+      const next = { ...current };
+      delete next[messageId];
+      return next;
+    });
+    const result = await deleteCustomerSupportMessage(messageId);
+    setDeletingSupportId((current) => (current === messageId ? null : current));
+    if (!result.ok) {
+      hiddenCustomerSupportIdsRef.current.delete(messageId);
+      if (removedItem) {
+        setCustomerSupport((current) => {
+          if (current.items.some((item) => item.id === messageId)) return current;
+          return {
+            ...current,
+            items: [...current.items, removedItem].sort(compareCustomerSupportMessageCreatedAtDesc),
+          };
+        });
+      } else {
+        void refresh();
+      }
+      setMessage(result.message);
+      return;
+    }
     setMessage(result.message);
-    await refresh();
+    void refresh();
     notifyCustomerSupportAdminCountChanged();
   }
 
