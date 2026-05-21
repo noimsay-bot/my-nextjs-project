@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { HomeNoticePollPanel } from "@/components/home/HomeNoticePollPanel";
 import { getSession, hasDeskAccess, isReadOnlyPortalRole, subscribeToAuth } from "@/lib/auth/storage";
 import {
   CommunityBoardCategory,
@@ -50,6 +51,7 @@ type CommunityListItem =
       kind: HomeNotice["kind"];
       isActive: boolean;
       applicationEnabled: boolean;
+      poll?: HomeNotice["poll"];
     }
   | {
       id: string;
@@ -98,6 +100,7 @@ function toAutomaticNoticeItem(notice: HomeNotice): CommunityListItem {
     kind: notice.kind,
     isActive: notice.isActive,
     applicationEnabled: notice.applicationEnabled,
+    poll: notice.poll,
   };
 }
 
@@ -883,6 +886,14 @@ export default function HomeNoticeBoardPage() {
                                 ) : null}
 
                                 <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7, color: "#f8fbff", fontSize: 14 }}>{item.body}</div>
+                                {item.source === "notice" && item.poll ? (
+                                  <HomeNoticePollPanel
+                                    noticeId={item.id.replace("notice:", "")}
+                                    poll={item.poll}
+                                    readOnly={isReadOnlyUser}
+                                    onVoted={syncFromCache}
+                                  />
+                                ) : null}
                                 {item.source === "manual" && item.category === "resource" && item.attachment ? (
                                   <div
                                     style={{

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { HomeNoticePollPanel } from "@/components/home/HomeNoticePollPanel";
 import { getSession, isReadOnlyPortalRole, subscribeToAuth } from "@/lib/auth/storage";
 import {
   applyToHomePopupNotice,
@@ -172,6 +173,15 @@ export function HomePopupNoticeModal() {
             <strong style={{ fontSize: 24, lineHeight: 1.25 }}>{notice.title}</strong>
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, color: "#f8fafc" }}>{notice.body}</div>
           </div>
+          {notice.poll ? (
+            <HomeNoticePollPanel
+              noticeId={notice.id}
+              poll={notice.poll}
+              readOnly={isReadOnlyUser}
+              compact
+              onVoted={syncFromCache}
+            />
+          ) : null}
           {message?.text ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
           {notice.applicationEnabled && isReadOnlyUser ? (
             <div className="status note">현재 계정은 조회 전용이라 공지 신청을 할 수 없습니다.</div>

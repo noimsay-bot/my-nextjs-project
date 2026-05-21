@@ -102,6 +102,99 @@
   line-height: 1.45;
 }
 
+.manageEquipmentSection {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.07);
+}
+
+.manageEquipmentForm {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) minmax(180px, 1.2fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.manageEquipmentField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.manageEquipmentActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.manageEquipmentModeText {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.manageEquipmentBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.manageEquipmentBlock > strong {
+  font-size: 13px;
+}
+
+.manageEquipmentList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.manageEquipmentRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.16);
+}
+
+.manageEquipmentName {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.manageEquipmentName strong,
+.manageEquipmentName small {
+  overflow-wrap: anywhere;
+}
+
+.manageEquipmentName small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+:global(html[data-theme="light"]) .manageEquipmentSection {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: #eff6ff;
+}
+
+:global(html[data-theme="light"]) .manageEquipmentRow {
+  border-color: rgba(37, 99, 235, 0.14);
+  background: #ffffff;
+}
+
 .familyBlock,
 .equipmentGroup {
   display: grid;
@@ -1251,6 +1344,14 @@
     min-height: 142px;
   }
 
+  .manageEquipmentForm {
+    grid-template-columns: 1fr;
+  }
+
+  .manageEquipmentForm :global(.btn) {
+    width: 100%;
+  }
+
   .liveFields {
     grid-template-columns: 1fr;
   }
@@ -1282,5 +1383,18 @@
 
   .actionButtons :global(.btn) {
     flex: 1 1 120px;
+  }
+
+  .manageEquipmentActions :global(.btn) {
+    flex: 1 1 140px;
+  }
+
+  .manageEquipmentRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .manageEquipmentRow :global(.btn) {
+    width: 100%;
   }
 }

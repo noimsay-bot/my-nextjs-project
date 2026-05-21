@@ -36,6 +36,30 @@ interface HomePopupNoticeApplicationRow {
   created_at: string;
 }
 
+type HomeNoticePollVoterMode = "anonymous" | "named";
+
+interface HomeNoticePollOption {
+  id: string;
+  title: string;
+}
+
+interface HomeNoticePollVote {
+  optionId: string;
+  voterName?: string;
+  createdAt: string;
+  isCurrentUser?: boolean;
+}
+
+interface HomeNoticePoll {
+  id: string;
+  title: string;
+  voterMode: HomeNoticePollVoterMode;
+  options: HomeNoticePollOption[];
+  votes: HomeNoticePollVote[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface HomeNotice {
   id: string;
   title: string;
@@ -44,6 +68,7 @@ interface HomeNotice {
   tone: "normal" | "urgent";
   isActive: boolean;
   applicationEnabled: boolean;
+  poll?: HomeNoticePoll | null;
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -92,6 +117,16 @@ interface HomePopupNoticeApplication {
   applicantId: string;
   applicantName: string;
   createdAt: string;
+}
+
+interface HomeNoticePollVoteRow {
+  id: string;
+  notice_id: string;
+  poll_id: string;
+  option_id: string;
+  voter_id: string;
+  voter_name: string | null;
+  created_at: string;
 }
 
 interface HomeNoticeStorePayload {
@@ -240,8 +275,33 @@ function isMissingAuditColumnError(error: unknown) {
   return isMissingColumnError(error, "created_by") || isMissingColumnError(error, "updated_by");
 }
 
+function isSupabaseSchemaMissingError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as Record<string, unknown>;
+  const code = typeof record.code === "string" ? record.code : "";
+  const message = typeof record.message === "string" ? record.message : "";
+  const details = typeof record.details === "string" ? record.details : "";
+  const hint = typeof record.hint === "string" ? record.hint : "";
+  const combined = `${message}\n${details}\n${hint}`.toLowerCase();
+
+  return (
+    code === "PGRST205" ||
+    combined.includes("schema cache") ||
+    (combined.includes('relation "public.') && combined.includes("does not exist")) ||
+    (combined.includes("could not find the table") && combined.includes("public."))
+  );
+}
+
+function isUniqueViolationError(error: unknown) {
+  return Boolean(error && typeof error === "object" && (error as Record<string, unknown>).code === "23505");
+}
+
 function normalizeTone(value: unknown) {
   return value === "urgent" ? "urgent" : "normal";
+}
+
+function normalizePollVoterMode(value: unknown): HomeNoticePollVoterMode {
+  return value === "named" ? "named" : "anonymous";
 }
 
 function normalizeKind(value: unknown) {
@@ -271,6 +331,43 @@ function normalizeCommunityBoardAttachment(value: unknown): CommunityBoardAttach
   };
 }
 
+function normalizeHomeNoticePoll(value: unknown): HomeNoticePoll | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<HomeNoticePoll>;
+  const fallbackDate = new Date().toISOString();
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  const options = (Array.isArray(record.options) ? record.options : [])
+    .filter((option): option is HomeNoticePollOption => Boolean(option && typeof option.id === "string"))
+    .map((option) => ({
+      id: option.id.trim(),
+      title: typeof option.title === "string" ? option.title.trim() : "",
+    }))
+    .filter((option) => option.id && option.title)
+    .slice(0, 12);
+  const optionIds = new Set(options.map((option) => option.id));
+  const votes = (Array.isArray(record.votes) ? record.votes : [])
+    .filter((vote): vote is HomeNoticePollVote => Boolean(vote && typeof vote.optionId === "string"))
+    .map((vote) => ({
+      optionId: vote.optionId.trim(),
+      voterName: typeof vote.voterName === "string" ? vote.voterName.trim() : undefined,
+      createdAt: normalizeIsoDate(vote.createdAt, fallbackDate),
+      isCurrentUser: Boolean(vote.isCurrentUser),
+    }))
+    .filter((vote) => optionIds.has(vote.optionId));
+
+  if (!title || options.length < 2) return null;
+
+  return {
+    id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : crypto.randomUUID(),
+    title,
+    voterMode: normalizePollVoterMode(record.voterMode),
+    options,
+    votes,
+    createdAt: normalizeIsoDate(record.createdAt, fallbackDate),
+    updatedAt: normalizeIsoDate(record.updatedAt, fallbackDate),
+  };
+}
+
 function normalizeHomeNotice(input: Partial<HomeNotice> & { id: string; title: string; body: string }): HomeNotice {
   const fallbackDate = new Date().toISOString();
   const kind = normalizeKind(input.kind);
@@ -287,6 +384,7 @@ function normalizeHomeNotice(input: Partial<HomeNotice> & { id: string; title: s
     tone: normalizeTone(input.tone),
     isActive: kind === "popup" ? Boolean(input.isActive) && !isExpired(expiresAt) : true,
     applicationEnabled: kind === "popup" ? Boolean(input.applicationEnabled) : false,
+    poll: normalizeHomeNoticePoll(input.poll),
     expiresAt,
     createdAt: normalizeIsoDate(input.createdAt, fallbackDate),
     updatedAt: normalizeIsoDate(input.updatedAt, fallbackDate),
@@ -354,6 +452,25 @@ function sortNotices(notices: HomeNotice[]) {
     }
     return right.createdAt.localeCompare(left.createdAt);
   });
+}
+
+function serializeNoticeForStore(notice: HomeNotice): HomeNotice {
+  const normalized = normalizeHomeNotice({
+    ...notice,
+    id: notice.id,
+    title: notice.title,
+    body: notice.body,
+  });
+
+  if (!normalized.poll) return normalized;
+
+  return {
+    ...normalized,
+    poll: {
+      ...normalized.poll,
+      votes: [],
+    },
+  };
 }
 
 function sortCommunityPosts(posts: CommunityBoardPost[]) {
@@ -435,7 +552,8 @@ function parseStorePayload(row: HomePopupNoticeStateRow | null | undefined) {
       (parsed?.version !== 2 &&
         parsed?.version !== 3 &&
         parsed?.version !== 4 &&
-        parsed?.version !== 5) ||
+        parsed?.version !== 5 &&
+        parsed?.version !== 6) ||
       !parsedNotices
     ) {
       return {
@@ -525,6 +643,104 @@ function rowToApplication(row: HomePopupNoticeApplicationRow): HomePopupNoticeAp
   };
 }
 
+function sanitizePollForProfile(notice: HomeNotice, profile: Pick<ProfileRow, "id"> | null | undefined): HomeNoticePoll | null {
+  if (!notice.poll) return null;
+  const voterMode = notice.poll.voterMode;
+
+  return {
+    ...notice.poll,
+    votes: notice.poll.votes.map((vote) => ({
+      optionId: vote.optionId,
+      voterName: voterMode === "named" ? vote.voterName : undefined,
+      createdAt: vote.createdAt,
+      isCurrentUser: Boolean(vote.isCurrentUser),
+    })),
+  };
+}
+
+function sanitizeNoticeForProfile(notice: HomeNotice, profile: Pick<ProfileRow, "id"> | null | undefined): HomeNotice {
+  return {
+    ...notice,
+    poll: sanitizePollForProfile(notice, profile),
+  };
+}
+
+function sanitizeWorkspaceForProfile(
+  workspace: ReturnType<typeof parseStorePayload>,
+  profile: Pick<ProfileRow, "id"> | null | undefined,
+) {
+  return {
+    ...workspace,
+    notices: workspace.notices.map((notice) => sanitizeNoticeForProfile(notice, profile)),
+  };
+}
+
+async function fetchHomeNoticePollVoteRows(
+  admin: ReturnType<typeof createAdminClient>,
+  notices: HomeNotice[],
+) {
+  const noticeIds = notices
+    .filter((notice) => notice.poll && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(notice.id))
+    .map((notice) => notice.id);
+
+  if (noticeIds.length === 0) return [] as HomeNoticePollVoteRow[];
+
+  const { data, error } = await admin
+    .from("home_notice_poll_votes")
+    .select("id, notice_id, poll_id, option_id, voter_id, voter_name, created_at")
+    .in("notice_id", noticeIds)
+    .returns<HomeNoticePollVoteRow[]>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      return [];
+    }
+    throw new Error("투표 결과 조회에 실패했습니다.");
+  }
+
+  return data ?? [];
+}
+
+function mergePollVotesIntoWorkspace(
+  workspace: ReturnType<typeof parseStorePayload>,
+  voteRows: HomeNoticePollVoteRow[],
+  profile: Pick<ProfileRow, "id"> | null | undefined,
+) {
+  if (voteRows.length === 0) return workspace;
+
+  const rowsByPoll = voteRows.reduce<Record<string, HomeNoticePollVoteRow[]>>((groups, row) => {
+    const key = `${row.notice_id}:${row.poll_id}`;
+    groups[key] = groups[key] ?? [];
+    groups[key].push(row);
+    return groups;
+  }, {});
+
+  return {
+    ...workspace,
+    notices: workspace.notices.map((notice) => {
+      if (!notice.poll) return notice;
+
+      const key = `${notice.id}:${notice.poll.id}`;
+      const rows = rowsByPoll[key] ?? [];
+      const optionIds = new Set(notice.poll.options.map((option) => option.id));
+      return normalizeHomeNotice({
+        ...notice,
+        poll: {
+          ...notice.poll,
+          votes: rows
+            .filter((row) => optionIds.has(row.option_id))
+            .map((row) => ({
+              optionId: row.option_id,
+              voterName: notice.poll?.voterMode === "named" ? row.voter_name ?? "사용자" : undefined,
+              createdAt: row.created_at,
+              isCurrentUser: Boolean(profile?.id && row.voter_id === profile.id),
+            })),
+        },
+      });
+    }),
+  };
+}
+
 function canWriteCommunityCategory(
   category: CommunityBoardPost["category"],
   profile: ProfileRow,
@@ -573,8 +789,8 @@ function buildStorePayload(
   communityComments: CommunityBoardComment[],
 ) {
   return JSON.stringify({
-    version: 5,
-    notices: sortNotices(notices),
+    version: 6,
+    notices: sortNotices(notices.map(serializeNoticeForStore)),
     ddays: getActiveHomeDdays(ddays).slice(0, 3),
     communityPosts: sortCommunityPosts(communityPosts),
     communityComments: sortCommunityComments(communityComments),
@@ -679,14 +895,16 @@ function buildWorkspaceJson(
   workspace: ReturnType<typeof parseStorePayload>,
   applications: HomePopupNoticeApplication[] = [],
   ownApplied = false,
+  profile: Pick<ProfileRow, "id"> | null | undefined = null,
 ) {
-  const activePopup = getActivePopupNotice(workspace.notices);
+  const safeWorkspace = sanitizeWorkspaceForProfile(workspace, profile);
+  const activePopup = getActivePopupNotice(safeWorkspace.notices);
   return {
     notice: activePopup,
-    notices: workspace.notices,
-    ddays: workspace.ddays,
-    communityPosts: workspace.communityPosts,
-    communityComments: workspace.communityComments,
+    notices: safeWorkspace.notices,
+    ddays: safeWorkspace.ddays,
+    communityPosts: safeWorkspace.communityPosts,
+    communityComments: safeWorkspace.communityComments,
     applications,
     ownApplied,
   };
@@ -1015,7 +1233,12 @@ export async function GET(request: Request) {
     }
 
     const workspace = parseStorePayload(noticeRow ?? null);
-    const activePopup = getActivePopupNotice(workspace.notices);
+    const voteRows = await withTimeout(
+      fetchHomeNoticePollVoteRows(admin, workspace.notices),
+      "투표 결과 조회가 지연되고 있습니다.",
+    );
+    const workspaceWithVotes = mergePollVotesIntoWorkspace(workspace, voteRows, profile);
+    const activePopup = getActivePopupNotice(workspaceWithVotes.notices);
     let ownApplied = false;
     let applications: HomePopupNoticeApplication[] = [];
 
@@ -1045,12 +1268,15 @@ export async function GET(request: Request) {
       }
     }
 
+    const safeWorkspace = sanitizeWorkspaceForProfile(workspaceWithVotes, profile);
+    const safeActivePopup = getActivePopupNotice(safeWorkspace.notices);
+
     return NextResponse.json({
-      notice: activePopup,
-      notices: workspace.notices,
-      ddays: workspace.ddays,
-      communityPosts: workspace.communityPosts,
-      communityComments: workspace.communityComments,
+      notice: safeActivePopup,
+      notices: safeWorkspace.notices,
+      ddays: safeWorkspace.ddays,
+      communityPosts: safeWorkspace.communityPosts,
+      communityComments: safeWorkspace.communityComments,
       applications,
       ownApplied,
       ...(includeTrips ? { tripCards: buildTripCards(scheduleRows ?? [], assignmentRows ?? []) } : {}),
@@ -1162,7 +1388,7 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace), post: nextPost });
+      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace, [], false, profile), post: nextPost });
     }
 
     if (action === "updatePost") {
@@ -1212,7 +1438,7 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json(buildWorkspaceJson(nextWorkspace));
+      return NextResponse.json(buildWorkspaceJson(nextWorkspace, [], false, profile));
     }
 
     if (action === "deletePost") {
@@ -1240,7 +1466,78 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json(buildWorkspaceJson(nextWorkspace));
+      return NextResponse.json(buildWorkspaceJson(nextWorkspace, [], false, profile));
+    }
+
+    if (action === "votePoll") {
+      if (profile.role === "observer") {
+        return NextResponse.json({ message: "Observer 등급은 투표할 수 없습니다." }, { status: 403 });
+      }
+
+      const noticeId = typeof payload?.noticeId === "string" ? payload.noticeId.trim() : "";
+      const optionId = typeof payload?.optionId === "string" ? payload.optionId.trim() : "";
+      const targetNotice = workspace.notices.find((notice) => notice.id === noticeId) ?? null;
+      const poll = targetNotice?.poll ?? null;
+      const targetOption = poll?.options.find((option) => option.id === optionId) ?? null;
+
+      if (!targetNotice || !poll) {
+        return NextResponse.json({ message: "투표할 공지를 찾지 못했습니다." }, { status: 404 });
+      }
+      if (!targetOption) {
+        return NextResponse.json({ message: "투표 항목을 찾지 못했습니다." }, { status: 404 });
+      }
+
+      const { data: existingVote, error: existingVoteError } = await withTimeout(
+        admin
+          .from("home_notice_poll_votes")
+          .select("id")
+          .eq("notice_id", targetNotice.id)
+          .eq("poll_id", poll.id)
+          .eq("voter_id", profile.id)
+          .maybeSingle<{ id: string }>(),
+        "투표 상태 확인이 지연되고 있습니다.",
+      );
+
+      if (existingVoteError) {
+        if (isSupabaseSchemaMissingError(existingVoteError)) {
+          return NextResponse.json({ message: "투표 테이블 구조가 아직 적용되지 않았습니다." }, { status: 500 });
+        }
+        throw new Error("투표 상태 확인에 실패했습니다.");
+      }
+      if (existingVote?.id) {
+        return NextResponse.json({ message: "이미 투표했습니다." }, { status: 409 });
+      }
+
+      const { error: voteError } = await withTimeout(
+        admin
+          .from("home_notice_poll_votes")
+          .insert({
+            notice_id: targetNotice.id,
+            poll_id: poll.id,
+            option_id: optionId,
+            voter_id: profile.id,
+            voter_name: poll.voterMode === "named" ? authorName : null,
+          } as never),
+        "투표 반영이 지연되고 있습니다.",
+      );
+
+      if (voteError) {
+        if (isUniqueViolationError(voteError)) {
+          return NextResponse.json({ message: "이미 투표했습니다." }, { status: 409 });
+        }
+        if (isSupabaseSchemaMissingError(voteError)) {
+          return NextResponse.json({ message: "투표 테이블 구조가 아직 적용되지 않았습니다." }, { status: 500 });
+        }
+        throw new Error("투표를 반영하지 못했습니다.");
+      }
+
+      const voteRows = await withTimeout(
+        fetchHomeNoticePollVoteRows(admin, workspace.notices),
+        "투표 결과 조회가 지연되고 있습니다.",
+      );
+      const workspaceWithVotes = mergePollVotesIntoWorkspace(workspace, voteRows, profile);
+
+      return NextResponse.json(buildWorkspaceJson(workspaceWithVotes, [], false, profile));
     }
 
     if (action === "createComment") {
@@ -1277,7 +1574,7 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace), comment: nextComment });
+      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace, [], false, profile), comment: nextComment });
     }
 
     return NextResponse.json({ message: "지원하지 않는 커뮤니티 작업입니다." }, { status: 400 });

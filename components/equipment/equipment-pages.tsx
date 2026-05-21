@@ -14,7 +14,9 @@ import {
   borrowEngSets,
   borrowEquipmentItems,
   canReturnLoanItem,
+  createEquipmentItem,
   fetchEquipmentItems,
+  fetchEquipmentItemsForManagement,
   fetchLiveEquipmentItemsForManagement,
   fetchEquipmentLoanItems,
   fetchEquipmentProfiles,
@@ -22,6 +24,7 @@ import {
   renameRentalTvuItem,
   returnEquipmentLoanItems,
   saveLiveEquipmentStatusEntries,
+  setEquipmentItemActive,
   setEquipmentItemsRepairStatus,
   setRentalTvuItemsActive,
   setTvuGridStatus,
@@ -54,6 +57,10 @@ type EquipmentItemCardTone = "default" | "live";
 type RepairDraftByItemId = Record<string, boolean>;
 type LiveStatusDraftByItemId = Record<string, LiveLoanDetails>;
 type LiveAccessoryGroupKey = "pin_mic" | "distributor";
+type ManagedEquipmentDraft = {
+  groupName: string;
+  name: string;
+};
 type StandaloneInlineAccessoryEntry =
   | { type: "item"; key: string; sortOrder: number; item: EquipmentItem }
   | { type: "variant"; key: string; sortOrder: number; parentLabel: string; items: EquipmentItem[] };
@@ -326,11 +333,25 @@ function isRegionalTransmissionTvuItem(item: EquipmentItem) {
   return /^live-regional-tvu-\d+$/i.test(item.code.trim());
 }
 
+function isDeskManagedEquipmentCategory(category: EquipmentCategory) {
+  return category === "camera_lens" || category === "light" || category === "live";
+}
+
+function isDeskManagedEquipmentItem(item: EquipmentItem) {
+  if (!isDeskManagedEquipmentCategory(item.category)) return false;
+  if (isTvuItem(item) || isRentalTvuItem(item) || isRegionalTransmissionTvuItem(item)) return false;
+  return true;
+}
+
 function isBorrowableEquipmentItem(item: EquipmentItem) {
   return item.metadata.borrowable !== false && item.metadata.borrowable !== "false" && !isRegionalTransmissionTvuItem(item);
 }
 
 function hasRentalTvuManagerRole(role: SessionUser["role"] | null | undefined) {
+  return role === "desk" || role === "team_lead" || role === "admin";
+}
+
+function hasEquipmentItemManagerRole(role: SessionUser["role"] | null | undefined) {
   return role === "desk" || role === "team_lead" || role === "admin";
 }
 
@@ -2056,6 +2077,126 @@ function RentalTvuSection({
   );
 }
 
+function ManagedEquipmentSection({
+  category,
+  activeItems,
+  inactiveItems,
+  draft,
+  actionPending,
+  deactivateMode,
+  showInactiveItems,
+  onDraftChange,
+  onCreate,
+  onDeactivateModeStart,
+  onDeactivateModeCancel,
+  onInactiveToggle,
+  onActiveChange,
+}: {
+  category: EquipmentCategory;
+  activeItems: EquipmentItem[];
+  inactiveItems: EquipmentItem[];
+  draft: ManagedEquipmentDraft;
+  actionPending: boolean;
+  deactivateMode: boolean;
+  showInactiveItems: boolean;
+  onDraftChange: (draft: ManagedEquipmentDraft) => void;
+  onCreate: () => void;
+  onDeactivateModeStart: () => void;
+  onDeactivateModeCancel: () => void;
+  onInactiveToggle: () => void;
+  onActiveChange: (item: EquipmentItem, isActive: boolean) => void;
+}) {
+  const groupPlaceholder = category === "camera_lens" ? "예: FX3 렌즈, 단독 카메라" : category === "light" ? "예: 조명, 배터리" : "예: 무선마이크, 모니터";
+  const activeManageableItems = activeItems.filter(isDeskManagedEquipmentItem);
+  const inactiveManageableItems = inactiveItems.filter(isDeskManagedEquipmentItem);
+
+  const renderInactiveRows = (items: EquipmentItem[]) => (
+    <div className={styles.manageEquipmentList}>
+      {items.map((item) => (
+        <div key={item.id} className={styles.manageEquipmentRow}>
+          <span className={styles.manageEquipmentName}>
+            <strong>{getEquipmentDisplayName(item)}</strong>
+            <small>{getEquipmentGroupDisplayName(item.groupName)}</small>
+          </span>
+          <button
+            type="button"
+            className="btn"
+            disabled={actionPending}
+            onClick={() => onActiveChange(item, true)}
+          >
+            복구
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <section className={styles.manageEquipmentSection}>
+      <div className={styles.groupHead}>
+        <h3>장비 관리</h3>
+        <span>{activeManageableItems.length}개 활성 · {inactiveManageableItems.length}개 비활성</span>
+      </div>
+      <form
+        className={styles.manageEquipmentForm}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onCreate();
+        }}
+      >
+        <label className={styles.manageEquipmentField}>
+          <span>그룹</span>
+          <input
+            className="field-input"
+            value={draft.groupName}
+            maxLength={80}
+            placeholder={groupPlaceholder}
+            onChange={(event) => onDraftChange({ ...draft, groupName: event.target.value })}
+            disabled={actionPending}
+          />
+        </label>
+        <label className={styles.manageEquipmentField}>
+          <span>장비명</span>
+          <input
+            className="field-input"
+            value={draft.name}
+            maxLength={120}
+            placeholder="예: A7S3 1번, LED 패널 2번"
+            onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
+            disabled={actionPending}
+          />
+        </label>
+        <button type="submit" className="btn primary" disabled={actionPending || !draft.groupName.trim() || !draft.name.trim()}>
+          추가
+        </button>
+      </form>
+      <div className={styles.manageEquipmentActions}>
+        {deactivateMode ? (
+          <button type="button" className="btn primary" disabled={actionPending} onClick={onDeactivateModeCancel}>
+            비활성화 취소
+          </button>
+        ) : (
+          <button type="button" className="btn" disabled={actionPending || activeManageableItems.length === 0} onClick={onDeactivateModeStart}>
+            비활성화
+          </button>
+        )}
+        <button type="button" className="btn" disabled={actionPending || inactiveManageableItems.length === 0} onClick={onInactiveToggle}>
+          {showInactiveItems ? "비활성 장비 숨기기" : "비활성 장비 보기"}
+        </button>
+      </div>
+      {deactivateMode ? (
+        <p className={styles.manageEquipmentModeText}>비활성화할 장비를 아래 장비 목록에서 클릭하세요. 대여중인 장비는 비활성화할 수 없습니다.</p>
+      ) : null}
+      {showInactiveItems && inactiveManageableItems.length > 0 ? (
+        <div className={styles.manageEquipmentBlock}>
+          <strong>비활성 장비</strong>
+          {renderInactiveRows(inactiveManageableItems)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function EquipmentCategoryPage({ category }: { category: EquipmentCategory }) {
   const config = equipmentCategoryConfigs[category];
   const [session, setSession] = useState<SessionUser | null>(() => getSession());
@@ -2076,6 +2217,9 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [rentalTvuSelectionIds, setRentalTvuSelectionIds] = useState<string[]>([]);
   const [rentalTvuEditItemId, setRentalTvuEditItemId] = useState<string | null>(null);
   const [rentalTvuEditName, setRentalTvuEditName] = useState("");
+  const [managedEquipmentDraft, setManagedEquipmentDraft] = useState<ManagedEquipmentDraft>({ groupName: "", name: "" });
+  const [managedDeactivateMode, setManagedDeactivateMode] = useState(false);
+  const [showInactiveManagedItems, setShowInactiveManagedItems] = useState(false);
   const [gridPendingItemId, setGridPendingItemId] = useState<string | null>(null);
 
   const isEngSetPage = category === "eng_set";
@@ -2083,6 +2227,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const canReturnEquipment = Boolean(session?.approved && (!isReadOnlyPortalRole(session.role) || hasDeskAccess(session.actualRole)));
   const canManageRepair = Boolean(session?.approved && hasDeskAccess(session.role));
   const canManageRentalTvu = Boolean(session?.approved && hasRentalTvuManagerRole(session.actualRole));
+  const canManageEquipmentItems = Boolean(session?.approved && hasEquipmentItemManagerRole(session.actualRole) && isDeskManagedEquipmentCategory(category));
   const canManageTvuGrid = canManageRentalTvu;
   const canViewRegionalTransmissionItems = Boolean(session?.approved && hasDeskAccess(session.actualRole));
   const showEquipmentStatusLink = canViewEquipmentStatus(session);
@@ -2092,9 +2237,16 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     setLoading(true);
     setMessage(null);
     try {
+      const currentSession = getSession();
+      const shouldLoadManagementItems = Boolean(currentSession?.approved && hasEquipmentItemManagerRole(currentSession.actualRole) && isDeskManagedEquipmentCategory(category));
+      const shouldLoadInactiveLiveItems = Boolean(currentSession?.approved && hasRentalTvuManagerRole(currentSession.actualRole));
       const [nextCurrent, nextItems, nextProfiles, nextHighlights] = await Promise.all([
         fetchEquipmentLoanItems({ status: "borrowed" }),
-        category === "live" ? fetchLiveEquipmentItemsForManagement() : fetchEquipmentItems([category]),
+        category === "live"
+          ? fetchLiveEquipmentItemsForManagement(shouldLoadInactiveLiveItems)
+          : shouldLoadManagementItems
+            ? fetchEquipmentItemsForManagement([category])
+            : fetchEquipmentItems([category]),
         isEngSetPage ? fetchEquipmentProfiles() : Promise.resolve([]),
         isEngSetPage ? loadEngScheduleHighlights(highlightDateKey) : Promise.resolve(new Map() as EngScheduleHighlightMap),
       ]);
@@ -2113,6 +2265,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => subscribeToAuth(setSession), []);
 
   useEffect(() => {
     setSelectedEntries(readBorrowSelections(session?.id));
@@ -2184,6 +2338,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   );
   const visibleItems = useMemo(() => items.filter((item) => !isHiddenEquipmentChoiceItem(item)), [items]);
   const activeVisibleItems = useMemo(() => visibleItems.filter((item) => item.isActive), [visibleItems]);
+  const inactiveVisibleItems = useMemo(() => visibleItems.filter((item) => !item.isActive), [visibleItems]);
   const inactiveRentalTvuItems = useMemo(
     () => visibleItems.filter((item) => isRentalTvuItem(item) && !item.isActive),
     [visibleItems],
@@ -2368,6 +2523,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       setMessage({ tone: "warn", text: "장비 수리 처리 권한이 없습니다." });
       return;
     }
+    setManagedDeactivateMode(false);
     setRepairMode(true);
     setRepairDraftByItemId({});
     setConfirmMode(null);
@@ -2385,6 +2541,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       setMessage({ tone: "warn", text: "임대 장비 관리 권한이 없습니다." });
       return;
     }
+    setManagedDeactivateMode(false);
     setRepairMode(false);
     setRepairDraftByItemId({});
     setConfirmMode(null);
@@ -2478,6 +2635,87 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     } finally {
       setActionPending(false);
     }
+  };
+
+  const confirmManagedEquipmentCreate = async () => {
+    if (!canManageEquipmentItems) {
+      setMessage({ tone: "warn", text: "장비 관리 권한이 없습니다." });
+      return;
+    }
+    const groupName = managedEquipmentDraft.groupName.trim();
+    const name = managedEquipmentDraft.name.trim();
+    if (!groupName || !name) {
+      setMessage({ tone: "note", text: "장비 그룹과 장비명을 입력해 주세요." });
+      return;
+    }
+
+    setActionPending(true);
+    try {
+      await createEquipmentItem({ category, groupName, name });
+      setManagedEquipmentDraft({ groupName, name: "" });
+      setMessage({ tone: "ok", text: "장비를 추가했습니다." });
+      await load();
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "장비 추가에 실패했습니다." });
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const openManagedDeactivateMode = () => {
+    if (!canManageEquipmentItems) {
+      setMessage({ tone: "warn", text: "장비 관리 권한이 없습니다." });
+      return;
+    }
+    setRepairMode(false);
+    setRepairDraftByItemId({});
+    setRentalTvuMode(null);
+    setRentalTvuSelectionIds([]);
+    setRentalTvuEditItemId(null);
+    setRentalTvuEditName("");
+    setConfirmMode(null);
+    setManagedDeactivateMode(true);
+    setShowInactiveManagedItems(false);
+    updateBorrowSelections(() => []);
+    setLiveDetails(liveDetailEmpty);
+    setMessage({ tone: "note", text: "비활성화할 장비를 아래 장비 목록에서 클릭하세요." });
+  };
+
+  const cancelManagedDeactivateMode = () => {
+    setManagedDeactivateMode(false);
+    setMessage(null);
+  };
+
+  const setManagedEquipmentActive = async (item: EquipmentItem, isActive: boolean) => {
+    if (!canManageEquipmentItems) {
+      setMessage({ tone: "warn", text: "장비 관리 권한이 없습니다." });
+      return;
+    }
+    if (!isActive && currentByItemId.has(item.id)) {
+      setMessage({ tone: "note", text: "대여중인 장비는 비활성화할 수 없습니다." });
+      return;
+    }
+
+    setActionPending(true);
+    try {
+      await setEquipmentItemActive(item.id, isActive);
+      setMessage({ tone: "ok", text: `${getEquipmentDisplayName(item)} 장비를 ${isActive ? "복구" : "비활성화"}했습니다.` });
+      await load();
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "장비 상태 변경에 실패했습니다." });
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const deactivateManagedEquipmentItem = (itemId: string) => {
+    if (actionPending) return;
+    const item = itemById.get(itemId);
+    if (!item || !isDeskManagedEquipmentItem(item)) {
+      setMessage({ tone: "note", text: "이 관리 패널에서 비활성화할 수 없는 장비입니다." });
+      return;
+    }
+    void setManagedEquipmentActive(item, false);
   };
 
   const openBorrowDialog = () => {
@@ -2610,14 +2848,18 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                   ? `${repairChangeCount}개 변경 예정`
                   : rentalTvuMode
                     ? `${rentalTvuSelectionIds.length}개 임대 장비 선택됨`
-                    : `${selectedIds.length}개 선택됨`}
+                    : managedDeactivateMode
+                      ? "장비 비활성화 모드"
+                      : `${selectedIds.length}개 선택됨`}
               </strong>
               <span className="muted">
                 {repairMode
                   ? "장비를 클릭해 수리중/해제를 선택한 뒤 확인을 누르세요."
                   : rentalTvuMode
                     ? "임대 장비 섹션의 확인/취소 버튼으로 변경을 마무리하세요."
-                    : "대여중/수리중 장비는 선택할 수 없습니다."}
+                    : managedDeactivateMode
+                      ? "비활성화할 장비를 클릭하면 바로 비활성화됩니다."
+                      : "대여중/수리중 장비는 선택할 수 없습니다."}
               </span>
             </div>
             <div className={styles.actionButtons}>
@@ -2630,7 +2872,11 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                     취소
                   </button>
                 </>
-              ) : rentalTvuMode ? null : (
+              ) : rentalTvuMode ? null : managedDeactivateMode ? (
+                <button type="button" className="btn" disabled={actionPending} onClick={cancelManagedDeactivateMode}>
+                  비활성화 취소
+                </button>
+              ) : (
                 <>
                   <button type="button" className="btn primary" disabled={!canMutate || selectedIds.length === 0 || actionPending} onClick={openBorrowDialog}>
                     대여하기
@@ -2655,6 +2901,23 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             </div>
           </div>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+          {canManageEquipmentItems && !loading && !repairMode && !rentalTvuMode ? (
+            <ManagedEquipmentSection
+              category={category}
+              activeItems={activeVisibleItems}
+              inactiveItems={inactiveVisibleItems}
+              draft={managedEquipmentDraft}
+              actionPending={actionPending}
+              deactivateMode={managedDeactivateMode}
+              showInactiveItems={showInactiveManagedItems}
+              onDraftChange={setManagedEquipmentDraft}
+              onCreate={confirmManagedEquipmentCreate}
+              onDeactivateModeStart={openManagedDeactivateMode}
+              onDeactivateModeCancel={cancelManagedDeactivateMode}
+              onInactiveToggle={() => setShowInactiveManagedItems((current) => !current)}
+              onActiveChange={setManagedEquipmentActive}
+            />
+          ) : null}
           {loading ? (
             <LoadingBlocks />
           ) : isEngSetPage ? (
@@ -2730,9 +2993,9 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
           ) : category === "camera_lens" ? (
             <CameraGroups
               items={activeVisibleItems}
-              selectedIds={repairMode ? [] : selectedIds}
+              selectedIds={repairMode || managedDeactivateMode ? [] : selectedIds}
               currentByItemId={currentByItemId}
-              onToggle={repairMode ? toggleRepairDraft : toggleSelection}
+              onToggle={managedDeactivateMode ? deactivateManagedEquipmentItem : repairMode ? toggleRepairDraft : toggleSelection}
               repairMode={repairMode}
               repairDraftByItemId={repairDraftByItemId}
             />
@@ -2740,11 +3003,11 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             <>
               <LiveEquipmentGroups
                 items={activeLiveBorrowableOrRentalItems}
-                selectedIds={repairMode || rentalTvuMode ? [] : selectedIds}
+                selectedIds={repairMode || rentalTvuMode || managedDeactivateMode ? [] : selectedIds}
                 currentByItemId={currentByItemId}
-                selectedTrsValues={rentalTvuMode ? [] : selectedTrsValues}
+                selectedTrsValues={rentalTvuMode || managedDeactivateMode ? [] : selectedTrsValues}
                 onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
-                onToggle={rentalTvuMode ? () => undefined : repairMode ? toggleRepairDraft : toggleSelection}
+                onToggle={managedDeactivateMode ? deactivateManagedEquipmentItem : rentalTvuMode ? () => undefined : repairMode ? toggleRepairDraft : toggleSelection}
                 repairMode={repairMode}
                 repairDraftByItemId={repairDraftByItemId}
                 rentalTvuMode={rentalTvuMode}
@@ -2791,9 +3054,9 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             <div className={styles.sectionStack}>
               {renderGroupedItems({
                 items: activeVisibleItems,
-                selectedIds: repairMode ? [] : selectedIds,
+                selectedIds: repairMode || managedDeactivateMode ? [] : selectedIds,
                 currentByItemId,
-                onToggle: repairMode ? toggleRepairDraft : toggleSelection,
+                onToggle: managedDeactivateMode ? deactivateManagedEquipmentItem : repairMode ? toggleRepairDraft : toggleSelection,
                 repairMode,
                 repairDraftByItemId,
               })}

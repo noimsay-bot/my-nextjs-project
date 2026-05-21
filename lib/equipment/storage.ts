@@ -89,6 +89,12 @@ export interface EquipmentLoanItemQuery {
   dateKey?: string;
 }
 
+export interface ManagedEquipmentItemDraft {
+  category: EquipmentCategory;
+  groupName: string;
+  name: string;
+}
+
 function normalizeMetadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -210,7 +216,32 @@ export async function fetchEquipmentItems(categories?: EquipmentCategory[]) {
   return (data ?? []).map(rowToItem);
 }
 
-export async function fetchLiveEquipmentItemsForManagement() {
+export async function fetchEquipmentItemsForManagement(categories?: EquipmentCategory[]) {
+  const session = await getPortalSession();
+  if (!session?.approved || !hasEquipmentItemManagerRole(session.actualRole)) {
+    return [];
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  let query = supabase
+    .from("equipment_items")
+    .select("id, category, group_name, name, code, sort_order, is_active, metadata, created_at, updated_at")
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+
+  if (categories?.length) {
+    query = query.in("category", categories);
+  }
+
+  const { data, error } = await query.returns<EquipmentItemRow[]>();
+  if (error) {
+    throw new Error(getEquipmentStorageErrorMessage(error, "equipment_items"));
+  }
+
+  return (data ?? []).map(rowToItem);
+}
+
+export async function fetchLiveEquipmentItemsForManagement(includeInactive = true) {
   const session = await getPortalSession();
   if (!session?.approved) {
     return [];
@@ -229,9 +260,8 @@ export async function fetchLiveEquipmentItemsForManagement() {
     throw new Error(getEquipmentStorageErrorMessage(error, "equipment_items"));
   }
 
-  return (data ?? [])
-    .map(rowToItem)
-    .filter((item) => item.isActive || item.metadata.rental === true || item.metadata.rental === "true");
+  const items = (data ?? []).map(rowToItem);
+  return includeInactive ? items : items.filter((item) => item.isActive);
 }
 
 export async function fetchEquipmentProfiles() {
@@ -403,6 +433,10 @@ function hasRentalTvuManagerRole(role: string | null | undefined) {
   return role === "desk" || role === "team_lead" || role === "admin";
 }
 
+function hasEquipmentItemManagerRole(role: string | null | undefined) {
+  return role === "desk" || role === "team_lead" || role === "admin";
+}
+
 function assertCanManageRentalTvu() {
   const session = getSession();
   if (!session?.approved || !hasRentalTvuManagerRole(session.actualRole)) {
@@ -561,6 +595,56 @@ export async function renameRentalTvuItem(itemId: string, name: string) {
   if (error) {
     throw new Error(getEquipmentStorageErrorMessage(error, "rental TVU equipment"));
   }
+}
+
+async function requestEquipmentItemManagement(
+  path: string,
+  init: RequestInit,
+  fallbackMessage: string,
+) {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+  const payload = await response.json().catch(() => null) as { message?: unknown } | null;
+
+  if (!response.ok) {
+    throw new Error(typeof payload?.message === "string" ? payload.message : fallbackMessage);
+  }
+}
+
+export async function createEquipmentItem(draft: ManagedEquipmentItemDraft) {
+  const session = getSession();
+  if (!session?.approved || !hasEquipmentItemManagerRole(session.actualRole)) {
+    throw new Error("장비 관리 권한이 없습니다.");
+  }
+
+  await requestEquipmentItemManagement(
+    "/api/equipment/items",
+    {
+      method: "POST",
+      body: JSON.stringify(draft),
+    },
+    "장비 추가에 실패했습니다.",
+  );
+}
+
+export async function setEquipmentItemActive(itemId: string, isActive: boolean) {
+  const session = getSession();
+  if (!session?.approved || !hasEquipmentItemManagerRole(session.actualRole)) {
+    throw new Error("장비 관리 권한이 없습니다.");
+  }
+
+  await requestEquipmentItemManagement(
+    "/api/equipment/items",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ itemId, isActive }),
+    },
+    isActive ? "장비 활성화에 실패했습니다." : "장비 비활성화에 실패했습니다.",
+  );
 }
 
 export async function setTvuGridStatus(itemId: string, isGrid: boolean) {

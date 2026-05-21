@@ -10,8 +10,8 @@ import {
 } from "@/lib/supabase/portal";
 
 const HOME_POPUP_NOTICE_ROW_KEY = "active";
-const HOME_NOTICE_STORE_VERSION = 5;
-const HOME_WORKSPACE_LOCAL_CACHE_VERSION = 2;
+const HOME_NOTICE_STORE_VERSION = 6;
+const HOME_WORKSPACE_LOCAL_CACHE_VERSION = 3;
 const HOME_WORKSPACE_LOCAL_CACHE_PREFIX = "jtbc-home-workspace-cache-v2";
 
 export const HOME_POPUP_NOTICE_EVENT = "j-home-popup-notice-updated";
@@ -19,7 +19,36 @@ export const HOME_POPUP_NOTICE_STATUS_EVENT = "j-home-popup-notice-status";
 
 export type HomeNoticeKind = "general" | "popup";
 export type HomeNoticeTone = "normal" | "urgent";
+export type HomeNoticePollVoterMode = "anonymous" | "named";
 export type CommunityBoardCategory = "notice" | "family" | "celebration" | "resource";
+
+export interface HomeNoticePollOption {
+  id: string;
+  title: string;
+}
+
+export interface HomeNoticePollVote {
+  optionId: string;
+  voterName?: string;
+  createdAt: string;
+  isCurrentUser?: boolean;
+}
+
+export interface HomeNoticePoll {
+  id: string;
+  title: string;
+  voterMode: HomeNoticePollVoterMode;
+  options: HomeNoticePollOption[];
+  votes: HomeNoticePollVote[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HomeNoticePollDraft {
+  title: string;
+  voterMode: HomeNoticePollVoterMode;
+  options: string[];
+}
 
 export interface HomeNotice {
   id: string;
@@ -29,6 +58,7 @@ export interface HomeNotice {
   tone: HomeNoticeTone;
   isActive: boolean;
   applicationEnabled: boolean;
+  poll?: HomeNoticePoll | null;
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -280,12 +310,28 @@ function isMissingAuditColumnError(error: unknown) {
   return isMissingColumnError(error, "created_by") || isMissingColumnError(error, "updated_by");
 }
 
+function clonePoll(poll: HomeNoticePoll | null | undefined): HomeNoticePoll | null {
+  if (!poll) return null;
+  return {
+    ...poll,
+    options: poll.options.map((option) => ({ ...option })),
+    votes: poll.votes.map((vote) => ({ ...vote })),
+  };
+}
+
+function cloneNotice(notice: HomeNotice): HomeNotice {
+  return {
+    ...notice,
+    poll: clonePoll(notice.poll),
+  };
+}
+
 function clonePopupNotice(notice: HomePopupNotice | null) {
-  return notice ? { ...notice } : null;
+  return notice ? ({ ...cloneNotice(notice), kind: "popup" } as HomePopupNotice) : null;
 }
 
 function cloneNoticeList(notices: HomeNotice[]) {
-  return notices.map((notice) => ({ ...notice }));
+  return notices.map(cloneNotice);
 }
 
 function cloneDdayList(ddays: HomeDdayItem[]) {
@@ -362,6 +408,10 @@ function normalizeTone(value: unknown): HomeNoticeTone {
   return value === "urgent" ? "urgent" : "normal";
 }
 
+function normalizePollVoterMode(value: unknown): HomeNoticePollVoterMode {
+  return value === "named" ? "named" : "anonymous";
+}
+
 function normalizeKind(value: unknown): HomeNoticeKind {
   return value === "general" ? "general" : "popup";
 }
@@ -376,6 +426,43 @@ function normalizeIsoDate(value: unknown, fallback: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
   return date.toISOString();
+}
+
+function normalizeHomeNoticePoll(value: unknown): HomeNoticePoll | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<HomeNoticePoll>;
+  const fallbackDate = new Date().toISOString();
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  const options = (Array.isArray(record.options) ? record.options : [])
+    .filter((option): option is HomeNoticePollOption => Boolean(option && typeof option.id === "string"))
+    .map((option) => ({
+      id: option.id.trim(),
+      title: typeof option.title === "string" ? option.title.trim() : "",
+    }))
+    .filter((option) => option.id && option.title)
+    .slice(0, 12);
+  const optionIds = new Set(options.map((option) => option.id));
+  const votes = (Array.isArray(record.votes) ? record.votes : [])
+    .filter((vote): vote is HomeNoticePollVote => Boolean(vote && typeof vote.optionId === "string"))
+    .map((vote) => ({
+      optionId: vote.optionId.trim(),
+      voterName: typeof vote.voterName === "string" ? vote.voterName.trim() : undefined,
+      createdAt: normalizeIsoDate(vote.createdAt, fallbackDate),
+      isCurrentUser: Boolean(vote.isCurrentUser),
+    }))
+    .filter((vote) => optionIds.has(vote.optionId));
+
+  if (!title || options.length < 2) return null;
+
+  return {
+    id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : crypto.randomUUID(),
+    title,
+    voterMode: normalizePollVoterMode(record.voterMode),
+    options,
+    votes,
+    createdAt: normalizeIsoDate(record.createdAt, fallbackDate),
+    updatedAt: normalizeIsoDate(record.updatedAt, fallbackDate),
+  };
 }
 
 function normalizeHomeNotice(input: Partial<HomeNotice> & { id: string; title: string; body: string }): HomeNotice {
@@ -394,6 +481,7 @@ function normalizeHomeNotice(input: Partial<HomeNotice> & { id: string; title: s
     tone: normalizeTone(input.tone),
     isActive: kind === "popup" ? Boolean(input.isActive) && !isExpired(expiresAt) : true,
     applicationEnabled: kind === "popup" ? Boolean(input.applicationEnabled) : false,
+    poll: normalizeHomeNoticePoll(input.poll),
     expiresAt,
     createdAt: normalizeIsoDate(input.createdAt, fallbackDate),
     updatedAt: normalizeIsoDate(input.updatedAt, fallbackDate),
@@ -469,6 +557,25 @@ function sortNotices(notices: HomeNotice[]) {
     }
     return right.createdAt.localeCompare(left.createdAt);
   });
+}
+
+function serializeNoticeForStore(notice: HomeNotice): HomeNotice {
+  const normalized = normalizeHomeNotice({
+    ...notice,
+    id: notice.id,
+    title: notice.title,
+    body: notice.body,
+  });
+
+  if (!normalized.poll) return normalized;
+
+  return {
+    ...normalized,
+    poll: {
+      ...normalized.poll,
+      votes: [],
+    },
+  };
 }
 
 function isUuidLike(value: string) {
@@ -551,6 +658,7 @@ function parseStorePayload(row: HomePopupNoticeStateRow | null | undefined) {
       (parsed?.version !== 2 &&
         parsed?.version !== 3 &&
         parsed?.version !== 4 &&
+        parsed?.version !== 5 &&
         parsed?.version !== HOME_NOTICE_STORE_VERSION) ||
       !parsedNotices
     ) {
@@ -751,7 +859,7 @@ function writeHomeWorkspaceLocalCache(
   const payload: HomeWorkspaceLocalCachePayload = {
     version: HOME_WORKSPACE_LOCAL_CACHE_VERSION,
     cachedAt: Date.now(),
-    notices: sortNotices(notices),
+    notices: sortNotices(notices.map(serializeNoticeForStore)),
     ddays: sortHomeDdays(getActiveHomeDdays(ddays)).slice(0, 3),
     communityPosts: sortCommunityPosts(communityPosts),
     communityComments: sortCommunityComments(communityComments),
@@ -767,7 +875,7 @@ function buildStorePayload(
 ) {
   return JSON.stringify({
     version: HOME_NOTICE_STORE_VERSION,
-    notices: sortNotices(notices),
+    notices: sortNotices(notices.map(serializeNoticeForStore)),
     ddays: sortHomeDdays(ddays).slice(0, 3),
     communityPosts: sortCommunityPosts(communityPosts),
     communityComments: sortCommunityComments(communityComments),
@@ -1397,6 +1505,34 @@ export async function updateHomeDday(input: { ddayId: string; title: string; tar
   return cloneDdayList(persistedWorkspace.ddays);
 }
 
+function buildHomeNoticePollFromDraft(input: HomeNoticePollDraft | null | undefined, now: string): HomeNoticePoll | null {
+  if (!input) return null;
+
+  const title = input.title.trim();
+  const optionTitles = input.options.map((option) => option.trim()).filter(Boolean).slice(0, 12);
+  const uniqueOptionTitles = optionTitles.filter((option, index) => optionTitles.indexOf(option) === index);
+
+  if (!title) {
+    throw new Error("투표 제목을 입력해 주세요.");
+  }
+  if (uniqueOptionTitles.length < 2) {
+    throw new Error("투표 항목은 2개 이상 입력해 주세요.");
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    title,
+    voterMode: normalizePollVoterMode(input.voterMode),
+    options: uniqueOptionTitles.map((option) => ({
+      id: crypto.randomUUID(),
+      title: option,
+    })),
+    votes: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export async function saveHomeNotice(input: {
   title: string;
   body: string;
@@ -1404,6 +1540,7 @@ export async function saveHomeNotice(input: {
   tone: HomeNoticeTone;
   expiresAt?: string | null;
   applicationEnabled?: boolean;
+  poll?: HomeNoticePollDraft | null;
 }) {
   const session = await getPortalSession();
   if (!session?.approved || !isManagerRole(session.role)) {
@@ -1424,6 +1561,7 @@ export async function saveHomeNotice(input: {
   const workspace = await getHomeWorkspaceForWrite();
   const existingNotices = workspace.notices;
   const now = new Date().toISOString();
+  const poll = buildHomeNoticePollFromDraft(input.poll, now);
   const nextNotice = normalizeHomeNotice({
     id: crypto.randomUUID(),
     title,
@@ -1432,6 +1570,7 @@ export async function saveHomeNotice(input: {
     tone: input.tone,
     isActive: input.kind === "popup",
     applicationEnabled: input.kind === "popup" ? Boolean(input.applicationEnabled) : false,
+    poll,
     expiresAt,
     createdAt: now,
     updatedAt: now,
@@ -1503,6 +1642,16 @@ export async function deleteHomeNotice(noticeId: string) {
 
     if (error && !isSupabaseSchemaMissingError(error)) {
       throw new Error(getSupabaseStorageErrorMessage(error, "home_popup_notice_applications"));
+    }
+  }
+  if (targetNotice.poll) {
+    const { error } = await supabase
+      .from("home_notice_poll_votes")
+      .delete()
+      .eq("notice_id", trimmedNoticeId);
+
+    if (error && !isSupabaseSchemaMissingError(error)) {
+      throw new Error(getSupabaseStorageErrorMessage(error, "home_notice_poll_votes"));
     }
   }
 
@@ -1610,6 +1759,16 @@ export async function closeHomePopupNotice() {
 
   const nextNotices = workspace.notices.filter((notice) => notice.id !== currentPopup.id);
   const supabase = await getPortalSupabaseClient();
+  if (currentPopup.poll) {
+    const { error } = await supabase
+      .from("home_notice_poll_votes")
+      .delete()
+      .eq("notice_id", currentPopup.id);
+
+    if (error && !isSupabaseSchemaMissingError(error)) {
+      throw new Error(getSupabaseStorageErrorMessage(error, "home_notice_poll_votes"));
+    }
+  }
   const nextComments = workspace.communityComments.filter((comment) => comment.targetKey !== `notice:${currentPopup.id}`);
   const persistedWorkspace = await persistNotices(
     nextNotices,
@@ -1704,6 +1863,31 @@ export async function closeHomePopupNoticeApplications() {
   emitHomePopupNoticeStatus({ ok: true, message: "신청을 마감했습니다." });
   emitHomePopupNoticeEvent();
   return getHomePopupNotice();
+}
+
+export async function voteHomeNoticePoll(input: { noticeId: string; optionId: string }) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+  if (isReadOnlyPortalRole(session.role)) {
+    throw new Error("조회 전용 계정은 투표할 수 없습니다.");
+  }
+
+  const noticeId = input.noticeId.trim();
+  const optionId = input.optionId.trim();
+  if (!noticeId || !optionId) {
+    throw new Error("투표할 항목을 찾지 못했습니다.");
+  }
+
+  const workspace = await syncCommunityWorkspaceMutation({
+    action: "votePoll",
+    noticeId,
+    optionId,
+  });
+  emitHomePopupNoticeStatus({ ok: true, message: "투표를 반영했습니다." });
+  emitHomePopupNoticeEvent();
+  return workspace.notices.find((notice) => notice.id === noticeId) ?? null;
 }
 
 export async function saveCommunityBoardPost(input: {

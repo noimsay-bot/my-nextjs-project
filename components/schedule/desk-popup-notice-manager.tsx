@@ -20,7 +20,9 @@ import {
   refreshHomePopupNoticeWorkspace,
   saveHomeNotice,
   type HomeNotice,
+  type HomeNoticePollDraft,
   type HomeNoticeTone,
+  type HomeNoticePollVoterMode,
 } from "@/lib/home-popup/storage";
 
 function formatNoticeDateTime(value: string) {
@@ -111,6 +113,14 @@ export function DeskPopupNoticeManager({
   const [popupTone, setPopupTone] = useState<HomeNoticeTone>("normal");
   const [popupExpiresAt, setPopupExpiresAt] = useState("");
   const [popupWithApplication, setPopupWithApplication] = useState(true);
+  const [pollNoticeTitle, setPollNoticeTitle] = useState("");
+  const [pollBody, setPollBody] = useState("");
+  const [pollTitle, setPollTitle] = useState("");
+  const [pollTone, setPollTone] = useState<HomeNoticeTone>("normal");
+  const [pollVoterMode, setPollVoterMode] = useState<HomeNoticePollVoterMode>("anonymous");
+  const [pollOptions, setPollOptions] = useState(["", ""]);
+  const [pollAsPopup, setPollAsPopup] = useState(false);
+  const [pollExpiresAt, setPollExpiresAt] = useState("");
   const [activePopup, setActivePopup] = useState(() => getHomePopupNotice());
   const [notices, setNotices] = useState<HomeNotice[]>(() => getHomeNotices());
   const [applications, setApplications] = useState(() => getHomePopupNoticeApplications());
@@ -199,6 +209,14 @@ export function DeskPopupNoticeManager({
     setPopupTone("normal");
     setPopupExpiresAt(activePopup?.isActive ? toDateTimeLocalValue(activePopup.expiresAt) : "");
     setPopupWithApplication(activePopup?.applicationEnabled ?? true);
+    setPollNoticeTitle("");
+    setPollBody("");
+    setPollTitle("");
+    setPollTone("normal");
+    setPollVoterMode("anonymous");
+    setPollOptions(["", ""]);
+    setPollAsPopup(false);
+    setPollExpiresAt(activePopup?.isActive ? toDateTimeLocalValue(activePopup.expiresAt) : "");
     setCelebrationDraft(defaultCelebrationDraft);
     setCelebrationDeactivateExisting(false);
     setComposerOpen(true);
@@ -256,6 +274,44 @@ export function DeskPopupNoticeManager({
       setMessage({
         tone: "warn",
         text: error instanceof Error ? error.message : "팝업 공지를 저장하지 못했습니다.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSavePollNotice = async () => {
+    const pollDraft: HomeNoticePollDraft = {
+      title: pollTitle,
+      voterMode: pollVoterMode,
+      options: pollOptions,
+    };
+
+    setSubmitting(true);
+    try {
+      await saveHomeNotice({
+        title: pollNoticeTitle,
+        body: pollBody.trim() || pollTitle,
+        kind: pollAsPopup ? "popup" : "general",
+        tone: pollTone,
+        expiresAt: pollAsPopup ? pollExpiresAt : null,
+        applicationEnabled: false,
+        poll: pollDraft,
+      });
+      setPollNoticeTitle("");
+      setPollBody("");
+      setPollTitle("");
+      setPollTone("normal");
+      setPollVoterMode("anonymous");
+      setPollOptions(["", ""]);
+      setPollAsPopup(false);
+      setPollExpiresAt("");
+      setComposerOpen(false);
+      await loadWorkspace();
+    } catch (error) {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "투표 공지를 저장하지 못했습니다.",
       });
     } finally {
       setSubmitting(false);
@@ -425,7 +481,7 @@ export function DeskPopupNoticeManager({
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
                       gap: 14,
                     }}
                   >
@@ -500,6 +556,104 @@ export function DeskPopupNoticeManager({
                       <div style={{ display: "flex", justifyContent: "flex-end" }}>
                         <button className="btn primary" type="button" disabled={submitting} onClick={() => void handleSavePopupNotice()}>
                           팝업 공지 등록
+                        </button>
+                      </div>
+                    </section>
+
+                    <section
+                      style={{
+                        display: "grid",
+                        gap: 10,
+                        border: "1px solid rgba(255,255,255,.12)",
+                        borderRadius: 16,
+                        padding: 14,
+                        background: "rgba(255,255,255,.04)",
+                      }}
+                    >
+                      <strong>투표 만들기</strong>
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>공지 유형</span>
+                        <select className="field-select" value={pollTone} onChange={(event) => setPollTone(event.target.value as HomeNoticeTone)}>
+                          <option value="normal">일반공지</option>
+                          <option value="urgent">긴급공지</option>
+                        </select>
+                      </label>
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>공지 제목</span>
+                        <input className="field-input" value={pollNoticeTitle} onChange={(event) => setPollNoticeTitle(event.target.value)} />
+                      </label>
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>안내 문구</span>
+                        <textarea
+                          className="field-input"
+                          rows={4}
+                          value={pollBody}
+                          onChange={(event) => setPollBody(event.target.value)}
+                          placeholder="비워 두면 투표 제목이 본문으로 사용됩니다."
+                          style={{ resize: "vertical" }}
+                        />
+                      </label>
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>투표 제목</span>
+                        <input className="field-input" value={pollTitle} onChange={(event) => setPollTitle(event.target.value)} />
+                      </label>
+                      <label style={{ display: "grid", gap: 6 }}>
+                        <span>투표자 표시</span>
+                        <select className="field-select" value={pollVoterMode} onChange={(event) => setPollVoterMode(event.target.value as HomeNoticePollVoterMode)}>
+                          <option value="anonymous">익명</option>
+                          <option value="named">실명</option>
+                        </select>
+                      </label>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <span>투표 항목</span>
+                        {pollOptions.map((option, index) => (
+                          <div
+                            key={index}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(0, 1fr) auto",
+                              gap: 8,
+                              alignItems: "center",
+                            }}
+                          >
+                            <input
+                              className="field-input"
+                              value={option}
+                              onChange={(event) => {
+                                const nextOptions = [...pollOptions];
+                                nextOptions[index] = event.target.value;
+                                setPollOptions(nextOptions);
+                              }}
+                              placeholder={`항목 ${index + 1}`}
+                            />
+                            <button
+                              className="btn"
+                              type="button"
+                              disabled={pollOptions.length <= 2}
+                              onClick={() => setPollOptions((current) => current.filter((_, optionIndex) => optionIndex !== index))}
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        ))}
+                        <button className="btn" type="button" onClick={() => setPollOptions((current) => [...current, ""])}>
+                          항목 추가
+                        </button>
+                      </div>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input type="checkbox" checked={pollAsPopup} onChange={(event) => setPollAsPopup(event.target.checked)} />
+                        <span>팝업으로도 띄우기</span>
+                      </label>
+                      {pollAsPopup ? (
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <span>팝업 종료일</span>
+                          <input className="field-input" type="datetime-local" value={pollExpiresAt} onChange={(event) => setPollExpiresAt(event.target.value)} />
+                          <span className="muted">비워 두면 수동 종료 전까지 계속 노출됩니다.</span>
+                        </label>
+                      ) : null}
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <button className="btn primary" type="button" disabled={submitting} onClick={() => void handleSavePollNotice()}>
+                          투표 공지 등록
                         </button>
                       </div>
                     </section>
