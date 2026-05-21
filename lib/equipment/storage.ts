@@ -666,31 +666,30 @@ export async function setTvuGridStatus(itemId: string, isGrid: boolean) {
 }
 
 export async function saveLiveEquipmentStatusEntries(entries: LiveEquipmentStatusSaveEntry[]) {
-  const session = assertCanManageLiveStatus();
+  assertCanManageLiveStatus();
   const payload = entries
     .map((entry) => ({
-      equipment_item_id: entry.equipmentItemId.trim(),
-      live_trs: entry.trs.trim() || null,
-      live_camera_reporter: entry.cameraReporter.trim() || null,
-      live_audio_man: entry.audioMan.trim() || null,
-      live_location: entry.location.trim() || null,
-      live_note: entry.note.trim() || null,
-      updated_by: session.id,
+      equipmentItemId: entry.equipmentItemId.trim(),
+      trs: entry.trs.trim(),
+      cameraReporter: entry.cameraReporter.trim(),
+      audioMan: entry.audioMan.trim(),
+      location: entry.location.trim(),
+      note: entry.note.trim(),
     }))
-    .filter((entry) => entry.equipment_item_id);
+    .filter((entry) => entry.equipmentItemId);
 
   if (payload.length === 0) {
     throw new Error("저장할 라이브장비 현황이 없습니다.");
   }
 
-  const supabase = await getPortalSupabaseClient();
-  const { error } = await supabase
-    .from("live_equipment_status_board")
-    .upsert(payload, { onConflict: "equipment_item_id" });
-
-  if (error) {
-    throw new Error(getEquipmentStorageErrorMessage(error, "live_equipment_status_board"));
-  }
+  await requestEquipmentItemManagement(
+    "/api/equipment/live-status",
+    {
+      method: "POST",
+      body: JSON.stringify({ entries: payload }),
+    },
+    "라이브장비 현황판 저장에 실패했습니다.",
+  );
 }
 
 export async function returnEquipmentLoanItems(loanItemIds: string[]) {

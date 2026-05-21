@@ -247,6 +247,10 @@ function toggleSelectedTrs(currentValue: string, trs: string) {
   return formatSelectedTrs(next);
 }
 
+function addTrsValues(target: Set<string>, value: string | null | undefined) {
+  parseSelectedTrs(value ?? "").forEach((trs) => target.add(trs));
+}
+
 function formatTrsSummary(selectedTrs: readonly string[]) {
   if (selectedTrs.length <= 2) return formatSelectedTrs(selectedTrs);
   return `${selectedTrs[0]} 외 ${selectedTrs.length - 1}개`;
@@ -454,6 +458,11 @@ function liveStatusDraftsEqual(left?: LiveLoanDetails, right?: LiveLoanDetails) 
   );
 }
 
+function hasLiveStatusDraftContent(value?: LiveLoanDetails) {
+  const normalized = normalizeLiveStatusDraft(value);
+  return Boolean(normalized.trs || normalized.cameraReporter || normalized.audioMan || normalized.location || normalized.note);
+}
+
 function createLiveStatusDraftByItemId(entries: LiveEquipmentStatusEntry[]) {
   return entries.reduce<LiveStatusDraftByItemId>((map, entry) => {
     map[entry.equipmentItemId] = normalizeLiveStatusDraft(entry);
@@ -480,18 +489,6 @@ function resolveLiveStatusDraft(manualDraft: LiveLoanDetails | undefined, loanIt
     audioMan: manual.audioMan || linked.audioMan,
     location: manual.location || linked.location,
     note: manual.note || linked.note,
-  };
-}
-
-function stripLinkedLiveStatusDraft(displayDraft: LiveLoanDetails | undefined, loanItem?: EquipmentLoanItem): LiveLoanDetails {
-  const display = normalizeLiveStatusDraft(displayDraft);
-  const linked = getLoanLiveStatusDraft(loanItem);
-  return {
-    trs: display.trs === linked.trs ? "" : display.trs,
-    cameraReporter: display.cameraReporter === linked.cameraReporter ? "" : display.cameraReporter,
-    audioMan: display.audioMan === linked.audioMan ? "" : display.audioMan,
-    location: display.location === linked.location ? "" : display.location,
-    note: display.note === linked.note ? "" : display.note,
   };
 }
 
@@ -1594,6 +1591,7 @@ function LiveEquipmentGroups({
   currentByItemId,
   onToggle,
   selectedTrsValues,
+  unavailableTrsValues,
   onTrsToggle,
   repairMode = false,
   repairDraftByItemId,
@@ -1609,6 +1607,7 @@ function LiveEquipmentGroups({
   currentByItemId: Map<string, EquipmentLoanItem>;
   onToggle: (itemId: string) => void;
   selectedTrsValues: string[];
+  unavailableTrsValues: Set<string>;
   onTrsToggle: (trs: string) => void;
   repairMode?: boolean;
   repairDraftByItemId?: RepairDraftByItemId;
@@ -1747,20 +1746,26 @@ function LiveEquipmentGroups({
                       {showTrsOptions ? (
                         <div className={styles.trsOptionPanel}>
                           <div className={styles.trsOptionGrid}>
-                            {LIVE_TRS_OPTIONS.map((trs) => (
-                              <button
-                                key={trs}
-                                type="button"
-                                className={[
-                                  styles.trsOptionButton,
-                                  selectedTrsValues.includes(trs) ? styles.trsOptionButtonSelected : "",
-                                ].join(" ").trim()}
-                                onClick={() => onTrsToggle(trs)}
-                                aria-pressed={selectedTrsValues.includes(trs)}
-                              >
-                                {trs}
-                              </button>
-                            ))}
+                            {LIVE_TRS_OPTIONS.map((trs) => {
+                              const selected = selectedTrsValues.includes(trs);
+                              const unavailable = unavailableTrsValues.has(trs);
+                              return (
+                                <button
+                                  key={trs}
+                                  type="button"
+                                  className={[
+                                    styles.trsOptionButton,
+                                    selected ? styles.trsOptionButtonSelected : "",
+                                  ].join(" ").trim()}
+                                  onClick={() => onTrsToggle(trs)}
+                                  aria-pressed={selected}
+                                  disabled={unavailable}
+                                >
+                                  <span>{trs}</span>
+                                  {unavailable ? <small>사용중</small> : null}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                       ) : null}
@@ -2203,6 +2208,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [items, setItems] = useState<EquipmentItem[]>([]);
   const [profiles, setProfiles] = useState<EquipmentProfile[]>([]);
   const [currentLoanItems, setCurrentLoanItems] = useState<EquipmentLoanItem[]>([]);
+  const [liveStatusEntries, setLiveStatusEntries] = useState<LiveEquipmentStatusEntry[]>([]);
   const [selectedEntries, setSelectedEntries] = useState<BorrowSelection[]>(() => readBorrowSelections(getSession()?.id));
   const [returnIds, setReturnIds] = useState<string[]>([]);
   const [engHighlights, setEngHighlights] = useState<EngScheduleHighlightMap>(() => new Map());
@@ -2240,7 +2246,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       const currentSession = getSession();
       const shouldLoadManagementItems = Boolean(currentSession?.approved && hasEquipmentItemManagerRole(currentSession.actualRole) && isDeskManagedEquipmentCategory(category));
       const shouldLoadInactiveLiveItems = Boolean(currentSession?.approved && hasRentalTvuManagerRole(currentSession.actualRole));
-      const [nextCurrent, nextItems, nextProfiles, nextHighlights] = await Promise.all([
+      const [nextCurrent, nextItems, nextProfiles, nextHighlights, nextLiveStatusEntries] = await Promise.all([
         fetchEquipmentLoanItems({ status: "borrowed" }),
         category === "live"
           ? fetchLiveEquipmentItemsForManagement(shouldLoadInactiveLiveItems)
@@ -2249,11 +2255,13 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
             : fetchEquipmentItems([category]),
         isEngSetPage ? fetchEquipmentProfiles() : Promise.resolve([]),
         isEngSetPage ? loadEngScheduleHighlights(highlightDateKey) : Promise.resolve(new Map() as EngScheduleHighlightMap),
+        category === "live" ? fetchLiveEquipmentStatusEntries() : Promise.resolve([] as LiveEquipmentStatusEntry[]),
       ]);
       setCurrentLoanItems(nextCurrent);
       setItems(nextItems);
       setProfiles(isEngSetPage ? nextProfiles.filter((profile) => !isHiddenEngSetProfile(profile)) : nextProfiles);
       setEngHighlights(nextHighlights);
+      setLiveStatusEntries(nextLiveStatusEntries);
       setSession(getSession());
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "장비 데이터를 불러오지 못했습니다." });
@@ -2319,6 +2327,15 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   const selectedIds = useMemo(() => selectedEntries.map((selection) => selection.id), [selectedEntries]);
   const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
+  const unavailableTrsValues = useMemo(() => {
+    const values = new Set<string>();
+    currentLoanItems.forEach((loanItem) => {
+      if (loanItem.item.category !== "live") return;
+      addTrsValues(values, loanItem.loan.liveTrs);
+    });
+    liveStatusEntries.forEach((entry) => addTrsValues(values, entry.trs));
+    return values;
+  }, [currentLoanItems, liveStatusEntries]);
   const selectedItemSelections = useMemo(
     () => selectedEntries.filter((selection): selection is Extract<BorrowSelection, { kind: "item" }> => selection.kind === "item"),
     [selectedEntries],
@@ -2426,6 +2443,16 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     if (hasSelectedTvu || !liveDetails.trs) return;
     setLiveDetails((current) => ({ ...current, trs: "" }));
   }, [hasSelectedTvu, liveDetails.trs]);
+
+  useEffect(() => {
+    if (category !== "live" || !liveDetails.trs) return;
+    setLiveDetails((current) => {
+      const currentSelectedTrs = parseSelectedTrs(current.trs);
+      const nextSelectedTrs = currentSelectedTrs.filter((trs) => !unavailableTrsValues.has(trs));
+      if (nextSelectedTrs.length === currentSelectedTrs.length) return current;
+      return { ...current, trs: formatSelectedTrs(nextSelectedTrs) };
+    });
+  }, [category, liveDetails.trs, unavailableTrsValues]);
 
   const sortedEngProfiles = useMemo(() => (
     profiles
@@ -2788,6 +2815,10 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const confirmBorrow = async () => {
     setActionPending(true);
     try {
+      const unavailableSelectedTrs = selectedTrsValues.filter((trs) => unavailableTrsValues.has(trs));
+      if (unavailableSelectedTrs.length > 0) {
+        throw new Error(`이미 사용 중인 TRS입니다: ${unavailableSelectedTrs.join(", ")}`);
+      }
       const itemIds = selectedItemSelections.map((selection) => selection.id);
       const engProfileIds = selectedEngSelections.map((selection) => selection.id);
       if (itemIds.length > 0) {
@@ -3006,6 +3037,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                 selectedIds={repairMode || rentalTvuMode || managedDeactivateMode ? [] : selectedIds}
                 currentByItemId={currentByItemId}
                 selectedTrsValues={rentalTvuMode || managedDeactivateMode ? [] : selectedTrsValues}
+                unavailableTrsValues={unavailableTrsValues}
                 onTrsToggle={(trs) => setLiveDetails((current) => ({ ...current, trs: toggleSelectedTrs(current.trs, trs) }))}
                 onToggle={managedDeactivateMode ? deactivateManagedEquipmentItem : rentalTvuMode ? () => undefined : repairMode ? toggleRepairDraft : toggleSelection}
                 repairMode={repairMode}
@@ -3257,6 +3289,8 @@ export function LiveEquipmentStatusHomePanel() {
                         const loanItem = currentByItemId.get(item.id);
                         const electionOverlay = getElectionOverlayForItem(item, electionOverlayByTvuName);
                         const draft = applyElectionOverlayToLiveDraft(resolveLiveStatusDraft(savedDrafts[item.id], loanItem), electionOverlay);
+                        const hasStatusDraft = hasLiveStatusDraftContent(draft);
+                        const borrowedLabel = electionOverlay ? "선거중계" : loanItem ? "대여중" : "사용중";
                         return (
                           <tr key={item.id}>
                             <td>
@@ -3306,7 +3340,7 @@ export function LiveEquipmentStatusHomePanel() {
                               <span className={styles.liveStatusCellValue}>{draft.note || "-"}</span>
                             </td>
                             <td>
-                              <StatusPill borrowed={Boolean(loanItem || electionOverlay)} repairing={item.isUnderRepair} borrowedLabel={electionOverlay ? "선거중계" : "대여중"} />
+                              <StatusPill borrowed={Boolean(loanItem || electionOverlay || hasStatusDraft)} repairing={item.isUnderRepair} borrowedLabel={borrowedLabel} />
                             </td>
                           </tr>
                         );
@@ -3421,19 +3455,12 @@ export function LiveEquipmentStatusPage() {
     }
     const payload = statusBoardItems.map((item): LiveEquipmentStatusSaveEntry => ({
       equipmentItemId: item.id,
-      ...stripLinkedLiveStatusDraft(drafts[item.id], currentByItemId.get(item.id)),
+      ...normalizeLiveStatusDraft(drafts[item.id]),
     }));
     setSaving(true);
     try {
       await saveLiveEquipmentStatusEntries(payload);
-      const nextDrafts = payload.reduce<LiveStatusDraftByItemId>((map, entry) => {
-        map[entry.equipmentItemId] = normalizeLiveStatusDraft(entry);
-        return map;
-      }, {});
-      setSavedDrafts(nextDrafts);
-      setDrafts(nextDrafts);
-      setEditBaselineDrafts({});
-      setEditMode(false);
+      await load();
       setMessage({ tone: "ok", text: "라이브장비 현황판을 저장했습니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비 현황판 저장에 실패했습니다." });
@@ -3477,6 +3504,8 @@ export function LiveEquipmentStatusPage() {
                 const draft = editMode ? drafts[item.id] ?? baseDisplayDraft : displayDraft;
                 const dirty = editMode && !liveStatusDraftsEqual(draft, editBaselineDrafts[item.id]);
                 const noteValue = draft.note || "-";
+                const hasStatusDraft = hasLiveStatusDraftContent(draft);
+                const borrowedLabel = electionOverlay ? "선거중계" : loanItem ? "대여중" : "사용중";
                 return (
                   <tr key={item.id} className={dirty ? styles.liveStatusDirtyRow : ""}>
                     <td>
@@ -3592,10 +3621,10 @@ export function LiveEquipmentStatusPage() {
                     </td>
                     <td>
                       <StatusPill
-                        borrowed={Boolean(loanItem || electionOverlay)}
+                        borrowed={Boolean(loanItem || electionOverlay || hasStatusDraft)}
                         repairing={item.isUnderRepair}
                         availableLabel={isRegionalTable ? "사용 가능" : "대여가능"}
-                        borrowedLabel={electionOverlay ? "선거중계" : "대여중"}
+                        borrowedLabel={borrowedLabel}
                       />
                     </td>
                   </tr>

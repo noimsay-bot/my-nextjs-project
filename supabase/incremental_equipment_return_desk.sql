@@ -14,6 +14,7 @@ declare
   v_now timestamptz := timezone('utc', now());
   v_returned_count integer := 0;
   v_loan_ids uuid[] := array[]::uuid[];
+  v_returned_item_ids uuid[] := array[]::uuid[];
 begin
   if v_user_id is null then
     raise exception '승인된 로그인 세션이 필요합니다.';
@@ -41,10 +42,13 @@ begin
         equipment_loans.borrower_profile_id = v_user_id
         or public.current_profile_role() in ('desk', 'admin', 'team_lead')
       )
-    returning equipment_loan_items.loan_id
+    returning equipment_loan_items.loan_id, equipment_loan_items.equipment_item_id
   )
-  select count(*), coalesce(array_agg(distinct loan_id), array[]::uuid[])
-  into v_returned_count, v_loan_ids
+  select
+    count(*),
+    coalesce(array_agg(distinct loan_id), array[]::uuid[]),
+    coalesce(array_agg(distinct equipment_item_id), array[]::uuid[])
+  into v_returned_count, v_loan_ids, v_returned_item_ids
   from updated_items;
 
   update public.equipment_loans
@@ -58,6 +62,9 @@ begin
       where equipment_loan_items.loan_id = equipment_loans.id
         and equipment_loan_items.status = 'borrowed'
     );
+
+  delete from public.live_equipment_status_board
+  where equipment_item_id = any(v_returned_item_ids);
 
   return coalesce(v_returned_count, 0);
 end;
