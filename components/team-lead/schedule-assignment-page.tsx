@@ -32,14 +32,21 @@ import {
   getScheduleAssignmentTimeColor,
   getScheduleAssignmentStore,
   getTeamLeadSchedules,
+  ensureScheduleAssignmentDailyBackups,
+  isScheduleAssignmentMonthLoaded,
+  listScheduleAssignmentBackups,
+  listScheduleAssignmentLocalBackups,
+  readScheduleAssignmentBackup,
   refreshTeamLeadAssignmentMonth,
   refreshTeamLeadAssignmentMonths,
   refreshTeamLeadState,
+  saveScheduleAssignmentLocalBackup,
   saveScheduleAssignmentStore,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_STORAGE_STATUS_EVENT,
+  ScheduleAssignmentBackupSummary,
   ScheduleAssignmentDataStore,
   ScheduleAssignmentDayRows,
   ScheduleAssignmentEntry,
@@ -124,6 +131,15 @@ const searchScopeLabels: Record<ScheduleAssignmentSearchScope, string> = {
   custom: "직접 선택",
   all: "전체",
 };
+
+function sortScheduleAssignmentBackupItems(items: ScheduleAssignmentBackupSummary[]) {
+  return Array.from(
+    items.reduce((map, item) => {
+      map.set(item.id, item);
+      return map;
+    }, new Map<string, ScheduleAssignmentBackupSummary>()).values(),
+  ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
 
 function getTripTagStyle(travelType: AssignmentTravelType, phase: AssignmentTripTagPhase = "") {
   if (travelType === "국내출장") {
@@ -940,6 +956,9 @@ export function ScheduleAssignmentPage() {
   const [schedules, setSchedules] = useState(() => getTeamLeadSchedules());
   const [store, setStore] = useState<ScheduleAssignmentDataStore>({ entries: {}, rows: {} });
   const [selectedMonthKey, setSelectedMonthKey] = useState("");
+  const [assignmentMonthLoading, setAssignmentMonthLoading] = useState(false);
+  const [backupItems, setBackupItems] = useState<ScheduleAssignmentBackupSummary[]>([]);
+  const [selectedBackupId, setSelectedBackupId] = useState("");
   const [activeTimeField, setActiveTimeField] = useState<string | null>(null);
   const [editingDayRows, setEditingDayRows] = useState<Record<string, ScheduleAssignmentDayRows>>({});
   const [editingTripTag, setEditingTripTag] = useState<{ tripTagId: string; rowKey: string; value: string } | null>(null);
@@ -992,6 +1011,27 @@ export function ScheduleAssignmentPage() {
   const selectedMonthKeyRef = useRef("");
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
+
+  const applyBackupItems = (nextItems: ScheduleAssignmentBackupSummary[]) => {
+    setBackupItems(nextItems);
+    setSelectedBackupId((current) => (
+      nextItems.some((item) => item.id === current) ? current : nextItems[0]?.id ?? ""
+    ));
+    return nextItems;
+  };
+
+  const syncBackupItems = async (options: { includeDb?: boolean } = {}) => {
+    if (options.includeDb === false) {
+      const localItems = listScheduleAssignmentLocalBackups();
+      return applyBackupItems(sortScheduleAssignmentBackupItems([
+        ...backupItems.filter((item) => item.kind === "daily"),
+        ...localItems,
+      ]));
+    }
+
+    const nextItems = await listScheduleAssignmentBackups();
+    return applyBackupItems(nextItems);
+  };
 
   flushDeferredRefreshRef.current = () => {
     if (!deferredRealtimeRefreshRef.current) return;
@@ -1556,7 +1596,9 @@ export function ScheduleAssignmentPage() {
   };
 
   useEffect(() => {
+    let mounted = true;
     const syncFromCache = () => {
+      if (!mounted) return;
       const nextSchedules = getTeamLeadSchedules();
       setSchedules(nextSchedules);
       setStore(getScheduleAssignmentStore());
@@ -1568,6 +1610,7 @@ export function ScheduleAssignmentPage() {
             : nextSchedules[0]?.monthKey || "",
       );
       setEditingDayRows({});
+      void syncBackupItems();
     };
     const refreshAssignmentStore = async () => {
       const monthKey = selectedMonthKeyRef.current;
@@ -1575,23 +1618,35 @@ export function ScheduleAssignmentPage() {
         syncFromCache();
         return;
       }
-      await refreshTeamLeadAssignmentMonth(monthKey);
-      syncFromCache();
+      setAssignmentMonthLoading(true);
+      try {
+        await refreshTeamLeadAssignmentMonth(monthKey);
+        await ensureScheduleAssignmentDailyBackups(getScheduleAssignmentStore(), [monthKey]);
+        syncFromCache();
+      } finally {
+        if (mounted) setAssignmentMonthLoading(false);
+      }
     };
     const refreshSchedules = async () => {
-      await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
-      const nextSchedules = getTeamLeadSchedules();
-      const targetMonthKey =
-        nextSchedules.some((schedule) => schedule.monthKey === selectedMonthKeyRef.current)
-          ? selectedMonthKeyRef.current
-          : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
-            ? todayMonthKey
-            : nextSchedules[0]?.monthKey || "";
-      if (targetMonthKey) {
-        // Keep assignment refresh scoped to the active month instead of reloading every month row.
-        await refreshTeamLeadAssignmentMonth(targetMonthKey);
+      setAssignmentMonthLoading(true);
+      try {
+        await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
+        const nextSchedules = getTeamLeadSchedules();
+        const targetMonthKey =
+          nextSchedules.some((schedule) => schedule.monthKey === selectedMonthKeyRef.current)
+            ? selectedMonthKeyRef.current
+            : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
+              ? todayMonthKey
+              : nextSchedules[0]?.monthKey || "";
+        if (targetMonthKey) {
+          // Keep assignment refresh scoped to the active month instead of reloading every month row.
+          await refreshTeamLeadAssignmentMonth(targetMonthKey);
+          await ensureScheduleAssignmentDailyBackups(getScheduleAssignmentStore(), [targetMonthKey]);
+        }
+        syncFromCache();
+      } finally {
+        if (mounted) setAssignmentMonthLoading(false);
       }
-      syncFromCache();
     };
     refreshSchedulesRef.current = refreshSchedules;
     refreshAssignmentsRef.current = refreshAssignmentStore;
@@ -1623,6 +1678,7 @@ export function ScheduleAssignmentPage() {
     window.addEventListener(SCHEDULE_STATE_EVENT, syncFromCache);
     window.addEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     return () => {
+      mounted = false;
       if (refreshSchedulesRef.current === refreshSchedules) {
         refreshSchedulesRef.current = null;
       }
@@ -1635,6 +1691,77 @@ export function ScheduleAssignmentPage() {
       window.removeEventListener(TEAM_LEAD_STORAGE_STATUS_EVENT, onStatus);
     };
   }, [todayMonthKey]);
+
+  useEffect(() => {
+    if (!selectedMonthKey) {
+      setAssignmentMonthLoading(false);
+      return undefined;
+    }
+    if (isScheduleAssignmentMonthLoaded(selectedMonthKey)) {
+      setAssignmentMonthLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAssignmentMonthLoading(true);
+    void refreshTeamLeadAssignmentMonth(selectedMonthKey)
+      .then(async () => {
+        if (cancelled) return;
+        await ensureScheduleAssignmentDailyBackups(getScheduleAssignmentStore(), [selectedMonthKey]);
+        setStore(getScheduleAssignmentStore());
+        await syncBackupItems();
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setImportMessage({
+          tone: "warn",
+          text: error instanceof Error ? error.message : "일정배정 월 데이터를 불러오지 못했습니다.",
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setAssignmentMonthLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMonthKey]);
+
+  useEffect(() => {
+    let timer: number | null = null;
+    let cancelled = false;
+
+    const scheduleNextDailyBackup = () => {
+      if (cancelled) return;
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 5, 0);
+      const delayMs = Math.max(1_000, nextMidnight.getTime() - now.getTime());
+
+      timer = window.setTimeout(() => {
+        const currentStore = getScheduleAssignmentStore();
+        const monthKeys = Array.from(
+          new Set([
+            ...Object.keys(currentStore.entries),
+            ...Object.keys(currentStore.rows),
+            selectedMonthKeyRef.current,
+          ].filter(Boolean)),
+        );
+        void ensureScheduleAssignmentDailyBackups(currentStore, monthKeys, new Date())
+          .then(() => syncBackupItems())
+          .finally(() => {
+            if (!cancelled) scheduleNextDailyBackup();
+          });
+      }, delayMs);
+    };
+
+    scheduleNextDailyBackup();
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2310,6 +2437,28 @@ export function ScheduleAssignmentPage() {
         ),
       );
 
+      const unloadedMonthKeys = touchedMonthKeys.filter((monthKey) => !isScheduleAssignmentMonthLoaded(monthKey));
+      if (unloadedMonthKeys.length > 0) {
+        setImportMessage({
+          tone: "warn",
+          text: "일정배정 월 데이터를 불러오는 중입니다. 최신 내용을 불러온 뒤 다시 입력해 주세요.",
+        });
+        setAssignmentMonthLoading(true);
+        void refreshTeamLeadAssignmentMonths(unloadedMonthKeys)
+          .then(() => {
+            setStore(getScheduleAssignmentStore());
+            void syncBackupItems({ includeDb: false });
+          })
+          .catch((error) => {
+            setImportMessage({
+              tone: "warn",
+              text: error instanceof Error ? error.message : "일정배정 월 데이터를 불러오지 못했습니다.",
+            });
+          })
+          .finally(() => setAssignmentMonthLoading(false));
+        return current;
+      }
+
       const hasChanges = touchedMonthKeys.some(
         (monthKey) => getStoreMonthSnapshot(current, monthKey) !== getStoreMonthSnapshot(next, monthKey),
       );
@@ -2326,6 +2475,7 @@ export function ScheduleAssignmentPage() {
       pendingAssignmentWritesRef.current += 1;
       saveScheduleAssignmentStore(next, touchedMonthKeys, { debounceMs }).finally(() => {
         pendingAssignmentWritesRef.current = Math.max(0, pendingAssignmentWritesRef.current - 1);
+        void syncBackupItems({ includeDb: false });
         flushDeferredRefreshRef.current();
       });
       return next;
@@ -2723,6 +2873,61 @@ export function ScheduleAssignmentPage() {
     }));
   };
 
+  const restoreSelectedBackup = async () => {
+    const backup = await readScheduleAssignmentBackup(selectedBackupId);
+    if (!backup) {
+      setImportMessage({ tone: "warn", text: "불러올 백업을 선택해 주세요." });
+      void syncBackupItems();
+      return;
+    }
+
+    const restoreMonthKeys = Array.from(
+      new Set([...Object.keys(backup.store.entries), ...Object.keys(backup.store.rows)].filter(Boolean)),
+    );
+    const targetMonthKey = backup.monthKey || restoreMonthKeys[0] || "";
+    if (!targetMonthKey || restoreMonthKeys.length === 0) {
+      setImportMessage({ tone: "warn", text: "선택한 백업에 복원할 월 데이터가 없습니다." });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${backup.label}을 불러옵니다.\n현재 DB 기준 내용은 복원 전 백업으로 남긴 뒤 선택한 백업으로 덮어씁니다.`,
+    );
+    if (!confirmed) return;
+
+    setAssignmentMonthLoading(true);
+    try {
+      await refreshTeamLeadAssignmentMonths(restoreMonthKeys);
+      const currentStore = getScheduleAssignmentStore();
+      saveScheduleAssignmentLocalBackup(currentStore, targetMonthKey, "manual");
+      const nextStore: ScheduleAssignmentDataStore = {
+        entries: {
+          ...currentStore.entries,
+          ...backup.store.entries,
+        },
+        rows: {
+          ...currentStore.rows,
+          ...backup.store.rows,
+        },
+      };
+
+      setStore(nextStore);
+      setSelectedMonthKey(targetMonthKey);
+      await saveScheduleAssignmentStore(nextStore, restoreMonthKeys, {
+        debounceMs: ASSIGNMENT_SAVE_IMMEDIATE_DEBOUNCE_MS,
+      });
+      await syncBackupItems();
+      setImportMessage({ tone: "ok", text: `${backup.label}을 불러왔습니다.` });
+    } catch (error) {
+      setImportMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "백업을 불러오지 못했습니다.",
+      });
+    } finally {
+      setAssignmentMonthLoading(false);
+    }
+  };
+
   if (schedules.length === 0) {
     return <section className="panel"><div className="panel-pad"><div className="status note">게시되었거나 작성된 근무표가 없어 일정배정표를 만들 수 없습니다.</div></div></section>;
   }
@@ -2841,7 +3046,35 @@ export function ScheduleAssignmentPage() {
               </button>
             ) : null}
           </form>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <label style={{ minWidth: 220, flex: "1 1 260px" }}>
+              <span className="sr-only">일정배정 백업 선택</span>
+              <select
+                className="field-select"
+                value={selectedBackupId}
+                disabled={backupItems.length === 0 || assignmentMonthLoading}
+                onChange={(event) => setSelectedBackupId(event.target.value)}
+                style={{ width: "100%" }}
+              >
+                <option value="">백업 선택</option>
+                {backupItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label} · {item.entryCount + item.rowChangeCount}건
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn"
+              disabled={!selectedBackupId || assignmentMonthLoading}
+              onClick={() => void restoreSelectedBackup()}
+            >
+              백업 불러오기
+            </button>
+          </div>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
+          {assignmentMonthLoading ? <div className="status note">선택한 월의 일정배정 저장본을 불러오는 중입니다.</div> : null}
           {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>
@@ -2895,6 +3128,15 @@ export function ScheduleAssignmentPage() {
         </div>
       ) : null}
 
+      <div
+        aria-busy={assignmentMonthLoading}
+        style={{
+          display: "grid",
+          gap: 12,
+          opacity: assignmentMonthLoading ? 0.65 : 1,
+          pointerEvents: assignmentMonthLoading ? "none" : undefined,
+        }}
+      >
       {monthDays.map((day) => {
         const storedDayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
         const draftDayRows = editingDayRows[day.dateKey];
@@ -3677,6 +3919,7 @@ export function ScheduleAssignmentPage() {
           </article>
         );
       })}
+      </div>
       </div>
     </section>
   );

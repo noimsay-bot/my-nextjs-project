@@ -176,6 +176,22 @@ export interface ScheduleAssignmentDataStore {
   rows: ScheduleAssignmentRowStore;
 }
 
+export type ScheduleAssignmentBackupKind = "autosave" | "daily" | "manual";
+
+export interface ScheduleAssignmentBackupSummary {
+  id: string;
+  kind: ScheduleAssignmentBackupKind;
+  monthKey: string;
+  label: string;
+  createdAt: string;
+  entryCount: number;
+  rowChangeCount: number;
+}
+
+export interface ScheduleAssignmentBackupItem extends ScheduleAssignmentBackupSummary {
+  store: ScheduleAssignmentDataStore;
+}
+
 export const TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT = "j-team-lead-schedule-assignment-updated";
 export const TEAM_LEAD_CONTRIBUTION_EVENT = "j-team-lead-contribution-updated";
 export const TEAM_LEAD_FINAL_CUT_EVENT = "j-team-lead-final-cut-updated";
@@ -190,6 +206,9 @@ const TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY = "submission_access_v1";
 const TEAM_LEAD_REFERENCE_NOTES_STATE_KEY = "reference_notes_v1";
 const TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY = "best_report_quarters_v1";
 const TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY = "best_report_current_v1";
+const TEAM_LEAD_SCHEDULE_ASSIGNMENT_BACKUP_STORAGE_KEY = "j-team-lead-schedule-assignment-backups-v1";
+const TEAM_LEAD_SCHEDULE_ASSIGNMENT_LOCAL_BACKUP_LIMIT = 60;
+const TEAM_LEAD_SCHEDULE_ASSIGNMENT_DB_DAILY_BACKUP_LIMIT = 10;
 export const TEAM_LEAD_BEST_REPORT_EVENT = "j-team-lead-best-report-updated";
 export const TEAM_LEAD_SUBMISSION_ACCESS_EVENT = "j-team-lead-submission-access-updated";
 
@@ -203,6 +222,23 @@ interface TeamLeadScheduleAssignmentRow {
 interface TeamLeadStateRow {
   key: string;
   state: unknown;
+}
+
+interface TeamLeadScheduleAssignmentBackupSummaryRow {
+  id: string;
+  kind: string;
+  month_key: string;
+  backup_date: string;
+  label: string | null;
+  entry_count: number | null;
+  row_change_count: number | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+interface TeamLeadScheduleAssignmentBackupRow extends TeamLeadScheduleAssignmentBackupSummaryRow {
+  entries: unknown;
+  rows: unknown;
 }
 
 let assignmentStoreCache: ScheduleAssignmentDataStore = { entries: {}, rows: {} };
@@ -219,6 +255,8 @@ let assignmentPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let assignmentPersistDelayMs: number | null = null;
 let assignmentPersistResolvers: Array<() => void> = [];
 let assignmentPersistMonthKeys = new Set<string>();
+let assignmentLoadedMonthKeys = new Set<string>();
+let assignmentDbBackupUnavailableWarned = false;
 let finalCutPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let finalCutPersistResolvers: Array<() => void> = [];
 
@@ -412,6 +450,421 @@ function normalizeScheduleAssignmentDataStore(store: unknown): ScheduleAssignmen
   };
 }
 
+function normalizeScheduleAssignmentBackupKind(value: unknown): ScheduleAssignmentBackupKind {
+  return value === "daily" || value === "manual" ? value : "autosave";
+}
+
+function formatLocalDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDaysToDateKey(dateKey: string, offset: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day + offset);
+  return formatLocalDateKey(date);
+}
+
+function formatLocalDateTimeLabel(date: Date) {
+  return `${formatLocalDateKey(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function getBackupMonthStore(store: ScheduleAssignmentDataStore, monthKey: string): ScheduleAssignmentDataStore {
+  const normalized = normalizeScheduleAssignmentDataStore(store);
+  return {
+    entries: {
+      [monthKey]: normalizeMonthEntries(normalized.entries[monthKey] ?? {}),
+    },
+    rows: {
+      [monthKey]: normalizeMonthRows(normalized.rows[monthKey] ?? {}),
+    },
+  };
+}
+
+function hasMeaningfulScheduleAssignmentEntry(entry: ScheduleAssignmentEntry) {
+  return (
+    Boolean(entry.clockIn.trim()) ||
+    Boolean(entry.clockOut.trim()) ||
+    Boolean(entry.travelType) ||
+    Boolean(entry.tripTagId.trim()) ||
+    Boolean(entry.tripTagLabel.trim()) ||
+    entry.tripTagPhase !== "" ||
+    entry.schedules.some((item) => item.trim()) ||
+    entry.exclusiveVideo.some(Boolean) ||
+    entry.coverageScore > 0 ||
+    Boolean(entry.coverageNote.trim())
+  );
+}
+
+function getScheduleAssignmentBackupCounts(store: ScheduleAssignmentDataStore, monthKey: string) {
+  const monthEntries = normalizeMonthEntries(store.entries[monthKey] ?? {});
+  const monthRows = normalizeMonthRows(store.rows[monthKey] ?? {});
+  const entryCount = Object.values(monthEntries).filter(hasMeaningfulScheduleAssignmentEntry).length;
+  const rowChangeCount = Object.values(monthRows).reduce(
+    (count, dayRows) =>
+      count +
+      dayRows.addedRows.length +
+      dayRows.deletedRowKeys.length +
+      Object.keys(dayRows.rowOverrides).length,
+    0,
+  );
+
+  return { entryCount, rowChangeCount };
+}
+
+function normalizeScheduleAssignmentBackupItem(raw: unknown): ScheduleAssignmentBackupItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<ScheduleAssignmentBackupItem>;
+  const id = typeof record.id === "string" ? record.id.trim() : "";
+  const monthKey = typeof record.monthKey === "string" ? record.monthKey.trim() : "";
+  const createdAt = typeof record.createdAt === "string" ? record.createdAt : "";
+  if (!id || !monthKey || !createdAt) return null;
+
+  const store = getBackupMonthStore(normalizeScheduleAssignmentDataStore(record.store), monthKey);
+  const counts = getScheduleAssignmentBackupCounts(store, monthKey);
+  return {
+    id,
+    kind: normalizeScheduleAssignmentBackupKind(record.kind),
+    monthKey,
+    label: typeof record.label === "string" && record.label.trim() ? record.label.trim() : `${monthKey} 백업`,
+    createdAt,
+    entryCount: counts.entryCount,
+    rowChangeCount: counts.rowChangeCount,
+    store,
+  };
+}
+
+function normalizeScheduleAssignmentDbBackupSummary(
+  row: TeamLeadScheduleAssignmentBackupSummaryRow,
+): ScheduleAssignmentBackupSummary | null {
+  const id = row.id?.trim() ?? "";
+  const monthKey = row.month_key?.trim() ?? "";
+  const createdAt = row.updated_at || row.created_at;
+  if (!id || !monthKey || !createdAt) return null;
+
+  return {
+    id,
+    kind: normalizeScheduleAssignmentBackupKind(row.kind),
+    monthKey,
+    label: row.label?.trim() || `${monthKey} 일일 백업 ${row.backup_date}`,
+    createdAt,
+    entryCount: Math.max(0, Number(row.entry_count ?? 0)),
+    rowChangeCount: Math.max(0, Number(row.row_change_count ?? 0)),
+  };
+}
+
+function normalizeScheduleAssignmentDbBackupItem(
+  row: TeamLeadScheduleAssignmentBackupRow,
+): ScheduleAssignmentBackupItem | null {
+  const summary = normalizeScheduleAssignmentDbBackupSummary(row);
+  if (!summary) return null;
+
+  const monthStore = getBackupMonthStore(
+    {
+      entries: {
+        [summary.monthKey]: normalizeMonthEntries(row.entries ?? {}),
+      },
+      rows: {
+        [summary.monthKey]: normalizeMonthRows(row.rows ?? {}),
+      },
+    },
+    summary.monthKey,
+  );
+  const counts = getScheduleAssignmentBackupCounts(monthStore, summary.monthKey);
+
+  return {
+    ...summary,
+    entryCount: counts.entryCount,
+    rowChangeCount: counts.rowChangeCount,
+    store: monthStore,
+  };
+}
+
+function readScheduleAssignmentLocalBackupItems(): ScheduleAssignmentBackupItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TEAM_LEAD_SCHEDULE_ASSIGNMENT_BACKUP_STORAGE_KEY);
+    const parsed = JSON.parse(raw ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeScheduleAssignmentBackupItem)
+      .filter((item): item is ScheduleAssignmentBackupItem => Boolean(item))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+function writeScheduleAssignmentLocalBackupItems(items: ScheduleAssignmentBackupItem[]) {
+  if (typeof window === "undefined") return;
+  const uniqueItems = Array.from(
+    items.reduce((map, item) => {
+      map.set(item.id, item);
+      return map;
+    }, new Map<string, ScheduleAssignmentBackupItem>()).values(),
+  ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const prunedItems = uniqueItems.slice(0, TEAM_LEAD_SCHEDULE_ASSIGNMENT_LOCAL_BACKUP_LIMIT);
+  try {
+    window.localStorage.setItem(TEAM_LEAD_SCHEDULE_ASSIGNMENT_BACKUP_STORAGE_KEY, JSON.stringify(prunedItems));
+  } catch {
+    // Browser storage can be unavailable or full; DB persistence remains the source of truth.
+  }
+}
+
+function buildScheduleAssignmentBackupLabel(kind: ScheduleAssignmentBackupKind, monthKey: string, createdAt: Date) {
+  if (kind === "autosave") return `${monthKey} 자동저장 ${formatLocalDateTimeLabel(createdAt)}`;
+  if (kind === "daily") return `${monthKey} 일일 백업 ${formatLocalDateKey(createdAt)}`;
+  return `${monthKey} 복원 전 백업 ${formatLocalDateTimeLabel(createdAt)}`;
+}
+
+function emitScheduleAssignmentDbBackupUnavailable(error: unknown) {
+  if (!isSupabaseSchemaMissingError(error)) return false;
+
+  console.warn(getSupabaseStorageErrorMessage(error, "team_lead_schedule_assignment_backups"));
+  if (!assignmentDbBackupUnavailableWarned) {
+    assignmentDbBackupUnavailableWarned = true;
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: "일정배정 DB 일일 백업 테이블이 아직 적용되지 않아 일일 백업을 건너뛰었습니다.",
+    });
+  }
+  return true;
+}
+
+function sortScheduleAssignmentBackupSummaries(items: ScheduleAssignmentBackupSummary[]) {
+  return Array.from(
+    items.reduce((map, item) => {
+      map.set(item.id, item);
+      return map;
+    }, new Map<string, ScheduleAssignmentBackupSummary>()).values(),
+  ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function listScheduleAssignmentLocalBackups(): ScheduleAssignmentBackupSummary[] {
+  return readScheduleAssignmentLocalBackupItems()
+    .filter((item) => item.kind !== "daily")
+    .map(({ store: _store, ...summary }) => summary);
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function listScheduleAssignmentDbBackupSummaries(): Promise<ScheduleAssignmentBackupSummary[]> {
+  const session = await getPortalSession();
+  if (!session?.approved) return [];
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_schedule_assignment_backups")
+    .select("id, kind, month_key, backup_date, label, entry_count, row_change_count, created_at, updated_at")
+    .eq("kind", "daily")
+    .order("backup_date", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(120)
+    .returns<TeamLeadScheduleAssignmentBackupSummaryRow[]>();
+
+  if (error) {
+    if (emitScheduleAssignmentDbBackupUnavailable(error)) return [];
+    throw new Error(error.message);
+  }
+
+  return (data ?? [])
+    .map(normalizeScheduleAssignmentDbBackupSummary)
+    .filter((item): item is ScheduleAssignmentBackupSummary => Boolean(item));
+}
+
+export async function listScheduleAssignmentBackups(): Promise<ScheduleAssignmentBackupSummary[]> {
+  const localSummaries = listScheduleAssignmentLocalBackups();
+
+  try {
+    return sortScheduleAssignmentBackupSummaries([
+      ...(await listScheduleAssignmentDbBackupSummaries()),
+      ...localSummaries,
+    ]);
+  } catch (error) {
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "일정배정 백업 목록을 불러오지 못했습니다.",
+    });
+    return sortScheduleAssignmentBackupSummaries(localSummaries);
+  }
+}
+
+export async function readScheduleAssignmentBackup(id: string) {
+  const normalizedId = id.trim();
+  const localBackup = readScheduleAssignmentLocalBackupItems().find((item) => item.id === normalizedId);
+  if (localBackup) return localBackup;
+  if (!isUuidLike(normalizedId)) return null;
+
+  const session = await getPortalSession();
+  if (!session?.approved) return null;
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_schedule_assignment_backups")
+    .select("id, kind, month_key, backup_date, label, entries, rows, entry_count, row_change_count, created_at, updated_at")
+    .eq("id", normalizedId)
+    .maybeSingle<TeamLeadScheduleAssignmentBackupRow>();
+
+  if (error) {
+    if (emitScheduleAssignmentDbBackupUnavailable(error)) return null;
+    throw new Error(error.message);
+  }
+
+  return data ? normalizeScheduleAssignmentDbBackupItem(data) : null;
+}
+
+export function saveScheduleAssignmentLocalBackup(
+  store: ScheduleAssignmentDataStore,
+  monthKey: string,
+  kind: ScheduleAssignmentBackupKind,
+  options: { label?: string; createdAt?: Date } = {},
+) {
+  const normalizedMonthKey = monthKey.trim();
+  if (!normalizedMonthKey || typeof window === "undefined") return null;
+
+  const createdAt = options.createdAt ?? new Date();
+  const monthStore = getBackupMonthStore(store, normalizedMonthKey);
+  const counts = getScheduleAssignmentBackupCounts(monthStore, normalizedMonthKey);
+  if (counts.entryCount + counts.rowChangeCount === 0) return null;
+
+  const dateKey = formatLocalDateKey(createdAt);
+  const id =
+    kind === "autosave"
+      ? `autosave:${normalizedMonthKey}`
+      : kind === "daily"
+        ? `daily:${normalizedMonthKey}:${dateKey}`
+        : `manual:${normalizedMonthKey}:${createdAt.getTime()}`;
+  const item: ScheduleAssignmentBackupItem = {
+    id,
+    kind,
+    monthKey: normalizedMonthKey,
+    label: options.label?.trim() || buildScheduleAssignmentBackupLabel(kind, normalizedMonthKey, createdAt),
+    createdAt: createdAt.toISOString(),
+    entryCount: counts.entryCount,
+    rowChangeCount: counts.rowChangeCount,
+    store: monthStore,
+  };
+  const nextItems = [item, ...readScheduleAssignmentLocalBackupItems().filter((backup) => backup.id !== item.id)];
+  writeScheduleAssignmentLocalBackupItems(nextItems);
+  return item;
+}
+
+export function saveScheduleAssignmentAutosaveBackups(store: ScheduleAssignmentDataStore, monthKeys: string[]) {
+  monthKeys.forEach((monthKey) => {
+    saveScheduleAssignmentLocalBackup(store, monthKey, "autosave");
+  });
+}
+
+async function pruneScheduleAssignmentDailyDbBackups(
+  supabase: Awaited<ReturnType<typeof getPortalSupabaseClient>>,
+  monthKey: string,
+  backupDateKey: string,
+) {
+  const cutoffDateKey = addDaysToDateKey(backupDateKey, -(TEAM_LEAD_SCHEDULE_ASSIGNMENT_DB_DAILY_BACKUP_LIMIT - 1));
+  const oldRowsDelete = await supabase
+    .from("team_lead_schedule_assignment_backups")
+    .delete()
+    .eq("kind", "daily")
+    .eq("month_key", monthKey)
+    .lt("backup_date", cutoffDateKey);
+
+  if (oldRowsDelete.error) {
+    if (emitScheduleAssignmentDbBackupUnavailable(oldRowsDelete.error)) return;
+    throw new Error(oldRowsDelete.error.message);
+  }
+
+  const { data, error } = await supabase
+    .from("team_lead_schedule_assignment_backups")
+    .select("id")
+    .eq("kind", "daily")
+    .eq("month_key", monthKey)
+    .order("backup_date", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .range(TEAM_LEAD_SCHEDULE_ASSIGNMENT_DB_DAILY_BACKUP_LIMIT, 999)
+    .returns<Array<{ id: string }>>();
+
+  if (error) {
+    if (emitScheduleAssignmentDbBackupUnavailable(error)) return;
+    throw new Error(error.message);
+  }
+
+  const deleteIds = (data ?? []).map((row) => row.id).filter(Boolean);
+  if (deleteIds.length === 0) return;
+
+  const { error: deleteError } = await supabase
+    .from("team_lead_schedule_assignment_backups")
+    .delete()
+    .in("id", deleteIds);
+
+  if (deleteError) {
+    if (emitScheduleAssignmentDbBackupUnavailable(deleteError)) return;
+    throw new Error(deleteError.message);
+  }
+}
+
+export async function ensureScheduleAssignmentDailyBackups(
+  store: ScheduleAssignmentDataStore,
+  monthKeys: string[],
+  date = new Date(),
+) {
+  const session = await getPortalSession();
+  if (!session?.approved) return [];
+
+  const supabase = await getPortalSupabaseClient();
+  const normalizedStore = normalizeScheduleAssignmentDataStore(store);
+  const dateKey = formatLocalDateKey(date);
+  const savedItems: ScheduleAssignmentBackupSummary[] = [];
+  const normalizedMonthKeys = normalizeAssignmentMonthKeys(monthKeys);
+
+  for (const monthKey of normalizedMonthKeys) {
+    const normalizedMonthKey = monthKey.trim();
+    if (!normalizedMonthKey) continue;
+
+    const monthStore = getBackupMonthStore(normalizedStore, normalizedMonthKey);
+    const counts = getScheduleAssignmentBackupCounts(monthStore, normalizedMonthKey);
+    if (counts.entryCount + counts.rowChangeCount === 0) continue;
+
+    try {
+      const { data, error } = await supabase
+        .from("team_lead_schedule_assignment_backups")
+        .upsert(
+          {
+            kind: "daily",
+            month_key: normalizedMonthKey,
+            backup_date: dateKey,
+            label: buildScheduleAssignmentBackupLabel("daily", normalizedMonthKey, date),
+            entries: monthStore.entries[normalizedMonthKey] ?? {},
+            rows: monthStore.rows[normalizedMonthKey] ?? {},
+            entry_count: counts.entryCount,
+            row_change_count: counts.rowChangeCount,
+            created_by: session.id,
+            updated_by: session.id,
+          },
+          { onConflict: "kind,month_key,backup_date" },
+        )
+        .select("id, kind, month_key, backup_date, label, entry_count, row_change_count, created_at, updated_at")
+        .single<TeamLeadScheduleAssignmentBackupSummaryRow>();
+
+      if (error) {
+        if (emitScheduleAssignmentDbBackupUnavailable(error)) return savedItems;
+        throw new Error(error.message);
+      }
+
+      const summary = normalizeScheduleAssignmentDbBackupSummary(data);
+      if (summary) savedItems.push(summary);
+      await pruneScheduleAssignmentDailyDbBackups(supabase, normalizedMonthKey, dateKey);
+    } catch (error) {
+      emitTeamLeadStorageStatus({
+        ok: false,
+        message: error instanceof Error ? error.message : "일정배정 일일 DB 백업에 실패했습니다.",
+      });
+    }
+  }
+
+  return savedItems;
+}
+
 function setAssignmentMonthUpdatedAt(monthKey: string, updatedAt: string | null | undefined) {
   if (updatedAt) {
     assignmentMonthUpdatedAtCache[monthKey] = updatedAt;
@@ -419,6 +872,21 @@ function setAssignmentMonthUpdatedAt(monthKey: string, updatedAt: string | null 
   }
 
   delete assignmentMonthUpdatedAtCache[monthKey];
+}
+
+function markAssignmentMonthLoaded(monthKey: string) {
+  const normalizedMonthKey = monthKey.trim();
+  if (normalizedMonthKey) {
+    assignmentLoadedMonthKeys.add(normalizedMonthKey);
+  }
+}
+
+function clearAssignmentLoadedMonths() {
+  assignmentLoadedMonthKeys = new Set<string>();
+}
+
+export function isScheduleAssignmentMonthLoaded(monthKey: string) {
+  return assignmentLoadedMonthKeys.has(monthKey.trim());
 }
 
 function applyAssignmentRowsToCache(rows: TeamLeadScheduleAssignmentRow[]) {
@@ -441,11 +909,13 @@ function applyAssignmentRowsToCache(rows: TeamLeadScheduleAssignmentRow[]) {
       rows: normalizeMonthRows(row.rows ?? {}),
     })]),
   );
+  rows.forEach((row) => markAssignmentMonthLoaded(row.month_key));
 }
 
 function applyAssignmentMonthToCache(monthKey: string, row: TeamLeadScheduleAssignmentRow | null) {
   const nextEntries = { ...assignmentStoreCache.entries };
   const nextRows = { ...assignmentStoreCache.rows };
+  markAssignmentMonthLoaded(monthKey);
 
   if (row) {
     nextEntries[monthKey] = normalizeMonthEntries(row.entries ?? {});
@@ -557,6 +1027,7 @@ async function persistScheduleAssignmentStore(
       }
 
       setAssignmentMonthUpdatedAt(monthKey, data.updated_at);
+      markAssignmentMonthLoaded(monthKey);
       continue;
     }
 
@@ -576,6 +1047,7 @@ async function persistScheduleAssignmentStore(
     }
 
     setAssignmentMonthUpdatedAt(monthKey, data.updated_at);
+    markAssignmentMonthLoaded(monthKey);
   }
 
   if (conflictMonthKeys.length > 0) {
@@ -637,6 +1109,7 @@ export async function refreshTeamLeadAssignmentMonth(monthKey: string) {
     const session = await getPortalSession();
     if (!session?.approved) {
       applyAssignmentMonthToCache(normalizedMonthKey, null);
+      clearAssignmentLoadedMonths();
       emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
       return;
     }
@@ -652,6 +1125,7 @@ export async function refreshTeamLeadAssignmentMonth(monthKey: string) {
       if (isSupabaseSchemaMissingError(error)) {
         console.warn(getSupabaseStorageErrorMessage(error, "team_lead_schedule_assignments"));
         applyAssignmentMonthToCache(normalizedMonthKey, null);
+        clearAssignmentLoadedMonths();
         emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
         return;
       }
@@ -690,6 +1164,7 @@ export async function refreshTeamLeadAssignmentMonths(monthKeys: string[]) {
     const session = await getPortalSession();
     if (!session?.approved) {
       normalizedMonthKeys.forEach((monthKey) => applyAssignmentMonthToCache(monthKey, null));
+      clearAssignmentLoadedMonths();
       emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
       return;
     }
@@ -705,6 +1180,7 @@ export async function refreshTeamLeadAssignmentMonths(monthKeys: string[]) {
       if (isSupabaseSchemaMissingError(error)) {
         console.warn(getSupabaseStorageErrorMessage(error, "team_lead_schedule_assignments"));
         normalizedMonthKeys.forEach((monthKey) => applyAssignmentMonthToCache(monthKey, null));
+        clearAssignmentLoadedMonths();
         emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
         return;
       }
@@ -781,6 +1257,7 @@ export async function refreshTeamLeadState() {
       assignmentStoreCache = { entries: {}, rows: {} };
       assignmentMonthUpdatedAtCache = {};
       assignmentPersistedSnapshotCache = {};
+      clearAssignmentLoadedMonths();
       emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
       await refreshTeamLeadMetaState();
       return;
@@ -798,6 +1275,7 @@ export async function refreshTeamLeadState() {
         assignmentStoreCache = { entries: {}, rows: {} };
         assignmentMonthUpdatedAtCache = {};
         assignmentPersistedSnapshotCache = {};
+        clearAssignmentLoadedMonths();
         emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
         await refreshTeamLeadMetaState();
         return;
@@ -830,6 +1308,19 @@ export function saveScheduleAssignmentStore(
 
   if (changedMonthKeys.length === 0) {
     return Promise.resolve();
+  }
+
+  saveScheduleAssignmentAutosaveBackups(normalizedStore, changedMonthKeys);
+
+  const unloadedMonthKeys = changedMonthKeys.filter((monthKey) => !isScheduleAssignmentMonthLoaded(monthKey));
+  if (unloadedMonthKeys.length > 0) {
+    assignmentStoreCache = normalizedStore;
+    emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: "일정배정 월 데이터를 아직 불러오는 중이라 저장을 보류했습니다. 최신 DB 내용을 먼저 다시 불러옵니다.",
+    });
+    return Promise.all(unloadedMonthKeys.map((monthKey) => refreshTeamLeadAssignmentMonth(monthKey))).then(() => undefined);
   }
 
   emitTeamLeadEvent(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT);
