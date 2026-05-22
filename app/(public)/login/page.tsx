@@ -389,11 +389,11 @@ export default function LoginPage() {
 
         {mode === "forgot" ? (
           <>
-            <div className="status note">아이디를 입력하면 가입된 이메일로 임시 비밀번호를 보내드립니다.</div>
+            <div className="status note">아이디 또는 이메일을 입력하면 가입된 이메일로 임시 비밀번호를 보내드립니다.</div>
             <input
               className="field-input"
               type="text"
-              placeholder="아이디"
+              placeholder="아이디 또는 이메일"
               value={forgotLoginId}
               onChange={(event) => setForgotLoginId(event.target.value)}
               disabled={!supabaseConfigured}

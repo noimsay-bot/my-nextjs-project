@@ -13,8 +13,10 @@ import {
   saveMyWorkCalendarCustomTexts,
   type MyWorkCalendarCustomTextMap,
 } from "@/lib/my-page/work-calendar-custom-texts";
-import { getAssignmentDisplayRank, getDayCategoryDisplayLabel } from "@/lib/schedule/constants";
-import { getPublishedSchedules, refreshPublishedSchedules, type PublishedScheduleItem } from "@/lib/schedule/published";
+import {
+  getPortalSupabaseClient,
+  getSupabaseStorageErrorMessage,
+} from "@/lib/supabase/portal";
 import styles from "./MyWorkCalendar.module.css";
 
 type CalendarDay = {
@@ -31,6 +33,21 @@ type MyWorkEvent = {
   name: string;
 };
 
+type MyWorkCalendarDaySummary = {
+  dateKey: string;
+  isWeekend: boolean;
+  isHoliday: boolean;
+  isCustomHoliday: boolean;
+  isWeekdayHoliday: boolean;
+};
+
+type MyWorkCalendarSummaryResponse = {
+  monthKey: string;
+  publishedAt: string;
+  events: MyWorkEvent[];
+  days: MyWorkCalendarDaySummary[];
+};
+
 type MessageState = {
   tone: "note" | "warn";
   text: string;
@@ -43,6 +60,10 @@ const MONTH_GRID_DAYS = 42;
 const HELP_DISMISSED_STORAGE_PREFIX = "jtbc-my-work-calendar-help-dismissed-v1";
 const MAX_CUSTOM_TEXTS_PER_DAY = 5;
 const CUSTOM_TEXT_HELP_MESSAGE = "날짜를 더블 클릭하면 입력할 수 있습니다. 입력 후 수정/삭제는 오른쪽 클릭해주세요.";
+const MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS = 30_000;
+const myWorkCalendarSummaryCache = new Map<string, MyWorkCalendarSummaryResponse>();
+const myWorkCalendarSummaryPromises = new Map<string, Promise<MyWorkCalendarSummaryResponse>>();
+let myWorkCalendarRpcRetryAfter = 0;
 
 function getTodayDateKey() {
   return formatDateKey(new Date());
@@ -95,64 +116,6 @@ function buildCalendarDays(monthKey: string): CalendarDay[] {
   });
 }
 
-function normalizeActorName(value: string | null | undefined) {
-  return typeof value === "string" ? value.replace(/\s+/g, "").trim() : "";
-}
-
-function getComparableAssignmentName(category: string, value: string) {
-  const trimmed = value.trim();
-  if (category !== "휴가") return trimmed;
-  const matched = /^(연차|대휴|etc|기타|공가|근속휴가|건강검진|경조)\s*:(.+)$/.exec(trimmed);
-  return matched ? matched[2].trim() : trimmed;
-}
-
-function isSameActorName(left: string | null | undefined, right: string | null | undefined) {
-  const normalizedLeft = normalizeActorName(left);
-  const normalizedRight = normalizeActorName(right);
-  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
-}
-
-function buildMyWorkEvents(items: PublishedScheduleItem[], username: string) {
-  const events: MyWorkEvent[] = [];
-  if (!username.trim()) return events;
-
-  items.forEach((item) => {
-    item.schedule.days.forEach((day) => {
-      if (isSameActorName(day.headerName, username)) {
-        events.push({
-          id: `${day.dateKey}:header`,
-          dateKey: day.dateKey,
-          category: "데스크",
-          label: "데스크",
-          name: day.headerName,
-        });
-      }
-
-      Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
-        names.forEach((name, index) => {
-          const comparableName = getComparableAssignmentName(category, name);
-          if (!isSameActorName(comparableName, username)) return;
-          const label = getDayCategoryDisplayLabel(day, category);
-          if (label === "일반" && !isRedScheduleDay(day)) return;
-          events.push({
-            id: `${day.dateKey}:${category}:${index}:${name}`,
-            dateKey: day.dateKey,
-            category,
-            label,
-            name: comparableName,
-          });
-        });
-      });
-    });
-  });
-
-  return events.sort((left, right) => (
-    left.dateKey.localeCompare(right.dateKey) ||
-    getAssignmentDisplayRank(left.category) - getAssignmentDisplayRank(right.category) ||
-    left.label.localeCompare(right.label)
-  ));
-}
-
 function groupByDate<T extends { dateKey?: string; scheduleDate?: string }>(items: T[]) {
   return items.reduce((map, item) => {
     const dateKey = item.dateKey ?? item.scheduleDate;
@@ -168,21 +131,6 @@ function getScheduleItemPreview(item: MyScheduleAssignmentItem) {
   return item.scheduleContent.trim() || "일정";
 }
 
-function buildDayScheduleIndex(items: PublishedScheduleItem[]) {
-  const map = new Map<string, { isWeekend: boolean; isHoliday: boolean; isCustomHoliday: boolean; isWeekdayHoliday: boolean }>();
-  items.forEach((item) => {
-    item.schedule.days.forEach((day) => {
-      map.set(day.dateKey, {
-        isWeekend: day.isWeekend,
-        isHoliday: day.isHoliday,
-        isCustomHoliday: day.isCustomHoliday,
-        isWeekdayHoliday: day.isWeekdayHoliday,
-      });
-    });
-  });
-  return map;
-}
-
 function isRedCalendarDay(day: CalendarDay, scheduleDay?: { isWeekend: boolean; isHoliday: boolean; isCustomHoliday: boolean; isWeekdayHoliday: boolean }) {
   return Boolean(
     scheduleDay?.isWeekend ||
@@ -192,10 +140,6 @@ function isRedCalendarDay(day: CalendarDay, scheduleDay?: { isWeekend: boolean; 
     day.date.getDay() === 0 ||
     day.date.getDay() === 6,
   );
-}
-
-function isRedScheduleDay(day: { isWeekend: boolean; isHoliday: boolean; isCustomHoliday: boolean; isWeekdayHoliday: boolean }) {
-  return day.isWeekend || day.isHoliday || day.isCustomHoliday || day.isWeekdayHoliday;
 }
 
 function getHelpDismissedStorageKey(sessionId: string | null | undefined) {
@@ -216,17 +160,75 @@ function getCustomTextKey(dateKey: string, index: number) {
   return `${dateKey}:${index}`;
 }
 
+async function fetchMyWorkCalendarSummary(monthKey: string) {
+  const cached = myWorkCalendarSummaryCache.get(monthKey);
+  if (cached) return cached;
+
+  const existingPromise = myWorkCalendarSummaryPromises.get(monthKey);
+  if (existingPromise) return existingPromise;
+
+  const requestPromise = fetchMyWorkCalendarSummaryDirect(monthKey)
+    .catch(() => fetchMyWorkCalendarSummaryViaApi(monthKey))
+    .then((summary) => {
+      myWorkCalendarSummaryCache.set(monthKey, summary);
+      return summary;
+    })
+    .finally(() => {
+      myWorkCalendarSummaryPromises.delete(monthKey);
+    });
+
+  myWorkCalendarSummaryPromises.set(monthKey, requestPromise);
+  return requestPromise;
+}
+
+function normalizeMyWorkCalendarSummaryPayload(monthKey: string, payload: unknown): MyWorkCalendarSummaryResponse {
+  const record = Array.isArray(payload) ? payload[0] : payload;
+  const value = record && typeof record === "object" ? record as Partial<MyWorkCalendarSummaryResponse> : {};
+  return {
+    monthKey,
+    publishedAt: typeof value.publishedAt === "string" ? value.publishedAt : "",
+    events: Array.isArray(value.events) ? value.events : [],
+    days: Array.isArray(value.days) ? value.days : [],
+  };
+}
+
+async function fetchMyWorkCalendarSummaryDirect(monthKey: string) {
+  if (Date.now() < myWorkCalendarRpcRetryAfter) {
+    throw new Error("내 일정 RPC 재시도 대기 중입니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase.rpc("get_my_work_calendar", { p_month_key: monthKey });
+  if (error) {
+    myWorkCalendarRpcRetryAfter = Date.now() + MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS;
+    throw new Error(getSupabaseStorageErrorMessage(error, "get_my_work_calendar"));
+  }
+
+  return normalizeMyWorkCalendarSummaryPayload(monthKey, data);
+}
+
+async function fetchMyWorkCalendarSummaryViaApi(monthKey: string) {
+  return fetch(`/api/schedule/my-work-calendar?monthKey=${encodeURIComponent(monthKey)}`, {
+    method: "GET",
+    cache: "no-store",
+    credentials: "same-origin",
+  })
+    .then(async (response) => {
+      const payload = (await response.json().catch(() => null)) as (Partial<MyWorkCalendarSummaryResponse> & { message?: string }) | null;
+      if (!response.ok) {
+        throw new Error(payload?.message || "게시 근무표를 불러오지 못했습니다.");
+      }
+      return normalizeMyWorkCalendarSummaryPayload(monthKey, payload);
+    });
+}
+
 export function MyWorkCalendarPage() {
   const todayKey = getTodayDateKey();
   const [session, setSession] = useState<SessionUser | null>(() => getSession());
   const [monthKey, setMonthKey] = useState(() => todayKey.slice(0, 7));
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
-  const visibleScheduleMonthKeys = useMemo(() => [addMonths(monthKey, -1), monthKey, addMonths(monthKey, 1)], [monthKey]);
-  const [publishedItems, setPublishedItems] = useState<PublishedScheduleItem[]>(() => getPublishedSchedules([
-    addMonths(todayKey.slice(0, 7), -1),
-    todayKey.slice(0, 7),
-    addMonths(todayKey.slice(0, 7), 1),
-  ]));
+  const [workEvents, setWorkEvents] = useState<MyWorkEvent[]>(() => myWorkCalendarSummaryCache.get(todayKey.slice(0, 7))?.events ?? []);
+  const [scheduleDays, setScheduleDays] = useState<MyWorkCalendarDaySummary[]>(() => myWorkCalendarSummaryCache.get(todayKey.slice(0, 7))?.days ?? []);
   const [scheduleItems, setScheduleItems] = useState<MyScheduleAssignmentItem[]>([]);
   const [customTexts, setCustomTexts] = useState<CustomTextMap>({});
   const [editingCustomTextDateKey, setEditingCustomTextDateKey] = useState<string | null>(null);
@@ -278,18 +280,20 @@ export function MyWorkCalendarPage() {
     setMessage(null);
 
     Promise.allSettled([
-      refreshPublishedSchedules({ monthKeys: visibleScheduleMonthKeys }),
+      fetchMyWorkCalendarSummary(monthKey),
       fetchMyScheduleAssignmentsWithPartnerInfo(monthKey),
     ])
-      .then(([publishedResult, scheduleResult]) => {
+      .then(([summaryResult, scheduleResult]) => {
         if (cancelled) return;
-        if (publishedResult.status === "fulfilled") {
-          setPublishedItems(publishedResult.value);
+        if (summaryResult.status === "fulfilled") {
+          setWorkEvents(summaryResult.value.events);
+          setScheduleDays(summaryResult.value.days);
         } else {
-          setPublishedItems([]);
+          setWorkEvents([]);
+          setScheduleDays([]);
           setMessage({
             tone: "warn",
-            text: publishedResult.reason instanceof Error ? publishedResult.reason.message : "게시 근무표를 불러오지 못했습니다.",
+            text: summaryResult.reason instanceof Error ? summaryResult.reason.message : "게시 근무표를 불러오지 못했습니다.",
           });
         }
 
@@ -297,7 +301,7 @@ export function MyWorkCalendarPage() {
           setScheduleItems(scheduleResult.value);
         } else {
           setScheduleItems([]);
-          if (publishedResult.status === "fulfilled") {
+          if (summaryResult.status === "fulfilled") {
             setMessage({ tone: "note", text: "내 일정 상세를 불러오지 못해 근무표만 표시합니다." });
           }
         }
@@ -309,11 +313,10 @@ export function MyWorkCalendarPage() {
     return () => {
       cancelled = true;
     };
-  }, [monthKey, visibleScheduleMonthKeys]);
+  }, [monthKey]);
 
   const calendarDays = useMemo(() => buildCalendarDays(monthKey), [monthKey]);
-  const workEvents = useMemo(() => buildMyWorkEvents(publishedItems, session?.username ?? ""), [publishedItems, session?.username]);
-  const scheduleDayIndex = useMemo(() => buildDayScheduleIndex(publishedItems), [publishedItems]);
+  const scheduleDayIndex = useMemo(() => new Map(scheduleDays.map((day) => [day.dateKey, day] as const)), [scheduleDays]);
   const workByDate = useMemo(() => groupByDate(workEvents), [workEvents]);
   const schedulesByDate = useMemo(() => groupByDate(scheduleItems), [scheduleItems]);
   const selectedDate = parseDateKey(selectedDateKey);

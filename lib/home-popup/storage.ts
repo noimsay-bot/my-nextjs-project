@@ -1,7 +1,7 @@
 "use client";
 
 import { getSession, isReadOnlyPortalRole, type UserRole } from "@/lib/auth/storage";
-import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
+import type { TeamLeadTripItem, TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -10,6 +10,7 @@ import {
 } from "@/lib/supabase/portal";
 
 const HOME_POPUP_NOTICE_ROW_KEY = "active";
+const HOME_COMMUNITY_ATTACHMENT_BUCKET = "home-community-attachments";
 const HOME_NOTICE_STORE_VERSION = 6;
 const HOME_WORKSPACE_LOCAL_CACHE_VERSION = 3;
 const HOME_WORKSPACE_LOCAL_CACHE_PREFIX = "jtbc-home-workspace-cache-v2";
@@ -92,7 +93,10 @@ export interface CommunityBoardAttachment {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  dataUrl: string;
+  dataUrl?: string;
+  downloadUrl?: string;
+  storagePath?: string;
+  createdAt?: string;
 }
 
 export interface CommunityBoardComment {
@@ -188,11 +192,13 @@ let homeWorkspaceCommunityLoaded = false;
 let homeWorkspaceLastFetchedAt = 0;
 let homeWorkspaceSessionKey: string | null = null;
 let homeWorkspaceLastFailureAt = 0;
+let homeCurrentTripsRpcRetryAfter = 0;
 
-const HOME_POPUP_WORKSPACE_TTL_MS = 30_000;
+const HOME_POPUP_WORKSPACE_TTL_MS = 60_000;
 const HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS = 4_000;
-const HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS = 10_000;
+const HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS = 30_000;
 const HOME_WORKSPACE_LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const HOME_CURRENT_TRIPS_RPC_FAILURE_COOLDOWN_MS = 30_000;
 
 type PortalSession = Awaited<ReturnType<typeof getPortalSession>> | null;
 
@@ -271,7 +277,10 @@ function validateCommunityBoardAttachment(attachment: CommunityBoardAttachment |
   if (normalized.sizeBytes > 6 * 1024 * 1024) {
     throw new Error("첨부 파일은 6MB 이내로 업로드해 주세요.");
   }
-  if (!normalized.dataUrl.startsWith("data:")) {
+  if (normalized.dataUrl && !normalized.dataUrl.startsWith("data:")) {
+    throw new Error("첨부 파일 형식을 확인해 주세요.");
+  }
+  if (!normalized.dataUrl && !normalized.storagePath && !normalized.downloadUrl) {
     throw new Error("첨부 파일 형식을 확인해 주세요.");
   }
   return normalized;
@@ -519,15 +528,21 @@ function normalizeCommunityBoardAttachment(value: unknown): CommunityBoardAttach
   const fileName = typeof record.fileName === "string" ? record.fileName.trim() : "";
   const mimeType = typeof record.mimeType === "string" ? record.mimeType.trim() : "";
   const dataUrl = typeof record.dataUrl === "string" ? record.dataUrl.trim() : "";
+  const downloadUrl = typeof record.downloadUrl === "string" ? record.downloadUrl.trim() : "";
+  const storagePath = typeof record.storagePath === "string" ? record.storagePath.trim() : "";
+  const createdAt = typeof record.createdAt === "string" ? record.createdAt.trim() : "";
   const sizeBytes = typeof record.sizeBytes === "number" && Number.isFinite(record.sizeBytes) ? record.sizeBytes : 0;
-  if (!fileName || !dataUrl || sizeBytes <= 0) {
+  if (!fileName || (!dataUrl && !downloadUrl && !storagePath) || sizeBytes <= 0) {
     return null;
   }
   return {
     fileName,
     mimeType,
     sizeBytes,
-    dataUrl,
+    ...(dataUrl ? { dataUrl } : {}),
+    ...(downloadUrl ? { downloadUrl } : {}),
+    ...(storagePath ? { storagePath } : {}),
+    ...(createdAt ? { createdAt } : {}),
   };
 }
 
@@ -600,6 +615,108 @@ function sortCommunityComments(comments: CommunityBoardComment[]) {
     }
     return right.createdAt.localeCompare(left.createdAt);
   });
+}
+
+function hasCommunityAttachmentWithoutStoredSource(posts: CommunityBoardPost[]) {
+  return posts.some((post) => post.attachment && !post.attachment.dataUrl && !post.attachment.storagePath);
+}
+
+function mergeStoredCommunityAttachments(
+  posts: CommunityBoardPost[],
+  storedPosts: CommunityBoardPost[],
+) {
+  const storedPostMap = new Map(storedPosts.map((post) => [post.id, post] as const));
+  return posts.map((post) => {
+    if (!post.attachment || post.attachment.dataUrl || post.attachment.storagePath) return post;
+    const storedAttachment = storedPostMap.get(post.id)?.attachment ?? null;
+    if (!storedAttachment?.dataUrl && !storedAttachment?.storagePath) return post;
+    return {
+      ...post,
+      attachment: {
+        ...storedAttachment,
+        ...post.attachment,
+        ...(storedAttachment.dataUrl ? { dataUrl: storedAttachment.dataUrl } : {}),
+        ...(storedAttachment.storagePath ? { storagePath: storedAttachment.storagePath } : {}),
+        downloadUrl: post.attachment.downloadUrl || storedAttachment.downloadUrl,
+      },
+    };
+  });
+}
+
+function getSafeStorageFileName(fileName: string) {
+  const normalized = fileName
+    .trim()
+    .replace(/[\\/]/g, "-")
+    .replace(/[\r\n"]/g, "_")
+    .replace(/[^\w.\-가-힣 ]/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+  return normalized || "attachment";
+}
+
+function createClientId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getCommunityAttachmentStoragePath(userId: string, attachment: CommunityBoardAttachment) {
+  return `community/${userId}/${createClientId()}-${getSafeStorageFileName(attachment.fileName)}`;
+}
+
+async function dataUrlToBlob(dataUrl: string) {
+  const response = await fetch(dataUrl);
+  if (!response.ok) {
+    throw new Error("첨부 파일을 업로드할 수 없습니다.");
+  }
+  return response.blob();
+}
+
+async function uploadCommunityAttachmentToStorage(
+  attachment: CommunityBoardAttachment | null,
+  session: NonNullable<Awaited<ReturnType<typeof getPortalSession>>>,
+): Promise<CommunityBoardAttachment | null> {
+  if (!attachment?.dataUrl || attachment.storagePath) return attachment;
+
+  const supabase = await getPortalSupabaseClient();
+  const storagePath = getCommunityAttachmentStoragePath(session.id, attachment);
+  const blob = await dataUrlToBlob(attachment.dataUrl);
+  const { error } = await supabase.storage.from(HOME_COMMUNITY_ATTACHMENT_BUCKET).upload(storagePath, blob, {
+    contentType: attachment.mimeType || blob.type || "application/octet-stream",
+    upsert: false,
+  });
+
+  if (error) {
+    // Keep existing posting flow alive when the private bucket/policy migration has not been applied yet.
+    return attachment;
+  }
+
+  return {
+    fileName: attachment.fileName,
+    mimeType: attachment.mimeType || blob.type || "application/octet-stream",
+    sizeBytes: attachment.sizeBytes,
+    storagePath,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function resolveCommunityAttachmentDownloadUrl(attachment: CommunityBoardAttachment) {
+  if (attachment.storagePath) {
+    try {
+      const supabase = await getPortalSupabaseClient();
+      const { data, error } = await supabase.storage
+        .from(HOME_COMMUNITY_ATTACHMENT_BUCKET)
+        .createSignedUrl(attachment.storagePath, 5 * 60);
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+    } catch {
+      // Fall back to the legacy server download path below.
+    }
+  }
+
+  return attachment.downloadUrl || attachment.dataUrl || "#";
 }
 
 function getActivePopupNotice(notices: HomeNotice[]) {
@@ -1031,6 +1148,66 @@ export function getHomePublicTripCards() {
   return cloneTripCards(tripCardCache);
 }
 
+function normalizeHomeCurrentTripCards(value: unknown): TeamLeadTripPersonCard[] {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((card) => {
+      if (!card || typeof card !== "object") return null;
+      const record = card as Record<string, unknown>;
+      const name = typeof record.name === "string" ? record.name.trim() : "";
+      const rawItems = Array.isArray(record.items) ? record.items : [];
+      const items: TeamLeadTripItem[] = rawItems
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const itemRecord = item as Record<string, unknown>;
+          const tripTagId = typeof itemRecord.tripTagId === "string" ? itemRecord.tripTagId.trim() : "";
+          const tripTagLabel = typeof itemRecord.tripTagLabel === "string" ? itemRecord.tripTagLabel.trim() : "";
+          const travelType = typeof itemRecord.travelType === "string" ? itemRecord.travelType.trim() : "";
+          const startDateKey = typeof itemRecord.startDateKey === "string" ? itemRecord.startDateKey.trim() : "";
+          const endDateKey = typeof itemRecord.endDateKey === "string" ? itemRecord.endDateKey.trim() : "";
+          const dateKeys = Array.isArray(itemRecord.dateKeys)
+            ? itemRecord.dateKeys.filter((dateKey): dateKey is string => typeof dateKey === "string")
+            : [];
+          const schedules = Array.isArray(itemRecord.schedules)
+            ? itemRecord.schedules.filter((schedule): schedule is string => typeof schedule === "string")
+            : [];
+          if (!tripTagId || !travelType || !startDateKey || !endDateKey) return null;
+          return {
+            tripTagId,
+            tripTagLabel,
+            travelType: travelType as TeamLeadTripPersonCard["items"][number]["travelType"],
+            startDateKey,
+            endDateKey,
+            dayCount: typeof itemRecord.dayCount === "number" ? itemRecord.dayCount : Math.max(1, dateKeys.length),
+            dateKeys,
+            duties: [] as string[],
+            schedules,
+          } satisfies TeamLeadTripItem;
+        })
+        .filter((item): item is TeamLeadTripItem => Boolean(item));
+      if (!name || items.length === 0) return null;
+      return { name, items };
+    })
+    .filter((card): card is TeamLeadTripPersonCard => Boolean(card));
+}
+
+export async function refreshHomeCurrentTripsFromSupabase() {
+  if (Date.now() < homeCurrentTripsRpcRetryAfter) {
+    throw new Error("현재 출장자 RPC 재시도 대기 중입니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase.rpc("get_home_current_trips");
+  if (error) {
+    homeCurrentTripsRpcRetryAfter = Date.now() + HOME_CURRENT_TRIPS_RPC_FAILURE_COOLDOWN_MS;
+    throw new Error(getSupabaseStorageErrorMessage(error, "get_home_current_trips"));
+  }
+
+  tripCardCache = normalizeHomeCurrentTripCards(data);
+  homeWorkspaceTripCardsLoaded = true;
+  return getHomePublicTripCards();
+}
+
 export function hasAppliedToCurrentHomePopupNotice() {
   return currentUserAppliedCache;
 }
@@ -1250,12 +1427,17 @@ async function persistNotices(
 ) {
   let safeCommunityPosts = communityPosts;
   let safeCommunityComments = communityComments;
-  if (options.preserveExistingCommunityIfEmpty !== false && (communityPosts.length === 0 || communityComments.length === 0)) {
+  const shouldLoadCurrentWorkspace =
+    hasCommunityAttachmentWithoutStoredSource(communityPosts) ||
+    (options.preserveExistingCommunityIfEmpty !== false && (communityPosts.length === 0 || communityComments.length === 0));
+
+  if (shouldLoadCurrentWorkspace) {
     const { data: currentRow, error: currentError } = await selectHomePopupNoticeRow(supabase);
     if (currentError) {
       throw new Error(getSupabaseStorageErrorMessage(currentError, "home_popup_notice_state"));
     }
     const currentWorkspace = parseStorePayload(currentRow ?? null);
+    safeCommunityPosts = mergeStoredCommunityAttachments(safeCommunityPosts, currentWorkspace.communityPosts);
     if (communityPosts.length === 0 && currentWorkspace.communityPosts.length > 0) {
       safeCommunityPosts = currentWorkspace.communityPosts;
     }
@@ -1930,7 +2112,9 @@ export async function saveCommunityBoardPost(input: {
 
   const title = input.title.trim();
   const body = input.body.trim();
-  const attachment = validateCommunityBoardAttachment(input.attachment);
+  const attachment = input.category === "resource"
+    ? await uploadCommunityAttachmentToStorage(validateCommunityBoardAttachment(input.attachment), session)
+    : null;
   if (!title || !body) {
     throw new Error("제목과 본문을 모두 입력해 주세요.");
   }
@@ -1964,7 +2148,6 @@ export async function updateCommunityBoardPost(input: {
   const postId = input.postId.trim();
   const title = input.title.trim();
   const body = input.body.trim();
-  const attachment = validateCommunityBoardAttachment(input.attachment);
   if (!postId) {
     throw new Error("수정할 글을 찾지 못했습니다.");
   }
@@ -1992,12 +2175,29 @@ export async function updateCommunityBoardPost(input: {
     );
   }
 
+  const shouldPreserveAttachment =
+    targetPost.category === "resource" &&
+    Boolean(
+      input.attachment &&
+      !input.attachment.dataUrl &&
+      (
+        (input.attachment.storagePath && targetPost.attachment?.storagePath === input.attachment.storagePath) ||
+        (input.attachment.downloadUrl && targetPost.attachment?.downloadUrl === input.attachment.downloadUrl)
+      ),
+    );
+  const attachment = shouldPreserveAttachment
+    ? null
+    : targetPost.category === "resource"
+      ? await uploadCommunityAttachmentToStorage(validateCommunityBoardAttachment(input.attachment), session)
+      : null;
+
   await syncCommunityWorkspaceMutation({
     action: "updatePost",
     postId,
     category: targetPost.category,
     title,
     body,
+    preserveAttachment: shouldPreserveAttachment,
     attachment,
   });
   emitHomePopupNoticeStatus({ ok: true, message: "커뮤니티 글을 수정했습니다." });

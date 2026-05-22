@@ -18,6 +18,7 @@ import {
   hydrateHomePopupWorkspaceFromLocal,
   HOME_POPUP_NOTICE_EVENT,
   refreshHomePopupNoticeWorkspace,
+  resolveCommunityAttachmentDownloadUrl,
   saveHomeDday,
   saveCommunityBoardComment,
   saveCommunityBoardPost,
@@ -208,6 +209,28 @@ export default function HomeNoticeBoardPage() {
     setDdays(getHomeDdays());
     setCommunityPosts(getCommunityBoardPosts());
     setCommunityComments(getCommunityBoardComments());
+  }, []);
+
+  const downloadAttachment = useCallback(async (targetAttachment: CommunityBoardAttachment) => {
+    try {
+      const url = await resolveCommunityAttachmentDownloadUrl(targetAttachment);
+      if (!url || url === "#") {
+        setMessage({ tone: "warn", text: "첨부 파일 다운로드 경로를 확인하지 못했습니다." });
+        return;
+      }
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = targetAttachment.fileName;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "첨부 파일을 다운로드하지 못했습니다.",
+      });
+    }
   }, []);
 
   const loadWorkspace = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -663,9 +686,9 @@ export default function HomeNoticeBoardPage() {
                               <span className="muted" style={{ fontSize: 12 }}>{formatFileSize(attachment.sizeBytes)}</span>
                             </div>
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                              <a className="btn white" href={attachment.dataUrl} download={attachment.fileName}>
+                              <button type="button" className="btn white" onClick={() => void downloadAttachment(attachment)}>
                                 다운로드 확인
-                              </a>
+                              </button>
                               <button type="button" className="btn" onClick={() => setAttachment(null)} disabled={saving}>
                                 첨부 제거
                               </button>
@@ -912,9 +935,9 @@ export default function HomeNoticeBoardPage() {
                                       <strong style={{ fontSize: 13 }}>{item.attachment.fileName}</strong>
                                       <span className="muted" style={{ fontSize: 12 }}>{formatFileSize(item.attachment.sizeBytes)}</span>
                                     </div>
-                                    <a className="btn white" href={item.attachment.dataUrl} download={item.attachment.fileName}>
+                                    <button type="button" className="btn white" onClick={() => void downloadAttachment(item.attachment!)}>
                                       다운로드
-                                    </a>
+                                    </button>
                                   </div>
                                 ) : null}
                                 <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>

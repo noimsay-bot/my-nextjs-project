@@ -25,8 +25,7 @@ import {
 import {
   acknowledgeCustomerSupportFeedbackNotification,
   CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT,
-  getOpenCustomerSupportMessageCount,
-  getPendingCustomerSupportFeedbackNotification,
+  getPortalCustomerSupportSummary,
   type CustomerSupportFeedbackNotification,
 } from "@/lib/portal/customer-support";
 import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
@@ -120,23 +119,23 @@ const links: PortalNavLink[] = [
 ];
 
 const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
-  "/equipment": "/images/sidebar-icons/tvu-equipment.png",
-  "/election": "/images/sidebar-icons/election.png",
-  "/admin": "/images/sidebar-icons/admin.png",
-  "/work-schedule": "/images/sidebar-icons/work-schedule.png",
-  "/restaurants": "/images/sidebar-icons/restaurants.png",
-  "/schedule": "/images/sidebar-icons/desk.png",
-  "/me": "/images/sidebar-icons/my-page.png",
-  "/submissions": "/images/sidebar-icons/best-report-submit.png",
-  "/review": "/images/sidebar-icons/best-report-review.png",
-  "/community": "/images/sidebar-icons/community.png",
-  "/vacation": "/images/sidebar-icons/vacation.png",
-  "/team-lead": "/images/sidebar-icons/team-lead.png",
+  "/equipment": "/images/sidebar-icons/tvu-equipment.webp",
+  "/election": "/images/sidebar-icons/election.webp",
+  "/admin": "/images/sidebar-icons/admin.webp",
+  "/work-schedule": "/images/sidebar-icons/work-schedule.webp",
+  "/restaurants": "/images/sidebar-icons/restaurants.webp",
+  "/schedule": "/images/sidebar-icons/desk.webp",
+  "/me": "/images/sidebar-icons/my-page.webp",
+  "/submissions": "/images/sidebar-icons/best-report-submit.webp",
+  "/review": "/images/sidebar-icons/best-report-review.webp",
+  "/community": "/images/sidebar-icons/community.webp",
+  "/vacation": "/images/sidebar-icons/vacation.webp",
+  "/team-lead": "/images/sidebar-icons/team-lead.webp",
 };
 
 const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
-  "customer-support": "/images/sidebar-icons/customer-support.png",
-  theme: "/images/sidebar-icons/theme-mode.png",
+  "customer-support": "/images/sidebar-icons/customer-support.webp",
+  theme: "/images/sidebar-icons/theme-mode.webp",
 };
 
 const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"; id: SidebarNavActionId }> = [
@@ -222,6 +221,8 @@ const MOBILE_SIDEBAR_TRIGGER_MIN_TOP = 12;
 const MOBILE_SIDEBAR_TRIGGER_HEIGHT = 100;
 const MOBILE_SIDEBAR_TRIGGER_BOTTOM_GAP = 12;
 const MOBILE_SIDEBAR_TRIGGER_LONG_PRESS_MS = 320;
+const PORTAL_BACKGROUND_POLL_INTERVAL_MS = 120_000;
+const PORTAL_FOCUS_REFRESH_COOLDOWN_MS = 60_000;
 
 function readStoredTheme(): PortalTheme {
   if (typeof window === "undefined") return "dark";
@@ -474,7 +475,7 @@ function SidebarItemIcon({ src, label }: { src?: string; label: string }) {
   return (
     <span className="portal-sidebar-link__icon" aria-hidden="true">
       {src ? (
-        <Image src={src} alt="" width={34} height={34} sizes="34px" />
+        <Image src={src} alt="" width={34} height={34} sizes="34px" unoptimized />
       ) : (
         <span className="portal-sidebar-link__fallback-icon">{label.slice(0, 1)}</span>
       )}
@@ -883,6 +884,8 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const mobileSidebarTriggerPointerIdRef = useRef<number | null>(null);
   const mobileSidebarTriggerPointerOffsetRef = useRef(0);
   const shouldSuppressMobileSidebarTriggerClickRef = useRef(false);
+  const customerSupportSummaryLastSyncAtRef = useRef(0);
+  const customerSupportSummaryPromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -894,51 +897,46 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   useEffect(() => {
     if (!session?.approved) {
       setCustomerSupportFeedback(null);
-      return;
-    }
-
-    let mounted = true;
-    const syncCustomerSupportFeedback = () => {
-      void getPendingCustomerSupportFeedbackNotification().then((notification) => {
-        if (!mounted) return;
-        setCustomerSupportFeedback(notification);
-      });
-    };
-
-    syncCustomerSupportFeedback();
-    window.addEventListener("focus", syncCustomerSupportFeedback);
-    const intervalId = window.setInterval(syncCustomerSupportFeedback, 60_000);
-
-    return () => {
-      mounted = false;
-      window.removeEventListener("focus", syncCustomerSupportFeedback);
-      window.clearInterval(intervalId);
-    };
-  }, [session?.approved, session?.id]);
-
-  useEffect(() => {
-    if (!session?.approved || !hasAdminAccess(session.actualRole)) {
       setAdminCustomerSupportOpenCount(0);
       return;
     }
 
     let mounted = true;
-    const syncAdminCustomerSupportCount = () => {
-      void getOpenCustomerSupportMessageCount().then((count) => {
+    const syncCustomerSupportSummary = (reason: "initial" | "focus" | "poll" | "event" | "visible" = "poll") => {
+      if ((reason === "focus" || reason === "poll" || reason === "visible") && document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (reason !== "initial" && now - customerSupportSummaryLastSyncAtRef.current < PORTAL_FOCUS_REFRESH_COOLDOWN_MS) return;
+      if (customerSupportSummaryPromiseRef.current) return;
+
+      customerSupportSummaryPromiseRef.current = getPortalCustomerSupportSummary().then((summary) => {
         if (!mounted) return;
-        setAdminCustomerSupportOpenCount(count);
+        customerSupportSummaryLastSyncAtRef.current = Date.now();
+        setCustomerSupportFeedback(summary.feedbackNotification);
+        setAdminCustomerSupportOpenCount(hasAdminAccess(session.actualRole) ? summary.openCount : 0);
+      }).catch(() => {
+        customerSupportSummaryLastSyncAtRef.current = Date.now();
+      }).finally(() => {
+        customerSupportSummaryPromiseRef.current = null;
       });
     };
 
-    syncAdminCustomerSupportCount();
-    window.addEventListener("focus", syncAdminCustomerSupportCount);
-    window.addEventListener(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT, syncAdminCustomerSupportCount);
-    const intervalId = window.setInterval(syncAdminCustomerSupportCount, 60_000);
+    const onFocus = () => syncCustomerSupportSummary("focus");
+    const onAdminCountEvent = () => syncCustomerSupportSummary("event");
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") syncCustomerSupportSummary("visible");
+    };
+
+    syncCustomerSupportSummary("initial");
+    window.addEventListener("focus", onFocus);
+    window.addEventListener(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT, onAdminCountEvent);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const intervalId = window.setInterval(() => syncCustomerSupportSummary("poll"), PORTAL_BACKGROUND_POLL_INTERVAL_MS);
 
     return () => {
       mounted = false;
-      window.removeEventListener("focus", syncAdminCustomerSupportCount);
-      window.removeEventListener(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT, syncAdminCustomerSupportCount);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT, onAdminCountEvent);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.clearInterval(intervalId);
     };
   }, [session?.approved, session?.actualRole, session?.id]);

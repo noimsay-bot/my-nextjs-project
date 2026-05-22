@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getHomePublicTripCards,
   HOME_POPUP_NOTICE_EVENT,
+  refreshHomeCurrentTripsFromSupabase,
   refreshHomePopupNoticeWorkspace,
 } from "@/lib/home-popup/storage";
 import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
@@ -49,7 +50,11 @@ export function HomeNewsCurrentTrips({
   };
 
   const loadTripCards = async () => {
-    await refreshHomePopupNoticeWorkspace({ includeCommunity: false });
+    try {
+      await refreshHomeCurrentTripsFromSupabase();
+    } catch {
+      await refreshHomePopupNoticeWorkspace({ includeCommunity: false });
+    }
     syncTripCards();
   };
 

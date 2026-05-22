@@ -78,6 +78,11 @@ export interface CustomerSupportFeedbackNotification {
   createdAt: string;
 }
 
+export interface PortalCustomerSupportSummary {
+  openCount: number;
+  feedbackNotification: CustomerSupportFeedbackNotification | null;
+}
+
 export function shouldSendCustomerSupportWithRealName(role: UserRole | null | undefined) {
   return Boolean(role && CUSTOMER_SUPPORT_REAL_NAME_ROLES.has(role));
 }
@@ -332,6 +337,51 @@ export async function getOpenCustomerSupportMessageCount(): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+function normalizeCustomerSupportSummary(value: unknown): PortalCustomerSupportSummary | null {
+  const record = Array.isArray(value) ? value[0] : value;
+  if (!record || typeof record !== "object") return null;
+  const payload = record as Record<string, unknown>;
+  const notification = payload.feedbackNotification && typeof payload.feedbackNotification === "object"
+    ? payload.feedbackNotification as Record<string, unknown>
+    : null;
+  return {
+    openCount: typeof payload.openCount === "number" && Number.isFinite(payload.openCount) ? payload.openCount : 0,
+    feedbackNotification: notification && typeof notification.id === "string"
+      ? {
+          id: notification.id,
+          body: typeof notification.body === "string" ? notification.body : "",
+          processedAt: typeof notification.processedAt === "string" ? notification.processedAt : null,
+          processedFeedback: typeof notification.processedFeedback === "string" ? notification.processedFeedback : null,
+          createdAt: typeof notification.createdAt === "string" ? notification.createdAt : "",
+        }
+      : null,
+  };
+}
+
+export async function getPortalCustomerSupportSummary(): Promise<PortalCustomerSupportSummary> {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    return { openCount: 0, feedbackNotification: null };
+  }
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase.rpc("get_portal_support_summary");
+    if (!error) {
+      const summary = normalizeCustomerSupportSummary(data);
+      if (summary) return summary;
+    }
+  } catch {
+    // Fall back to the existing RLS-scoped reads below.
+  }
+
+  const [feedbackNotification, openCount] = await Promise.all([
+    getPendingCustomerSupportFeedbackNotification(),
+    getOpenCustomerSupportMessageCount(),
+  ]);
+  return { feedbackNotification, openCount };
 }
 
 export async function markCustomerSupportMessageProcessed(messageId: string, feedback = "") {

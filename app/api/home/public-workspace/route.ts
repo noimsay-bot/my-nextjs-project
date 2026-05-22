@@ -6,6 +6,10 @@ import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 
 const HOME_PUBLIC_WORKSPACE_TIMEOUT_MS = 4_000;
+const HOME_COMMUNITY_ATTACHMENT_BUCKET = "home-community-attachments";
+const HOME_TRIP_LOOKBACK_DAYS = 14;
+const HOME_TRIP_LOOKAHEAD_DAYS = 7;
+const CURRENT_TRIP_TRAVEL_TYPES = new Set<AssignmentTravelType>(["국내출장", "해외출장"]);
 
 function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknown, init?: ResponseInit) {
   const status = init?.status ?? 200;
@@ -97,7 +101,9 @@ interface CommunityBoardAttachment {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
-  dataUrl: string;
+  dataUrl?: string;
+  downloadUrl?: string;
+  storagePath?: string;
 }
 
 interface CommunityBoardPost {
@@ -156,7 +162,6 @@ interface TeamLeadScheduleAssignmentRow {
 
 interface ScheduleMonthRow {
   month_key: string;
-  draft_state: GeneratedSchedule | null;
   published_state: GeneratedSchedule | null;
 }
 
@@ -330,15 +335,19 @@ function normalizeCommunityBoardAttachment(value: unknown): CommunityBoardAttach
   const fileName = typeof record.fileName === "string" ? record.fileName.trim() : "";
   const mimeType = typeof record.mimeType === "string" ? record.mimeType.trim() : "";
   const dataUrl = typeof record.dataUrl === "string" ? record.dataUrl.trim() : "";
+  const downloadUrl = typeof record.downloadUrl === "string" ? record.downloadUrl.trim() : "";
+  const storagePath = typeof record.storagePath === "string" ? record.storagePath.trim() : "";
   const sizeBytes = typeof record.sizeBytes === "number" && Number.isFinite(record.sizeBytes) ? record.sizeBytes : 0;
-  if (!fileName || !dataUrl || sizeBytes <= 0) {
+  if (!fileName || (!dataUrl && !storagePath && !downloadUrl) || sizeBytes <= 0) {
     return null;
   }
   return {
     fileName,
     mimeType,
     sizeBytes,
-    dataUrl,
+    ...(dataUrl ? { dataUrl } : {}),
+    ...(downloadUrl ? { downloadUrl } : {}),
+    ...(storagePath ? { storagePath } : {}),
   };
 }
 
@@ -686,6 +695,181 @@ function sanitizeWorkspaceForProfile(
   };
 }
 
+function getCommunityAttachmentDownloadUrl(postId: string) {
+  return `/api/home/public-workspace?attachmentPostId=${encodeURIComponent(postId)}`;
+}
+
+function serializeCommunityPostForResponse(post: CommunityBoardPost): CommunityBoardPost {
+  if (!post.attachment) return post;
+  const { dataUrl: _dataUrl, ...attachment } = post.attachment;
+  return {
+    ...post,
+    attachment: {
+      ...attachment,
+      downloadUrl: attachment.downloadUrl || getCommunityAttachmentDownloadUrl(post.id),
+    },
+  };
+}
+
+function serializeCommunityPostsForResponse(posts: CommunityBoardPost[]) {
+  return posts.map(serializeCommunityPostForResponse);
+}
+
+function parseAttachmentDataUrl(dataUrl: string, fallbackMimeType: string) {
+  const matched = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
+  if (!matched) return null;
+  const mimeType = matched[1]?.trim() || fallbackMimeType || "application/octet-stream";
+  const isBase64 = Boolean(matched[2]);
+  const payload = matched[3] ?? "";
+  try {
+    return {
+      mimeType,
+      bytes: isBase64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getSafeAttachmentFilename(fileName: string) {
+  const normalized = fileName.trim().replace(/[\r\n"\\]/g, "_");
+  return normalized || "attachment";
+}
+
+async function ensureCommunityAttachmentBucket(admin: ReturnType<typeof createAdminClient>) {
+  const { error } = await admin.storage.createBucket(HOME_COMMUNITY_ATTACHMENT_BUCKET, {
+    public: false,
+  });
+  if (error && !/already exists|duplicate|exists/i.test(error.message)) {
+    throw new Error("첨부 파일 저장소를 준비하지 못했습니다.");
+  }
+}
+
+function getAttachmentFileExtension(fileName: string, mimeType: string) {
+  const fromName = fileName.split(".").pop()?.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (fromName) return fromName.slice(0, 12);
+  if (mimeType.includes("pdf")) return "pdf";
+  if (mimeType.includes("png")) return "png";
+  if (mimeType.includes("webp")) return "webp";
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return "jpg";
+  return "bin";
+}
+
+function getCommunityAttachmentStoragePath(postId: string, attachment: CommunityBoardAttachment) {
+  const extension = getAttachmentFileExtension(attachment.fileName, attachment.mimeType);
+  return `community/${postId}/${crypto.randomUUID()}.${extension}`;
+}
+
+async function persistCommunityAttachmentToStorage(
+  admin: ReturnType<typeof createAdminClient>,
+  postId: string,
+  attachment: CommunityBoardAttachment | null,
+  ownerId: string,
+): Promise<CommunityBoardAttachment | null> {
+  if (attachment?.storagePath) {
+    const ownerPrefix = `community/${ownerId}/`;
+    const legacyPostPrefix = `community/${postId}/`;
+    if (!attachment.storagePath.startsWith(ownerPrefix) && !attachment.storagePath.startsWith(legacyPostPrefix)) {
+      throw new Error("첨부 파일 저장 경로를 확인해 주세요.");
+    }
+    return {
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      storagePath: attachment.storagePath,
+      downloadUrl: attachment.downloadUrl || getCommunityAttachmentDownloadUrl(postId),
+    };
+  }
+  if (!attachment?.dataUrl) return attachment;
+  const parsed = parseAttachmentDataUrl(attachment.dataUrl, attachment.mimeType);
+  if (!parsed) {
+    throw new Error("첨부 파일 형식을 확인해 주세요.");
+  }
+
+  await ensureCommunityAttachmentBucket(admin);
+  const storagePath = getCommunityAttachmentStoragePath(postId, attachment);
+  const { error } = await admin.storage.from(HOME_COMMUNITY_ATTACHMENT_BUCKET).upload(storagePath, parsed.bytes, {
+    contentType: parsed.mimeType,
+    upsert: false,
+  });
+
+  if (error) {
+    throw new Error("첨부 파일을 저장하지 못했습니다.");
+  }
+
+  return {
+    fileName: attachment.fileName,
+    mimeType: parsed.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    storagePath,
+    downloadUrl: getCommunityAttachmentDownloadUrl(postId),
+  };
+}
+
+async function buildStorageAttachmentDownloadResponse(
+  request: Request,
+  startedAt: number,
+  attachment: CommunityBoardAttachment,
+) {
+  const storagePath = attachment.storagePath?.trim();
+  if (!storagePath) {
+    return jsonWithUsageDebug(request, startedAt, { message: "첨부 파일을 찾지 못했습니다." }, { status: 404 });
+  }
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage.from(HOME_COMMUNITY_ATTACHMENT_BUCKET).download(storagePath);
+  if (error || !data) {
+    return jsonWithUsageDebug(request, startedAt, { message: "첨부 파일을 찾지 못했습니다." }, { status: 404 });
+  }
+
+  const bytes = Buffer.from(await data.arrayBuffer());
+  const fileName = getSafeAttachmentFilename(attachment.fileName);
+  logRouteUsageDebug(request, {
+    status: 200,
+    startedAt,
+    responseBytes: bytes.byteLength,
+  });
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": attachment.mimeType || data.type || "application/octet-stream",
+      "Content-Length": String(bytes.byteLength),
+      "Content-Disposition": `attachment; filename="${fileName.replace(/[^\x20-\x7E]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+async function buildAttachmentDownloadResponse(request: Request, startedAt: number, post: CommunityBoardPost) {
+  const attachment = post.attachment;
+  if (!attachment?.dataUrl && !attachment?.storagePath) {
+    return jsonWithUsageDebug(request, startedAt, { message: "첨부 파일을 찾지 못했습니다." }, { status: 404 });
+  }
+
+  if (attachment.storagePath) {
+    return buildStorageAttachmentDownloadResponse(request, startedAt, attachment);
+  }
+
+  const parsed = parseAttachmentDataUrl(attachment.dataUrl ?? "", attachment.mimeType);
+  if (!parsed) {
+    return jsonWithUsageDebug(request, startedAt, { message: "첨부 파일 형식을 확인해 주세요." }, { status: 415 });
+  }
+
+  const fileName = getSafeAttachmentFilename(attachment.fileName);
+  logRouteUsageDebug(request, {
+    status: 200,
+    startedAt,
+    responseBytes: parsed.bytes.byteLength,
+  });
+  return new Response(parsed.bytes, {
+    headers: {
+      "Content-Type": parsed.mimeType,
+      "Content-Length": String(parsed.bytes.byteLength),
+      "Content-Disposition": `attachment; filename="${fileName.replace(/[^\x20-\x7E]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
 async function fetchHomeNoticePollVoteRows(
   admin: ReturnType<typeof createAdminClient>,
   notices: HomeNotice[],
@@ -914,7 +1098,7 @@ function buildWorkspaceJson(
     notice: activePopup,
     notices: safeWorkspace.notices,
     ddays: safeWorkspace.ddays,
-    communityPosts: safeWorkspace.communityPosts,
+    communityPosts: serializeCommunityPostsForResponse(safeWorkspace.communityPosts),
     communityComments: safeWorkspace.communityComments,
     applications,
     ownApplied,
@@ -1036,7 +1220,7 @@ function buildTripCards(
   scheduleRows
     .map((row) => ({
       month_key: row.month_key,
-      schedule: row.published_state ?? row.draft_state,
+      schedule: row.published_state,
     }))
     .filter((row): row is { month_key: string; schedule: GeneratedSchedule } => Boolean(row.schedule))
     .sort((left, right) => left.month_key.localeCompare(right.month_key))
@@ -1176,12 +1360,62 @@ function buildTripCards(
     .sort((left, right) => left.name.localeCompare(right.name, "ko"));
 }
 
-function getMonthKeysAroundToday(now = new Date()) {
-  const base = new Date(now.getFullYear(), now.getMonth(), 1);
-  return [-1, 0, 1].map((offset) => {
-    const current = new Date(base.getFullYear(), base.getMonth() + offset, 1);
-    return `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}`;
+function formatDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function getMonthKeyFromDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getHomeTripDateWindow(now = new Date()) {
+  const startDate = addDays(now, -HOME_TRIP_LOOKBACK_DAYS);
+  const endDate = addDays(now, HOME_TRIP_LOOKAHEAD_DAYS);
+  const monthKeys = new Set<string>();
+  let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const endMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+  while (cursor <= endMonth) {
+    monthKeys.add(getMonthKeyFromDate(cursor));
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  }
+  return {
+    todayKey: formatDateKey(now),
+    startKey: formatDateKey(startDate),
+    endKey: formatDateKey(endDate),
+    monthKeys: Array.from(monthKeys).sort((left, right) => left.localeCompare(right)),
+  };
+}
+
+function filterScheduleRowsToDateWindow(rows: ScheduleMonthRow[], startKey: string, endKey: string): ScheduleMonthRow[] {
+  return rows.map((row) => {
+    if (!row.published_state) return row;
+    return {
+      ...row,
+      published_state: {
+        ...row.published_state,
+        days: row.published_state.days.filter((day) => day.dateKey >= startKey && day.dateKey <= endKey),
+      },
+    };
   });
+}
+
+function filterCurrentTripCards(cards: TeamLeadTripPersonCard[], todayKey: string) {
+  return cards
+    .map((card) => ({
+      ...card,
+      items: card.items.filter((item) =>
+        CURRENT_TRIP_TRAVEL_TYPES.has(item.travelType) &&
+        item.startDateKey <= todayKey &&
+        item.endDateKey >= todayKey,
+      ),
+    }))
+    .filter((card) => card.items.length > 0);
 }
 
 export async function GET(request: Request) {
@@ -1195,6 +1429,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const includeTrips = searchParams.get("includeTrips") !== "0";
     const includeCommunity = searchParams.get("includeCommunity") !== "0";
+    const attachmentPostId = searchParams.get("attachmentPostId")?.trim() ?? "";
 
     const supabase = await createServerClient();
     const {
@@ -1207,7 +1442,6 @@ export async function GET(request: Request) {
     }
 
     const admin = createAdminClient();
-    const monthKeys = includeTrips ? getMonthKeysAroundToday() : [];
     const { data: profile, error: profileError } = await withTimeout(
       admin
         .from("profiles")
@@ -1221,13 +1455,34 @@ export async function GET(request: Request) {
       return jsonWithUsageDebug(request, startedAt, { message: "승인된 계정이 필요합니다." }, { status: 403 });
     }
 
+    if (attachmentPostId) {
+      const { data: noticeRow, error: noticeError } = await withTimeout(
+        selectHomePopupNoticeRow(admin),
+        "첨부 파일 조회가 지연되고 있습니다.",
+      );
+
+      if (noticeError) {
+        throw new Error("커뮤니티 게시글 조회에 실패했습니다.");
+      }
+
+      const workspace = sanitizeWorkspaceForProfile(parseStorePayload(noticeRow ?? null), profile);
+      const targetPost = workspace.communityPosts.find((post) => post.id === attachmentPostId) ?? null;
+      if (!targetPost || targetPost.category !== "resource") {
+        return jsonWithUsageDebug(request, startedAt, { message: "첨부 파일을 찾지 못했습니다." }, { status: 404 });
+      }
+
+      return await buildAttachmentDownloadResponse(request, startedAt, targetPost);
+    }
+
+    const tripWindow = includeTrips ? getHomeTripDateWindow() : null;
+    const monthKeys = tripWindow?.monthKeys ?? [];
     const [{ data: noticeRow, error: noticeError }, { data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
       Promise.all([
         selectHomePopupNoticeRow(admin),
         includeTrips
           ? admin
             .from("schedule_months")
-            .select("month_key, draft_state, published_state")
+            .select("month_key, published_state")
             .in("month_key", monthKeys)
             .returns<ScheduleMonthRow[]>()
           : Promise.resolve({ data: [] as ScheduleMonthRow[] }),
@@ -1288,11 +1543,21 @@ export async function GET(request: Request) {
       notice: safeActivePopup,
       notices: safeWorkspace.notices,
       ddays: safeWorkspace.ddays,
-      communityPosts: includeCommunity ? safeWorkspace.communityPosts : [],
+      communityPosts: includeCommunity ? serializeCommunityPostsForResponse(safeWorkspace.communityPosts) : [],
       communityComments: includeCommunity ? safeWorkspace.communityComments : [],
       applications,
       ownApplied,
-      ...(includeTrips ? { tripCards: buildTripCards(scheduleRows ?? [], assignmentRows ?? []) } : {}),
+      ...(includeTrips && tripWindow
+        ? {
+            tripCards: filterCurrentTripCards(
+              buildTripCards(
+                filterScheduleRowsToDateWindow(scheduleRows ?? [], tripWindow.startKey, tripWindow.endKey),
+                assignmentRows ?? [],
+              ),
+              tripWindow.todayKey,
+            ),
+          }
+        : {}),
     };
 
     return jsonWithUsageDebug(request, startedAt, payload);
@@ -1306,9 +1571,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+
   try {
     if (!hasSupabaseAdminEnv()) {
-      return NextResponse.json({ message: "Supabase 관리자 환경변수가 없습니다." }, { status: 500 });
+      return jsonWithUsageDebug(request, startedAt, { message: "Supabase 관리자 환경변수가 없습니다." }, { status: 500 });
     }
 
     const supabase = await createServerClient();
@@ -1318,7 +1585,7 @@ export async function POST(request: Request) {
     } = await withTimeout(supabase.auth.getUser(), "로그인 세션 확인이 지연되고 있습니다.");
 
     if (userError || !user) {
-      return NextResponse.json({ message: "로그인 세션을 확인하지 못했습니다." }, { status: 401 });
+      return jsonWithUsageDebug(request, startedAt, { message: "로그인 세션을 확인하지 못했습니다." }, { status: 401 });
     }
 
     const admin = createAdminClient();
@@ -1332,7 +1599,7 @@ export async function POST(request: Request) {
     );
 
     if (profileError || !profile || !profile.approved) {
-      return NextResponse.json({ message: "승인된 계정이 필요합니다." }, { status: 403 });
+      return jsonWithUsageDebug(request, startedAt, { message: "승인된 계정이 필요합니다." }, { status: 403 });
     }
 
     const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -1353,7 +1620,9 @@ export async function POST(request: Request) {
     if (action === "createPost") {
       const input = validateCommunityPostInput(payload);
       if (!canWriteCommunityCategory(input.category, profile)) {
-        return NextResponse.json(
+        return jsonWithUsageDebug(
+          request,
+          startedAt,
           {
             message: input.category === "notice"
               ? "공지 게시판은 DESK 또는 총괄팀장 권한자만 작성할 수 있습니다."
@@ -1363,14 +1632,16 @@ export async function POST(request: Request) {
         );
       }
 
+      const postId = crypto.randomUUID();
+      const storedAttachment = await persistCommunityAttachmentToStorage(admin, postId, input.attachment, profile.id);
       const nextPost = normalizeCommunityBoardPost({
-        id: crypto.randomUUID(),
+        id: postId,
         category: input.category,
         title: input.title,
         body: input.body,
         authorId: profile.id,
         authorName,
-        attachment: input.attachment,
+        attachment: storedAttachment,
         createdAt: now,
         updatedAt: now,
       });
@@ -1402,31 +1673,40 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace, [], false, profile), post: nextPost });
+      return jsonWithUsageDebug(request, startedAt, {
+        ...buildWorkspaceJson(nextWorkspace, [], false, profile),
+        post: serializeCommunityPostForResponse(nextPost),
+      });
     }
 
     if (action === "updatePost") {
       const postId = typeof payload?.postId === "string" ? payload.postId.trim() : "";
       const input = validateCommunityPostInput(payload);
+      const preserveAttachment = Boolean(payload?.preserveAttachment);
       const targetPost = workspace.communityPosts.find((post) => post.id === postId) ?? null;
       if (!targetPost) {
-        return NextResponse.json({ message: "수정할 글을 찾지 못했습니다." }, { status: 404 });
+        return jsonWithUsageDebug(request, startedAt, { message: "수정할 글을 찾지 못했습니다." }, { status: 404 });
       }
       const canManage =
         targetPost.category === "notice"
           ? isManagerRole(profile.role)
           : isManagerRole(profile.role) || targetPost.authorId === profile.id;
       if (!canManage || profile.role === "observer") {
-        return NextResponse.json({ message: "작성자 또는 DESK 권한이 필요합니다." }, { status: 403 });
+        return jsonWithUsageDebug(request, startedAt, { message: "작성자 또는 DESK 권한이 필요합니다." }, { status: 403 });
       }
 
+      const nextAttachment = targetPost.category === "resource"
+        ? preserveAttachment
+          ? targetPost.attachment ?? null
+          : await persistCommunityAttachmentToStorage(admin, postId, input.attachment, profile.id)
+        : null;
       const nextPosts = workspace.communityPosts.map((post) =>
         post.id === postId
           ? normalizeCommunityBoardPost({
               ...post,
               title: input.title,
               body: input.body,
-              attachment: targetPost.category === "resource" ? input.attachment : null,
+              attachment: nextAttachment,
               updatedAt: now,
             })
           : post,
@@ -1452,21 +1732,21 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json(buildWorkspaceJson(nextWorkspace, [], false, profile));
+      return jsonWithUsageDebug(request, startedAt, buildWorkspaceJson(nextWorkspace, [], false, profile));
     }
 
     if (action === "deletePost") {
       const postId = typeof payload?.postId === "string" ? payload.postId.trim() : "";
       const targetPost = workspace.communityPosts.find((post) => post.id === postId) ?? null;
       if (!targetPost) {
-        return NextResponse.json({ message: "삭제할 글을 찾지 못했습니다." }, { status: 404 });
+        return jsonWithUsageDebug(request, startedAt, { message: "삭제할 글을 찾지 못했습니다." }, { status: 404 });
       }
       const canManage =
         targetPost.category === "notice"
           ? isManagerRole(profile.role)
           : isManagerRole(profile.role) || targetPost.authorId === profile.id;
       if (!canManage || profile.role === "observer") {
-        return NextResponse.json({ message: "작성자 또는 DESK 권한이 필요합니다." }, { status: 403 });
+        return jsonWithUsageDebug(request, startedAt, { message: "작성자 또는 DESK 권한이 필요합니다." }, { status: 403 });
       }
 
       const nextWorkspace = await persistHomeWorkspace(
@@ -1480,12 +1760,12 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json(buildWorkspaceJson(nextWorkspace, [], false, profile));
+      return jsonWithUsageDebug(request, startedAt, buildWorkspaceJson(nextWorkspace, [], false, profile));
     }
 
     if (action === "votePoll") {
       if (profile.role === "observer") {
-        return NextResponse.json({ message: "Observer 등급은 투표할 수 없습니다." }, { status: 403 });
+        return jsonWithUsageDebug(request, startedAt, { message: "Observer 등급은 투표할 수 없습니다." }, { status: 403 });
       }
 
       const noticeId = typeof payload?.noticeId === "string" ? payload.noticeId.trim() : "";
@@ -1495,10 +1775,10 @@ export async function POST(request: Request) {
       const targetOption = poll?.options.find((option) => option.id === optionId) ?? null;
 
       if (!targetNotice || !poll) {
-        return NextResponse.json({ message: "투표할 공지를 찾지 못했습니다." }, { status: 404 });
+        return jsonWithUsageDebug(request, startedAt, { message: "투표할 공지를 찾지 못했습니다." }, { status: 404 });
       }
       if (!targetOption) {
-        return NextResponse.json({ message: "투표 항목을 찾지 못했습니다." }, { status: 404 });
+        return jsonWithUsageDebug(request, startedAt, { message: "투표 항목을 찾지 못했습니다." }, { status: 404 });
       }
 
       const { data: existingVote, error: existingVoteError } = await withTimeout(
@@ -1514,12 +1794,12 @@ export async function POST(request: Request) {
 
       if (existingVoteError) {
         if (isSupabaseSchemaMissingError(existingVoteError)) {
-          return NextResponse.json({ message: "투표 테이블 구조가 아직 적용되지 않았습니다." }, { status: 500 });
+          return jsonWithUsageDebug(request, startedAt, { message: "투표 테이블 구조가 아직 적용되지 않았습니다." }, { status: 500 });
         }
         throw new Error("투표 상태 확인에 실패했습니다.");
       }
       if (existingVote?.id) {
-        return NextResponse.json({ message: "이미 투표했습니다." }, { status: 409 });
+        return jsonWithUsageDebug(request, startedAt, { message: "이미 투표했습니다." }, { status: 409 });
       }
 
       const { error: voteError } = await withTimeout(
@@ -1537,10 +1817,10 @@ export async function POST(request: Request) {
 
       if (voteError) {
         if (isUniqueViolationError(voteError)) {
-          return NextResponse.json({ message: "이미 투표했습니다." }, { status: 409 });
+          return jsonWithUsageDebug(request, startedAt, { message: "이미 투표했습니다." }, { status: 409 });
         }
         if (isSupabaseSchemaMissingError(voteError)) {
-          return NextResponse.json({ message: "투표 테이블 구조가 아직 적용되지 않았습니다." }, { status: 500 });
+          return jsonWithUsageDebug(request, startedAt, { message: "투표 테이블 구조가 아직 적용되지 않았습니다." }, { status: 500 });
         }
         throw new Error("투표를 반영하지 못했습니다.");
       }
@@ -1551,12 +1831,12 @@ export async function POST(request: Request) {
       );
       const workspaceWithVotes = mergePollVotesIntoWorkspace(workspace, voteRows, profile);
 
-      return NextResponse.json(buildWorkspaceJson(workspaceWithVotes, [], false, profile));
+      return jsonWithUsageDebug(request, startedAt, buildWorkspaceJson(workspaceWithVotes, [], false, profile));
     }
 
     if (action === "createComment") {
       if (profile.role === "observer") {
-        return NextResponse.json({ message: "Observer 등급은 댓글을 등록할 수 없습니다." }, { status: 403 });
+        return jsonWithUsageDebug(request, startedAt, { message: "Observer 등급은 댓글을 등록할 수 없습니다." }, { status: 403 });
       }
 
       const input = validateCommunityCommentInput(payload);
@@ -1565,7 +1845,7 @@ export async function POST(request: Request) {
         workspace.communityPosts.some((post) => `manual:${post.id}` === input.targetKey);
 
       if (!targetExists) {
-        return NextResponse.json({ message: "댓글을 남길 게시글을 찾지 못했습니다." }, { status: 404 });
+        return jsonWithUsageDebug(request, startedAt, { message: "댓글을 남길 게시글을 찾지 못했습니다." }, { status: 404 });
       }
 
       const nextComment = normalizeCommunityBoardComment({
@@ -1588,16 +1868,18 @@ export async function POST(request: Request) {
         profile.id,
       );
 
-      return NextResponse.json({ ...buildWorkspaceJson(nextWorkspace, [], false, profile), comment: nextComment });
+      return jsonWithUsageDebug(request, startedAt, {
+        ...buildWorkspaceJson(nextWorkspace, [], false, profile),
+        comment: nextComment,
+      });
     }
 
-    return NextResponse.json({ message: "지원하지 않는 커뮤니티 작업입니다." }, { status: 400 });
+    return jsonWithUsageDebug(request, startedAt, { message: "지원하지 않는 커뮤니티 작업입니다." }, { status: 400 });
   } catch (error) {
-    return NextResponse.json(
-      {
-        message: error instanceof Error ? error.message : "커뮤니티 작업을 처리하지 못했습니다.",
-      },
-      { status: error instanceof Error && error.message.includes("지연") ? 503 : 500 },
-    );
+    const payload = {
+      message: error instanceof Error ? error.message : "커뮤니티 작업을 처리하지 못했습니다.",
+    };
+    const status = error instanceof Error && error.message.includes("지연") ? 503 : 500;
+    return jsonWithUsageDebug(request, startedAt, payload, { status });
   }
 }

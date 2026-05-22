@@ -1339,7 +1339,7 @@ export async function requestPasswordReset(email: string) {
   }
 }
 
-export async function issueTemporaryPassword(email: string) {
+export async function issueTemporaryPassword(identifier: string) {
   try {
     const response = await fetch("/api/auth/temporary-password", {
       method: "POST",
@@ -1347,7 +1347,7 @@ export async function issueTemporaryPassword(email: string) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        loginId: email,
+        loginId: identifier,
       }),
     });
 
@@ -1385,6 +1385,7 @@ export async function updatePassword(password: string) {
       data: {
         ...(user?.user_metadata ?? {}),
         must_change_password: false,
+        mustChangePassword: false,
       },
     });
 
@@ -1395,7 +1396,7 @@ export async function updatePassword(password: string) {
       };
     }
 
-    await refreshSession();
+    await refreshSession({ force: true });
 
     return {
       ok: true as const,
