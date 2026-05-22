@@ -221,30 +221,42 @@ export async function POST(request: Request) {
 
     const updatedLoanIds = new Set<string>();
     const returnedLoanIds = new Set<string>();
-    const returnedItemIds = new Set<string>();
+    const boardDeleteIds = new Set<string>();
+    const boardPayload: Array<NormalizedLiveStatusEntry & { updated_by: string }> = [];
+
     for (const entry of entries) {
       const activeLoanId = activeLoanByItemId.get(entry.equipment_item_id);
       const shouldBeBorrowed = hasLiveStatusContent(entry);
+      const canBorrowItem = isBorrowableItem(itemById.get(entry.equipment_item_id));
+
+      if (!canBorrowItem) {
+        if (shouldBeBorrowed) {
+          boardPayload.push({
+            ...entry,
+            updated_by: auth.profile.id,
+          });
+        } else {
+          boardDeleteIds.add(entry.equipment_item_id);
+        }
+        continue;
+      }
 
       if (!shouldBeBorrowed) {
+        boardDeleteIds.add(entry.equipment_item_id);
         if (!activeLoanId || returnedLoanIds.has(activeLoanId)) continue;
 
-        const { data: returnedRows, error: returnError } = await auth.admin
+        const { error: returnError } = await auth.admin
           .from("equipment_loan_items")
           .update({
             status: "returned",
             returned_at: new Date().toISOString(),
           } as never)
           .eq("loan_id", activeLoanId)
-          .eq("status", "borrowed")
-          .select("equipment_item_id")
-          .returns<Array<{ equipment_item_id: string }>>();
+          .eq("status", "borrowed");
 
         if (returnError) {
           throw new Error(returnError.message);
         }
-
-        (returnedRows ?? []).forEach((row) => returnedItemIds.add(row.equipment_item_id));
 
         const { error: loanReturnError } = await auth.admin
           .from("equipment_loans")
@@ -263,10 +275,6 @@ export async function POST(request: Request) {
       }
 
       if (!activeLoanId) {
-        if (!isBorrowableItem(itemById.get(entry.equipment_item_id))) {
-          throw new Error("대여 처리할 수 없는 라이브장비가 포함되어 있습니다.");
-        }
-
         const now = new Date().toISOString();
         const { data: loan, error: loanInsertError } = await auth.admin
           .from("equipment_loans")
@@ -303,6 +311,7 @@ export async function POST(request: Request) {
         }
 
         updatedLoanIds.add(loan.id);
+        boardDeleteIds.add(entry.equipment_item_id);
         continue;
       }
 
@@ -324,16 +333,29 @@ export async function POST(request: Request) {
         throw new Error(loanUpdateError.message);
       }
       updatedLoanIds.add(activeLoanId);
+      boardDeleteIds.add(entry.equipment_item_id);
     }
 
-    const boardDeleteIds = Array.from(new Set([...itemIds, ...returnedItemIds]));
-    const { error: boardError } = await auth.admin
-      .from("live_equipment_status_board")
-      .delete()
-      .in("equipment_item_id", boardDeleteIds);
+    if (boardPayload.length > 0) {
+      const { error: boardUpsertError } = await auth.admin
+        .from("live_equipment_status_board")
+        .upsert(boardPayload as never, { onConflict: "equipment_item_id" });
 
-    if (boardError) {
-      throw new Error(boardError.message);
+      if (boardUpsertError) {
+        throw new Error(boardUpsertError.message);
+      }
+    }
+
+    const normalizedBoardDeleteIds = Array.from(boardDeleteIds);
+    if (normalizedBoardDeleteIds.length > 0) {
+      const { error: boardDeleteError } = await auth.admin
+        .from("live_equipment_status_board")
+        .delete()
+        .in("equipment_item_id", normalizedBoardDeleteIds);
+
+      if (boardDeleteError) {
+        throw new Error(boardDeleteError.message);
+      }
     }
 
     return NextResponse.json({ ok: true });
