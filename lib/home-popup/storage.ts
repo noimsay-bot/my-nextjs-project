@@ -8,6 +8,7 @@ import {
   getSupabaseStorageErrorMessage,
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
+import { logPortalTrafficDebug } from "@/lib/portal/traffic-debug";
 
 const HOME_POPUP_NOTICE_ROW_KEY = "active";
 const HOME_COMMUNITY_ATTACHMENT_BUCKET = "home-community-attachments";
@@ -546,6 +547,24 @@ function normalizeCommunityBoardAttachment(value: unknown): CommunityBoardAttach
   };
 }
 
+function getCommunityAttachmentDownloadUrl(postId: string) {
+  return `/api/home/public-workspace?attachmentPostId=${encodeURIComponent(postId)}`;
+}
+
+function serializeCommunityPostsForClient(posts: CommunityBoardPost[]) {
+  return posts.map((post) => {
+    if (!post.attachment) return post;
+    const { dataUrl: _dataUrl, ...attachment } = post.attachment;
+    return {
+      ...post,
+      attachment: {
+        ...attachment,
+        downloadUrl: attachment.downloadUrl || getCommunityAttachmentDownloadUrl(post.id),
+      },
+    };
+  });
+}
+
 function normalizeCommunityBoardComment(
   input: Partial<CommunityBoardComment> & {
     id: string;
@@ -703,19 +722,44 @@ async function uploadCommunityAttachmentToStorage(
 
 export async function resolveCommunityAttachmentDownloadUrl(attachment: CommunityBoardAttachment) {
   if (attachment.storagePath) {
+    const startedAt = Date.now();
     try {
       const supabase = await getPortalSupabaseClient();
       const { data, error } = await supabase.storage
         .from(HOME_COMMUNITY_ATTACHMENT_BUCKET)
         .createSignedUrl(attachment.storagePath, 5 * 60);
       if (!error && data?.signedUrl) {
+        logPortalTrafficDebug({
+          route: "home-community-attachment",
+          source: "storage",
+          status: "success",
+          startedAt,
+        });
         return data.signedUrl;
       }
+      logPortalTrafficDebug({
+        route: "home-community-attachment",
+        source: "storage",
+        status: "error",
+        startedAt,
+      });
     } catch {
+      logPortalTrafficDebug({
+        route: "home-community-attachment",
+        source: "storage",
+        status: "error",
+        startedAt,
+      });
       // Fall back to the legacy server download path below.
     }
   }
 
+  logPortalTrafficDebug({
+    route: "home-community-attachment",
+    source: "fallback-api",
+    status: attachment.downloadUrl || attachment.dataUrl ? "success" : "skipped",
+    startedAt: Date.now(),
+  });
   return attachment.downloadUrl || attachment.dataUrl || "#";
 }
 
@@ -1192,7 +1236,14 @@ function normalizeHomeCurrentTripCards(value: unknown): TeamLeadTripPersonCard[]
 }
 
 export async function refreshHomeCurrentTripsFromSupabase() {
+  const startedAt = Date.now();
   if (Date.now() < homeCurrentTripsRpcRetryAfter) {
+    logPortalTrafficDebug({
+      route: "home-current-trips",
+      source: "rpc",
+      status: "skipped",
+      startedAt,
+    });
     throw new Error("현재 출장자 RPC 재시도 대기 중입니다.");
   }
 
@@ -1200,11 +1251,23 @@ export async function refreshHomeCurrentTripsFromSupabase() {
   const { data, error } = await supabase.rpc("get_home_current_trips");
   if (error) {
     homeCurrentTripsRpcRetryAfter = Date.now() + HOME_CURRENT_TRIPS_RPC_FAILURE_COOLDOWN_MS;
+    logPortalTrafficDebug({
+      route: "home-current-trips",
+      source: "rpc",
+      status: "error",
+      startedAt,
+    });
     throw new Error(getSupabaseStorageErrorMessage(error, "get_home_current_trips"));
   }
 
   tripCardCache = normalizeHomeCurrentTripCards(data);
   homeWorkspaceTripCardsLoaded = true;
+  logPortalTrafficDebug({
+    route: "home-current-trips",
+    source: "rpc",
+    status: "success",
+    startedAt,
+  });
   return getHomePublicTripCards();
 }
 
@@ -1270,7 +1333,7 @@ async function fetchHomePublicWorkspaceFallback(
     notice: activePopup,
     notices: workspace.notices,
     ddays: workspace.ddays,
-    communityPosts: options.includeCommunity === false ? [] : workspace.communityPosts,
+    communityPosts: options.includeCommunity === false ? [] : serializeCommunityPostsForClient(workspace.communityPosts),
     communityComments: options.includeCommunity === false ? [] : workspace.communityComments,
     applications,
     ownApplied,
@@ -1278,6 +1341,30 @@ async function fetchHomePublicWorkspaceFallback(
 }
 
 async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspaceOptions = {}) {
+  const session = await getPortalSession();
+
+  if (session?.approved && options.includeTrips === false) {
+    const startedAt = Date.now();
+    try {
+      const payload = await fetchHomePublicWorkspaceFallback(session, options);
+      logPortalTrafficDebug({
+        route: "home-public-workspace",
+        source: "direct-supabase",
+        status: "success",
+        startedAt,
+      });
+      return normalizeHomePublicWorkspaceResponse(payload);
+    } catch {
+      logPortalTrafficDebug({
+        route: "home-public-workspace",
+        source: "direct-supabase",
+        status: "error",
+        startedAt,
+      });
+      // Keep the existing Vercel API path as a compatibility fallback.
+    }
+  }
+
   const searchParams = new URLSearchParams();
   if (options.includeTrips === false) {
     searchParams.set("includeTrips", "0");
@@ -1293,8 +1380,8 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS);
 
+  const startedAt = Date.now();
   try {
-    const session = await getPortalSession();
     const response = await fetch(requestUrl, {
       method: "GET",
       cache: "no-store",
@@ -1307,6 +1394,12 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
       if (options.includeTrips === false && session?.approved) {
         return fetchHomePublicWorkspaceFallback(session, options);
       }
+      logPortalTrafficDebug({
+        route: "home-public-workspace",
+        source: "fallback-api",
+        status: "error",
+        startedAt,
+      });
       throw new Error(payload && "message" in payload && typeof payload.message === "string"
         ? payload.message
         : "홈 데이터를 불러오지 못했습니다.");
@@ -1316,12 +1409,30 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
       if (session?.approved) {
         return fetchHomePublicWorkspaceFallback(session, options);
       }
+      logPortalTrafficDebug({
+        route: "home-public-workspace",
+        source: "fallback-api",
+        status: "skipped",
+        startedAt,
+      });
       return normalizeHomePublicWorkspaceResponse(null);
     }
 
+    logPortalTrafficDebug({
+      route: "home-public-workspace",
+      source: "fallback-api",
+      status: "success",
+      startedAt,
+    });
     return normalizeHomePublicWorkspaceResponse(payload as Partial<HomePublicWorkspaceResponse>);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
+      logPortalTrafficDebug({
+        route: "home-public-workspace",
+        source: "fallback-api",
+        status: "error",
+        startedAt,
+      });
       throw new Error("홈 데이터 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
     }
     throw error;

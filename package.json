@@ -7,6 +7,7 @@
     "start": "next start",
     "lint": "eslint .",
     "debug:rebalance": "ts-node --project scripts/tsconfig.debug.json -r tsconfig-paths/register scripts/replay-rebalance.ts",
+    "migrate:home-community-attachments": "node scripts/migrate-home-community-attachments.mjs",
     "test:e2e": "playwright test",
     "harness:routes": "node scripts/harness/generate-route-map.mjs",
     "harness:env": "node scripts/harness/generate-env-map.mjs",

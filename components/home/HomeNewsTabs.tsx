@@ -15,6 +15,7 @@ import {
 import {
   getHomePublicTripCards,
   HOME_POPUP_NOTICE_EVENT,
+  refreshHomeCurrentTripsFromSupabase,
   refreshHomePopupNoticeWorkspace,
 } from "@/lib/home-popup/storage";
 
@@ -144,7 +145,9 @@ export function HomeNewsTabs({
       setCurrentTripCount(getCurrentTripCount());
     };
 
-    void refreshHomePopupNoticeWorkspace({ includeCommunity: false }).then(syncCurrentTripCount);
+    void refreshHomeCurrentTripsFromSupabase()
+      .catch(() => refreshHomePopupNoticeWorkspace({ includeCommunity: false }))
+      .then(syncCurrentTripCount);
     window.addEventListener("storage", syncCurrentTripCount);
     window.addEventListener("focus", syncCurrentTripCount);
     window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncCurrentTripCount);

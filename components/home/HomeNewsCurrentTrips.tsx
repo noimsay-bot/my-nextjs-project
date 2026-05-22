@@ -7,6 +7,7 @@ import {
   refreshHomeCurrentTripsFromSupabase,
   refreshHomePopupNoticeWorkspace,
 } from "@/lib/home-popup/storage";
+import { logPortalTrafficDebug } from "@/lib/portal/traffic-debug";
 import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
@@ -53,7 +54,14 @@ export function HomeNewsCurrentTrips({
     try {
       await refreshHomeCurrentTripsFromSupabase();
     } catch {
+      const startedAt = Date.now();
       await refreshHomePopupNoticeWorkspace({ includeCommunity: false });
+      logPortalTrafficDebug({
+        route: "home-current-trips",
+        source: "fallback-api",
+        status: "success",
+        startedAt,
+      });
     }
     syncTripCards();
   };

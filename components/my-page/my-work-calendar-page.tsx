@@ -17,6 +17,7 @@ import {
   getPortalSupabaseClient,
   getSupabaseStorageErrorMessage,
 } from "@/lib/supabase/portal";
+import { logPortalTrafficDebug } from "@/lib/portal/traffic-debug";
 import styles from "./MyWorkCalendar.module.css";
 
 type CalendarDay = {
@@ -193,7 +194,14 @@ function normalizeMyWorkCalendarSummaryPayload(monthKey: string, payload: unknow
 }
 
 async function fetchMyWorkCalendarSummaryDirect(monthKey: string) {
+  const startedAt = Date.now();
   if (Date.now() < myWorkCalendarRpcRetryAfter) {
+    logPortalTrafficDebug({
+      route: "my-work-calendar",
+      source: "rpc",
+      status: "skipped",
+      startedAt,
+    });
     throw new Error("내 일정 RPC 재시도 대기 중입니다.");
   }
 
@@ -201,13 +209,26 @@ async function fetchMyWorkCalendarSummaryDirect(monthKey: string) {
   const { data, error } = await supabase.rpc("get_my_work_calendar", { p_month_key: monthKey });
   if (error) {
     myWorkCalendarRpcRetryAfter = Date.now() + MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS;
+    logPortalTrafficDebug({
+      route: "my-work-calendar",
+      source: "rpc",
+      status: "error",
+      startedAt,
+    });
     throw new Error(getSupabaseStorageErrorMessage(error, "get_my_work_calendar"));
   }
 
+  logPortalTrafficDebug({
+    route: "my-work-calendar",
+    source: "rpc",
+    status: "success",
+    startedAt,
+  });
   return normalizeMyWorkCalendarSummaryPayload(monthKey, data);
 }
 
 async function fetchMyWorkCalendarSummaryViaApi(monthKey: string) {
+  const startedAt = Date.now();
   return fetch(`/api/schedule/my-work-calendar?monthKey=${encodeURIComponent(monthKey)}`, {
     method: "GET",
     cache: "no-store",
@@ -216,8 +237,20 @@ async function fetchMyWorkCalendarSummaryViaApi(monthKey: string) {
     .then(async (response) => {
       const payload = (await response.json().catch(() => null)) as (Partial<MyWorkCalendarSummaryResponse> & { message?: string }) | null;
       if (!response.ok) {
+        logPortalTrafficDebug({
+          route: "my-work-calendar",
+          source: "fallback-api",
+          status: "error",
+          startedAt,
+        });
         throw new Error(payload?.message || "게시 근무표를 불러오지 못했습니다.");
       }
+      logPortalTrafficDebug({
+        route: "my-work-calendar",
+        source: "fallback-api",
+        status: "success",
+        startedAt,
+      });
       return normalizeMyWorkCalendarSummaryPayload(monthKey, payload);
     });
 }

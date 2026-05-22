@@ -7,6 +7,7 @@ import {
   getSupabaseStorageErrorMessage,
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
+import { logPortalTrafficDebug } from "@/lib/portal/traffic-debug";
 
 const CUSTOMER_SUPPORT_TABLE = "customer_support_messages";
 const CUSTOMER_SUPPORT_ATTACHMENT_BUCKET = "customer-support-attachments";
@@ -366,21 +367,49 @@ export async function getPortalCustomerSupportSummary(): Promise<PortalCustomerS
     return { openCount: 0, feedbackNotification: null };
   }
 
+  const rpcStartedAt = Date.now();
   try {
     const supabase = await getPortalSupabaseClient();
     const { data, error } = await supabase.rpc("get_portal_support_summary");
     if (!error) {
       const summary = normalizeCustomerSupportSummary(data);
-      if (summary) return summary;
+      if (summary) {
+        logPortalTrafficDebug({
+          route: "portal-support-summary",
+          source: "rpc",
+          status: "success",
+          startedAt: rpcStartedAt,
+        });
+        return summary;
+      }
     }
+    logPortalTrafficDebug({
+      route: "portal-support-summary",
+      source: "rpc",
+      status: "error",
+      startedAt: rpcStartedAt,
+    });
   } catch {
+    logPortalTrafficDebug({
+      route: "portal-support-summary",
+      source: "rpc",
+      status: "error",
+      startedAt: rpcStartedAt,
+    });
     // Fall back to the existing RLS-scoped reads below.
   }
 
+  const fallbackStartedAt = Date.now();
   const [feedbackNotification, openCount] = await Promise.all([
     getPendingCustomerSupportFeedbackNotification(),
     getOpenCustomerSupportMessageCount(),
   ]);
+  logPortalTrafficDebug({
+    route: "portal-support-summary",
+    source: "fallback-direct",
+    status: "success",
+    startedAt: fallbackStartedAt,
+  });
   return { feedbackNotification, openCount };
 }
 
