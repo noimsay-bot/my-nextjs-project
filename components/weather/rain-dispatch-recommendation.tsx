@@ -1,15 +1,23 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   RainDispatchRecommendationResponse,
   WeatherDispatchRangeMinutes,
 } from "@/lib/weather/recommendation";
+import { createClient, hasSupabaseEnv } from "@/lib/supabase/client";
 import type { InitialWeatherRecommendations } from "@/components/weather/weather-dashboard";
 import styles from "@/components/weather/weather.module.css";
 
 const RANGE_OPTIONS: WeatherDispatchRangeMinutes[] = [30, 45, 60];
 const CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type DispatchCacheRow = {
+  payload: unknown;
+  fetched_at: string;
+  expires_at: string;
+  error_message: string | null;
+};
 
 function formatDateTime(value: string) {
   const date = new Date(value);
@@ -19,6 +27,19 @@ function formatDateTime(value: string) {
 
 function formatRain(value: number) {
   return `${Number(value.toFixed(1)).toLocaleString("ko-KR")}mm/h`;
+}
+
+function isRecommendationResponse(value: unknown): value is RainDispatchRecommendationResponse {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      Array.isArray((value as { items?: unknown }).items) &&
+      typeof (value as { rangeMinutes?: unknown }).rangeMinutes === "number",
+  );
+}
+
+function isUsableRecommendationResponse(value: unknown): value is RainDispatchRecommendationResponse {
+  return isRecommendationResponse(value) && value.status !== "unavailable" && value.items.length > 0;
 }
 
 export function RainDispatchRecommendation({
@@ -33,7 +54,7 @@ export function RainDispatchRecommendation({
   const [message, setMessage] = useState("");
   const cacheRef = useRef(
     new Map<WeatherDispatchRangeMinutes, { data: RainDispatchRecommendationResponse; cachedAt: number }>(
-      RANGE_OPTIONS.map((range) => [range, { data: initialRecommendations[range], cachedAt: Date.now() }]),
+      RANGE_OPTIONS.map((range) => [range, { data: initialRecommendations[range], cachedAt: 0 }]),
     ),
   );
 
@@ -42,23 +63,31 @@ export function RainDispatchRecommendation({
     () => formatDateTime(currentRecommendations.generatedAt),
     [currentRecommendations.generatedAt],
   );
+  const formattedDataBasisAt = useMemo(() => {
+    if (!currentRecommendations.dataBasisAt) return "";
+    return formatDateTime(currentRecommendations.dataBasisAt);
+  }, [currentRecommendations.dataBasisAt]);
 
-  async function refreshRecommendations(force = false) {
-    const cached = cacheRef.current.get(selectedRange);
+  const refreshRecommendationsForRange = useCallback(async (
+    range: WeatherDispatchRangeMinutes,
+    force = false,
+    announce = true,
+  ) => {
+    const cached = cacheRef.current.get(range);
     if (!force && cached && Date.now() - cached.cachedAt < CLIENT_CACHE_TTL_MS) {
       setRecommendationsByRange((current) => ({
         ...current,
-        [selectedRange]: cached.data,
+        [range]: cached.data,
       }));
-      setMessage("최근 추천 결과를 다시 사용했습니다.");
+      if (announce) setMessage("최근 추천 결과를 다시 사용했습니다.");
       return;
     }
 
-    setLoadingRange(selectedRange);
-    setMessage("");
+    setLoadingRange(range);
+    if (announce) setMessage("");
 
     try {
-      const response = await fetch(`/api/weather/dispatch-recommendation?range=${selectedRange}`, {
+      const response = await fetch(`/api/weather/dispatch-recommendation?range=${range}`, {
         headers: {
           Accept: "application/json",
         },
@@ -67,26 +96,95 @@ export function RainDispatchRecommendation({
 
       if (!response.ok) {
         const errorMessage = "message" in data ? data.message : null;
-        setMessage(errorMessage ?? "강수 출동 추천을 불러오지 못했습니다.");
+        if (announce) setMessage(errorMessage ?? "강수 출동 추천을 불러오지 못했습니다.");
         return;
       }
 
       if (!("items" in data)) {
-        setMessage(data.message ?? "강수 출동 추천을 불러오지 못했습니다.");
+        if (announce) setMessage(data.message ?? "강수 출동 추천을 불러오지 못했습니다.");
         return;
       }
 
-      cacheRef.current.set(selectedRange, { data, cachedAt: Date.now() });
+      cacheRef.current.set(range, { data, cachedAt: Date.now() });
       setRecommendationsByRange((current) => ({
         ...current,
-        [selectedRange]: data,
+        [range]: data,
       }));
-      setMessage("강수 출동 추천을 새로 계산했습니다.");
+      if (announce) {
+        setMessage(data.status === "unavailable" ? data.message ?? "강수 출동 추천을 불러오지 못했습니다." : "강수 출동 추천을 새로 계산했습니다.");
+      }
     } catch {
-      setMessage("강수 출동 추천을 불러오는 중 오류가 발생했습니다.");
+      if (announce) setMessage("강수 출동 추천을 불러오는 중 오류가 발생했습니다.");
     } finally {
       setLoadingRange(null);
     }
+  }, []);
+
+  const loadCachedRecommendationsForRange = useCallback(async (
+    range: WeatherDispatchRangeMinutes,
+    announce = false,
+    autoRefreshOnMiss = false,
+  ) => {
+    const cached = cacheRef.current.get(range);
+    if (cached && Date.now() - cached.cachedAt < CLIENT_CACHE_TTL_MS) {
+      setRecommendationsByRange((current) => ({
+        ...current,
+        [range]: cached.data,
+      }));
+      if (announce) setMessage("최근 추천 결과를 다시 사용했습니다.");
+      return;
+    }
+
+    if (!hasSupabaseEnv()) {
+      if (autoRefreshOnMiss) {
+        await refreshRecommendationsForRange(range, true, announce);
+        return;
+      }
+      if (announce) setMessage("캐시된 강수 추천을 확인하지 못했습니다. 필요하면 새로고침을 눌러 주세요.");
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("weather_dispatch_cache")
+        .select("payload, fetched_at, expires_at, error_message")
+        .eq("range_minutes", range)
+        .gt("expires_at", new Date().toISOString())
+        .order("fetched_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<DispatchCacheRow>();
+
+      if (error || !data || !isUsableRecommendationResponse(data.payload)) {
+        if (autoRefreshOnMiss) {
+          await refreshRecommendationsForRange(range, true, announce);
+          return;
+        }
+        if (announce) setMessage("캐시된 강수 추천이 없습니다. 필요하면 새로고침을 눌러 주세요.");
+        return;
+      }
+
+      cacheRef.current.set(range, { data: data.payload, cachedAt: new Date(data.fetched_at).getTime() });
+      setRecommendationsByRange((current) => ({
+        ...current,
+        [range]: data.payload,
+      }));
+      if (announce) setMessage("Supabase 캐시에서 강수 출동 추천을 불러왔습니다.");
+    } catch {
+      if (autoRefreshOnMiss) {
+        await refreshRecommendationsForRange(range, true, announce);
+        return;
+      }
+      if (announce) setMessage("캐시된 강수 추천을 확인하지 못했습니다. 필요하면 새로고침을 눌러 주세요.");
+    }
+  }, [refreshRecommendationsForRange]);
+
+  useEffect(() => {
+    void loadCachedRecommendationsForRange(30, false, false);
+  }, [loadCachedRecommendationsForRange]);
+
+  async function refreshRecommendations(force = false) {
+    await refreshRecommendationsForRange(selectedRange, force);
   }
 
   return (
@@ -120,6 +218,7 @@ export function RainDispatchRecommendation({
                 onClick={() => {
                   setSelectedRange(range);
                   setMessage("");
+                  void loadCachedRecommendationsForRange(range, true, false);
                 }}
               >
                 {range}분 이내
@@ -128,6 +227,7 @@ export function RainDispatchRecommendation({
           </div>
           <span className="muted">
             기준: {currentRecommendations.base.name} · 도착 후 10~40분 기준 · 계산 {formattedGeneratedAt}
+            {formattedDataBasisAt ? ` · 자료 ${formattedDataBasisAt}` : ""}
           </span>
         </div>
 
@@ -135,6 +235,10 @@ export function RainDispatchRecommendation({
           <div className={message.includes("못했") || message.includes("오류") ? "status warn" : "status note"}>
             {message}
           </div>
+        ) : null}
+
+        {currentRecommendations.message && currentRecommendations.items.length > 0 ? (
+          <div className="status warn">{currentRecommendations.message}</div>
         ) : null}
 
         <div className={styles.recommendationCards}>
@@ -173,7 +277,11 @@ export function RainDispatchRecommendation({
                 </div>
                 <div className={styles.metric}>
                   <span>평가 기준</span>
-                  <strong>도착 후 10~40분 기준</strong>
+                  <strong>{item.estimationNote || "도착 후 10~40분 기준"}</strong>
+                </div>
+                <div className={styles.metric}>
+                  <span>데이터 기준 시각</span>
+                  <strong>{formatDateTime(item.dataBasisAt)}</strong>
                 </div>
               </div>
 
@@ -187,7 +295,9 @@ export function RainDispatchRecommendation({
         </div>
 
         {currentRecommendations.items.length === 0 ? (
-          <div className="status note">선택한 이동권 안에서 추천할 강수 후보가 없습니다.</div>
+          <div className="status note">
+            {currentRecommendations.message ?? "현재 강수 출동 추천이 없습니다."}
+          </div>
         ) : null}
       </div>
     </article>

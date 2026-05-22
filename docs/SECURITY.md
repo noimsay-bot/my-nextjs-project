@@ -13,6 +13,7 @@
 - `ASSEMBLY_EXPORT_TOKEN`: server-only.
 - `HUB_ASSEMBLY_SYNC_TOKEN`: server-only.
 - `KMA_APIHUB_AUTH_KEY`: server-only.
+- `DATA_GO_KR_SERVICE_KEY`: server-only.
 - SMTP 관련 키: server-only.
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: client-exposed 가능.
 
@@ -21,12 +22,16 @@
 - `npm run harness:boundaries`: client/component/server-only 경계 위반을 검사한다.
 - `npm run harness:all`: 문서, generated, 경계, 품질 점검을 묶어 실행한다.
 
+## 날씨 캐시
+- `weather_radar_frames`, `weather_dispatch_cache`는 관리자 승인 profile만 select 가능하도록 RLS 정책을 둔다.
+- 클라이언트는 캐시 테이블 select만 사용하고, 외부 API 키와 캐시 upsert는 서버 route/service role 경로에만 둔다.
+
 ## 실패로 보는 항목
 - client component에서 server-only env 직접 접근.
 - components에서 service role key 문자열 사용.
 - components/client component에서 `lib/supabase/admin` import.
 - 공개 라우트에서 `AuthGate`/`PortalShell` 직접 import.
-- client component에서 `KMA_APIHUB_AUTH_KEY` 직접 접근.
+- client component에서 `KMA_APIHUB_AUTH_KEY` 또는 `DATA_GO_KR_SERVICE_KEY` 직접 접근.
 
 ## 경고로 보는 항목
 - `app/api`에서 UI component import.

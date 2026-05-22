@@ -6,6 +6,8 @@ export type WeatherDispatchRangeMinutes = 30 | 45 | 60;
 export interface RainForecastFrame {
   afterMinutes: number;
   rainMmPerHour: number;
+  forecastAt?: string;
+  precipitationType?: string | null;
 }
 
 export interface RainDispatchRecommendationItem {
@@ -20,12 +22,18 @@ export interface RainDispatchRecommendationItem {
   score: number;
   reason: string;
   caution: string;
+  dataBasisAt: string;
+  estimationNote: string;
 }
 
 export interface RainDispatchRecommendationResponse {
+  status?: "available" | "unavailable";
+  message?: string | null;
   base: typeof SANGAM_BASE;
   rangeMinutes: WeatherDispatchRangeMinutes;
   generatedAt: string;
+  dataBasisAt?: string | null;
+  note?: string | null;
   items: RainDispatchRecommendationItem[];
 }
 
@@ -87,6 +95,25 @@ function formatRain(value: number) {
   return `${Number(value.toFixed(1)).toLocaleString("ko-KR")}mm/h`;
 }
 
+export function parseRainAmount(value: string | number | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  const text = String(value ?? "").trim();
+  if (!text || text === "강수없음") return 0;
+  if (text.includes("1mm 미만")) return 0.5;
+
+  const rangeMatch = text.match(/(\d+(?:\.\d+)?)\s*~\s*(\d+(?:\.\d+)?)/);
+  if (rangeMatch) {
+    const left = Number(rangeMatch[1]);
+    const right = Number(rangeMatch[2]);
+    if (Number.isFinite(left) && Number.isFinite(right)) return Math.max(left, right);
+  }
+
+  const numericMatch = text.match(/(\d+(?:\.\d+)?)/);
+  if (!numericMatch) return 0;
+  const numeric = Number(numericMatch[1]);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
 function buildReason(input: {
   candidate: WeatherDispatchCandidate;
   peakAfterArrivalMinutes: number;
@@ -127,7 +154,13 @@ function buildCaution(candidate: WeatherDispatchCandidate, peakRainMmPerHour: nu
   return candidate.caution ? `${rainCaution} ${candidate.caution}` : rainCaution;
 }
 
-function scoreCandidate(candidate: WeatherDispatchCandidate, rangeMinutes: WeatherDispatchRangeMinutes) {
+function scoreCandidate(
+  candidate: WeatherDispatchCandidate,
+  rangeMinutes: WeatherDispatchRangeMinutes,
+  frames: RainForecastFrame[],
+  dataBasisAt: string,
+  estimationNote: string,
+) {
   const distanceKm = getHaversineDistanceKm(SANGAM_BASE, candidate);
   const travelBandMinutes = getTravelBandMinutes(distanceKm);
 
@@ -135,7 +168,6 @@ function scoreCandidate(candidate: WeatherDispatchCandidate, rangeMinutes: Weath
     return null;
   }
 
-  const frames = getMockForecast(candidate.id);
   const evaluationStart = travelBandMinutes + EVALUATION_SETUP_MINUTES;
   const evaluationEnd = travelBandMinutes + EVALUATION_WINDOW_MINUTES;
   const evaluationFrames = frames.filter(
@@ -210,16 +242,31 @@ function scoreCandidate(candidate: WeatherDispatchCandidate, rangeMinutes: Weath
       trend,
     }),
     caution: buildCaution(candidate, peakRainMmPerHour),
+    dataBasisAt: peakFrame.forecastAt ?? dataBasisAt,
+    estimationNote,
     sortRain: peakRainMmPerHour,
     sortSustained: sustainedMinutes,
   };
 }
 
-export function generateRainDispatchRecommendations(
+export function generateRainDispatchRecommendationsFromForecasts(
   rangeMinutes: WeatherDispatchRangeMinutes,
-  generatedAt = new Date().toISOString(),
+  forecastsByCandidateId: Map<string, RainForecastFrame[]>,
+  options: {
+    generatedAt?: string;
+    dataBasisAt?: string | null;
+    note?: string | null;
+    status?: "available" | "unavailable";
+    message?: string | null;
+  } = {},
 ): RainDispatchRecommendationResponse {
-  const scored = WEATHER_DISPATCH_CANDIDATES.map((candidate) => scoreCandidate(candidate, rangeMinutes))
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const dataBasisAt = options.dataBasisAt ?? generatedAt;
+  const estimationNote = options.note ?? "예보 시간 단위 기반 추정";
+  const scored = WEATHER_DISPATCH_CANDIDATES.map((candidate) => {
+    const frames = forecastsByCandidateId.get(candidate.id) ?? [];
+    return scoreCandidate(candidate, rangeMinutes, frames, dataBasisAt, estimationNote);
+  })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
@@ -234,11 +281,30 @@ export function generateRainDispatchRecommendations(
     }));
 
   return {
+    status: options.status ?? "available",
+    message: options.message ?? null,
     base: SANGAM_BASE,
     rangeMinutes,
     generatedAt,
+    dataBasisAt,
+    note: estimationNote,
     items: scored,
   };
+}
+
+export function generateRainDispatchRecommendations(
+  rangeMinutes: WeatherDispatchRangeMinutes,
+  generatedAt = new Date().toISOString(),
+): RainDispatchRecommendationResponse {
+  const forecastsByCandidateId = new Map(
+    WEATHER_DISPATCH_CANDIDATES.map((candidate) => [candidate.id, getMockForecast(candidate.id)] as const),
+  );
+  const response = generateRainDispatchRecommendationsFromForecasts(rangeMinutes, forecastsByCandidateId, {
+    generatedAt,
+    dataBasisAt: generatedAt,
+    note: "개발용 mock 강수 흐름",
+  });
+  return response;
 }
 
 export function formatRainAmountForDisplay(value: number) {

@@ -60,7 +60,8 @@
 .mapViewport {
   position: relative;
   display: grid;
-  min-height: 320px;
+  min-height: 0;
+  height: clamp(220px, 38vh, 360px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -71,11 +72,31 @@
   background-size: 42px 42px;
 }
 
+.leafletMap {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  z-index: 0;
+}
+
 .mapImage {
   width: 100%;
   height: 100%;
-  min-height: 320px;
-  object-fit: cover;
+  object-fit: contain;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.mapLegend {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 520;
+  max-width: min(260px, calc(100% - 28px));
+  max-height: 42px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.72);
 }
 
 .mapPlaceholder {
@@ -95,10 +116,76 @@
   font-size: 18px;
 }
 
+.mapLoading {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 520;
+  width: min(520px, calc(100% - 28px));
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.74);
+  color: #f8fbff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.mapOverlayNotice {
+  position: absolute;
+  left: 50%;
+  top: 52px;
+  z-index: 520;
+  width: min(560px, calc(100% - 28px));
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.74);
+  color: #f8fbff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.radarEmptyState {
+  display: grid;
+  gap: 10px;
+  max-width: 720px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.16);
+}
+
+.radarEmptyState strong {
+  font-size: 17px;
+}
+
+.emptyMetaRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.emptyMetaRow span {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .mapBadge {
   position: absolute;
   left: 14px;
   top: 14px;
+  z-index: 520;
   display: inline-flex;
   width: fit-content;
   padding: 6px 10px;
@@ -108,6 +195,29 @@
   color: #f8fbff;
   font-size: 12px;
   font-weight: 800;
+}
+
+.radarMapControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.opacityControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(260px, 100%);
+}
+
+.opacityControl input {
+  width: 150px;
+  accent-color: #5eead4;
 }
 
 .recommendationHeader {
@@ -140,6 +250,10 @@
   gap: 10px;
 }
 
+.cardHead > div {
+  min-width: 0;
+}
+
 .rankBadge {
   display: inline-flex;
   align-items: center;
@@ -158,9 +272,11 @@
 .placeName {
   margin: 0;
   font-size: 19px;
+  overflow-wrap: anywhere;
 }
 
 .scoreText {
+  flex: 0 0 auto;
   color: #bae6fd;
   font-weight: 900;
 }
@@ -227,7 +343,18 @@
 
   .mapViewport,
   .mapImage {
-    min-height: 260px;
+    height: clamp(190px, 34vh, 280px);
+  }
+
+  .radarMapControls,
+  .opacityControl {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .opacityControl input {
+    flex: 1 1 auto;
+    width: auto;
   }
 }
 
