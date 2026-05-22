@@ -3415,7 +3415,7 @@ export function LiveEquipmentStatusPage() {
   const regionalTvuItems = useMemo(() => items.filter(isRegionalTransmissionTvuItem), [items]);
   const tvuItems = useMemo(() => items.filter((item) => isTvuItem(item) && !isRegionalTransmissionTvuItem(item)), [items]);
   const statusBoardItems = useMemo(() => [...tvuItems, ...regionalTvuItems], [regionalTvuItems, tvuItems]);
-  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.role));
+  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.actualRole));
   const hasDirtyDrafts = useMemo(() => (
     editMode && statusBoardItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
   ), [drafts, editBaselineDrafts, editMode, statusBoardItems]);
