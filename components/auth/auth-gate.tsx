@@ -41,6 +41,10 @@ function hasAccess(
     return hasAdminAccess(session.role);
   }
 
+  if (pathname.startsWith("/weather")) {
+    return session.role === "admin";
+  }
+
   if (pathname.startsWith("/team-lead")) {
     return hasTeamLeadAccess(session.role);
   }
@@ -128,6 +132,7 @@ function hasAccess(
         pathname === "/" ||
         pathname === "/vacation" ||
         pathname.startsWith("/submissions") ||
+        pathname.startsWith("/weather") ||
         pathname.startsWith("/admin")
       );
     default:

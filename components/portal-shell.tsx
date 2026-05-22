@@ -75,6 +75,7 @@ const links: PortalNavLink[] = [
   { href: "/vacation", label: "휴가 신청" },
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/partner/schedule", label: "일정" },
+  { href: "/weather", label: "날씨" },
   {
     href: "/equipment",
     label: "TVU/장비",
@@ -151,6 +152,7 @@ const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"
   { kind: "link", href: "/schedule" },
   { kind: "link", href: "/team-lead" },
   { kind: "action", id: "customer-support" },
+  { kind: "link", href: "/weather" },
   { kind: "link", href: "/admin" },
 ];
 
@@ -357,6 +359,7 @@ function getVisibleLinks(
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/schedule" ||
           (link.href === "/review" && session.canReview && !reviewLocked) ||
+          link.href === "/weather" ||
           link.href === "/admin",
         )
         .map((link) => (link.href === "/schedule" ? withVisibleLeafChildren(link, ["/schedule/write"]) : link));
@@ -386,6 +389,7 @@ function isLinkActive(pathname: string, href: string) {
     (href === "/equipment" && pathname.startsWith("/equipment")) ||
     (href === "/schedule" && pathname.startsWith("/schedule")) ||
     (href === "/team-lead" && pathname.startsWith("/team-lead")) ||
+    (href === "/weather" && pathname.startsWith("/weather")) ||
     (href === "/admin" && pathname.startsWith("/admin"))
   );
 }

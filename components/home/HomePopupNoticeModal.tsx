@@ -56,7 +56,7 @@ export function HomePopupNoticeModal() {
 
   const loadNotice = async () => {
     try {
-      await refreshHomePopupNoticeWorkspace({ includeTrips: false });
+      await refreshHomePopupNoticeWorkspace({ includeTrips: false, includeCommunity: false });
       syncFromCache();
     } catch (error) {
       setMessage({

@@ -12,6 +12,7 @@ import {
   getScheduleAssignmentGeneralDisplayNames,
   getScheduleAssignmentRows,
 } from "@/lib/team-lead/storage";
+import { defaultPointers } from "@/lib/schedule/constants";
 import type { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import type { ScheduleAssignmentDataStore } from "@/lib/team-lead/storage";
 
@@ -217,7 +218,7 @@ test("half-day assignment duty adds half-day tag to schedule display name", () =
     month: 5,
     monthKey: "2026-05",
     days: [day],
-    nextPointers: {},
+    nextPointers: { ...defaultPointers },
     nextStartDate: "2026-06-01",
   } as GeneratedSchedule;
   const store: ScheduleAssignmentDataStore = {
@@ -264,7 +265,7 @@ test("assembly assignment duty is reflected in the schedule management assembly 
     month: 6,
     monthKey: "2026-06",
     days: [day],
-    nextPointers: {},
+    nextPointers: { ...defaultPointers },
     nextStartDate: "2026-07-01",
   } as GeneratedSchedule;
   const store: ScheduleAssignmentDataStore = {
@@ -295,7 +296,7 @@ test("big event assignments become schedule assignment duties across month bound
     month: 5,
     monthKey: "2026-05",
     days: [],
-    nextPointers: {},
+    nextPointers: { ...defaultPointers },
     nextStartDate: "2026-06-01",
     big_events: [
       {
@@ -335,7 +336,7 @@ test("big event assignments become schedule assignment duties across month bound
     month: 6,
     monthKey: "2026-06",
     days: [juneDay],
-    nextPointers: {},
+    nextPointers: { ...defaultPointers },
     nextStartDate: "2026-07-01",
   } as GeneratedSchedule;
   const bigEvents = getScheduleAssignmentBigEvents([maySchedule, juneSchedule]);

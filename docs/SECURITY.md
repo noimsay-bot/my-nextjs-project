@@ -12,6 +12,7 @@
 - `OPENAI_API_KEY`: server-only.
 - `ASSEMBLY_EXPORT_TOKEN`: server-only.
 - `HUB_ASSEMBLY_SYNC_TOKEN`: server-only.
+- `KMA_APIHUB_AUTH_KEY`: server-only.
 - SMTP 관련 키: server-only.
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: client-exposed 가능.
 
@@ -25,6 +26,7 @@
 - components에서 service role key 문자열 사용.
 - components/client component에서 `lib/supabase/admin` import.
 - 공개 라우트에서 `AuthGate`/`PortalShell` 직접 import.
+- client component에서 `KMA_APIHUB_AUTH_KEY` 직접 접근.
 
 ## 경고로 보는 항목
 - `app/api`에서 UI component import.

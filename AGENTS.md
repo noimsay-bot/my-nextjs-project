@@ -2,7 +2,7 @@
 
 ## 1. 한 줄 설명
 - Next.js 15 App Router, Supabase Auth/PostgREST/Storage/RLS, Vercel 기반 내부 포털이다.
-- 주요 영역은 로그인, 홈, 근무표, 휴가신청, 베스트리포트 평가, 장비, 팀장, 관리자, 마이페이지다.
+- 주요 영역은 로그인, 홈, 근무표, 휴가신청, 베스트리포트 평가, 장비, 팀장, 관리자, 날씨, 마이페이지다.
 
 ## 2. 절대 경계
 - 실제 서비스 기능 동작을 문서/하네스 작업 중 바꾸지 않는다.
@@ -42,6 +42,7 @@
 - 장비: [docs/product/equipment.md](docs/product/equipment.md)
 - 선거: [docs/product/election.md](docs/product/election.md)
 - 뉴스 브리핑: [docs/product/news-briefing.md](docs/product/news-briefing.md)
+- 날씨: [docs/product/weather.md](docs/product/weather.md)
 - 마이페이지: [docs/product/my-page.md](docs/product/my-page.md)
 - 변경 기록 방식: [docs/CHANGELOG_GUIDE.md](docs/CHANGELOG_GUIDE.md)
 - 기술 부채: [docs/exec-plans/tech-debt-tracker.md](docs/exec-plans/tech-debt-tracker.md)

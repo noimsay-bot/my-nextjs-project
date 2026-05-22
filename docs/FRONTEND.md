@@ -7,6 +7,7 @@
 - 공개 로그인 라우트는 `app/(public)/login/page.tsx`에 있다.
 - 모바일 사이드바와 전역 탐색은 `components/sidebar.tsx`, `components/portal-shell.tsx`, `app/globals.css`에 걸쳐 있다.
 - schedule/team-lead 영역은 별도 하위 shell 컴포넌트를 사용한다.
+- 날씨 화면은 관리자 전용 포털 페이지로, 레이더 영역과 추천 카드가 모바일에서 한 열로 접혀야 한다.
 
 ## 경계
 - `components/**`는 UI 중심이다.

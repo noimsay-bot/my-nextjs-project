@@ -1,10 +1,21 @@
 import { NextResponse } from "next/server";
+import { getJsonResponseByteLength, logRouteUsageDebug } from "@/lib/server/usage-debug";
 import { getScheduleCategoryLabel } from "@/lib/schedule/constants";
 import type { DaySchedule, GeneratedSchedule } from "@/lib/schedule/types";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 
 const HOME_PUBLIC_WORKSPACE_TIMEOUT_MS = 4_000;
+
+function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknown, init?: ResponseInit) {
+  const status = init?.status ?? 200;
+  logRouteUsageDebug(request, {
+    status,
+    startedAt,
+    responseBytes: getJsonResponseByteLength(payload),
+  });
+  return NextResponse.json(payload, init);
+}
 
 type AppRole = "member" | "outlet" | "reviewer" | "team_lead" | "admin" | "desk" | "observer" | "partner";
 type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
@@ -1174,13 +1185,16 @@ function getMonthKeysAroundToday(now = new Date()) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+
   try {
     if (!hasSupabaseAdminEnv()) {
-      return NextResponse.json({ message: "Supabase 관리자 환경변수가 없습니다." }, { status: 500 });
+      return jsonWithUsageDebug(request, startedAt, { message: "Supabase 관리자 환경변수가 없습니다." }, { status: 500 });
     }
 
     const { searchParams } = new URL(request.url);
     const includeTrips = searchParams.get("includeTrips") !== "0";
+    const includeCommunity = searchParams.get("includeCommunity") !== "0";
 
     const supabase = await createServerClient();
     const {
@@ -1189,7 +1203,7 @@ export async function GET(request: Request) {
     } = await withTimeout(supabase.auth.getUser(), "로그인 세션 확인이 지연되고 있습니다.");
 
     if (userError || !user) {
-      return NextResponse.json({ message: "로그인 세션을 확인하지 못했습니다." }, { status: 401 });
+      return jsonWithUsageDebug(request, startedAt, { message: "로그인 세션을 확인하지 못했습니다." }, { status: 401 });
     }
 
     const admin = createAdminClient();
@@ -1204,7 +1218,7 @@ export async function GET(request: Request) {
     );
 
     if (profileError || !profile || !profile.approved) {
-      return NextResponse.json({ message: "승인된 계정이 필요합니다." }, { status: 403 });
+      return jsonWithUsageDebug(request, startedAt, { message: "승인된 계정이 필요합니다." }, { status: 403 });
     }
 
     const [{ data: noticeRow, error: noticeError }, { data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
@@ -1270,24 +1284,24 @@ export async function GET(request: Request) {
 
     const safeWorkspace = sanitizeWorkspaceForProfile(workspaceWithVotes, profile);
     const safeActivePopup = getActivePopupNotice(safeWorkspace.notices);
-
-    return NextResponse.json({
+    const payload = {
       notice: safeActivePopup,
       notices: safeWorkspace.notices,
       ddays: safeWorkspace.ddays,
-      communityPosts: safeWorkspace.communityPosts,
-      communityComments: safeWorkspace.communityComments,
+      communityPosts: includeCommunity ? safeWorkspace.communityPosts : [],
+      communityComments: includeCommunity ? safeWorkspace.communityComments : [],
       applications,
       ownApplied,
       ...(includeTrips ? { tripCards: buildTripCards(scheduleRows ?? [], assignmentRows ?? []) } : {}),
-    });
+    };
+
+    return jsonWithUsageDebug(request, startedAt, payload);
   } catch (error) {
-    return NextResponse.json(
-      {
-        message: error instanceof Error ? error.message : "공개 홈 데이터를 불러오지 못했습니다.",
-      },
-      { status: error instanceof Error && error.message.includes("지연") ? 503 : 500 },
-    );
+    const payload = {
+      message: error instanceof Error ? error.message : "공개 홈 데이터를 불러오지 못했습니다.",
+    };
+    const status = error instanceof Error && error.message.includes("지연") ? 503 : 500;
+    return jsonWithUsageDebug(request, startedAt, payload, { status });
   }
 }
 

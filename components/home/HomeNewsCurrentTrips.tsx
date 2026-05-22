@@ -49,7 +49,7 @@ export function HomeNewsCurrentTrips({
   };
 
   const loadTripCards = async () => {
-    await refreshHomePopupNoticeWorkspace();
+    await refreshHomePopupNoticeWorkspace({ includeCommunity: false });
     syncTripCards();
   };
 

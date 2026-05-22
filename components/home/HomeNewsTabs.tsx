@@ -144,7 +144,7 @@ export function HomeNewsTabs({
       setCurrentTripCount(getCurrentTripCount());
     };
 
-    void refreshHomePopupNoticeWorkspace().then(syncCurrentTripCount);
+    void refreshHomePopupNoticeWorkspace({ includeCommunity: false }).then(syncCurrentTripCount);
     window.addEventListener("storage", syncCurrentTripCount);
     window.addEventListener("focus", syncCurrentTripCount);
     window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncCurrentTripCount);

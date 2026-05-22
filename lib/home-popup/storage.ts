@@ -164,6 +164,7 @@ type HomePublicWorkspaceResponse = {
 type RefreshHomePopupNoticeWorkspaceOptions = {
   force?: boolean;
   includeTrips?: boolean;
+  includeCommunity?: boolean;
 };
 
 type PersistHomeWorkspaceOptions = {
@@ -183,6 +184,7 @@ let refreshPromiseKey: string | null = null;
 let refreshRequestId = 0;
 let homeWorkspaceLoaded = false;
 let homeWorkspaceTripCardsLoaded = false;
+let homeWorkspaceCommunityLoaded = false;
 let homeWorkspaceLastFetchedAt = 0;
 let homeWorkspaceSessionKey: string | null = null;
 let homeWorkspaceLastFailureAt = 0;
@@ -917,6 +919,7 @@ function syncCaches(
   applications: HomePopupNoticeApplication[],
   ownApplied = false,
   tripCards: TeamLeadTripPersonCard[] = tripCardCache,
+  persistLocalCache = true,
 ) {
   noticeListCache = cloneNoticeList(sortNotices(notices));
   homeDdayCache = cloneDdayList(sortHomeDdays(ddays).slice(0, 3));
@@ -926,7 +929,9 @@ function syncCaches(
   applicationCache = cloneApplications(applications);
   tripCardCache = cloneTripCards(tripCards);
   currentUserAppliedCache = ownApplied;
-  writeHomeWorkspaceLocalCache(getSession(), noticeListCache, homeDdayCache, communityPostCache, communityCommentCache);
+  if (persistLocalCache) {
+    writeHomeWorkspaceLocalCache(getSession(), noticeListCache, homeDdayCache, communityPostCache, communityCommentCache);
+  }
 }
 
 export function hydrateHomePopupWorkspaceFromLocal(session: PortalSession = getSession()) {
@@ -944,6 +949,7 @@ export function hydrateHomePopupWorkspaceFromLocal(session: PortalSession = getS
   );
   homeWorkspaceLoaded = true;
   homeWorkspaceTripCardsLoaded = false;
+  homeWorkspaceCommunityLoaded = true;
   homeWorkspaceLastFetchedAt = 0;
   homeWorkspaceSessionKey = getHomeWorkspaceSessionKey(session);
   return true;
@@ -957,6 +963,7 @@ function hasFreshHomePopupWorkspace(
   if (homeWorkspaceSessionKey !== getHomeWorkspaceSessionKey(session)) return false;
   if (Date.now() - homeWorkspaceLastFetchedAt >= HOME_POPUP_WORKSPACE_TTL_MS) return false;
   if (options.includeTrips && !homeWorkspaceTripCardsLoaded) return false;
+  if (options.includeCommunity !== false && !homeWorkspaceCommunityLoaded) return false;
   return true;
 }
 
@@ -966,9 +973,12 @@ function markHomePopupWorkspaceFresh(
 ) {
   homeWorkspaceLoaded = true;
   homeWorkspaceTripCardsLoaded = homeWorkspaceTripCardsLoaded || Boolean(options.includeTrips);
+  homeWorkspaceCommunityLoaded = homeWorkspaceCommunityLoaded || options.includeCommunity !== false;
   homeWorkspaceLastFetchedAt = Date.now();
   homeWorkspaceSessionKey = getHomeWorkspaceSessionKey(session);
-  writeHomeWorkspaceLocalCache(session, noticeListCache, homeDdayCache, communityPostCache, communityCommentCache);
+  if (options.includeCommunity !== false || homeWorkspaceCommunityLoaded) {
+    writeHomeWorkspaceLocalCache(session, noticeListCache, homeDdayCache, communityPostCache, communityCommentCache);
+  }
 }
 
 function resetSessionScopedWorkspaceState() {
@@ -1029,11 +1039,14 @@ function getHomeWorkspaceRequestKey(
   sessionKey: string,
   options: RefreshHomePopupNoticeWorkspaceOptions,
 ) {
-  return `${sessionKey}:${options.includeTrips === false ? "no-trips" : "with-trips"}`;
+  const tripsKey = options.includeTrips === false ? "no-trips" : "with-trips";
+  const communityKey = options.includeCommunity === false ? "summary" : "full";
+  return `${sessionKey}:${tripsKey}:${communityKey}`;
 }
 
 async function fetchHomePublicWorkspaceFallback(
   session: NonNullable<Awaited<ReturnType<typeof getPortalSession>>>,
+  options: RefreshHomePopupNoticeWorkspaceOptions = {},
 ): Promise<HomePublicWorkspaceResponse> {
   const supabase = await getPortalSupabaseClient();
   const { data: noticeRow, error: noticeError } = await selectHomePopupNoticeRow(supabase);
@@ -1080,8 +1093,8 @@ async function fetchHomePublicWorkspaceFallback(
     notice: activePopup,
     notices: workspace.notices,
     ddays: workspace.ddays,
-    communityPosts: workspace.communityPosts,
-    communityComments: workspace.communityComments,
+    communityPosts: options.includeCommunity === false ? [] : workspace.communityPosts,
+    communityComments: options.includeCommunity === false ? [] : workspace.communityComments,
     applications,
     ownApplied,
   };
@@ -1091,6 +1104,9 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
   const searchParams = new URLSearchParams();
   if (options.includeTrips === false) {
     searchParams.set("includeTrips", "0");
+  }
+  if (options.includeCommunity === false) {
+    searchParams.set("includeCommunity", "0");
   }
 
   const requestUrl = searchParams.size > 0
@@ -1112,7 +1128,7 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
     const payload = (await response.json().catch(() => null)) as { message?: string } | HomePublicWorkspaceResponse | null;
     if (!response.ok) {
       if (options.includeTrips === false && session?.approved) {
-        return fetchHomePublicWorkspaceFallback(session);
+        return fetchHomePublicWorkspaceFallback(session, options);
       }
       throw new Error(payload && "message" in payload && typeof payload.message === "string"
         ? payload.message
@@ -1121,7 +1137,7 @@ async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspace
 
     if (!payload || typeof payload !== "object") {
       if (session?.approved) {
-        return fetchHomePublicWorkspaceFallback(session);
+        return fetchHomePublicWorkspaceFallback(session, options);
       }
       return normalizeHomePublicWorkspaceResponse(null);
     }
@@ -1293,6 +1309,7 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
   refreshPromise = (async () => {
     if (homeWorkspaceSessionKey && homeWorkspaceSessionKey !== sessionKey) {
       homeWorkspaceTripCardsLoaded = false;
+      homeWorkspaceCommunityLoaded = false;
       resetSessionScopedWorkspaceState();
     }
 
@@ -1303,6 +1320,7 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
       syncCaches([], [], [], [], [], false, []);
       homeWorkspaceLoaded = true;
       homeWorkspaceTripCardsLoaded = true;
+      homeWorkspaceCommunityLoaded = true;
       homeWorkspaceLastFetchedAt = Date.now();
       homeWorkspaceSessionKey = sessionKey;
       emitHomePopupNoticeEvent();
@@ -1327,6 +1345,7 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
 
     try {
       const workspace = normalizeHomePublicWorkspaceResponse(await fetchHomePublicWorkspace(options));
+      const canPersistLocalCache = options.includeCommunity !== false || homeWorkspaceCommunityLoaded;
 
       if (requestId !== refreshRequestId) {
         return buildCachedWorkspaceResult();
@@ -1334,11 +1353,12 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
       syncCaches(
         workspace.notices,
         workspace.ddays,
-        workspace.communityPosts,
-        workspace.communityComments,
+        options.includeCommunity === false ? getCommunityBoardPosts() : workspace.communityPosts,
+        options.includeCommunity === false ? getCommunityBoardComments() : workspace.communityComments,
         workspace.applications,
         workspace.ownApplied,
         workspace.tripCards,
+        canPersistLocalCache,
       );
       homeWorkspaceLastFailureAt = 0;
       markHomePopupWorkspaceFresh(session, options);

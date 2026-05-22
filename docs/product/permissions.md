@@ -16,6 +16,8 @@
 - 클라이언트 포털 접근 제어는 `AuthGate`가 세션, role, approved, mustChangePassword 등을 함께 판단한다.
 - 메뉴와 전역 액션 노출은 `PortalShell`이 판단한다.
 - DB 접근은 Supabase RLS가 최종 방어선이다.
+- `/weather`는 현재 `role === "admin"` 사용자에게만 노출/접근을 허용한다.
+- `app/api/weather/**`는 AuthGate를 통과하지 않으므로 Route Handler에서 서버 세션과 admin profile을 다시 확인한다.
 
 ## 주의
 - `admin`과 `team_lead`는 단순 계층 구조로 추정하지 않는다.

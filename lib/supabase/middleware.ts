@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const SUPABASE_AUTH_COOKIE_SUFFIX = "-auth-token";
-const PROTECTED_ROUTE_PREFIXES = ["/admin", "/review", "/schedule", "/submissions", "/team-lead", "/vacation"] as const;
+const PROTECTED_ROUTE_PREFIXES = ["/admin", "/review", "/schedule", "/submissions", "/team-lead", "/vacation", "/weather"] as const;
 
 function hasSupabaseAuthCookie(request: NextRequest) {
   return request.cookies
@@ -11,6 +11,18 @@ function hasSupabaseAuthCookie(request: NextRequest) {
 
 function isProtectedRoute(pathname: string) {
   return PROTECTED_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function isFastBypassRequest(request: NextRequest) {
+  const method = request.method.toUpperCase();
+  if (method === "HEAD" || method === "OPTIONS") return true;
+
+  const purpose = (request.headers.get("purpose") ?? request.headers.get("sec-purpose") ?? "").toLowerCase();
+  return (
+    request.headers.has("next-router-prefetch") ||
+    request.headers.has("x-middleware-prefetch") ||
+    purpose.includes("prefetch")
+  );
 }
 
 function buildLoginRedirect(request: NextRequest, pathname: string, reason?: string) {
@@ -24,6 +36,11 @@ function buildLoginRedirect(request: NextRequest, pathname: string, reason?: str
 
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  if (isFastBypassRequest(request)) {
+    return NextResponse.next({ request });
+  }
+
   const hasAuthCookie = hasSupabaseAuthCookie(request);
 
   if (!isProtectedRoute(pathname)) {
