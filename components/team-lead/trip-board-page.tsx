@@ -11,6 +11,8 @@ import {
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   TeamLeadTripPersonCard,
 } from "@/lib/team-lead/storage";
+import { getTeamLeadEvaluationMonthKeys } from "@/lib/team-lead/evaluation-year";
+import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 
@@ -35,10 +37,11 @@ export function TripBoardPage({
   const [cards, setCards] = useState<Array<TeamLeadTripPersonCard & { cardKey: string }>>([]);
   const [expandedCardKeys, setExpandedCardKeys] = useState<string[]>([]);
   const lastFocusRefreshAtRef = useRef(0);
+  const evaluationYear = useTeamLeadEvaluationYear();
 
   useEffect(() => {
     const syncCards = () => {
-      const tripCards = getTeamLeadTripCards(travelTypes);
+      const tripCards = getTeamLeadTripCards(travelTypes, evaluationYear);
       if (!showAllUsers) {
         setCards(tripCards.map((card) => ({ ...card, cardKey: card.name })));
         return;
@@ -71,7 +74,10 @@ export function TripBoardPage({
     };
     const refresh = async () => {
       await Promise.all([refreshUsers(), refreshScheduleState()]);
-      await refreshTeamLeadAssignmentMonths(getTeamLeadSchedules().map((schedule) => schedule.monthKey));
+      await refreshTeamLeadAssignmentMonths([
+        ...getTeamLeadEvaluationMonthKeys(evaluationYear),
+        ...getTeamLeadSchedules().map((schedule) => schedule.monthKey),
+      ]);
       syncCards();
     };
     const onFocusRefresh = () => {
@@ -93,7 +99,7 @@ export function TripBoardPage({
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, syncCards);
       window.removeEventListener(SCHEDULE_STATE_EVENT, syncCards);
     };
-  }, [showAllUsers, travelTypes]);
+  }, [evaluationYear, showAllUsers, travelTypes]);
 
   useEffect(() => {
     setExpandedCardKeys((current) => current.filter((cardKey) => cards.some((card) => card.cardKey === cardKey)));

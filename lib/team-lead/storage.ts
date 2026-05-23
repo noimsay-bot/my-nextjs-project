@@ -25,6 +25,7 @@ import {
 } from "@/lib/supabase/portal";
 import {
   getTeamLeadEvaluationPeriod,
+  getTeamLeadEvaluationMonthKeys,
   getTeamLeadEvaluationYear,
 } from "@/lib/team-lead/evaluation-year";
 
@@ -2564,9 +2565,15 @@ export function formatScheduleAssignmentDisplayName(
   return hasTripTag ? `${trimmedName}(출)` : trimmedName;
 }
 
-export function getTeamLeadTripCards(travelTypes: AssignmentTravelType[]) {
+export function getTeamLeadTripCards(
+  travelTypes: AssignmentTravelType[],
+  evaluationYear = getTeamLeadEvaluationYear(),
+) {
   const allowedTypes = new Set(travelTypes);
-  return buildScheduleAssignmentTripWorkspace().tripCards
+  const monthKeys = new Set(getTeamLeadEvaluationMonthKeys(evaluationYear));
+  const schedules = getTeamLeadSchedules().filter((schedule) => monthKeys.has(schedule.monthKey));
+
+  return buildScheduleAssignmentTripWorkspace(schedules).tripCards
     .map((card) => ({
       name: card.name,
       items: card.items.filter((item) => allowedTypes.has(item.travelType)),
