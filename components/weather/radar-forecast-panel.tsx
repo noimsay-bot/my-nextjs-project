@@ -409,14 +409,6 @@ export function RadarForecastPanel() {
           </div>
           <button
             type="button"
-            className="btn primary"
-            disabled={!hasCompleteRadarFrames}
-            onClick={() => setIsPlaying((current) => !current)}
-          >
-            {isPlaying ? "정지" : "재생"}
-          </button>
-          <button
-            type="button"
             className="btn white"
             disabled={status === "loading"}
             onClick={() => void refreshAllFrames()}
@@ -426,6 +418,14 @@ export function RadarForecastPanel() {
         </div>
 
         <div className={styles.toolbar} aria-label="레이더 예측 시간 선택">
+          <button
+            type="button"
+            className={`btn primary ${styles.playButton}`}
+            disabled={!hasCompleteRadarFrames}
+            onClick={() => setIsPlaying((current) => !current)}
+          >
+            {isPlaying ? "정지" : "재생"}
+          </button>
           {RADAR_OFFSETS.map((offset) => (
             <button
               key={offset}
