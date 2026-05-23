@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { WEATHER_MAP_CENTER, WEATHER_MAP_DEFAULT_ZOOM, WEATHER_MAP_TILE } from "@/lib/weather/map-config";
+import {
+  WEATHER_MAP_CENTER,
+  WEATHER_MAP_DEFAULT_ZOOM,
+  WEATHER_MAP_TILE,
+} from "@/lib/weather/map-config";
 import { getRadarOverlayBounds, type RadarProjectionInput } from "@/lib/weather/radar-projection";
 import styles from "@/components/weather/weather.module.css";
 
@@ -22,7 +26,6 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
   const leafletRef = useRef<LeafletModule | null>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const overlayRef = useRef<import("leaflet").ImageOverlay | null>(null);
-  const hasFitInitialBoundsRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
 
   const overlayBounds = useMemo(() => getRadarOverlayBounds(frame), [frame]);
@@ -72,7 +75,6 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
       }
       overlayRef.current = null;
       leafletRef.current = null;
-      hasFitInitialBoundsRef.current = false;
     };
   }, []);
 
@@ -99,10 +101,8 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
     });
 
     overlayRef.current = overlay;
-    if (!hasFitInitialBoundsRef.current) {
-      map.fitBounds(overlayBounds, { padding: [16, 16], animate: false });
-      hasFitInitialBoundsRef.current = true;
-    }
+    map.setMaxBounds(overlayBounds);
+    map.fitBounds(overlayBounds, { padding: [0, 0], animate: false });
 
     return () => {
       overlay.remove();

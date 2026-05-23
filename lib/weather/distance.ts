@@ -21,10 +21,11 @@ export function getHaversineDistanceKm(
   return EARTH_RADIUS_KM * c;
 }
 
-export type WeatherTravelBandMinutes = 15 | 30 | 45 | 60;
+export type WeatherTravelBandMinutes = 10 | 20 | 30 | 45 | 60;
 
 export function getTravelBandMinutes(distanceKm: number): WeatherTravelBandMinutes | null {
-  if (distanceKm <= 5) return 15;
+  if (distanceKm <= 4) return 10;
+  if (distanceKm <= 8) return 20;
   if (distanceKm <= 12) return 30;
   if (distanceKm <= 22) return 45;
   if (distanceKm <= 35) return 60;

@@ -1,6 +1,6 @@
 export const WEATHER_MAP_CENTER = {
-  lat: 37.5796,
-  lng: 126.8908,
+  lat: 36.35,
+  lng: 127.85,
 };
 
 export const WEATHER_MAP_DEFAULT_ZOOM = 7;

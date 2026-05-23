@@ -1,7 +1,12 @@
-import { SANGAM_BASE, WEATHER_DISPATCH_CANDIDATES, type WeatherDispatchCandidate } from "@/lib/weather/candidates";
+import {
+  SANGAM_BASE,
+  WEATHER_DISPATCH_CANDIDATES,
+  type WeatherDispatchCandidate,
+  type WeatherDispatchPoint,
+} from "@/lib/weather/candidates";
 import { getHaversineDistanceKm, getTravelBandMinutes, type WeatherTravelBandMinutes } from "@/lib/weather/distance";
 
-export type WeatherDispatchRangeMinutes = 30 | 45 | 60;
+export type WeatherDispatchRangeMinutes = 10 | 20 | 30;
 
 export interface RainForecastFrame {
   afterMinutes: number;
@@ -29,7 +34,7 @@ export interface RainDispatchRecommendationItem {
 export interface RainDispatchRecommendationResponse {
   status?: "available" | "unavailable";
   message?: string | null;
-  base: typeof SANGAM_BASE;
+  base: WeatherDispatchPoint;
   rangeMinutes: WeatherDispatchRangeMinutes;
   generatedAt: string;
   dataBasisAt?: string | null;
@@ -63,7 +68,7 @@ function clamp(value: number, min: number, max: number) {
 
 export function parseWeatherDispatchRange(value: string | null | undefined): WeatherDispatchRangeMinutes {
   const numeric = Number(value);
-  return numeric === 45 || numeric === 60 ? numeric : 30;
+  return numeric === 10 || numeric === 20 ? numeric : 30;
 }
 
 export function getRainIntensityLabel(mmPerHour: number) {
@@ -155,13 +160,14 @@ function buildCaution(candidate: WeatherDispatchCandidate, peakRainMmPerHour: nu
 }
 
 function scoreCandidate(
+  base: WeatherDispatchPoint,
   candidate: WeatherDispatchCandidate,
   rangeMinutes: WeatherDispatchRangeMinutes,
   frames: RainForecastFrame[],
   dataBasisAt: string,
   estimationNote: string,
 ) {
-  const distanceKm = getHaversineDistanceKm(SANGAM_BASE, candidate);
+  const distanceKm = getHaversineDistanceKm(base, candidate);
   const travelBandMinutes = getTravelBandMinutes(distanceKm);
 
   if (!travelBandMinutes || travelBandMinutes > rangeMinutes) {
@@ -258,14 +264,16 @@ export function generateRainDispatchRecommendationsFromForecasts(
     note?: string | null;
     status?: "available" | "unavailable";
     message?: string | null;
+    base?: WeatherDispatchPoint;
   } = {},
 ): RainDispatchRecommendationResponse {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const dataBasisAt = options.dataBasisAt ?? generatedAt;
   const estimationNote = options.note ?? "예보 시간 단위 기반 추정";
+  const base = options.base ?? SANGAM_BASE;
   const scored = WEATHER_DISPATCH_CANDIDATES.map((candidate) => {
     const frames = forecastsByCandidateId.get(candidate.id) ?? [];
-    return scoreCandidate(candidate, rangeMinutes, frames, dataBasisAt, estimationNote);
+    return scoreCandidate(base, candidate, rangeMinutes, frames, dataBasisAt, estimationNote);
   })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .sort((left, right) => {
@@ -283,7 +291,7 @@ export function generateRainDispatchRecommendationsFromForecasts(
   return {
     status: options.status ?? "available",
     message: options.message ?? null,
-    base: SANGAM_BASE,
+    base,
     rangeMinutes,
     generatedAt,
     dataBasisAt,

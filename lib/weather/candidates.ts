@@ -1,8 +1,11 @@
-export interface WeatherDispatchCandidate {
-  id: string;
+export interface WeatherDispatchPoint {
   name: string;
   lat: number;
   lon: number;
+}
+
+export interface WeatherDispatchCandidate extends WeatherDispatchPoint {
+  id: string;
   shootingSuitability: number;
   caution?: string;
 }
@@ -12,7 +15,7 @@ export const SANGAM_BASE = {
   // 실제 회사 좌표에 맞게 조정 가능
   lat: 37.5796,
   lon: 126.8908,
-} as const;
+} as const satisfies WeatherDispatchPoint;
 
 export const WEATHER_DISPATCH_CANDIDATES: WeatherDispatchCandidate[] = [
   {
@@ -108,6 +111,6 @@ export const WEATHER_DISPATCH_CANDIDATES: WeatherDispatchCandidate[] = [
     lat: 37.725,
     lon: 126.7586,
     shootingSuitability: 0.82,
-    caution: "상암 기준 60분권 끝단이라 실제 교통 상황을 별도로 확인해야 합니다.",
+    caution: "현재 위치에 따라 이동권 끝단일 수 있어 실제 교통 상황을 별도로 확인해야 합니다.",
   },
 ];

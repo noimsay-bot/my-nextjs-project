@@ -60,8 +60,10 @@
 .mapViewport {
   position: relative;
   display: grid;
+  justify-self: center;
+  width: min(100%, 720px);
+  aspect-ratio: 1 / 1;
   min-height: 0;
-  height: clamp(220px, 38vh, 360px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -341,9 +343,8 @@
     flex: 1 1 96px;
   }
 
-  .mapViewport,
-  .mapImage {
-    height: clamp(190px, 34vh, 280px);
+  .mapViewport {
+    width: 100%;
   }
 
   .radarMapControls,

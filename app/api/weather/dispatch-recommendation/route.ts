@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getJsonResponseByteLength, logRouteUsageDebug } from "@/lib/server/usage-debug";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
-import { SANGAM_BASE, WEATHER_DISPATCH_CANDIDATES, type WeatherDispatchCandidate } from "@/lib/weather/candidates";
+import {
+  SANGAM_BASE,
+  WEATHER_DISPATCH_CANDIDATES,
+  type WeatherDispatchCandidate,
+  type WeatherDispatchPoint,
+} from "@/lib/weather/candidates";
 import {
   WEATHER_FORECAST_OFFSETS,
   generateRainDispatchRecommendationsFromForecasts,
@@ -76,17 +81,36 @@ function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknow
 function createUnavailablePayload(
   rangeMinutes: WeatherDispatchRangeMinutes,
   message: string,
+  base: WeatherDispatchPoint = SANGAM_BASE,
 ): RainDispatchRecommendationResponse {
   const generatedAt = new Date().toISOString();
   return {
     status: "unavailable",
     message,
-    base: SANGAM_BASE,
+    base,
     rangeMinutes,
     generatedAt,
     dataBasisAt: null,
     note: DATA_GO_KR_ESTIMATION_NOTE,
     items: [],
+  };
+}
+
+function parseCoordinate(value: string | null, min: number, max: number) {
+  if (!value) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= min && numeric <= max ? numeric : null;
+}
+
+function getRequestDispatchBase(url: URL): WeatherDispatchPoint | null {
+  const lat = parseCoordinate(url.searchParams.get("lat"), -90, 90);
+  const lon = parseCoordinate(url.searchParams.get("lon"), -180, 180);
+  if (lat === null || lon === null) return null;
+
+  return {
+    name: "현재 위치",
+    lat,
+    lon,
   };
 }
 
@@ -512,33 +536,40 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const rangeMinutes = parseWeatherDispatchRange(url.searchParams.get("range"));
+  const requestBase = getRequestDispatchBase(url);
+  const dispatchBase = requestBase ?? SANGAM_BASE;
+  const useSharedCache = requestBase === null;
   const now = new Date();
   const baseTimeKst = getDispatchBaseTimeKst(now);
-  const cached = await readFreshDispatchCache(baseTimeKst, rangeMinutes);
-  if (cached) {
-    return jsonWithUsageDebug(request, startedAt, cached.payload, { headers: CACHE_HEADERS });
-  }
+  if (useSharedCache) {
+    const cached = await readFreshDispatchCache(baseTimeKst, rangeMinutes);
+    if (cached) {
+      return jsonWithUsageDebug(request, startedAt, cached.payload, { headers: CACHE_HEADERS });
+    }
 
-  const refreshing = await readRefreshingDispatchCache(baseTimeKst, rangeMinutes);
-  if (refreshing) {
-    const payload = createUnavailablePayload(rangeMinutes, "강수 추천 캐시를 갱신하는 중입니다.");
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+    const refreshing = await readRefreshingDispatchCache(baseTimeKst, rangeMinutes);
+    if (refreshing) {
+      const payload = createUnavailablePayload(rangeMinutes, "강수 추천 캐시를 갱신하는 중입니다.", dispatchBase);
+      return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+    }
   }
 
   const serviceKey = process.env.DATA_GO_KR_SERVICE_KEY?.trim();
 
   if (!serviceKey) {
-    const payload = createUnavailablePayload(rangeMinutes, "공공데이터 초단기예보 서버 설정이 필요합니다.");
+    const payload = createUnavailablePayload(rangeMinutes, "공공데이터 초단기예보 서버 설정이 필요합니다.", dispatchBase);
     return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
   }
 
   try {
-    await writeDispatchCache({
-      baseTimeKst,
-      rangeMinutes,
-      payload: createUnavailablePayload(rangeMinutes, "강수 추천 캐시를 갱신하는 중입니다."),
-      errorMessage: REFRESHING_CACHE_MESSAGE,
-    });
+    if (useSharedCache) {
+      await writeDispatchCache({
+        baseTimeKst,
+        rangeMinutes,
+        payload: createUnavailablePayload(rangeMinutes, "강수 추천 캐시를 갱신하는 중입니다.", dispatchBase),
+        errorMessage: REFRESHING_CACHE_MESSAGE,
+      });
+    }
     const { forecastsByCandidateId, dataBasisAt, errorMessage } = await buildForecastMap(normalizeServiceKey(serviceKey), now);
     if (forecastsByCandidateId.size === 0) {
       const payload: RainDispatchRecommendationResponse = {
@@ -546,19 +577,21 @@ export async function GET(request: Request) {
         message: errorMessage
           ? `현재 강수 출동 추천이 없습니다. (${errorMessage})`
           : "현재 강수 출동 추천이 없습니다.",
-        base: SANGAM_BASE,
+        base: dispatchBase,
         rangeMinutes,
         generatedAt: now.toISOString(),
         dataBasisAt: null,
         note: DATA_GO_KR_ESTIMATION_NOTE,
         items: [],
       };
-      await writeDispatchCache({
-        baseTimeKst,
-        rangeMinutes,
-        payload,
-        errorMessage: payload.message,
-      });
+      if (useSharedCache) {
+        await writeDispatchCache({
+          baseTimeKst,
+          rangeMinutes,
+          payload,
+          errorMessage: payload.message,
+        });
+      }
       return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
     }
 
@@ -568,21 +601,26 @@ export async function GET(request: Request) {
       note: DATA_GO_KR_ESTIMATION_NOTE,
       status: "available",
       message: null,
+      base: dispatchBase,
     });
-    await writeDispatchCache({
-      baseTimeKst,
-      rangeMinutes,
-      payload,
-    });
+    if (useSharedCache) {
+      await writeDispatchCache({
+        baseTimeKst,
+        rangeMinutes,
+        payload,
+      });
+    }
     return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
   } catch {
-    const payload = createUnavailablePayload(rangeMinutes, "공공데이터 초단기예보를 처리하지 못했습니다.");
-    await writeDispatchCache({
-      baseTimeKst,
-      rangeMinutes,
-      payload,
-      errorMessage: payload.message,
-    });
+    const payload = createUnavailablePayload(rangeMinutes, "공공데이터 초단기예보를 처리하지 못했습니다.", dispatchBase);
+    if (useSharedCache) {
+      await writeDispatchCache({
+        baseTimeKst,
+        rangeMinutes,
+        payload,
+        errorMessage: payload.message,
+      });
+    }
     return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
   }
 }

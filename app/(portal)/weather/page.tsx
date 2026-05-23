@@ -4,7 +4,12 @@ import {
   type WeatherDispatchRangeMinutes,
 } from "@/lib/weather/recommendation";
 
-const INITIAL_RANGES: WeatherDispatchRangeMinutes[] = [30, 45, 60];
+const INITIAL_RANGES: WeatherDispatchRangeMinutes[] = [10, 20, 30];
+const CURRENT_LOCATION_PENDING_BASE = {
+  name: "현재 위치 확인 전",
+  lat: 37.5796,
+  lon: 126.8908,
+} as const;
 
 export const dynamic = "force-static";
 export const revalidate = 300;
@@ -18,7 +23,8 @@ export default function WeatherPage() {
         generatedAt,
         dataBasisAt: null,
         status: "unavailable",
-        message: "현재 강수 출동 추천이 없습니다. 필요하면 추천 새로고침을 눌러 주세요.",
+        message: "브라우저 위치 권한을 허용하면 현재 위치 기준 추천을 계산합니다.",
+        base: CURRENT_LOCATION_PENDING_BASE,
       }),
     ]),
   ) as InitialWeatherRecommendations;

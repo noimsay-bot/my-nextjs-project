@@ -5,18 +5,15 @@ import type {
   RainDispatchRecommendationResponse,
   WeatherDispatchRangeMinutes,
 } from "@/lib/weather/recommendation";
-import { createClient, hasSupabaseEnv } from "@/lib/supabase/client";
 import type { InitialWeatherRecommendations } from "@/components/weather/weather-dashboard";
 import styles from "@/components/weather/weather.module.css";
 
-const RANGE_OPTIONS: WeatherDispatchRangeMinutes[] = [30, 45, 60];
+const RANGE_OPTIONS: WeatherDispatchRangeMinutes[] = [10, 20, 30];
 const CLIENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
-type DispatchCacheRow = {
-  payload: unknown;
-  fetched_at: string;
-  expires_at: string;
-  error_message: string | null;
+type CurrentLocation = {
+  lat: number;
+  lon: number;
 };
 
 function formatDateTime(value: string) {
@@ -38,8 +35,31 @@ function isRecommendationResponse(value: unknown): value is RainDispatchRecommen
   );
 }
 
-function isUsableRecommendationResponse(value: unknown): value is RainDispatchRecommendationResponse {
-  return isRecommendationResponse(value) && value.status !== "unavailable" && value.items.length > 0;
+function roundCoordinate(value: number) {
+  return Number(value.toFixed(5));
+}
+
+function getRecommendationCacheKey(range: WeatherDispatchRangeMinutes, location: CurrentLocation) {
+  return `${range}:${location.lat.toFixed(5)}:${location.lon.toFixed(5)}`;
+}
+
+function getRecommendationUrl(range: WeatherDispatchRangeMinutes, location: CurrentLocation) {
+  const params = new URLSearchParams({
+    range: String(range),
+    lat: location.lat.toFixed(5),
+    lon: location.lon.toFixed(5),
+  });
+  return `/api/weather/dispatch-recommendation?${params.toString()}`;
+}
+
+function getLocationErrorMessage(error: GeolocationPositionError) {
+  if (error.code === error.PERMISSION_DENIED) {
+    return "브라우저 위치 권한을 허용하면 현재 위치 기준 추천을 계산합니다.";
+  }
+  if (error.code === error.TIMEOUT) {
+    return "현재 위치 확인 시간이 초과됐습니다. 다시 시도해 주세요.";
+  }
+  return "현재 위치를 확인하지 못했습니다. 브라우저 위치 설정을 확인해 주세요.";
 }
 
 export function RainDispatchRecommendation({
@@ -47,15 +67,16 @@ export function RainDispatchRecommendation({
 }: {
   initialRecommendations: InitialWeatherRecommendations;
 }) {
-  const [selectedRange, setSelectedRange] = useState<WeatherDispatchRangeMinutes>(30);
+  const [selectedRange, setSelectedRange] = useState<WeatherDispatchRangeMinutes>(10);
   const [recommendationsByRange, setRecommendationsByRange] =
     useState<InitialWeatherRecommendations>(initialRecommendations);
   const [loadingRange, setLoadingRange] = useState<WeatherDispatchRangeMinutes | null>(null);
   const [message, setMessage] = useState("");
+  const [currentLocation, setCurrentLocation] = useState<CurrentLocation | null>(null);
+  const [locationStatus, setLocationStatus] =
+    useState<"idle" | "checking" | "ready" | "blocked" | "unsupported">("idle");
   const cacheRef = useRef(
-    new Map<WeatherDispatchRangeMinutes, { data: RainDispatchRecommendationResponse; cachedAt: number }>(
-      RANGE_OPTIONS.map((range) => [range, { data: initialRecommendations[range], cachedAt: 0 }]),
-    ),
+    new Map<string, { data: RainDispatchRecommendationResponse; cachedAt: number }>(),
   );
 
   const currentRecommendations = recommendationsByRange[selectedRange];
@@ -70,10 +91,12 @@ export function RainDispatchRecommendation({
 
   const refreshRecommendationsForRange = useCallback(async (
     range: WeatherDispatchRangeMinutes,
+    location: CurrentLocation,
     force = false,
     announce = true,
   ) => {
-    const cached = cacheRef.current.get(range);
+    const cacheKey = getRecommendationCacheKey(range, location);
+    const cached = cacheRef.current.get(cacheKey);
     if (!force && cached && Date.now() - cached.cachedAt < CLIENT_CACHE_TTL_MS) {
       setRecommendationsByRange((current) => ({
         ...current,
@@ -87,7 +110,7 @@ export function RainDispatchRecommendation({
     if (announce) setMessage("");
 
     try {
-      const response = await fetch(`/api/weather/dispatch-recommendation?range=${range}`, {
+      const response = await fetch(getRecommendationUrl(range, location), {
         headers: {
           Accept: "application/json",
         },
@@ -105,7 +128,7 @@ export function RainDispatchRecommendation({
         return;
       }
 
-      cacheRef.current.set(range, { data, cachedAt: Date.now() });
+      cacheRef.current.set(cacheKey, { data, cachedAt: Date.now() });
       setRecommendationsByRange((current) => ({
         ...current,
         [range]: data,
@@ -120,71 +143,51 @@ export function RainDispatchRecommendation({
     }
   }, []);
 
-  const loadCachedRecommendationsForRange = useCallback(async (
+  const requestCurrentLocation = useCallback((
     range: WeatherDispatchRangeMinutes,
-    announce = false,
-    autoRefreshOnMiss = false,
+    announce = true,
   ) => {
-    const cached = cacheRef.current.get(range);
-    if (cached && Date.now() - cached.cachedAt < CLIENT_CACHE_TTL_MS) {
-      setRecommendationsByRange((current) => ({
-        ...current,
-        [range]: cached.data,
-      }));
-      if (announce) setMessage("최근 추천 결과를 다시 사용했습니다.");
+    if (!("geolocation" in navigator)) {
+      setLocationStatus("unsupported");
+      if (announce) setMessage("이 브라우저에서는 현재 위치를 확인할 수 없습니다.");
       return;
     }
 
-    if (!hasSupabaseEnv()) {
-      if (autoRefreshOnMiss) {
-        await refreshRecommendationsForRange(range, true, announce);
-        return;
-      }
-      if (announce) setMessage("캐시된 강수 추천을 확인하지 못했습니다. 필요하면 새로고침을 눌러 주세요.");
-      return;
-    }
-
-    try {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("weather_dispatch_cache")
-        .select("payload, fetched_at, expires_at, error_message")
-        .eq("range_minutes", range)
-        .gt("expires_at", new Date().toISOString())
-        .order("fetched_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<DispatchCacheRow>();
-
-      if (error || !data || !isUsableRecommendationResponse(data.payload)) {
-        if (autoRefreshOnMiss) {
-          await refreshRecommendationsForRange(range, true, announce);
-          return;
-        }
-        if (announce) setMessage("캐시된 강수 추천이 없습니다. 필요하면 새로고침을 눌러 주세요.");
-        return;
-      }
-
-      cacheRef.current.set(range, { data: data.payload, cachedAt: new Date(data.fetched_at).getTime() });
-      setRecommendationsByRange((current) => ({
-        ...current,
-        [range]: data.payload,
-      }));
-      if (announce) setMessage("Supabase 캐시에서 강수 출동 추천을 불러왔습니다.");
-    } catch {
-      if (autoRefreshOnMiss) {
-        await refreshRecommendationsForRange(range, true, announce);
-        return;
-      }
-      if (announce) setMessage("캐시된 강수 추천을 확인하지 못했습니다. 필요하면 새로고침을 눌러 주세요.");
-    }
+    setLocationStatus("checking");
+    if (announce) setMessage("현재 위치를 확인하는 중입니다.");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLocation = {
+          lat: roundCoordinate(position.coords.latitude),
+          lon: roundCoordinate(position.coords.longitude),
+        };
+        setCurrentLocation(nextLocation);
+        setLocationStatus("ready");
+        if (announce) setMessage("현재 위치 기준으로 강수 출동 추천을 계산합니다.");
+        void refreshRecommendationsForRange(range, nextLocation, true, announce);
+      },
+      (error) => {
+        setLocationStatus(error.code === error.PERMISSION_DENIED ? "blocked" : "idle");
+        if (announce) setMessage(getLocationErrorMessage(error));
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: CLIENT_CACHE_TTL_MS,
+        timeout: 10000,
+      },
+    );
   }, [refreshRecommendationsForRange]);
 
   useEffect(() => {
-    void loadCachedRecommendationsForRange(30, false, false);
-  }, [loadCachedRecommendationsForRange]);
+    requestCurrentLocation(10, false);
+  }, [requestCurrentLocation]);
 
   async function refreshRecommendations(force = false) {
-    await refreshRecommendationsForRange(selectedRange, force);
+    if (currentLocation) {
+      await refreshRecommendationsForRange(selectedRange, currentLocation, force);
+      return;
+    }
+    requestCurrentLocation(selectedRange);
   }
 
   return (
@@ -195,16 +198,22 @@ export function RainDispatchRecommendation({
             <div className="chip">Dispatch</div>
             <h2>강수 출동 추천</h2>
             <p className={styles.sectionDescription}>
-              상암동 기준 지금 출발했을 때, 도착 직후가 아니라 도착 후 촬영 가능한 시간대에 강하고 오래 비가 이어질 가능성이 높은 지역을 추천합니다.
+              현재 위치에서 지금 출발했을 때, 도착 직후가 아니라 도착 후 촬영 가능한 시간대에 강하고 오래 비가 이어질 가능성이 높은 지역을 추천합니다.
             </p>
           </div>
           <button
             type="button"
             className="btn primary"
-            disabled={loadingRange === selectedRange}
+            disabled={loadingRange === selectedRange || locationStatus === "checking"}
             onClick={() => void refreshRecommendations(true)}
           >
-            {loadingRange === selectedRange ? "계산 중" : "추천 새로고침"}
+            {locationStatus === "checking"
+              ? "위치 확인 중"
+              : loadingRange === selectedRange
+                ? "계산 중"
+                : currentLocation
+                  ? "추천 새로고침"
+                  : "현재 위치 확인"}
           </button>
         </div>
 
@@ -214,11 +223,16 @@ export function RainDispatchRecommendation({
               <button
                 key={range}
                 type="button"
+                disabled={locationStatus === "checking"}
                 className={`btn ${selectedRange === range ? "white" : ""} ${styles.rangeButton}`.trim()}
                 onClick={() => {
                   setSelectedRange(range);
                   setMessage("");
-                  void loadCachedRecommendationsForRange(range, true, false);
+                  if (currentLocation) {
+                    void refreshRecommendationsForRange(range, currentLocation, false, true);
+                  } else {
+                    requestCurrentLocation(range);
+                  }
                 }}
               >
                 {range}분 이내
@@ -232,7 +246,7 @@ export function RainDispatchRecommendation({
         </div>
 
         {message ? (
-          <div className={message.includes("못했") || message.includes("오류") ? "status warn" : "status note"}>
+          <div className={message.includes("못했") || message.includes("오류") || message.includes("권한") ? "status warn" : "status note"}>
             {message}
           </div>
         ) : null}
