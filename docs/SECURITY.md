@@ -23,7 +23,7 @@
 - `npm run harness:all`: 문서, generated, 경계, 품질 점검을 묶어 실행한다.
 
 ## 날씨 캐시
-- `weather_radar_frames`, `weather_dispatch_cache`는 관리자 승인 profile만 select 가능하도록 RLS 정책을 둔다.
+- `weather_radar_frame_sets`, `weather_radar_frames`, `weather_dispatch_cache`는 관리자 승인 profile만 select 가능하도록 RLS 정책을 둔다.
 - 클라이언트는 캐시 테이블 select만 사용하고, 외부 API 키와 캐시 upsert는 서버 route/service role 경로에만 둔다.
 
 ## 실패로 보는 항목

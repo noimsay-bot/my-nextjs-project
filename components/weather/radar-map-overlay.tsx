@@ -26,6 +26,9 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
   const leafletRef = useRef<LeafletModule | null>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const overlayRef = useRef<import("leaflet").ImageOverlay | null>(null);
+  const hasFittedInitialBoundsRef = useRef(false);
+  const hasUserAdjustedViewRef = useRef(false);
+  const isProgrammaticViewChangeRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
 
   const overlayBounds = useMemo(() => getRadarOverlayBounds(frame), [frame]);
@@ -56,6 +59,13 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
         maxZoom: WEATHER_MAP_TILE.maxZoom,
       }).addTo(map);
 
+      const markUserAdjustedView = () => {
+        if (!isProgrammaticViewChangeRef.current) {
+          hasUserAdjustedViewRef.current = true;
+        }
+      };
+      map.on("zoomstart dragstart", markUserAdjustedView);
+
       initializedMap = map;
       mapRef.current = map;
       setMapReady(true);
@@ -75,6 +85,9 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
       }
       overlayRef.current = null;
       leafletRef.current = null;
+      hasFittedInitialBoundsRef.current = false;
+      hasUserAdjustedViewRef.current = false;
+      isProgrammaticViewChangeRef.current = false;
     };
   }, []);
 
@@ -93,6 +106,7 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
       interactive: false,
       crossOrigin: false,
       alt: `레이더 1H 강수예측 ${label}`,
+      className: styles.radarOverlayImage,
     }).addTo(map);
     overlay.getElement()?.setAttribute("referrerpolicy", "no-referrer");
 
@@ -102,7 +116,14 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
 
     overlayRef.current = overlay;
     map.setMaxBounds(overlayBounds);
-    map.fitBounds(overlayBounds, { padding: [0, 0], animate: false });
+    if (!hasFittedInitialBoundsRef.current || !hasUserAdjustedViewRef.current) {
+      isProgrammaticViewChangeRef.current = true;
+      map.fitBounds(overlayBounds, { padding: [0, 0], animate: false });
+      hasFittedInitialBoundsRef.current = true;
+      window.setTimeout(() => {
+        isProgrammaticViewChangeRef.current = false;
+      }, 0);
+    }
 
     return () => {
       overlay.remove();

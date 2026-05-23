@@ -1,18 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/client";
 import { RadarMapOverlay } from "@/components/weather/radar-map-overlay";
 import styles from "@/components/weather/weather.module.css";
 
 const RADAR_OFFSETS = [0, 10, 20, 30, 40, 50, 60] as const;
-const RADAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const RADAR_CACHE_PROVIDER = "kma_apihub_radar_1h";
 
 type RadarOffset = (typeof RADAR_OFFSETS)[number];
+type RadarFrameKind = "observed" | "forecast";
+type RadarFrameStatus = "available" | "nodata" | "error";
+type RadarRouteStatus =
+  | "available"
+  | "stale_available"
+  | "refreshing"
+  | "hsr_permission_required"
+  | "unavailable";
 
 type RadarFrame = {
   offsetMinutes: RadarOffset;
+  frameKind: RadarFrameKind;
+  sourceEndpoint: string;
+  status: RadarFrameStatus;
   imageUrl: string | null;
   legendUrl: string | null;
   dateTime: string | null;
@@ -27,26 +37,60 @@ type RadarFrame = {
   layerCoverageEndProjY: number | null;
   zoomLvl: number | null;
   nodata: boolean;
+  errorMessage: string | null;
 };
 
-type RadarForecastResponse =
-  | {
-      status: "available";
-      message: null;
-      generatedAt: string;
-      frame: RadarFrame;
-    }
-  | {
-      status: "unavailable";
-      message: string;
-      detail: string | null;
-      generatedAt: string;
-      frame: RadarFrame;
-    };
+type RadarFrameSet = {
+  id: string | null;
+  provider: string;
+  baseTimeKst: string;
+  qpf: string;
+  fetchedAt: string;
+  expiresAt: string;
+  isComplete: boolean;
+  isActive: boolean;
+  missingFrames: RadarOffset[];
+  frames: RadarFrame[];
+};
+
+type RadarAttempt = {
+  baseTimeKst: string | null;
+  qpf: string | null;
+  missingFrames: RadarOffset[];
+  availableFrames: number;
+  errorMessage: string | null;
+  debug: unknown;
+};
+
+type RadarForecastResponse = {
+  status: RadarRouteStatus;
+  message: string;
+  generatedAt: string;
+  set: RadarFrameSet | null;
+  latestAttempt: RadarAttempt | null;
+};
+
+type RadarFrameSetRow = {
+  id: string;
+  provider: string;
+  base_time_kst: string;
+  qpf: string;
+  expected_frames: number;
+  available_frames: number;
+  missing_frames: number[] | null;
+  is_complete: boolean;
+  is_active: boolean;
+  fetched_at: string;
+  expires_at: string;
+  error_message: string | null;
+  debug: unknown;
+};
 
 type RadarCacheRow = {
+  provider: string;
   base_time_kst: string;
   ef_minutes: number;
+  qpf: string;
   image_url: string | null;
   legend_url: string | null;
   date_time_text: string | null;
@@ -56,16 +100,25 @@ type RadarCacheRow = {
   fetched_at: string;
   expires_at: string;
   error_message: string | null;
+  frame_kind: string | null;
+  frame_set_id: string | null;
+  source_endpoint: string | null;
+  status: string | null;
 };
 
 function getOffsetLabel(offset: RadarOffset) {
-  return offset === 0 ? "현재" : `${offset}분 후`;
+  return offset === 0 ? "현재" : `+${offset}분`;
+}
+
+function normalizeOffset(value: number | string | null | undefined): RadarOffset {
+  const numeric = Number(value);
+  return RADAR_OFFSETS.includes(numeric as RadarOffset) ? (numeric as RadarOffset) : 0;
 }
 
 function getMissingOffsetLabels(frames: Partial<Record<RadarOffset, RadarFrame>>) {
   return RADAR_OFFSETS.filter((offset) => {
     const frame = frames[offset];
-    return !frame?.imageUrl || frame.nodata;
+    return !frame?.imageUrl || frame.nodata || frame.status !== "available";
   }).map(getOffsetLabel);
 }
 
@@ -91,11 +144,18 @@ function readCoverageNumber(value: unknown, key: string) {
 }
 
 function cacheRowToFrame(row: RadarCacheRow): RadarFrame {
-  const offset = RADAR_OFFSETS.includes(row.ef_minutes as RadarOffset)
-    ? (row.ef_minutes as RadarOffset)
-    : 0;
+  const offset = normalizeOffset(row.ef_minutes);
+  const status: RadarFrameStatus = row.status === "available"
+    ? "available"
+    : row.status === "error"
+      ? "error"
+      : "nodata";
+  const nodata = row.nodata || !row.image_url || status !== "available";
   return {
     offsetMinutes: offset,
+    frameKind: row.frame_kind === "observed" ? "observed" : "forecast",
+    sourceEndpoint: row.source_endpoint ?? "",
+    status: nodata ? "nodata" : status,
     imageUrl: row.image_url,
     legendUrl: row.legend_url,
     dateTime: row.date_time_text ?? row.base_time_kst,
@@ -109,152 +169,181 @@ function cacheRowToFrame(row: RadarCacheRow): RadarFrame {
     layerCoverageEndProjX: readCoverageNumber(row.coverage, "layerCoverageEndProjX"),
     layerCoverageEndProjY: readCoverageNumber(row.coverage, "layerCoverageEndProjY"),
     zoomLvl: row.zoom_lvl ? Number(row.zoom_lvl) : null,
-    nodata: row.nodata,
+    nodata,
+    errorMessage: row.error_message,
   };
+}
+
+function frameSetFromRows(setRow: RadarFrameSetRow, frameRows: RadarCacheRow[]): RadarFrameSet {
+  return {
+    id: setRow.id,
+    provider: setRow.provider,
+    baseTimeKst: setRow.base_time_kst,
+    qpf: setRow.qpf,
+    fetchedAt: setRow.fetched_at,
+    expiresAt: setRow.expires_at,
+    isComplete: setRow.is_complete,
+    isActive: setRow.is_active,
+    missingFrames: (setRow.missing_frames ?? []).map(normalizeOffset),
+    frames: frameRows.map(cacheRowToFrame).sort((left, right) => left.offsetMinutes - right.offsetMinutes),
+  };
+}
+
+function framesToRecord(frameSet: RadarFrameSet) {
+  const nextFrames: Partial<Record<RadarOffset, RadarFrame>> = {};
+  for (const frame of frameSet.frames) {
+    if (frame.imageUrl && !frame.nodata && frame.status === "available") {
+      nextFrames[frame.offsetMinutes] = frame;
+    }
+  }
+  return nextFrames;
+}
+
+function hasPlayableCompleteSet(frameSet: RadarFrameSet | null) {
+  if (!frameSet?.isComplete) return false;
+  return isCompleteRadarFrameSet(framesToRecord(frameSet));
+}
+
+function formatKstTimestamp(value: string | null) {
+  if (!value) return "";
+  if (/^\d{12}$/.test(value)) {
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)} ${value.slice(8, 10)}:${value.slice(10, 12)} KST`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR");
+}
+
+function missingLabelsFromAttempt(attempt: RadarAttempt | null) {
+  if (!attempt?.missingFrames.length) return "";
+  return attempt.missingFrames.map(getOffsetLabel).join(", ");
 }
 
 export function RadarForecastPanel() {
   const [selectedOffset, setSelectedOffset] = useState<RadarOffset>(0);
   const [frames, setFrames] = useState<Partial<Record<RadarOffset, RadarFrame>>>({});
-  const [status, setStatus] = useState<"idle" | "loading" | "available" | "unavailable" | "error">("idle");
+  const [activeSet, setActiveSet] = useState<RadarFrameSet | null>(null);
+  const [latestAttempt, setLatestAttempt] = useState<RadarAttempt | null>(null);
+  const [status, setStatus] = useState<"idle" | "loading" | "available" | "unavailable" | "warning" | "error">("idle");
   const [message, setMessage] = useState("기상청 API 활용신청 승인 후 레이더 영상이 표시됩니다.");
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [overlayOpacity, setOverlayOpacity] = useState(0.68);
-  const cacheRef = useRef<Partial<Record<RadarOffset, { frame: RadarFrame; cachedAt: number }>>>({});
+  const [overlayOpacity, setOverlayOpacity] = useState(0.5);
+
+  const applyCompleteFrameSet = useCallback((frameSet: RadarFrameSet) => {
+    if (!hasPlayableCompleteSet(frameSet)) return false;
+    const nextFrames = framesToRecord(frameSet);
+    setFrames(nextFrames);
+    setActiveSet(frameSet);
+    setSelectedOffset((current) => (nextFrames[current] ? current : 0));
+    return true;
+  }, []);
 
   const loadCachedFrames = useCallback(async () => {
     if (!hasSupabaseEnv()) {
       setStatus("unavailable");
-      setMessage("레이더 캐시를 확인하지 못했습니다. 자료 새로고침을 눌러 주세요.");
+      setMessage("레이더 세트 캐시를 확인하지 못했습니다. 자료 새로고침을 눌러 주세요.");
       return false;
     }
 
     try {
       const supabase = createClient();
-      const { data, error } = await supabase
-        .from("weather_radar_frames")
+      const { data: setRow, error: setError } = await supabase
+        .from("weather_radar_frame_sets")
         .select(
-          "base_time_kst, ef_minutes, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message",
+          "id, provider, base_time_kst, qpf, expected_frames, available_frames, missing_frames, is_complete, is_active, fetched_at, expires_at, error_message, debug",
         )
         .eq("provider", RADAR_CACHE_PROVIDER)
-        .gt("expires_at", new Date().toISOString())
-        .order("fetched_at", { ascending: false });
+        .eq("is_active", true)
+        .eq("is_complete", true)
+        .order("fetched_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<RadarFrameSetRow>();
 
-      if (error || !data) {
+      if (setError || !setRow) {
         setStatus("unavailable");
-        setMessage("레이더 캐시를 확인하지 못했습니다. 자료 새로고침을 눌러 주세요.");
+        setMessage("active 레이더 완성 세트가 없습니다. 자료 새로고침을 눌러 주세요.");
         return false;
       }
 
-      const nextFrames: Partial<Record<RadarOffset, RadarFrame>> = {};
-      for (const row of data as RadarCacheRow[]) {
-        const frame = cacheRowToFrame(row);
-        if (frame.imageUrl && !frame.nodata && !nextFrames[frame.offsetMinutes]) {
-          nextFrames[frame.offsetMinutes] = frame;
-          cacheRef.current[frame.offsetMinutes] = { frame, cachedAt: new Date(row.fetched_at).getTime() };
-        }
+      const { data: frameRows, error: frameError } = await supabase
+        .from("weather_radar_frames")
+        .select(
+          "provider, base_time_kst, ef_minutes, qpf, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message, frame_kind, frame_set_id, source_endpoint, status",
+        )
+        .eq("provider", RADAR_CACHE_PROVIDER)
+        .eq("frame_set_id", setRow.id)
+        .order("ef_minutes", { ascending: true });
+
+      if (frameError || !frameRows) {
+        setStatus("unavailable");
+        setMessage("active 레이더 세트의 프레임을 확인하지 못했습니다. 자료 새로고침을 눌러 주세요.");
+        return false;
       }
 
-      setFrames(nextFrames);
-      if (isCompleteRadarFrameSet(nextFrames)) {
-        setStatus("available");
-        setMessage("Supabase 캐시에서 레이더 예측 7개 프레임을 불러왔습니다.");
-        return true;
+      const frameSet = frameSetFromRows(setRow, frameRows as RadarCacheRow[]);
+      if (!applyCompleteFrameSet(frameSet)) {
+        setStatus("unavailable");
+        setMessage("active 레이더 세트가 7개 프레임 완성 조건을 만족하지 않습니다. 자료 새로고침을 눌러 주세요.");
+        return false;
       }
 
-      const missingLabels = getMissingOffsetLabels(nextFrames);
-      setStatus("unavailable");
-      setMessage(
-        Object.keys(nextFrames).length > 0
-          ? `레이더 캐시에 일부 시간대만 있습니다. 누락: ${missingLabels.join(", ")}.`
-          : "레이더 캐시가 비어 있습니다. 자료 새로고침을 눌러 주세요.",
-      );
-      return false;
+      setStatus("available");
+      setMessage("Supabase 캐시에서 active 레이더 완성 세트를 불러왔습니다.");
+      setGeneratedAt(frameSet.fetchedAt);
+      return true;
     } catch {
       setStatus("unavailable");
-      setMessage("레이더 캐시를 확인하지 못했습니다. 자료 새로고침을 눌러 주세요.");
+      setMessage("레이더 세트 캐시를 확인하지 못했습니다. 자료 새로고침을 눌러 주세요.");
       return false;
     }
-  }, []);
+  }, [applyCompleteFrameSet]);
 
-  async function refreshFrame(offset: RadarOffset, force = false) {
-    const cached = cacheRef.current[offset];
-    if (!force && cached && Date.now() - cached.cachedAt < RADAR_CACHE_TTL_MS) {
-      setFrames((current) => ({ ...current, [offset]: cached.frame }));
-      return cached.frame;
-    }
+  async function refreshAllFrames() {
+    setStatus("loading");
+    setMessage("레이더 세트를 확인하는 중입니다.");
 
     try {
-      const response = await fetch(`/api/weather/radar-forecast?offset=${offset}`, {
+      const response = await fetch("/api/weather/radar-forecast?refresh=1", {
         headers: {
           Accept: "application/json",
         },
       });
       const data = (await response.json()) as RadarForecastResponse | { message?: string };
 
-      if (!response.ok) {
+      if (!response.ok || !("status" in data)) {
         setStatus("error");
-        setMessage(data.message ?? "레이더 예측 정보를 불러오지 못했습니다.");
-        return null;
-      }
-
-      if ("status" in data && data.status === "available") {
-        const frame = data.frame;
-        cacheRef.current[offset] = { frame, cachedAt: Date.now() };
-        setFrames((current) => ({ ...current, [offset]: frame }));
-        setStatus("available");
-        setMessage("레이더 예측 영상을 불러왔습니다.");
-        setGeneratedAt(data.generatedAt);
-        return frame;
-      }
-
-      if ("status" in data && data.status === "unavailable") {
-        setStatus("unavailable");
-        setMessage(data.detail ?? data.message);
-        setGeneratedAt(data.generatedAt);
-        setFrames((current) => ({ ...current, [offset]: data.frame }));
-        return data.frame;
-      }
-
-      setStatus("error");
-      setMessage("레이더 예측 응답 형식을 확인하지 못했습니다.");
-      return null;
-    } catch {
-      setStatus("error");
-      setMessage("레이더 예측 정보를 불러오는 중 오류가 발생했습니다.");
-      return null;
-    }
-  }
-
-  async function refreshAllFrames() {
-    setStatus("loading");
-    setMessage("");
-    const refreshedFrames = await Promise.all(RADAR_OFFSETS.map((offset) => refreshFrame(offset, true)));
-    const hasAvailableFrame = refreshedFrames.some((frame) => frame?.imageUrl && !frame.nodata);
-    if (hasAvailableFrame) {
-      const nextFrames: Partial<Record<RadarOffset, RadarFrame>> = {};
-      for (const frame of refreshedFrames) {
-        if (frame) nextFrames[frame.offsetMinutes] = frame;
-      }
-      setFrames(nextFrames);
-      for (const offset of RADAR_OFFSETS) {
-        const frame = nextFrames[offset];
-        if (frame?.imageUrl && !frame.nodata) cacheRef.current[offset] = { frame, cachedAt: Date.now() };
-      }
-      if (isCompleteRadarFrameSet(nextFrames)) {
-        setStatus("available");
-        setMessage("레이더 예측 7개 프레임을 새로 불러왔습니다.");
+        setMessage(data.message ?? "레이더 세트 갱신 응답을 확인하지 못했습니다.");
         return;
       }
 
-      setStatus("unavailable");
-      setMessage(`KMA APIHub가 일부 시간대만 반환했습니다. 누락: ${getMissingOffsetLabels(nextFrames).join(", ")}.`);
-      return;
-    }
+      setGeneratedAt(data.generatedAt);
+      setLatestAttempt(data.latestAttempt);
 
-    setStatus("unavailable");
-    setMessage("기상청 레이더 API 자료를 불러올 수 없습니다. 서버 환경변수와 APIHub 활용신청 상태를 확인해 주세요.");
+      if (data.set && applyCompleteFrameSet(data.set)) {
+        setStatus(data.status === "available" ? "available" : "warning");
+        setMessage(data.message);
+        return;
+      }
+
+      if (isCompleteRadarFrameSet(frames)) {
+        setStatus("warning");
+        setMessage(data.message || "최신 레이더 세트가 아직 완성되지 않아 이전 완성 자료를 표시합니다.");
+        return;
+      }
+
+      setStatus(data.status === "hsr_permission_required" ? "warning" : "unavailable");
+      setMessage(data.message || "현재 사용할 수 있는 완성 레이더 세트가 없습니다.");
+    } catch {
+      if (isCompleteRadarFrameSet(frames)) {
+        setStatus("warning");
+        setMessage("레이더 세트 갱신 중 오류가 발생해 이전 완성 자료를 표시합니다.");
+        return;
+      }
+
+      setStatus("error");
+      setMessage("레이더 세트 갱신 중 오류가 발생했습니다.");
+    }
   }
 
   useEffect(() => {
@@ -286,19 +375,20 @@ export function RadarForecastPanel() {
     };
   }, [hasCompleteRadarFrames, isPlaying]);
 
-  const selectedFrame = frames[selectedOffset];
+  const selectedFrame = hasCompleteRadarFrames ? frames[selectedOffset] : null;
   const selectedOffsetLabel = getOffsetLabel(selectedOffset);
   const handleRadarImageError = useCallback(() => {
-    setStatus("unavailable");
-    setMessage("레이더 영상을 불러오지 못했습니다. 기상청 APIHub 승인 또는 응답 상태를 확인해 주세요.");
+    setStatus("warning");
+    setMessage("active 레이더 세트의 이미지 로드에 실패했습니다. APIHub 이미지 접근 상태를 확인해 주세요.");
   }, []);
-  const statusClassName = status === "error" ? "status warn" : status === "available" ? "status ok" : "status note";
-  const formattedGeneratedAt = useMemo(() => {
-    if (!generatedAt) return "";
-    const date = new Date(generatedAt);
-    if (Number.isNaN(date.getTime())) return generatedAt;
-    return date.toLocaleString("ko-KR");
-  }, [generatedAt]);
+  const statusClassName = status === "error" || status === "warning"
+    ? "status warn"
+    : status === "available"
+      ? "status ok"
+      : "status note";
+  const formattedGeneratedAt = useMemo(() => formatKstTimestamp(generatedAt), [generatedAt]);
+  const activeBaseTimeText = useMemo(() => formatKstTimestamp(activeSet?.baseTimeKst ?? null), [activeSet]);
+  const latestMissingLabels = missingLabelsFromAttempt(latestAttempt);
 
   return (
     <article className="panel">
@@ -308,7 +398,7 @@ export function RadarForecastPanel() {
             <div className="chip">Radar</div>
             <h2>레이더 1H 강수예측</h2>
             <p className={styles.sectionDescription}>
-              기상청 레이더 기반 1시간 강수예측 레이어를 표시합니다.
+              현재는 HSR 실황, 예측은 1H예측 완성 세트를 표시합니다.
             </p>
           </div>
           <button
@@ -335,6 +425,7 @@ export function RadarForecastPanel() {
               key={offset}
               type="button"
               className={`btn ${selectedOffset === offset ? "white" : ""} ${styles.timeButton}`.trim()}
+              disabled={!hasCompleteRadarFrames}
               onClick={() => {
                 setIsPlaying(false);
                 setSelectedOffset(offset);
@@ -351,7 +442,7 @@ export function RadarForecastPanel() {
             <span>투명도</span>
             <input
               type="range"
-              min="35"
+              min="15"
               max="90"
               step="5"
               value={Math.round(overlayOpacity * 100)}
@@ -373,7 +464,7 @@ export function RadarForecastPanel() {
             <div className={styles.radarEmptyState}>
               <strong>레이더 영상 없음</strong>
               <p className={styles.cardText}>
-                현재 선택한 시간대의 레이더 예측 영상이 없습니다. 자료 새로고침 후에도 비어 있으면 APIHub 자료 제공 상태를 확인해 주세요.
+                active complete 레이더 세트가 없거나 현재 선택한 시간대의 영상이 없습니다.
               </p>
               <div className={styles.emptyMetaRow}>
                 <span>{selectedOffsetLabel}</span>
@@ -382,9 +473,21 @@ export function RadarForecastPanel() {
             </div>
           )}
           <div className={statusClassName} aria-live="polite">
-            {status === "loading" ? "레이더 예측 정보를 불러오는 중입니다." : message}
+            {status === "loading" ? "레이더 세트 정보를 불러오는 중입니다." : message}
             {formattedGeneratedAt ? ` · 확인 ${formattedGeneratedAt}` : ""}
           </div>
+          {activeSet ? (
+            <div className="status note">
+              active 기준시각 {activeBaseTimeText || activeSet.baseTimeKst} · {activeSet.qpf} · 7/7 프레임
+            </div>
+          ) : null}
+          {latestAttempt ? (
+            <div className={latestMissingLabels ? "status warn" : "status note"}>
+              최근 갱신 시도 {latestAttempt.baseTimeKst ? formatKstTimestamp(latestAttempt.baseTimeKst) : "기준시각 없음"} ·{" "}
+              {latestAttempt.availableFrames}/7 프레임
+              {latestMissingLabels ? ` · 누락 프레임: ${latestMissingLabels}` : " · 누락 프레임 없음"}
+            </div>
+          ) : null}
         </div>
       </div>
     </article>

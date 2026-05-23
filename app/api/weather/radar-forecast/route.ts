@@ -7,22 +7,39 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const RADAR_FRAME_OFFSETS = [0, 10, 20, 30, 40, 50, 60] as const;
-const RADAR_BASE_DELAY_MINUTES = [10, 20, 30] as const;
-const RADAR_QPF_MODES = ["M", "B"] as const;
+const SUPPORTED_FORECAST_EF_MINUTES = [10, 20, 30, 40, 50, 60] as const;
+const RADAR_BASE_DELAY_MINUTES = [10, 20, 30, 40] as const;
+const RADAR_QPF_MODES = ["M"] as const satisfies readonly RadarQpfMode[];
 const RADAR_CACHE_PROVIDER = "kma_apihub_radar_1h";
 const RADAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const REFRESHING_CACHE_MESSAGE = "refreshing";
 const KMA_APIHUB_ORIGIN = "https://apihub.kma.go.kr";
+const HSR_ENDPOINT = "nph-rdr_cmp1_imgp";
+const FORECAST_ENDPOINT = "nph-qpf_ana_imgp";
+const HSR_PERMISSION_MESSAGE = "현재 실황 프레임을 위해 APIHub 4.1 레이더-HSR API 활용신청이 필요합니다.";
 const CACHE_HEADERS = {
   "Cache-Control": "private, max-age=300",
   Vary: "Cookie",
 };
-const RADAR_UNAVAILABLE_MESSAGE = "기상청 API 활용신청 승인 후 레이더 영상이 표시됩니다.";
 
 type RadarFrameOffset = (typeof RADAR_FRAME_OFFSETS)[number];
-type RadarQpfMode = (typeof RADAR_QPF_MODES)[number];
+type RadarForecastOffset = (typeof SUPPORTED_FORECAST_EF_MINUTES)[number];
+type RadarQpfMode = "M" | "B";
+type RadarFrameKind = "observed" | "forecast";
+type RadarSourceEndpoint = typeof HSR_ENDPOINT | typeof FORECAST_ENDPOINT;
+type RadarFrameStatus = "available" | "nodata" | "error";
+type RadarResponseStatus =
+  | "available"
+  | "stale_available"
+  | "refreshing"
+  | "hsr_permission_required"
+  | "unavailable";
+
 type RadarForecastFrame = {
   offsetMinutes: RadarFrameOffset;
+  frameKind: RadarFrameKind;
+  sourceEndpoint: RadarSourceEndpoint;
+  status: RadarFrameStatus;
   imageUrl: string | null;
   legendUrl: string | null;
   dateTime: string | null;
@@ -37,9 +54,40 @@ type RadarForecastFrame = {
   layerCoverageEndProjY: number | null;
   zoomLvl: number | null;
   nodata: boolean;
+  errorMessage: string | null;
 };
 
-type KmaRadarForecastResponse = {
+type RadarFrameSetPayload = {
+  id: string | null;
+  provider: string;
+  baseTimeKst: string;
+  qpf: RadarQpfMode;
+  fetchedAt: string;
+  expiresAt: string;
+  isComplete: boolean;
+  isActive: boolean;
+  missingFrames: RadarFrameOffset[];
+  frames: RadarForecastFrame[];
+};
+
+type RadarAttemptPayload = {
+  baseTimeKst: string | null;
+  qpf: RadarQpfMode | null;
+  missingFrames: RadarFrameOffset[];
+  availableFrames: number;
+  errorMessage: string | null;
+  debug: Record<string, unknown>;
+};
+
+type RadarRoutePayload = {
+  status: RadarResponseStatus;
+  message: string;
+  generatedAt: string;
+  set: RadarFrameSetPayload | null;
+  latestAttempt: RadarAttemptPayload | null;
+};
+
+type KmaRadarResponse = {
   meta?: {
     errCd?: unknown;
     errMsg?: unknown;
@@ -51,7 +99,25 @@ type KmaRadarForecastResponse = {
   result?: unknown;
 };
 
+type RadarFrameSetRow = {
+  id: string;
+  provider: string;
+  base_time_kst: string;
+  qpf: string;
+  expected_frames: number;
+  available_frames: number;
+  missing_frames: number[] | null;
+  is_complete: boolean;
+  is_active: boolean;
+  fetched_at: string;
+  expires_at: string;
+  error_message: string | null;
+  debug: unknown;
+};
+
 type RadarCacheRow = {
+  id?: string;
+  provider: string;
   base_time_kst: string;
   ef_minutes: number;
   qpf: string;
@@ -64,43 +130,92 @@ type RadarCacheRow = {
   fetched_at: string;
   expires_at: string;
   error_message: string | null;
+  frame_kind?: string | null;
+  frame_set_id?: string | null;
+  source_endpoint?: string | null;
+  status?: string | null;
+  debug?: unknown;
 };
 
-function normalizeRadarOffset(value: string | null): RadarFrameOffset {
+type FetchRadarFrameInput = {
+  authKey: string;
+  baseTime: string;
+  qpf: RadarQpfMode;
+  offsetMinutes: RadarFrameOffset;
+  frameKind: RadarFrameKind;
+  sourceEndpoint: RadarSourceEndpoint;
+};
+
+type FetchRadarFrameResult = {
+  frame: RadarForecastFrame;
+  requestStatus: "available" | "nodata" | "error" | "permission";
+  debug: Record<string, unknown>;
+  errorMessage: string | null;
+};
+
+type WriteRadarFrameSetResult = {
+  row: RadarFrameSetRow | null;
+  canWriteFrames: boolean;
+};
+
+type SupabaseQueryResult<T> = {
+  data: T | null;
+  error: { message?: string } | null;
+};
+
+type SupabaseQueryListResult<T> = {
+  data: T[] | null;
+  error: { message?: string } | null;
+};
+
+type SupabaseSelectBuilder<T> = PromiseLike<SupabaseQueryListResult<T>> & {
+  eq: (column: string, value: unknown) => SupabaseSelectBuilder<T>;
+  gt: (column: string, value: unknown) => SupabaseSelectBuilder<T>;
+  order: (column: string, options: { ascending: boolean }) => SupabaseSelectBuilder<T>;
+  limit: (count: number) => SupabaseSelectBuilder<T>;
+  maybeSingle: () => Promise<SupabaseQueryResult<T>>;
+};
+
+type SupabaseWriteBuilder<T> = {
+  select: (columns: string) => {
+    maybeSingle: () => Promise<SupabaseQueryResult<T>>;
+  };
+};
+
+type SupabaseUpdateBuilder = PromiseLike<unknown> & {
+  eq: (column: string, value: unknown) => SupabaseUpdateBuilder;
+};
+
+type SupabaseUntypedTable = {
+  select: <T = unknown>(columns: string) => SupabaseSelectBuilder<T>;
+  upsert: <T = unknown>(
+    values: Record<string, unknown> | Record<string, unknown>[],
+    options: { onConflict: string },
+  ) => SupabaseWriteBuilder<T>;
+  update: (values: Record<string, unknown>) => SupabaseUpdateBuilder;
+};
+
+function weatherCacheTable(table: "weather_radar_frame_sets" | "weather_radar_frames") {
+  return (createAdminClient() as unknown as {
+    from: (tableName: string) => SupabaseUntypedTable;
+  }).from(table);
+}
+
+function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknown, init?: ResponseInit) {
+  const status = init?.status ?? 200;
+  logRouteUsageDebug(request, {
+    status,
+    startedAt,
+    responseBytes: getJsonResponseByteLength(payload),
+  });
+  return NextResponse.json(payload, init);
+}
+
+function normalizeRadarOffset(value: number | string | null | undefined): RadarFrameOffset {
   const numeric = Number(value);
   return RADAR_FRAME_OFFSETS.includes(numeric as RadarFrameOffset)
     ? (numeric as RadarFrameOffset)
     : 0;
-}
-
-function createUnavailableResponse(offsetMinutes: RadarFrameOffset, detail?: string) {
-  return {
-    status: "unavailable" as const,
-    message: RADAR_UNAVAILABLE_MESSAGE,
-    detail: detail ?? null,
-    generatedAt: new Date().toISOString(),
-    frame: createEmptyRadarFrame(offsetMinutes),
-  };
-}
-
-function createEmptyRadarFrame(offsetMinutes: RadarFrameOffset): RadarForecastFrame {
-  return {
-    offsetMinutes,
-    imageUrl: null,
-    legendUrl: null,
-    dateTime: null,
-    ef: null,
-    imageCoverageStartProjX: null,
-    imageCoverageStartProjY: null,
-    imageCoverageEndProjX: null,
-    imageCoverageEndProjY: null,
-    layerCoverageStartProjX: null,
-    layerCoverageStartProjY: null,
-    layerCoverageEndProjX: null,
-    layerCoverageEndProjY: null,
-    zoomLvl: null,
-    nodata: true,
-  };
 }
 
 function getCacheExpiresAt(date = new Date()) {
@@ -118,81 +233,8 @@ function getKstRadarBaseTime(delayMinutes: number, date = new Date()) {
   return `${year}${month}${day}${hour}${minute}`;
 }
 
-function buildKmaRadarForecastUrl(
-  authKey: string,
-  baseTime: string,
-  offsetMinutes: RadarFrameOffset,
-  qpf: RadarQpfMode,
-) {
-  const params = new URLSearchParams({
-    PROJ: "LCC",
-    cmp: "HSR",
-    obs: "qpf",
-    qcd: "EXT",
-    grid: "2",
-    itv: "10",
-    tm_mode: "m10",
-    data0: "RCM",
-    level: "C",
-    map: "R",
-    dtm: "m0",
-    zoom_level: "0",
-    zoom_rate: "2",
-    zoom_x: "0000000",
-    zoom_y: "0000000",
-    auto_man: "1",
-    mode: "H",
-    umove: "10",
-    fmove: "2",
-    dmove: "180",
-    bmove: "10",
-    winnum: "0",
-    rand: "10",
-    size: "640",
-    an_frn: "1",
-    an_itv: "1",
-    river: "on",
-    road: "on",
-    city: "on",
-    gis_auto: "on",
-    stnname: "on",
-    ctrl: "0",
-    dataDtlCd: "rdr_rdr_qpf_ana1_0",
-    data1: "r01",
-    data2: "rdr_qpf_ana1",
-    data3: "0",
-    overlay: "spr",
-    color: "C4",
-    effect: "N",
-    height: "420",
-    qpf,
-    ef: String(offsetMinutes),
-    eva: "1",
-    option: "1",
-    STARTX: "-384032.28285233676",
-    STARTY: "4878817.500765007",
-    ENDX: "758967.7171476632",
-    ENDY: "3778150.834098339",
-    ZOOMLVL: "11",
-    selWs: "kh",
-    tm: baseTime,
-    tm_st: baseTime,
-    tm_ed: baseTime,
-    tm2: baseTime,
-    authKey,
-  });
-
-  return `https://apihub.kma.go.kr/api/typ03/cgi/rdr/nph-qpf_ana_imgp?${params.toString()}`;
-}
-
-function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknown, init?: ResponseInit) {
-  const status = init?.status ?? 200;
-  logRouteUsageDebug(request, {
-    status,
-    startedAt,
-    responseBytes: getJsonResponseByteLength(payload),
-  });
-  return NextResponse.json(payload, init);
+function getKstRadarBaseTimeCandidates(date = new Date()) {
+  return RADAR_BASE_DELAY_MINUTES.map((delayMinutes) => getKstRadarBaseTime(delayMinutes, date));
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {
@@ -269,27 +311,6 @@ function readCoverageRecord(value: unknown) {
     : {};
 }
 
-function radarFrameFromCacheRow(row: RadarCacheRow): RadarForecastFrame {
-  const coverage = readCoverageRecord(row.coverage);
-  return {
-    offsetMinutes: normalizeRadarOffset(String(row.ef_minutes)),
-    imageUrl: row.image_url,
-    legendUrl: row.legend_url,
-    dateTime: row.date_time_text ?? row.base_time_kst,
-    ef: String(row.ef_minutes),
-    imageCoverageStartProjX: readNumber(coverage, ["imageCoverageStartProjX"]),
-    imageCoverageStartProjY: readNumber(coverage, ["imageCoverageStartProjY"]),
-    imageCoverageEndProjX: readNumber(coverage, ["imageCoverageEndProjX"]),
-    imageCoverageEndProjY: readNumber(coverage, ["imageCoverageEndProjY"]),
-    layerCoverageStartProjX: readNumber(coverage, ["layerCoverageStartProjX"]),
-    layerCoverageStartProjY: readNumber(coverage, ["layerCoverageStartProjY"]),
-    layerCoverageEndProjX: readNumber(coverage, ["layerCoverageEndProjX"]),
-    layerCoverageEndProjY: readNumber(coverage, ["layerCoverageEndProjY"]),
-    zoomLvl: row.zoom_lvl ? Number(row.zoom_lvl) : null,
-    nodata: row.nodata,
-  };
-}
-
 function radarCoveragePayload(frame: RadarForecastFrame) {
   return {
     imageCoverageStartProjX: frame.imageCoverageStartProjX,
@@ -303,91 +324,55 @@ function radarCoveragePayload(frame: RadarForecastFrame) {
   };
 }
 
-async function readFreshRadarCache(offsetMinutes: RadarFrameOffset) {
-  if (!hasSupabaseAdminEnv()) return null;
-  const { data, error } = await createAdminClient()
-    .from("weather_radar_frames")
-    .select(
-      "base_time_kst, ef_minutes, qpf, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message",
-    )
-    .eq("provider", RADAR_CACHE_PROVIDER)
-    .eq("ef_minutes", offsetMinutes)
-    .gt("expires_at", new Date().toISOString())
-    .order("fetched_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<RadarCacheRow>();
-
-  if (error || !data || data.nodata || !data.image_url) return null;
-  return data;
-}
-
-async function readRefreshingRadarCache(offsetMinutes: RadarFrameOffset) {
-  if (!hasSupabaseAdminEnv()) return null;
-  const { data, error } = await createAdminClient()
-    .from("weather_radar_frames")
-    .select(
-      "base_time_kst, ef_minutes, qpf, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message",
-    )
-    .eq("provider", RADAR_CACHE_PROVIDER)
-    .eq("ef_minutes", offsetMinutes)
-    .eq("error_message", REFRESHING_CACHE_MESSAGE)
-    .gt("expires_at", new Date().toISOString())
-    .order("fetched_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<RadarCacheRow>();
-
-  if (error || !data) return null;
-  return data;
-}
-
-async function writeRadarCache(input: {
-  baseTime: string;
-  qpf: RadarQpfMode;
-  frame: RadarForecastFrame;
-  errorMessage?: string | null;
-}) {
-  if (!hasSupabaseAdminEnv()) return;
-  const now = new Date().toISOString();
-  try {
-    const supabase = createAdminClient() as unknown as {
-      from: (table: string) => {
-        upsert: (values: Record<string, unknown>, options: { onConflict: string }) => Promise<unknown>;
-      };
-    };
-    await supabase
-      .from("weather_radar_frames")
-      .upsert(
-        {
-          provider: RADAR_CACHE_PROVIDER,
-          base_time_kst: input.baseTime,
-          ef_minutes: input.frame.offsetMinutes,
-          qpf: input.qpf,
-          image_url: input.frame.imageUrl,
-          legend_url: input.frame.legendUrl,
-          date_time_text: input.frame.dateTime,
-          zoom_lvl: input.frame.zoomLvl === null ? null : String(input.frame.zoomLvl),
-          coverage: radarCoveragePayload(input.frame),
-          nodata: input.frame.nodata,
-          fetched_at: now,
-          expires_at: getCacheExpiresAt(),
-          error_message: input.errorMessage ?? null,
-        },
-        { onConflict: "provider,base_time_kst,ef_minutes,qpf" },
-      );
-  } catch {
-    // Cache write failure must not break the weather screen.
-  }
-}
-
-function normalizeKmaRadarFrame(result: unknown, offsetMinutes: RadarFrameOffset): RadarForecastFrame {
-  const record = getRecord(result);
-  const emptyFrame = createEmptyRadarFrame(offsetMinutes);
-  if (!record) return emptyFrame;
-
-  const nodata = readBoolean(record, ["nodata", "noData", "no_data"]);
+function createEmptyRadarFrame(
+  offsetMinutes: RadarFrameOffset,
+  frameKind: RadarFrameKind,
+  sourceEndpoint: RadarSourceEndpoint,
+  status: RadarFrameStatus,
+  errorMessage: string | null,
+): RadarForecastFrame {
   return {
     offsetMinutes,
-    imageUrl: toKmaAssetUrl(readString(record, ["url", "imageUrl", "imageURL"])),
+    frameKind,
+    sourceEndpoint,
+    status,
+    imageUrl: null,
+    legendUrl: null,
+    dateTime: null,
+    ef: null,
+    imageCoverageStartProjX: null,
+    imageCoverageStartProjY: null,
+    imageCoverageEndProjX: null,
+    imageCoverageEndProjY: null,
+    layerCoverageStartProjX: null,
+    layerCoverageStartProjY: null,
+    layerCoverageEndProjX: null,
+    layerCoverageEndProjY: null,
+    zoomLvl: null,
+    nodata: true,
+    errorMessage,
+  };
+}
+
+function normalizeKmaRadarFrame(
+  result: unknown,
+  offsetMinutes: RadarFrameOffset,
+  frameKind: RadarFrameKind,
+  sourceEndpoint: RadarSourceEndpoint,
+): RadarForecastFrame {
+  const record = getRecord(result);
+  if (!record) {
+    return createEmptyRadarFrame(offsetMinutes, frameKind, sourceEndpoint, "nodata", null);
+  }
+
+  const nodata = readBoolean(record, ["nodata", "noData", "no_data"]);
+  const imageUrl = toKmaAssetUrl(readString(record, ["url", "imageUrl", "imageURL"]));
+  return {
+    offsetMinutes,
+    frameKind,
+    sourceEndpoint,
+    status: nodata || !imageUrl ? "nodata" : "available",
+    imageUrl,
     legendUrl: toKmaAssetUrl(readString(record, ["bar", "legendUrl", "legendURL"])),
     dateTime: readString(record, ["dateTime", "datetime", "tm", "time", "date_time"]),
     ef: readString(record, ["ef"]),
@@ -400,7 +385,662 @@ function normalizeKmaRadarFrame(result: unknown, offsetMinutes: RadarFrameOffset
     layerCoverageEndProjX: readCoverageNumber(record, "layerCoverage", ["layerCoverageEndProjX"], ["endProjX", "endX"]),
     layerCoverageEndProjY: readCoverageNumber(record, "layerCoverage", ["layerCoverageEndProjY"], ["endProjY", "endY"]),
     zoomLvl: readNumber(record, ["zoomLvl", "zoomLVL", "ZOOMLVL"]),
+    nodata: nodata || !imageUrl,
+    errorMessage: null,
+  };
+}
+
+function buildCommonRadarParams(authKey: string, baseTime: string, qpf: RadarQpfMode) {
+  return {
+    PROJ: "LCC",
+    grid: "2",
+    itv: "10",
+    tm_mode: "m10",
+    data0: "RCM",
+    level: "C",
+    map: "R",
+    dtm: "m0",
+    zoom_level: "0",
+    zoom_rate: "2",
+    zoom_x: "0000000",
+    zoom_y: "0000000",
+    auto_man: "1",
+    mode: "H",
+    umove: "10",
+    fmove: "2",
+    dmove: "180",
+    bmove: "10",
+    winnum: "0",
+    rand: "10",
+    size: "640",
+    an_frn: "1",
+    an_itv: "1",
+    river: "on",
+    road: "on",
+    city: "on",
+    gis_auto: "on",
+    stnname: "on",
+    ctrl: "0",
+    overlay: "spr",
+    color: "C4",
+    effect: "N",
+    height: "420",
+    qpf,
+    STARTX: "-384032.28285233676",
+    STARTY: "4878817.500765007",
+    ENDX: "758967.7171476632",
+    ENDY: "3778150.834098339",
+    ZOOMLVL: "11",
+    selWs: "kh",
+    tm: baseTime,
+    tm_st: baseTime,
+    tm_ed: baseTime,
+    tm2: baseTime,
+    authKey,
+  };
+}
+
+function buildKmaRadarObservedUrl(authKey: string, baseTime: string, qpf: RadarQpfMode) {
+  const params = new URLSearchParams({
+    ...buildCommonRadarParams(authKey, baseTime, qpf),
+    cmp: "HSP",
+    obs: "ECHD",
+    qcd: "HSLP",
+    dataDtlCd: "rdr_hsr_0",
+    data1: "h01",
+    data2: "hsr",
+    data3: "0",
+    ef: "",
+    legend: "1",
+  });
+  return `${KMA_APIHUB_ORIGIN}/api/typ03/cgi/rdr/${HSR_ENDPOINT}?${params.toString()}`;
+}
+
+function buildKmaRadarForecastUrl(
+  authKey: string,
+  baseTime: string,
+  offsetMinutes: RadarForecastOffset,
+  qpf: RadarQpfMode,
+) {
+  const params = new URLSearchParams({
+    ...buildCommonRadarParams(authKey, baseTime, qpf),
+    cmp: "HSR",
+    obs: "qpf",
+    qcd: "EXT",
+    dataDtlCd: "rdr_rdr_qpf_ana1_0",
+    data1: "r01",
+    data2: "rdr_qpf_ana1",
+    data3: "0",
+    ef: String(offsetMinutes),
+    eva: "1",
+    option: "1",
+  });
+  return `${KMA_APIHUB_ORIGIN}/api/typ03/cgi/rdr/${FORECAST_ENDPOINT}?${params.toString()}`;
+}
+
+function isCompleteFrameSet(frames: RadarForecastFrame[]) {
+  return RADAR_FRAME_OFFSETS.every((offset) =>
+    frames.some((frame) => frame.offsetMinutes === offset && frame.status === "available" && frame.imageUrl && !frame.nodata),
+  );
+}
+
+function getMissingFrames(frames: RadarForecastFrame[]) {
+  return RADAR_FRAME_OFFSETS.filter((offset) => {
+    const frame = frames.find((candidate) => candidate.offsetMinutes === offset);
+    return !frame?.imageUrl || frame.nodata || frame.status !== "available";
+  });
+}
+
+function getAvailableFrameCount(frames: RadarForecastFrame[]) {
+  return RADAR_FRAME_OFFSETS.length - getMissingFrames(frames).length;
+}
+
+function radarFrameFromCacheRow(row: RadarCacheRow): RadarForecastFrame {
+  const coverage = readCoverageRecord(row.coverage);
+  const offsetMinutes = normalizeRadarOffset(row.ef_minutes);
+  const frameKind: RadarFrameKind = row.frame_kind === "observed" ? "observed" : "forecast";
+  const sourceEndpoint: RadarSourceEndpoint = row.source_endpoint === HSR_ENDPOINT ? HSR_ENDPOINT : FORECAST_ENDPOINT;
+  const imageUrl = row.image_url;
+  const nodata = row.nodata || !imageUrl;
+  return {
+    offsetMinutes,
+    frameKind,
+    sourceEndpoint,
+    status: row.status === "available" && imageUrl && !nodata ? "available" : row.status === "error" ? "error" : "nodata",
+    imageUrl,
+    legendUrl: row.legend_url,
+    dateTime: row.date_time_text ?? row.base_time_kst,
+    ef: String(row.ef_minutes),
+    imageCoverageStartProjX: readNumber(coverage, ["imageCoverageStartProjX"]),
+    imageCoverageStartProjY: readNumber(coverage, ["imageCoverageStartProjY"]),
+    imageCoverageEndProjX: readNumber(coverage, ["imageCoverageEndProjX"]),
+    imageCoverageEndProjY: readNumber(coverage, ["imageCoverageEndProjY"]),
+    layerCoverageStartProjX: readNumber(coverage, ["layerCoverageStartProjX"]),
+    layerCoverageStartProjY: readNumber(coverage, ["layerCoverageStartProjY"]),
+    layerCoverageEndProjX: readNumber(coverage, ["layerCoverageEndProjX"]),
+    layerCoverageEndProjY: readNumber(coverage, ["layerCoverageEndProjY"]),
+    zoomLvl: row.zoom_lvl ? Number(row.zoom_lvl) : null,
     nodata,
+    errorMessage: row.error_message,
+  };
+}
+
+function frameSetPayloadFromRows(setRow: RadarFrameSetRow, frames: RadarForecastFrame[]): RadarFrameSetPayload {
+  return {
+    id: setRow.id,
+    provider: setRow.provider,
+    baseTimeKst: setRow.base_time_kst,
+    qpf: setRow.qpf === "B" ? "B" : "M",
+    fetchedAt: setRow.fetched_at,
+    expiresAt: setRow.expires_at,
+    isComplete: setRow.is_complete,
+    isActive: setRow.is_active,
+    missingFrames: (setRow.missing_frames ?? []).map((value) => normalizeRadarOffset(value)),
+    frames: frames.sort((left, right) => left.offsetMinutes - right.offsetMinutes),
+  };
+}
+
+function createAdHocFrameSetPayload(input: {
+  baseTimeKst: string;
+  qpf: RadarQpfMode;
+  frames: RadarForecastFrame[];
+  isActive: boolean;
+}) {
+  const now = new Date();
+  return {
+    id: null,
+    provider: RADAR_CACHE_PROVIDER,
+    baseTimeKst: input.baseTimeKst,
+    qpf: input.qpf,
+    fetchedAt: now.toISOString(),
+    expiresAt: getCacheExpiresAt(now),
+    isComplete: isCompleteFrameSet(input.frames),
+    isActive: input.isActive,
+    missingFrames: getMissingFrames(input.frames),
+    frames: input.frames.sort((left, right) => left.offsetMinutes - right.offsetMinutes),
+  } satisfies RadarFrameSetPayload;
+}
+
+async function readFramesBySetId(frameSetId: string) {
+  if (!hasSupabaseAdminEnv()) return [];
+  const { data, error } = await weatherCacheTable("weather_radar_frames")
+    .select<RadarCacheRow>(
+      "provider, base_time_kst, ef_minutes, qpf, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message, frame_kind, frame_set_id, source_endpoint, status, debug",
+    )
+    .eq("frame_set_id", frameSetId)
+    .eq("provider", RADAR_CACHE_PROVIDER)
+    .order("ef_minutes", { ascending: true });
+
+  if (error || !data) return [];
+  return data.map(radarFrameFromCacheRow);
+}
+
+async function readActiveCompleteRadarSet(freshOnly: boolean) {
+  if (!hasSupabaseAdminEnv()) return null;
+  try {
+    let query = weatherCacheTable("weather_radar_frame_sets")
+      .select<RadarFrameSetRow>(
+        "id, provider, base_time_kst, qpf, expected_frames, available_frames, missing_frames, is_complete, is_active, fetched_at, expires_at, error_message, debug",
+      )
+      .eq("provider", RADAR_CACHE_PROVIDER)
+      .eq("is_active", true)
+      .eq("is_complete", true)
+      .order("fetched_at", { ascending: false })
+      .limit(1);
+
+    if (freshOnly) {
+      query = query.gt("expires_at", new Date().toISOString());
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+
+    const frames = await readFramesBySetId(data.id);
+    if (!isCompleteFrameSet(frames)) return null;
+    return frameSetPayloadFromRows(data, frames);
+  } catch {
+    return null;
+  }
+}
+
+async function readFreshRefreshingRadarSet() {
+  if (!hasSupabaseAdminEnv()) return null;
+  try {
+    const { data, error } = await weatherCacheTable("weather_radar_frame_sets")
+      .select<RadarFrameSetRow>(
+        "id, provider, base_time_kst, qpf, expected_frames, available_frames, missing_frames, is_complete, is_active, fetched_at, expires_at, error_message, debug",
+      )
+      .eq("provider", RADAR_CACHE_PROVIDER)
+      .eq("error_message", REFRESHING_CACHE_MESSAGE)
+      .gt("expires_at", new Date().toISOString())
+      .order("fetched_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function readRadarFrameSetByCacheKey(baseTimeKst: string, qpf: RadarQpfMode) {
+  if (!hasSupabaseAdminEnv()) return null;
+  try {
+    const { data, error } = await weatherCacheTable("weather_radar_frame_sets")
+      .select<RadarFrameSetRow>(
+        "id, provider, base_time_kst, qpf, expected_frames, available_frames, missing_frames, is_complete, is_active, fetched_at, expires_at, error_message, debug",
+      )
+      .eq("provider", RADAR_CACHE_PROVIDER)
+      .eq("base_time_kst", baseTimeKst)
+      .eq("qpf", qpf)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRadarFrameSet(input: {
+  baseTimeKst: string;
+  qpf: RadarQpfMode;
+  frames: RadarForecastFrame[];
+  isComplete: boolean;
+  isActive: boolean;
+  errorMessage: string | null;
+  debug: Record<string, unknown>;
+}): Promise<WriteRadarFrameSetResult> {
+  if (!hasSupabaseAdminEnv()) return { row: null, canWriteFrames: false };
+  const now = new Date().toISOString();
+  const missingFrames = getMissingFrames(input.frames);
+  const availableFrames = getAvailableFrameCount(input.frames);
+
+  try {
+    if (!input.isComplete) {
+      const existingSet = await readRadarFrameSetByCacheKey(input.baseTimeKst, input.qpf);
+      if (existingSet?.is_complete) {
+        return { row: existingSet, canWriteFrames: false };
+      }
+    }
+
+    const { data, error } = await weatherCacheTable("weather_radar_frame_sets")
+      .upsert<RadarFrameSetRow>(
+        {
+          provider: RADAR_CACHE_PROVIDER,
+          base_time_kst: input.baseTimeKst,
+          qpf: input.qpf,
+          expected_frames: RADAR_FRAME_OFFSETS.length,
+          available_frames: availableFrames,
+          missing_frames: missingFrames,
+          is_complete: input.isComplete,
+          is_active: input.isActive,
+          fetched_at: now,
+          expires_at: getCacheExpiresAt(),
+          error_message: input.errorMessage,
+          debug: input.debug,
+        },
+        { onConflict: "provider,base_time_kst,qpf" },
+      )
+      .select("id, provider, base_time_kst, qpf, expected_frames, available_frames, missing_frames, is_complete, is_active, fetched_at, expires_at, error_message, debug")
+      .maybeSingle();
+
+    if (error || !data) return { row: null, canWriteFrames: false };
+    return { row: data, canWriteFrames: true };
+  } catch {
+    return { row: null, canWriteFrames: false };
+  }
+}
+
+async function writeRadarFrames(input: {
+  baseTimeKst: string;
+  qpf: RadarQpfMode;
+  frameSetId: string | null;
+  frames: RadarForecastFrame[];
+}) {
+  if (!hasSupabaseAdminEnv()) return;
+  const now = new Date().toISOString();
+  try {
+    const rows: Record<string, unknown>[] = input.frames.map((frame) => ({
+      provider: RADAR_CACHE_PROVIDER,
+      base_time_kst: input.baseTimeKst,
+      ef_minutes: frame.offsetMinutes,
+      qpf: input.qpf,
+      image_url: frame.imageUrl,
+      legend_url: frame.legendUrl,
+      date_time_text: frame.dateTime,
+      zoom_lvl: frame.zoomLvl === null ? null : String(frame.zoomLvl),
+      coverage: radarCoveragePayload(frame),
+      nodata: frame.nodata,
+      fetched_at: now,
+      expires_at: getCacheExpiresAt(),
+      error_message: frame.errorMessage,
+      frame_kind: frame.frameKind,
+      frame_set_id: input.frameSetId,
+      source_endpoint: frame.sourceEndpoint,
+      status: frame.status,
+      debug: {
+        imageUrlPresent: Boolean(frame.imageUrl),
+        dateTime: frame.dateTime,
+        ef: frame.ef,
+      },
+    }));
+
+    await weatherCacheTable("weather_radar_frames")
+      .upsert(
+        rows,
+        { onConflict: "provider,base_time_kst,ef_minutes,qpf" },
+      );
+  } catch {
+    // Cache write failure must not block the API response.
+  }
+}
+
+async function activateRadarFrameSet(frameSetId: string) {
+  if (!hasSupabaseAdminEnv()) return;
+  try {
+    await weatherCacheTable("weather_radar_frame_sets")
+      .update({ is_active: false })
+      .eq("provider", RADAR_CACHE_PROVIDER)
+      .eq("is_active", true);
+
+    await weatherCacheTable("weather_radar_frame_sets")
+      .update({ is_active: true })
+      .eq("id", frameSetId);
+  } catch {
+    // Active flag failure must not block returning a complete set.
+  }
+}
+
+function radarAttemptPayload(input: {
+  baseTimeKst: string | null;
+  qpf: RadarQpfMode | null;
+  frames: RadarForecastFrame[];
+  errorMessage: string | null;
+  debug: Record<string, unknown>;
+}): RadarAttemptPayload {
+  return {
+    baseTimeKst: input.baseTimeKst,
+    qpf: input.qpf,
+    missingFrames: getMissingFrames(input.frames),
+    availableFrames: getAvailableFrameCount(input.frames),
+    errorMessage: input.errorMessage,
+    debug: input.debug,
+  };
+}
+
+async function fetchWithTimeout(url: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    return await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRadarFrameResult> {
+  const url = input.sourceEndpoint === HSR_ENDPOINT
+    ? buildKmaRadarObservedUrl(input.authKey, input.baseTime, input.qpf)
+    : buildKmaRadarForecastUrl(input.authKey, input.baseTime, input.offsetMinutes as RadarForecastOffset, input.qpf);
+  const debugBase = {
+    baseTimeKst: input.baseTime,
+    qpf: input.qpf,
+    offsetMinutes: input.offsetMinutes,
+    frameKind: input.frameKind,
+    sourceEndpoint: input.sourceEndpoint,
+  };
+
+  try {
+    const response = await fetchWithTimeout(url);
+    if (response.status === 401 || response.status === 403) {
+      const errorMessage = input.sourceEndpoint === HSR_ENDPOINT
+        ? HSR_PERMISSION_MESSAGE
+        : "KMA APIHub 인증 또는 활용신청 상태를 확인해 주세요.";
+      return {
+        frame: createEmptyRadarFrame(input.offsetMinutes, input.frameKind, input.sourceEndpoint, "error", errorMessage),
+        requestStatus: "permission",
+        errorMessage,
+        debug: {
+          ...debugBase,
+          httpStatus: response.status,
+          imageUrlPresent: false,
+          dateTime: null,
+        },
+      };
+    }
+
+    if (!response.ok) {
+      const errorMessage = "KMA APIHub 레이더 응답을 불러오지 못했습니다.";
+      return {
+        frame: createEmptyRadarFrame(input.offsetMinutes, input.frameKind, input.sourceEndpoint, "error", errorMessage),
+        requestStatus: "error",
+        errorMessage,
+        debug: {
+          ...debugBase,
+          httpStatus: response.status,
+          imageUrlPresent: false,
+          dateTime: null,
+        },
+      };
+    }
+
+    const data = await response.json().catch(() => null) as KmaRadarResponse | null;
+    const errCd = data?.meta?.errCd;
+    if (!data || errCd !== "000") {
+      const errMsg = readString(getRecord(data?.meta), ["errMsg", "msg"]);
+      const errorMessage = errMsg || "KMA APIHub 레이더 응답 상태를 확인하지 못했습니다.";
+      return {
+        frame: createEmptyRadarFrame(input.offsetMinutes, input.frameKind, input.sourceEndpoint, "error", errorMessage),
+        requestStatus: "error",
+        errorMessage,
+        debug: {
+          ...debugBase,
+          httpStatus: response.status,
+          errCd: errCd ?? null,
+          errMsg: errMsg ?? null,
+          imageUrlPresent: false,
+          dateTime: null,
+        },
+      };
+    }
+
+    const frame = normalizeKmaRadarFrame(data.data?.result ?? data.result, input.offsetMinutes, input.frameKind, input.sourceEndpoint);
+    const errorMessage = frame.status === "available"
+      ? null
+      : "KMA APIHub 레이더 데이터가 아직 제공되지 않았습니다.";
+    const normalizedFrame = {
+      ...frame,
+      dateTime: frame.dateTime ?? input.baseTime,
+      ef: frame.ef ?? String(input.offsetMinutes),
+      errorMessage,
+    };
+    return {
+      frame: normalizedFrame,
+      requestStatus: normalizedFrame.status === "available" ? "available" : "nodata",
+      errorMessage,
+      debug: {
+        ...debugBase,
+        httpStatus: response.status,
+        errCd,
+        imageUrlPresent: Boolean(normalizedFrame.imageUrl),
+        dateTime: normalizedFrame.dateTime,
+        nodata: normalizedFrame.nodata,
+      },
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error && error.name === "AbortError"
+      ? "KMA APIHub 레이더 응답 시간이 초과됐습니다."
+      : "KMA APIHub 레이더 예측 정보를 처리하지 못했습니다.";
+    return {
+      frame: createEmptyRadarFrame(input.offsetMinutes, input.frameKind, input.sourceEndpoint, "error", errorMessage),
+      requestStatus: "error",
+      errorMessage,
+      debug: {
+        ...debugBase,
+        imageUrlPresent: false,
+        dateTime: null,
+        errorName: error instanceof Error ? error.name : "unknown",
+      },
+    };
+  }
+}
+
+async function writeRefreshingPlaceholder(baseTimeKst: string, qpf: RadarQpfMode) {
+  await writeRadarFrameSet({
+    baseTimeKst,
+    qpf,
+    frames: [],
+    isComplete: false,
+    isActive: false,
+    errorMessage: REFRESHING_CACHE_MESSAGE,
+    debug: {
+      note: "refresh placeholder; future advisory lock candidate",
+    },
+  });
+}
+
+async function buildRadarFrameSet(authKey: string) {
+  let lastAttempt: RadarAttemptPayload | null = null;
+
+  for (const baseTimeKst of getKstRadarBaseTimeCandidates()) {
+    for (const qpf of RADAR_QPF_MODES) {
+      await writeRefreshingPlaceholder(baseTimeKst, qpf);
+
+      const observedResult = await fetchKmaRadarFrame({
+        authKey,
+        baseTime: baseTimeKst,
+        qpf,
+        offsetMinutes: 0,
+        frameKind: "observed",
+        sourceEndpoint: HSR_ENDPOINT,
+      });
+      if (observedResult.requestStatus === "permission") {
+        const frames = [observedResult.frame];
+        const debug = {
+          hsrPermissionRequired: true,
+          frames: [observedResult.debug],
+        };
+        const writeResult = await writeRadarFrameSet({
+          baseTimeKst,
+          qpf,
+          frames,
+          isComplete: false,
+          isActive: false,
+          errorMessage: HSR_PERMISSION_MESSAGE,
+          debug,
+        });
+        if (writeResult.canWriteFrames) {
+          await writeRadarFrames({
+            baseTimeKst,
+            qpf,
+            frameSetId: writeResult.row?.id ?? null,
+            frames,
+          });
+        }
+        return {
+          status: "hsr_permission_required" as const,
+          set: null,
+          attempt: radarAttemptPayload({
+            baseTimeKst,
+            qpf,
+            frames,
+            errorMessage: HSR_PERMISSION_MESSAGE,
+            debug,
+          }),
+        };
+      }
+
+      const forecastResults = await Promise.all(
+        SUPPORTED_FORECAST_EF_MINUTES.map((offsetMinutes) =>
+          fetchKmaRadarFrame({
+            authKey,
+            baseTime: baseTimeKst,
+            qpf,
+            offsetMinutes,
+            frameKind: "forecast",
+            sourceEndpoint: FORECAST_ENDPOINT,
+          }),
+        ),
+      );
+      const frames = [observedResult.frame, ...forecastResults.map((result) => result.frame)];
+      const isComplete = isCompleteFrameSet(frames);
+      const errorMessage = isComplete
+        ? null
+        : [...forecastResults, observedResult].find((result) => result.errorMessage)?.errorMessage
+          ?? "KMA APIHub가 일부 레이더 시간대를 반환하지 않았습니다.";
+      const debug = {
+        frames: [observedResult.debug, ...forecastResults.map((result) => result.debug)],
+        supportedForecastEfMinutes: SUPPORTED_FORECAST_EF_MINUTES,
+      };
+      const writeResult = await writeRadarFrameSet({
+        baseTimeKst,
+        qpf,
+        frames,
+        isComplete,
+        isActive: false,
+        errorMessage,
+        debug,
+      });
+      if (writeResult.canWriteFrames) {
+        await writeRadarFrames({
+          baseTimeKst,
+          qpf,
+          frameSetId: writeResult.row?.id ?? null,
+          frames,
+        });
+      }
+
+      lastAttempt = radarAttemptPayload({
+        baseTimeKst,
+        qpf,
+        frames,
+        errorMessage,
+        debug,
+      });
+
+      if (isComplete) {
+        if (writeResult.row?.id) {
+          await activateRadarFrameSet(writeResult.row.id);
+        }
+        const activeSet = writeResult.row
+          ? frameSetPayloadFromRows({ ...writeResult.row, is_active: true }, frames)
+          : createAdHocFrameSetPayload({ baseTimeKst, qpf, frames, isActive: true });
+        return {
+          status: "available" as const,
+          set: activeSet,
+          attempt: lastAttempt,
+        };
+      }
+    }
+  }
+
+  return {
+    status: "unavailable" as const,
+    set: null,
+    attempt: lastAttempt,
+  };
+}
+
+function payload(input: {
+  status: RadarResponseStatus;
+  message: string;
+  set: RadarFrameSetPayload | null;
+  latestAttempt?: RadarAttemptPayload | null;
+}): RadarRoutePayload {
+  return {
+    status: input.status,
+    message: input.message,
+    generatedAt: new Date().toISOString(),
+    set: input.set,
+    latestAttempt: input.latestAttempt ?? null,
   };
 }
 
@@ -408,122 +1048,113 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   const auth = await requireWeatherAdmin();
   if (auth.response) return auth.response;
-
   const url = new URL(request.url);
-  const offsetMinutes = normalizeRadarOffset(url.searchParams.get("offset"));
+  const shouldRefresh = url.searchParams.get("refresh") === "1";
+
+  const freshActiveSet = await readActiveCompleteRadarSet(true);
+  if (freshActiveSet) {
+    return jsonWithUsageDebug(
+      request,
+      startedAt,
+      payload({
+        status: "available",
+        message: "신선한 레이더 완성 세트를 반환했습니다.",
+        set: freshActiveSet,
+      }),
+      { headers: CACHE_HEADERS },
+    );
+  }
+
+  const activeFallbackSet = await readActiveCompleteRadarSet(false);
+  const refreshingSet = await readFreshRefreshingRadarSet();
+  if (refreshingSet) {
+    return jsonWithUsageDebug(
+      request,
+      startedAt,
+      payload({
+        status: "refreshing",
+        message: activeFallbackSet
+          ? "최신 레이더 세트를 갱신하는 중입니다. 이전 완성 자료를 표시합니다."
+          : "레이더 세트를 갱신하는 중입니다.",
+        set: activeFallbackSet,
+      }),
+      { headers: CACHE_HEADERS },
+    );
+  }
+
+  if (!shouldRefresh) {
+    return jsonWithUsageDebug(
+      request,
+      startedAt,
+      payload({
+        status: activeFallbackSet ? "stale_available" : "unavailable",
+        message: activeFallbackSet
+          ? "캐시된 active 레이더 완성 세트를 반환했습니다. 외부 API 갱신은 새로고침 요청에서만 수행됩니다."
+          : "active 레이더 완성 세트가 없습니다. 자료 새로고침을 눌러 주세요.",
+        set: activeFallbackSet,
+      }),
+      { headers: CACHE_HEADERS },
+    );
+  }
+
   const authKey = process.env.KMA_APIHUB_AUTH_KEY?.trim();
-
-  const cachedFrame = await readFreshRadarCache(offsetMinutes);
-  if (cachedFrame) {
-    const frame = radarFrameFromCacheRow(cachedFrame);
-    const payload = frame.imageUrl && !frame.nodata
-      ? {
-          status: "available" as const,
-          message: null,
-          generatedAt: cachedFrame.fetched_at,
-          frame,
-        }
-      : {
-          ...createUnavailableResponse(offsetMinutes, cachedFrame.error_message ?? "캐시된 레이더 데이터가 아직 제공되지 않았습니다."),
-          generatedAt: cachedFrame.fetched_at,
-          frame,
-        };
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
-  }
-
-  const refreshingFrame = await readRefreshingRadarCache(offsetMinutes);
-  if (refreshingFrame) {
-    const payload = createUnavailableResponse(offsetMinutes, "레이더 캐시를 갱신하는 중입니다.");
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
-  }
-
   if (!authKey) {
-    const payload = createUnavailableResponse(offsetMinutes, "기상청 레이더 API 서버 설정이 필요합니다.");
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+    return jsonWithUsageDebug(
+      request,
+      startedAt,
+      payload({
+        status: activeFallbackSet ? "stale_available" : "unavailable",
+        message: activeFallbackSet
+          ? "기상청 레이더 API 서버 설정이 없어 이전 완성 자료를 표시합니다."
+          : "기상청 레이더 API 서버 설정이 필요합니다.",
+        set: activeFallbackSet,
+      }),
+      { headers: CACHE_HEADERS },
+    );
   }
 
-  try {
-    let lastDetail = "KMA APIHub 레이더 예측 데이터가 아직 제공되지 않았습니다.";
-    await writeRadarCache({
-      baseTime: getKstRadarBaseTime(RADAR_BASE_DELAY_MINUTES[0]),
-      qpf: RADAR_QPF_MODES[0],
-      frame: createEmptyRadarFrame(offsetMinutes),
-      errorMessage: REFRESHING_CACHE_MESSAGE,
-    });
-
-    for (const delayMinutes of RADAR_BASE_DELAY_MINUTES) {
-      const baseTime = getKstRadarBaseTime(delayMinutes);
-      for (const qpf of RADAR_QPF_MODES) {
-        const radarUrl = buildKmaRadarForecastUrl(authKey, baseTime, offsetMinutes, qpf);
-        const response = await fetch(radarUrl, {
-          cache: "no-store",
-          headers: {
-            Accept: "application/json",
-          },
-        });
-
-        if (response.status === 401 || response.status === 403) {
-          lastDetail = "KMA APIHub 인증 또는 활용신청 상태를 확인해 주세요.";
-          continue;
-        }
-
-        if (!response.ok) {
-          lastDetail = "KMA APIHub 레이더 응답을 불러오지 못했습니다.";
-          continue;
-        }
-
-        const data = await response.json().catch(() => null) as KmaRadarForecastResponse | null;
-        if (!data || data.meta?.errCd !== "000") {
-          lastDetail = "KMA APIHub 레이더 응답 상태를 확인하지 못했습니다.";
-          continue;
-        }
-
-        const frame = normalizeKmaRadarFrame(data.data?.result ?? data.result, offsetMinutes);
-        if (frame.nodata || !frame.imageUrl) {
-          lastDetail = "KMA APIHub 레이더 예측 데이터가 아직 제공되지 않았습니다.";
-          await writeRadarCache({
-            baseTime,
-            qpf,
-            frame: {
-              ...frame,
-              dateTime: frame.dateTime ?? baseTime,
-              ef: frame.ef ?? String(offsetMinutes),
-            },
-            errorMessage: lastDetail,
-          });
-          continue;
-        }
-
-        const cachedFramePayload = {
-          ...frame,
-          dateTime: frame.dateTime ?? baseTime,
-          ef: frame.ef ?? String(offsetMinutes),
-        };
-        await writeRadarCache({
-          baseTime,
-          qpf,
-          frame: cachedFramePayload,
-        });
-        const payload = {
-          status: "available" as const,
-          message: null,
-          generatedAt: new Date().toISOString(),
-          frame: cachedFramePayload,
-        };
-        return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
-      }
-    }
-
-    await writeRadarCache({
-      baseTime: getKstRadarBaseTime(RADAR_BASE_DELAY_MINUTES[0]),
-      qpf: RADAR_QPF_MODES[0],
-      frame: createEmptyRadarFrame(offsetMinutes),
-      errorMessage: lastDetail,
-    });
-    const payload = createUnavailableResponse(offsetMinutes, lastDetail);
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
-  } catch {
-    const payload = createUnavailableResponse(offsetMinutes, "KMA APIHub 레이더 예측 정보를 처리하지 못했습니다.");
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+  const result = await buildRadarFrameSet(authKey);
+  if (result.status === "available" && result.set) {
+    return jsonWithUsageDebug(
+      request,
+      startedAt,
+      payload({
+        status: "available",
+        message: "레이더 현재 실황 1개와 1H예측 6개 프레임을 새 active set으로 저장했습니다.",
+        set: result.set,
+        latestAttempt: result.attempt,
+      }),
+      { headers: CACHE_HEADERS },
+    );
   }
+
+  if (result.status === "hsr_permission_required") {
+    return jsonWithUsageDebug(
+      request,
+      startedAt,
+      payload({
+        status: "hsr_permission_required",
+        message: activeFallbackSet
+          ? `${HSR_PERMISSION_MESSAGE} 이전 완성 자료를 표시합니다.`
+          : HSR_PERMISSION_MESSAGE,
+        set: activeFallbackSet,
+        latestAttempt: result.attempt,
+      }),
+      { headers: CACHE_HEADERS },
+    );
+  }
+
+  return jsonWithUsageDebug(
+    request,
+    startedAt,
+    payload({
+      status: activeFallbackSet ? "stale_available" : "unavailable",
+      message: activeFallbackSet
+        ? "최신 레이더 세트가 아직 완성되지 않아 이전 완성 자료를 표시합니다."
+        : "현재 사용할 수 있는 완성 레이더 세트가 없습니다.",
+      set: activeFallbackSet,
+      latestAttempt: result.attempt,
+    }),
+    { headers: CACHE_HEADERS },
+  );
 }
