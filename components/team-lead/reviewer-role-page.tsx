@@ -3,10 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  closeTeamLeadSubmissionAndOpenReviewAccess,
+  closeTeamLeadReviewAccess,
   getTeamLeadReviewerRoleWorkspace,
   isTeamLeadSubmissionAccessOpen,
   refreshTeamLeadSubmissionAccessState,
   ReviewerRoleProfileItem,
+  saveCurrentBestReportResultsAsNextQuarter,
   saveTeamLeadReviewerRoles,
   setTeamLeadSubmissionAccessOpen,
   TEAM_LEAD_SUBMISSION_ACCESS_EVENT,
@@ -95,6 +98,7 @@ export function ReviewerRolePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [submissionOpen, setSubmissionOpen] = useState(() => isTeamLeadSubmissionAccessOpen());
+  const [activeReviewerCount, setActiveReviewerCount] = useState(0);
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "note"; text: string } | null>(null);
 
   const nameChipOrder = useMemo(() => new Map(nameChips.map((name, index) => [name, index] as const)), [nameChips]);
@@ -114,15 +118,16 @@ export function ReviewerRolePage() {
     setLoading(true);
     try {
       const workspace = await getTeamLeadReviewerRoleWorkspace();
-      const grantedReviewerNames = workspace.profiles
-        .filter((profile) => workspace.grantedProfileIds.includes(profile.id))
+      const selectedReviewerNames = workspace.profiles
+        .filter((profile) => workspace.selectedProfileIds.includes(profile.id))
         .map((profile) => profile.name);
 
       setProfiles(workspace.profiles);
-      const sortedGrantedReviewerNames = sortNamesByChipOrder(grantedReviewerNames, nameChipOrder);
+      setActiveReviewerCount(workspace.activeProfileIds.length);
+      const sortedSelectedReviewerNames = sortNamesByChipOrder(selectedReviewerNames, nameChipOrder);
       setSelectedNames((current) => {
         const currentMissing = current.filter((name) => !workspace.profiles.some((profile) => profile.name === name));
-        return sortNamesByChipOrder([...sortedGrantedReviewerNames, ...currentMissing], nameChipOrder);
+        return sortNamesByChipOrder([...sortedSelectedReviewerNames, ...currentMissing], nameChipOrder);
       });
       setMessage(null);
     } catch (error) {
@@ -168,9 +173,9 @@ export function ReviewerRolePage() {
     () => ({
       total: nameChips.length,
       reviewers: selectedNames.length,
-      members: Math.max(nameChips.length - selectedNames.length, 0),
+      activeReviewers: activeReviewerCount,
     }),
-    [nameChips.length, selectedNames.length],
+    [activeReviewerCount, nameChips.length, selectedNames.length],
   );
 
   const selectedDisplayNames = useMemo(
@@ -244,16 +249,16 @@ export function ReviewerRolePage() {
     const saveResult = await saveTeamLeadReviewerRoles(linkedSelectedIds);
     setSaving(false);
 
-    setMessage({
-      tone: saveResult.ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
-      text: saveResult.ok
-        ? `평가자를 지정했습니다.${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 저장되지 않았습니다: ${missingNames.join(", ")}` : ""}`
-        : saveResult.message,
-    });
-
     if (saveResult.ok) {
       await refresh();
     }
+
+    setMessage({
+      tone: saveResult.ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
+      text: saveResult.ok
+        ? `평가자 명단을 저장했습니다. 제출 마감 때 평가 페이지가 열립니다.${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 저장되지 않았습니다: ${missingNames.join(", ")}` : ""}`
+        : saveResult.message,
+    });
   };
 
   const handleOpenSubmissions = async () => {
@@ -275,7 +280,40 @@ export function ReviewerRolePage() {
   };
 
   const handleCloseSubmissions = async () => {
-    const confirmed = window.confirm("베스트리포트 제출 페이지를 마감하시겠습니까?");
+    const linkedSelectedIds = selectedNames
+      .map((name) => profileByName.get(name)?.id ?? null)
+      .filter((id): id is string => Boolean(id));
+    const missingNames = selectedNames.filter((name) => !profileByName.has(name));
+
+    if (linkedSelectedIds.length === 0) {
+      setMessage({ tone: "warn", text: "제출 마감 전에 평가자를 먼저 지정해 주세요." });
+      return;
+    }
+
+    const confirmed = window.confirm("베스트리포트 제출을 마감하고 선택한 평가자에게 평가 페이지를 오픈하시겠습니까?");
+    if (!confirmed) return;
+
+    setSaving(true);
+    const saveResult = await saveTeamLeadReviewerRoles(linkedSelectedIds);
+    const result = saveResult.ok ? await closeTeamLeadSubmissionAndOpenReviewAccess() : saveResult;
+    setSaving(false);
+
+    if (!result.ok) {
+      setMessage({ tone: "warn", text: result.message });
+      return;
+    }
+
+    await refreshTeamLeadSubmissionAccessState();
+    setSubmissionOpen(result.isOpen);
+    await refresh();
+    setMessage({
+      tone: missingNames.length > 0 ? "note" : "ok",
+      text: `${result.message}${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 제외했습니다: ${missingNames.join(", ")}` : ""}`,
+    });
+  };
+
+  const handleCancelSubmissionOpen = async () => {
+    const confirmed = window.confirm("베스트리포트 제출 오픈을 취소하고 제출 페이지를 닫으시겠습니까?");
     if (!confirmed) return;
 
     setSaving(true);
@@ -289,20 +327,38 @@ export function ReviewerRolePage() {
 
     await refreshTeamLeadSubmissionAccessState();
     setSubmissionOpen(result.isOpen);
-    setMessage({ tone: "ok", text: "베스트리포트 제출 페이지를 마감했습니다." });
+    setMessage({ tone: "ok", text: "베스트리포트 제출 오픈을 취소했습니다." });
   };
 
-  const handleCloseEvaluation = async () => {
-    if (selectedNames.length === 0) {
-      setMessage({ tone: "note", text: "마감할 평가자 권한이 없습니다." });
-      return;
-    }
-
-    const confirmed = window.confirm("베스트리포트 평가를 마감하고 지정된 평가자 권한을 해제하시겠습니까?");
+  const handleCancelReviewOpen = async () => {
+    const confirmed = window.confirm("영상평가 평가자 오픈을 닫으시겠습니까? 저장된 평가 데이터는 삭제되지 않습니다.");
     if (!confirmed) return;
 
     setSaving(true);
-    const result = await saveTeamLeadReviewerRoles([]);
+    const result = await closeTeamLeadReviewAccess();
+    setSaving(false);
+
+    if (!result.ok) {
+      setMessage({ tone: "warn", text: result.message });
+      return;
+    }
+
+    await refresh();
+    setActiveReviewerCount(0);
+    setMessage({ tone: "ok", text: result.message });
+  };
+
+  const handleCloseEvaluation = async () => {
+    if (activeReviewerCount === 0) {
+      setMessage({ tone: "note", text: "현재 오픈된 평가 페이지가 없습니다." });
+      return;
+    }
+
+    const confirmed = window.confirm("현재 베스트리포트 평가 결과를 분기 저장하고 평가 페이지를 닫으시겠습니까?");
+    if (!confirmed) return;
+
+    setSaving(true);
+    const result = await saveCurrentBestReportResultsAsNextQuarter();
     setSaving(false);
 
     if (!result.ok) {
@@ -312,7 +368,8 @@ export function ReviewerRolePage() {
 
     await refresh();
     setSelectedNames([]);
-    setMessage({ tone: "ok", text: "베스트리포트 평가를 마감하고 평가자 권한을 해제했습니다." });
+    setActiveReviewerCount(0);
+    setMessage({ tone: "ok", text: `${result.message} 평가 페이지를 닫았습니다.` });
   };
 
   return (
@@ -327,8 +384,8 @@ export function ReviewerRolePage() {
           <div className="kpi-value">{summary.reviewers}</div>
         </article>
         <article className="kpi">
-          <div className="kpi-label">일반 인원</div>
-          <div className="kpi-value">{summary.members}</div>
+          <div className="kpi-label">평가 오픈</div>
+          <div className="kpi-value">{summary.activeReviewers}</div>
         </article>
       </section>
 
@@ -345,7 +402,10 @@ export function ReviewerRolePage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {submissionOpen ? (
               <>
-                <button type="button" className="btn white" onClick={() => router.push("/submissions")} disabled={saving}>
+                <button type="button" className="btn white" onClick={handleCancelSubmissionOpen} disabled={saving}>
+                  오픈중 · 다시 누르면 취소
+                </button>
+                <button type="button" className="btn" onClick={() => router.push("/submissions")} disabled={saving}>
                   제출 페이지 열기
                 </button>
                 <button type="button" className="btn" onClick={handleCloseSubmissions} disabled={saving}>
@@ -365,7 +425,12 @@ export function ReviewerRolePage() {
             <button type="button" className="btn" onClick={handleAssignReviewers} disabled={saving || selectedNames.length === 0}>
               평가자 지정
             </button>
-            <button type="button" className="btn" onClick={handleCloseEvaluation} disabled={saving || selectedNames.length === 0}>
+            {activeReviewerCount > 0 ? (
+              <button type="button" className="btn white" onClick={handleCancelReviewOpen} disabled={saving}>
+                평가 오픈중 · 다시 누르면 닫기
+              </button>
+            ) : null}
+            <button type="button" className="btn" onClick={handleCloseEvaluation} disabled={saving || activeReviewerCount === 0}>
               평가 마감
             </button>
             <button type="button" className="btn" onClick={() => setEditingNames((current) => !current)}>

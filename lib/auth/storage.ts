@@ -407,8 +407,8 @@ function normalizeExperienceRole(value: unknown): UserRole | null {
   return null;
 }
 
-function hasIntrinsicReviewAccess(role: UserRole) {
-  return role === "reviewer" || role === "team_lead";
+function hasIntrinsicReviewAccess(_role: UserRole) {
+  return false;
 }
 
 function buildSessionWithExperience(

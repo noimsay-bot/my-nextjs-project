@@ -202,6 +202,7 @@ export const SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR = "#eff6ff";
 const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
 const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
 const TEAM_LEAD_REVIEW_ACCESS_STATE_KEY = "review_access_v1";
+const TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY = "reviewer_selection_v1";
 const TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY = "submission_access_v1";
 const TEAM_LEAD_REFERENCE_NOTES_STATE_KEY = "reference_notes_v1";
 const TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY = "best_report_quarters_v1";
@@ -2817,6 +2818,8 @@ export interface ReviewerRoleProfileItem {
 export interface ReviewerRoleWorkspace {
   profiles: ReviewerRoleProfileItem[];
   grantedProfileIds: string[];
+  selectedProfileIds: string[];
+  activeProfileIds: string[];
 }
 
 export interface TeamLeadReferenceNoteItem {
@@ -3133,23 +3136,39 @@ function normalizeReferenceNotesState(raw: unknown) {
   ) as ReferenceNotesStore;
 }
 
-async function getGrantedReviewerProfileIds() {
+async function getReviewProfileIdsState(key: string) {
   const supabase = await getPrivilegedSupabaseClient();
   const { data, error } = await supabase
     .from("team_lead_state")
     .select("state")
-    .eq("key", TEAM_LEAD_REVIEW_ACCESS_STATE_KEY)
+    .eq("key", key)
     .maybeSingle<{ state: unknown }>();
 
   if (error) {
     if (isSupabaseSchemaMissingError(error)) {
       console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
-      return [] as string[];
+      return { exists: false, profileIds: [] as string[] };
     }
     throw new Error(error.message);
   }
 
-  return normalizeReviewAccessState(data?.state);
+  return {
+    exists: Boolean(data),
+    profileIds: normalizeReviewAccessState(data?.state),
+  };
+}
+
+async function getGrantedReviewerProfileIds() {
+  return (await getReviewProfileIdsState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY)).profileIds;
+}
+
+async function getSelectedReviewerProfileIds() {
+  const selectedState = await getReviewProfileIdsState(TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY);
+  if (selectedState.exists) {
+    return selectedState.profileIds;
+  }
+
+  return getGrantedReviewerProfileIds();
 }
 
 export function isTeamLeadSubmissionAccessOpen() {
@@ -3522,6 +3541,11 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
     throw new Error(error.message);
   }
 
+  const [selectedProfileIds, activeProfileIds] = await Promise.all([
+    getSelectedReviewerProfileIds(),
+    getGrantedReviewerProfileIds(),
+  ]);
+
   return {
     profiles: (data ?? [])
       .filter((profile) => {
@@ -3529,7 +3553,9 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
         return role === "member" || role === "outlet" || role === "reviewer" || role === "desk" || role === "admin";
       })
       .map(formatReviewerRoleProfile),
-    grantedProfileIds: await getGrantedReviewerProfileIds(),
+    grantedProfileIds: selectedProfileIds,
+    selectedProfileIds,
+    activeProfileIds,
   };
 }
 
@@ -3832,6 +3858,8 @@ export async function saveCurrentBestReportResultsAsNextQuarter() {
   const previousSnapshots = [...workspace.savedQuarters];
   const nextSnapshots = [...previousSnapshots, nextSnapshot];
   const resetAt = new Date().toISOString();
+  const previousActiveProfileIds = await getGrantedReviewerProfileIds();
+  const previousSelectedProfileIds = await getSelectedReviewerProfileIds();
 
   try {
     await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY, nextSnapshots);
@@ -3858,11 +3886,20 @@ export async function saveCurrentBestReportResultsAsNextQuarter() {
     await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
       profileIds: [],
     });
+    await persistTeamLeadState(TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY, {
+      profileIds: [],
+    });
   } catch (error) {
     await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY, previousSnapshots);
     await persistTeamLeadState(TEAM_LEAD_BEST_REPORT_CURRENT_STATE_KEY, {
       resetAt: "",
     });
+    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+      profileIds: previousActiveProfileIds,
+    }).catch(() => undefined);
+    await persistTeamLeadState(TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY, {
+      profileIds: previousSelectedProfileIds,
+    }).catch(() => undefined);
     return {
       ok: false as const,
       message: error instanceof Error ? error.message : "평가자 명단 초기화에 실패했습니다.",
@@ -3908,22 +3945,23 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
       })
       .map((profile) => profile.id),
   );
-  const grantedProfileIds = normalizedSelectedIds.filter((id) => availableIds.has(id));
+  const selectedReviewerIds = normalizedSelectedIds.filter((id) => availableIds.has(id));
 
   try {
-    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
-      profileIds: grantedProfileIds,
+    await persistTeamLeadState(TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY, {
+      profileIds: selectedReviewerIds,
     });
   } catch (error) {
     return {
       ok: false as const,
-      message: error instanceof Error ? error.message : "평가 권한 저장에 실패했습니다.",
+      message: error instanceof Error ? error.message : "평가자 명단 저장에 실패했습니다.",
     };
   }
 
   return {
     ok: true as const,
-    message: "평가 페이지 권한을 저장했습니다.",
+    profileIds: selectedReviewerIds,
+    message: "평가자 명단을 저장했습니다. 제출 마감 때 평가 페이지가 열립니다.",
   };
 }
 
@@ -3934,6 +3972,11 @@ export async function setTeamLeadSubmissionAccessOpen(nextOpen: boolean) {
   }
 
   try {
+    if (nextOpen) {
+      await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+        profileIds: [],
+      });
+    }
     await persistTeamLeadState(TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY, {
       isOpen: nextOpen,
     });
@@ -3950,6 +3993,69 @@ export async function setTeamLeadSubmissionAccessOpen(nextOpen: boolean) {
     ok: true as const,
     isOpen: nextOpen,
     message: nextOpen ? "영상평가 제출을 오픈했습니다." : "영상평가 제출을 닫았습니다.",
+  };
+}
+
+export async function closeTeamLeadSubmissionAndOpenReviewAccess() {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "영상평가 제출 마감 권한이 없습니다." };
+  }
+
+  const selectedProfileIds = await getSelectedReviewerProfileIds();
+  if (selectedProfileIds.length === 0) {
+    return { ok: false as const, message: "평가자를 먼저 지정해 주세요." };
+  }
+
+  const previousActiveProfileIds = await getGrantedReviewerProfileIds();
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+      profileIds: selectedProfileIds,
+    });
+    await persistTeamLeadState(TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY, {
+      isOpen: false,
+    });
+    submissionAccessCache = false;
+    emitTeamLeadEvent(TEAM_LEAD_SUBMISSION_ACCESS_EVENT);
+  } catch (error) {
+    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+      profileIds: previousActiveProfileIds,
+    }).catch(() => undefined);
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "제출 마감 및 평가 오픈에 실패했습니다.",
+    };
+  }
+
+  return {
+    ok: true as const,
+    isOpen: false,
+    activeProfileIds: selectedProfileIds,
+    message: "제출을 마감하고 지정된 평가자에게 평가 페이지를 오픈했습니다.",
+  };
+}
+
+export async function closeTeamLeadReviewAccess() {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "영상평가 오픈 취소 권한이 없습니다." };
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+      profileIds: [],
+    });
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "영상평가 오픈 취소에 실패했습니다.",
+    };
+  }
+
+  return {
+    ok: true as const,
+    message: "영상평가 평가자 오픈을 닫았습니다.",
   };
 }
 

@@ -2431,14 +2431,11 @@ set search_path = public
 as $$
   select (
     public.current_profile_approved() = true
-    and (
-      public.current_profile_role() in ('reviewer', 'team_lead', 'desk')
-      or exists (
-        select 1
-        from public.team_lead_state
-        where public.team_lead_state.key = 'review_access_v1'
-          and coalesce(public.team_lead_state.state -> 'profileIds', '[]'::jsonb) @> to_jsonb(array[auth.uid()::text])
-      )
+    and exists (
+      select 1
+      from public.team_lead_state
+      where public.team_lead_state.key = 'review_access_v1'
+        and coalesce(public.team_lead_state.state -> 'profileIds', '[]'::jsonb) @> to_jsonb(array[auth.uid()::text])
     )
   );
 $$;
@@ -2506,6 +2503,10 @@ grant execute on function public.current_profile_approved() to authenticated;
 grant execute on function public.current_profile_role() to authenticated;
 grant execute on function public.current_profile_has_review_access() to authenticated;
 grant execute on function public.is_admin() to authenticated;
+
+drop policy if exists "submissions_select_assigned_reviewer" on public.submissions;
+drop policy if exists "reviews_insert_assigned_reviewer" on public.reviews;
+drop policy if exists "reviews_update_assigned_reviewer" on public.reviews;
 
 drop policy if exists "reviews_update_granted_reviewers" on public.reviews;
 create policy "reviews_update_granted_reviewers"
