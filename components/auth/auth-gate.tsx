@@ -111,19 +111,19 @@ function hasAccess(
       return (
         pathname === "/" ||
         (pathname === "/vacation" && Boolean(vacationRequestOpen)) ||
-        pathname.startsWith("/submissions")
+        (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen))
       );
     case "desk":
       return (
         pathname === "/" ||
         pathname === "/vacation" ||
-        pathname.startsWith("/submissions")
+        (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen))
       );
     case "team_lead":
       return (
         pathname === "/" ||
         pathname === "/vacation" ||
-        pathname.startsWith("/submissions") ||
+        (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen)) ||
         pathname.startsWith("/schedule") ||
         pathname.startsWith("/admin")
       );
@@ -131,7 +131,7 @@ function hasAccess(
       return (
         pathname === "/" ||
         pathname === "/vacation" ||
-        pathname.startsWith("/submissions") ||
+        (pathname.startsWith("/submissions") && Boolean(submissionAccessOpen)) ||
         pathname.startsWith("/weather") ||
         pathname.startsWith("/admin")
       );
@@ -339,7 +339,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if ((session.role === "member" || session.role === "outlet") && needsSubmissionAccessCheck && effectiveSubmissionAccessOpen === null) {
+    if (needsSubmissionAccessCheck && effectiveSubmissionAccessOpen === null) {
       return;
     }
 
@@ -366,9 +366,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (
     authPending ||
     (needsVacationAccessCheck && effectiveVacationRequestOpen === null) ||
-    ((session?.role === "member" || session?.role === "outlet") &&
-      needsSubmissionAccessCheck &&
-      effectiveSubmissionAccessOpen === null)
+    (needsSubmissionAccessCheck && effectiveSubmissionAccessOpen === null)
   ) {
     return <div className="status note">인증 상태를 확인하는 중입니다.</div>;
   }

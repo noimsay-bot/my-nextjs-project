@@ -314,7 +314,7 @@ function getVisibleLinks(
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
-          link.href === "/submissions" ||
+          (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !reviewLocked),
       );
     case "desk":

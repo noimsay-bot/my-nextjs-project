@@ -257,6 +257,9 @@ export function ReviewerRolePage() {
   };
 
   const handleOpenSubmissions = async () => {
+    const confirmed = window.confirm("베스트리포트 제출 페이지를 오픈하시겠습니까?");
+    if (!confirmed) return;
+
     setSaving(true);
     const result = await setTeamLeadSubmissionAccessOpen(true);
     setSaving(false);
@@ -267,8 +270,49 @@ export function ReviewerRolePage() {
     }
 
     await refreshTeamLeadSubmissionAccessState();
-    setMessage({ tone: "ok", text: `${result.message} 베스트리포트 제출 페이지로 이동합니다.` });
-    router.push("/submissions");
+    setSubmissionOpen(result.isOpen);
+    setMessage({ tone: "ok", text: result.message });
+  };
+
+  const handleCloseSubmissions = async () => {
+    const confirmed = window.confirm("베스트리포트 제출 페이지를 마감하시겠습니까?");
+    if (!confirmed) return;
+
+    setSaving(true);
+    const result = await setTeamLeadSubmissionAccessOpen(false);
+    setSaving(false);
+
+    if (!result.ok) {
+      setMessage({ tone: "warn", text: result.message });
+      return;
+    }
+
+    await refreshTeamLeadSubmissionAccessState();
+    setSubmissionOpen(result.isOpen);
+    setMessage({ tone: "ok", text: "베스트리포트 제출 페이지를 마감했습니다." });
+  };
+
+  const handleCloseEvaluation = async () => {
+    if (selectedNames.length === 0) {
+      setMessage({ tone: "note", text: "마감할 평가자 권한이 없습니다." });
+      return;
+    }
+
+    const confirmed = window.confirm("베스트리포트 평가를 마감하고 지정된 평가자 권한을 해제하시겠습니까?");
+    if (!confirmed) return;
+
+    setSaving(true);
+    const result = await saveTeamLeadReviewerRoles([]);
+    setSaving(false);
+
+    if (!result.ok) {
+      setMessage({ tone: "warn", text: result.message });
+      return;
+    }
+
+    await refresh();
+    setSelectedNames([]);
+    setMessage({ tone: "ok", text: "베스트리포트 평가를 마감하고 평가자 권한을 해제했습니다." });
   };
 
   return (
@@ -299,16 +343,30 @@ export function ReviewerRolePage() {
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button
-              type="button"
-              className={`btn ${submissionOpen ? "white" : ""}`}
-              onClick={handleOpenSubmissions}
-              disabled={saving}
-            >
-              {submissionOpen ? "오픈중 · 제출 페이지 열기" : "영상평가 제출 오픈"}
-            </button>
+            {submissionOpen ? (
+              <>
+                <button type="button" className="btn white" onClick={() => router.push("/submissions")} disabled={saving}>
+                  제출 페이지 열기
+                </button>
+                <button type="button" className="btn" onClick={handleCloseSubmissions} disabled={saving}>
+                  제출 마감
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleOpenSubmissions}
+                disabled={saving}
+              >
+                베스트리포트 제출 오픈
+              </button>
+            )}
             <button type="button" className="btn" onClick={handleAssignReviewers} disabled={saving || selectedNames.length === 0}>
               평가자 지정
+            </button>
+            <button type="button" className="btn" onClick={handleCloseEvaluation} disabled={saving || selectedNames.length === 0}>
+              평가 마감
             </button>
             <button type="button" className="btn" onClick={() => setEditingNames((current) => !current)}>
               {editingNames ? "수정 완료" : "수정"}
