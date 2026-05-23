@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient, hasSupabaseEnv } from "@/lib/supabase/client";
 import { RadarMapOverlay } from "@/components/weather/radar-map-overlay";
 import styles from "@/components/weather/weather.module.css";
@@ -229,10 +229,13 @@ export function RadarForecastPanel() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
+  const framesRef = useRef<Partial<Record<RadarOffset, RadarFrame>>>({});
+  const autoRefreshStartedRef = useRef(false);
 
   const applyCompleteFrameSet = useCallback((frameSet: RadarFrameSet) => {
     if (!hasPlayableCompleteSet(frameSet)) return false;
     const nextFrames = framesToRecord(frameSet);
+    framesRef.current = nextFrames;
     setFrames(nextFrames);
     setActiveSet(frameSet);
     setSelectedOffset((current) => (nextFrames[current] ? current : 0));
@@ -299,9 +302,9 @@ export function RadarForecastPanel() {
     }
   }, [applyCompleteFrameSet]);
 
-  async function refreshAllFrames() {
+  const refreshAllFrames = useCallback(async (options?: { auto?: boolean }) => {
     setStatus("loading");
-    setMessage("레이더 세트를 확인하는 중입니다.");
+    setMessage(options?.auto ? "레이더 현재 세트를 자동 확인하는 중입니다." : "레이더 세트를 확인하는 중입니다.");
 
     try {
       const response = await fetch("/api/weather/radar-forecast?refresh=1", {
@@ -326,7 +329,7 @@ export function RadarForecastPanel() {
         return;
       }
 
-      if (isCompleteRadarFrameSet(frames)) {
+      if (isCompleteRadarFrameSet(framesRef.current)) {
         setStatus("warning");
         setMessage(data.message || "최신 레이더 세트가 아직 완성되지 않아 이전 완성 자료를 표시합니다.");
         return;
@@ -335,7 +338,7 @@ export function RadarForecastPanel() {
       setStatus(data.status === "hsr_permission_required" ? "warning" : "unavailable");
       setMessage(data.message || "현재 사용할 수 있는 완성 레이더 세트가 없습니다.");
     } catch {
-      if (isCompleteRadarFrameSet(frames)) {
+      if (isCompleteRadarFrameSet(framesRef.current)) {
         setStatus("warning");
         setMessage("레이더 세트 갱신 중 오류가 발생해 이전 완성 자료를 표시합니다.");
         return;
@@ -344,17 +347,20 @@ export function RadarForecastPanel() {
       setStatus("error");
       setMessage("레이더 세트 갱신 중 오류가 발생했습니다.");
     }
-  }
+  }, [applyCompleteFrameSet]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!cancelled) await loadCachedFrames();
+      await loadCachedFrames();
+      if (cancelled || autoRefreshStartedRef.current) return;
+      autoRefreshStartedRef.current = true;
+      await refreshAllFrames({ auto: true });
     })();
     return () => {
       cancelled = true;
     };
-  }, [loadCachedFrames]);
+  }, [loadCachedFrames, refreshAllFrames]);
 
   const hasCompleteRadarFrames = isCompleteRadarFrameSet(frames);
 

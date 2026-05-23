@@ -19,11 +19,14 @@
 - 이동시간은 실제 길찾기가 아니라 현재 위치 기준 Haversine 직선거리 이동권으로 계산한다.
 - 추천 영역은 브라우저 위치 권한 허용 후 현재 위치 좌표를 서버 route에 전달해 계산한다.
 - 현재 위치 기반 추천은 사용자별 좌표가 섞이지 않도록 `weather_dispatch_cache` 공유 payload를 읽거나 쓰지 않는다.
-- 레이더 영역은 먼저 Supabase 캐시 테이블을 읽고, 새로고침 버튼이 눌린 경우에만 서버 route가 캐시 미스 상태에서 외부 API를 호출한다.
+- 레이더 영역은 먼저 Supabase 캐시 테이블을 읽고, 진입 직후와 새로고침 버튼에서 서버 route가 최신 active complete set을 확인한다.
+- 신선한 active complete set이 있으면 외부 API를 호출하지 않고 반환하며, 없거나 만료된 경우에는 진입 직후 자동 갱신으로 APIHub를 호출할 수 있다.
 - 레이더 PNG는 Vercel route나 `/_next/image`를 거치지 않고 기상청 APIHub 이미지 URL을 브라우저가 직접 로드한다.
 - 레이더 화면은 Leaflet 지도 타일 위에 APIHub의 배경지도 없는 레이더 PNG를 오버레이한다.
 - 레이더 1H예측은 `현재`, `+10분`, `+20분`, `+30분`, `+40분`, `+50분`, `+60분` 7개 프레임이 모두 있을 때만 완성된 active set으로 본다.
 - `현재` 프레임은 APIHub 4.1 레이더-HSR(`nph-rdr_cmp1_imgp`)에서 가져오고, `+10분`부터 `+60분`까지는 APIHub 4.4 레이더-1H예측(`nph-qpf_ana_imgp`)에서 가져온다.
+- 1H예측 `qpf`는 `M(MAPLE)`을 우선 사용하고, 완성 세트가 안 만들어지면 `B(블랜딩)`도 같은 완성 조건으로 시도한다.
+- `+40분` 프레임은 `ef=40`을 우선 요청하고, 해당 프레임만 비면 APIHub 문서의 `(+0,+1,,,)` 표기 검증을 위해 `ef=4`를 1회 추가 시도하며 이 결과를 debug에 남긴다.
 - 새로고침 결과가 불완전하면 `weather_radar_frame_sets.is_active`로 승격하지 않고, 기존 active complete set이 있으면 그대로 표시한다.
 - 불완전 세트는 `missing_frames`, `available_frames`, `debug` 상태 확인용으로만 저장하며 가까운 시간대 프레임으로 대체하지 않는다.
 - APIHub 문서상 레이더-1H예측은 `PROJ=LCC`, `STARTX/STARTY/ENDX/ENDY`, `ZOOMLVL`을 제공한다. 현재 변환 helper는 APIHub 경량 지도 좌표가 한국 도메인 bounds로 안전하게 환산될 때만 오버레이하고, 확정하지 못하면 원본 PNG fallback을 표시한다.

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const RADAR_FRAME_OFFSETS = [0, 10, 20, 30, 40, 50, 60] as const;
 const SUPPORTED_FORECAST_EF_MINUTES = [10, 20, 30, 40, 50, 60] as const;
 const RADAR_BASE_DELAY_MINUTES = [10, 20, 30, 40] as const;
-const RADAR_QPF_MODES = ["M"] as const satisfies readonly RadarQpfMode[];
+const RADAR_QPF_MODES = ["M", "B"] as const satisfies readonly RadarQpfMode[];
 const RADAR_CACHE_PROVIDER = "kma_apihub_radar_1h";
 const RADAR_CACHE_TTL_MS = 5 * 60 * 1000;
 const REFRESHING_CACHE_MESSAGE = "refreshing";
@@ -142,6 +142,7 @@ type FetchRadarFrameInput = {
   baseTime: string;
   qpf: RadarQpfMode;
   offsetMinutes: RadarFrameOffset;
+  requestedEf?: string;
   frameKind: RadarFrameKind;
   sourceEndpoint: RadarSourceEndpoint;
 };
@@ -456,12 +457,7 @@ function buildKmaRadarObservedUrl(authKey: string, baseTime: string, qpf: RadarQ
   return `${KMA_APIHUB_ORIGIN}/api/typ03/cgi/rdr/${HSR_ENDPOINT}?${params.toString()}`;
 }
 
-function buildKmaRadarForecastUrl(
-  authKey: string,
-  baseTime: string,
-  offsetMinutes: RadarForecastOffset,
-  qpf: RadarQpfMode,
-) {
+function buildKmaRadarForecastUrl(authKey: string, baseTime: string, requestedEf: string, qpf: RadarQpfMode) {
   const params = new URLSearchParams({
     ...buildCommonRadarParams(authKey, baseTime, qpf),
     cmp: "HSR",
@@ -471,11 +467,18 @@ function buildKmaRadarForecastUrl(
     data1: "r01",
     data2: "rdr_qpf_ana1",
     data3: "0",
-    ef: String(offsetMinutes),
+    ef: requestedEf,
     eva: "1",
     option: "1",
   });
   return `${KMA_APIHUB_ORIGIN}/api/typ03/cgi/rdr/${FORECAST_ENDPOINT}?${params.toString()}`;
+}
+
+function getForecastEfCandidates(offsetMinutes: RadarForecastOffset) {
+  if (offsetMinutes === 40) {
+    return ["40", "4"] as const;
+  }
+  return [String(offsetMinutes)] as const;
 }
 
 function isCompleteFrameSet(frames: RadarForecastFrame[]) {
@@ -787,13 +790,17 @@ async function fetchWithTimeout(url: string) {
 }
 
 async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRadarFrameResult> {
+  const requestedEf = input.sourceEndpoint === FORECAST_ENDPOINT
+    ? input.requestedEf ?? String(input.offsetMinutes)
+    : "";
   const url = input.sourceEndpoint === HSR_ENDPOINT
     ? buildKmaRadarObservedUrl(input.authKey, input.baseTime, input.qpf)
-    : buildKmaRadarForecastUrl(input.authKey, input.baseTime, input.offsetMinutes as RadarForecastOffset, input.qpf);
+    : buildKmaRadarForecastUrl(input.authKey, input.baseTime, requestedEf, input.qpf);
   const debugBase = {
     baseTimeKst: input.baseTime,
     qpf: input.qpf,
     offsetMinutes: input.offsetMinutes,
+    requestedEf,
     frameKind: input.frameKind,
     sourceEndpoint: input.sourceEndpoint,
   };
@@ -859,7 +866,7 @@ async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRad
     const normalizedFrame = {
       ...frame,
       dateTime: frame.dateTime ?? input.baseTime,
-      ef: frame.ef ?? String(input.offsetMinutes),
+      ef: frame.ef ?? requestedEf,
       errorMessage,
     };
     return {
@@ -872,6 +879,7 @@ async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRad
         errCd,
         imageUrlPresent: Boolean(normalizedFrame.imageUrl),
         dateTime: normalizedFrame.dateTime,
+        responseEf: normalizedFrame.ef,
         nodata: normalizedFrame.nodata,
       },
     };
@@ -891,6 +899,52 @@ async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRad
       },
     };
   }
+}
+
+async function fetchKmaRadarForecastFrame(input: Omit<FetchRadarFrameInput, "requestedEf" | "frameKind" | "sourceEndpoint">) {
+  const candidateResults: Record<string, unknown>[] = [];
+  let lastResult: FetchRadarFrameResult | null = null;
+
+  for (const requestedEf of getForecastEfCandidates(input.offsetMinutes as RadarForecastOffset)) {
+    const result = await fetchKmaRadarFrame({
+      ...input,
+      requestedEf,
+      frameKind: "forecast",
+      sourceEndpoint: FORECAST_ENDPOINT,
+    });
+    candidateResults.push(result.debug);
+
+    if (result.requestStatus === "available") {
+      return {
+        ...result,
+        debug: {
+          ...result.debug,
+          fallbackEfUsed: requestedEf !== String(input.offsetMinutes),
+          candidateResults,
+        },
+      };
+    }
+
+    lastResult = result;
+  }
+
+  if (!lastResult) {
+    return fetchKmaRadarFrame({
+      ...input,
+      requestedEf: String(input.offsetMinutes),
+      frameKind: "forecast",
+      sourceEndpoint: FORECAST_ENDPOINT,
+    });
+  }
+
+  return {
+    ...lastResult,
+    debug: {
+      ...lastResult.debug,
+      fallbackEfUsed: false,
+      candidateResults,
+    },
+  };
 }
 
 async function writeRefreshingPlaceholder(baseTimeKst: string, qpf: RadarQpfMode) {
@@ -960,13 +1014,11 @@ async function buildRadarFrameSet(authKey: string) {
 
       const forecastResults = await Promise.all(
         SUPPORTED_FORECAST_EF_MINUTES.map((offsetMinutes) =>
-          fetchKmaRadarFrame({
+          fetchKmaRadarForecastFrame({
             authKey,
             baseTime: baseTimeKst,
             qpf,
             offsetMinutes,
-            frameKind: "forecast",
-            sourceEndpoint: FORECAST_ENDPOINT,
           }),
         ),
       );
@@ -979,6 +1031,9 @@ async function buildRadarFrameSet(authKey: string) {
       const debug = {
         frames: [observedResult.debug, ...forecastResults.map((result) => result.debug)],
         supportedForecastEfMinutes: SUPPORTED_FORECAST_EF_MINUTES,
+        forecastEfCandidateMap: Object.fromEntries(
+          SUPPORTED_FORECAST_EF_MINUTES.map((offset) => [String(offset), getForecastEfCandidates(offset)]),
+        ),
       };
       const writeResult = await writeRadarFrameSet({
         baseTimeKst,
