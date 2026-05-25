@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { inflateSync } from "node:zlib";
 import { getJsonResponseByteLength, logRouteUsageDebug } from "@/lib/server/usage-debug";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { requireWeatherAdmin } from "@/lib/weather/server-auth";
@@ -35,6 +36,17 @@ type RadarResponseStatus =
   | "hsr_permission_required"
   | "unavailable";
 
+type RadarImageStats = {
+  ok: boolean;
+  bytes: number | null;
+  contentType: string | null;
+  width: number | null;
+  height: number | null;
+  visiblePixels: number | null;
+  hasVisiblePixels: boolean | null;
+  errorMessage?: string;
+};
+
 type RadarForecastFrame = {
   offsetMinutes: RadarFrameOffset;
   frameKind: RadarFrameKind;
@@ -55,6 +67,7 @@ type RadarForecastFrame = {
   zoomLvl: number | null;
   nodata: boolean;
   errorMessage: string | null;
+  imageStats: RadarImageStats | null;
 };
 
 type RadarFrameSetPayload = {
@@ -352,6 +365,7 @@ function createEmptyRadarFrame(
     zoomLvl: null,
     nodata: true,
     errorMessage,
+    imageStats: null,
   };
 }
 
@@ -388,7 +402,121 @@ function normalizeKmaRadarFrame(
     zoomLvl: readNumber(record, ["zoomLvl", "zoomLVL", "ZOOMLVL"]),
     nodata: nodata || !imageUrl,
     errorMessage: null,
+    imageStats: null,
   };
+}
+
+function imageStatsFromDebug(debug: unknown): RadarImageStats | null {
+  const record = getRecord(debug);
+  const imageStats = getRecord(record?.imageStats);
+  if (!imageStats) return null;
+  return {
+    ok: imageStats.ok === true,
+    bytes: readNumber(imageStats, ["bytes"]),
+    contentType: readString(imageStats, ["contentType"]),
+    width: readNumber(imageStats, ["width"]),
+    height: readNumber(imageStats, ["height"]),
+    visiblePixels: readNumber(imageStats, ["visiblePixels"]),
+    hasVisiblePixels: typeof imageStats.hasVisiblePixels === "boolean" ? imageStats.hasVisiblePixels : null,
+    errorMessage: readString(imageStats, ["errorMessage"]) ?? undefined,
+  };
+}
+
+function parseVisiblePixelsFromPng(buffer: Buffer) {
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  if (buffer.length < 33 || !buffer.subarray(0, 8).equals(pngSignature)) {
+    throw new Error("not_png");
+  }
+
+  let offset = 8;
+  let width: number | null = null;
+  let height: number | null = null;
+  let bitDepth: number | null = null;
+  let colorType: number | null = null;
+  const idatChunks: Buffer[] = [];
+
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd + 4 > buffer.length) throw new Error("truncated_png");
+    const chunk = buffer.subarray(dataStart, dataEnd);
+
+    if (type === "IHDR") {
+      width = chunk.readUInt32BE(0);
+      height = chunk.readUInt32BE(4);
+      bitDepth = chunk[8] ?? null;
+      colorType = chunk[9] ?? null;
+    } else if (type === "IDAT") {
+      idatChunks.push(chunk);
+    } else if (type === "IEND") {
+      break;
+    }
+
+    offset = dataEnd + 4;
+  }
+
+  if (!width || !height || bitDepth !== 8 || colorType === null || idatChunks.length === 0) {
+    throw new Error("unsupported_png");
+  }
+
+  if (colorType === 2) {
+    return { width, height, visiblePixels: width * height };
+  }
+
+  const bytesPerPixel = colorType === 6 ? 4 : colorType === 4 ? 2 : null;
+  if (!bytesPerPixel) throw new Error("unsupported_png");
+
+  const inflated = inflateSync(Buffer.concat(idatChunks));
+  const rowLength = width * bytesPerPixel;
+  const expectedLength = (rowLength + 1) * height;
+  if (inflated.length < expectedLength) throw new Error("truncated_png_data");
+
+  let inputOffset = 0;
+  let visiblePixels = 0;
+  let previousRow = Buffer.alloc(rowLength);
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[inputOffset];
+    inputOffset += 1;
+    const rawRow = inflated.subarray(inputOffset, inputOffset + rowLength);
+    inputOffset += rowLength;
+    const row = Buffer.alloc(rowLength);
+
+    for (let x = 0; x < rowLength; x += 1) {
+      const left = x >= bytesPerPixel ? row[x - bytesPerPixel] : 0;
+      const up = previousRow[x] ?? 0;
+      const upLeft = x >= bytesPerPixel ? previousRow[x - bytesPerPixel] ?? 0 : 0;
+      const raw = rawRow[x] ?? 0;
+      let value: number;
+      if (filter === 0) {
+        value = raw;
+      } else if (filter === 1) {
+        value = raw + left;
+      } else if (filter === 2) {
+        value = raw + up;
+      } else if (filter === 3) {
+        value = raw + Math.floor((left + up) / 2);
+      } else if (filter === 4) {
+        const predictor = left + up - upLeft;
+        const pa = Math.abs(predictor - left);
+        const pb = Math.abs(predictor - up);
+        const pc = Math.abs(predictor - upLeft);
+        value = raw + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft);
+      } else {
+        throw new Error("unsupported_png_filter");
+      }
+      row[x] = value & 0xff;
+    }
+
+    for (let x = bytesPerPixel - 1; x < rowLength; x += bytesPerPixel) {
+      if ((row[x] ?? 0) > 0) visiblePixels += 1;
+    }
+    previousRow = row;
+  }
+
+  return { width, height, visiblePixels };
 }
 
 function buildCommonRadarParams(authKey: string, baseTime: string, qpf: RadarQpfMode) {
@@ -525,6 +653,7 @@ function radarFrameFromCacheRow(row: RadarCacheRow): RadarForecastFrame {
     zoomLvl: row.zoom_lvl ? Number(row.zoom_lvl) : null,
     nodata,
     errorMessage: row.error_message,
+    imageStats: imageStatsFromDebug(row.debug),
   };
 }
 
@@ -727,6 +856,7 @@ async function writeRadarFrames(input: {
         imageUrlPresent: Boolean(frame.imageUrl),
         dateTime: frame.dateTime,
         ef: frame.ef,
+        imageStats: frame.imageStats,
       },
     }));
 
@@ -787,6 +917,66 @@ async function fetchWithTimeout(url: string) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchImageStatsWithTimeout(url: string): Promise<RadarImageStats> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+      },
+      signal: controller.signal,
+    });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get("content-type");
+    if (!response.ok) {
+      return {
+        ok: false,
+        bytes: bytes.length,
+        contentType,
+        width: null,
+        height: null,
+        visiblePixels: null,
+        hasVisiblePixels: null,
+        errorMessage: `image_http_${response.status}`,
+      };
+    }
+
+    const parsed = parseVisiblePixelsFromPng(bytes);
+    return {
+      ok: true,
+      bytes: bytes.length,
+      contentType,
+      width: parsed.width,
+      height: parsed.height,
+      visiblePixels: parsed.visiblePixels,
+      hasVisiblePixels: parsed.visiblePixels > 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      bytes: null,
+      contentType: null,
+      width: null,
+      height: null,
+      visiblePixels: null,
+      hasVisiblePixels: null,
+      errorMessage: error instanceof Error ? error.message : "image_probe_failed",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function withImageStats(frame: RadarForecastFrame) {
+  if (frame.status !== "available" || !frame.imageUrl || frame.nodata) return frame;
+  return {
+    ...frame,
+    imageStats: await fetchImageStatsWithTimeout(frame.imageUrl),
+  };
 }
 
 async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRadarFrameResult> {
@@ -863,12 +1053,12 @@ async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRad
     const errorMessage = frame.status === "available"
       ? null
       : "KMA APIHub 레이더 데이터가 아직 제공되지 않았습니다.";
-    const normalizedFrame = {
+    const normalizedFrame = await withImageStats({
       ...frame,
       dateTime: frame.dateTime ?? input.baseTime,
       ef: frame.ef ?? requestedEf,
       errorMessage,
-    };
+    });
     return {
       frame: normalizedFrame,
       requestStatus: normalizedFrame.status === "available" ? "available" : "nodata",
@@ -881,6 +1071,7 @@ async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRad
         dateTime: normalizedFrame.dateTime,
         responseEf: normalizedFrame.ef,
         nodata: normalizedFrame.nodata,
+        imageStats: normalizedFrame.imageStats,
       },
     };
   } catch (error) {

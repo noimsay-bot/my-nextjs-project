@@ -38,6 +38,10 @@ type RadarFrame = {
   zoomLvl: number | null;
   nodata: boolean;
   errorMessage: string | null;
+  hasVisibleRadarEcho?: boolean | null;
+  imageStats?: {
+    hasVisiblePixels?: boolean | null;
+  } | null;
 };
 
 type RadarFrameSet = {
@@ -104,6 +108,7 @@ type RadarCacheRow = {
   frame_set_id: string | null;
   source_endpoint: string | null;
   status: string | null;
+  debug?: unknown;
 };
 
 function getOffsetLabel(offset: RadarOffset) {
@@ -143,6 +148,19 @@ function readCoverageNumber(value: unknown, key: string) {
   return null;
 }
 
+function readDebugImageStats(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const debug = value as Record<string, unknown>;
+  const imageStats = debug.imageStats;
+  if (!imageStats || typeof imageStats !== "object" || Array.isArray(imageStats)) return null;
+  const stats = imageStats as Record<string, unknown>;
+  return typeof stats.hasVisiblePixels === "boolean" ? stats.hasVisiblePixels : null;
+}
+
+function readFrameImageStats(frame: RadarFrame) {
+  return typeof frame.imageStats?.hasVisiblePixels === "boolean" ? frame.imageStats.hasVisiblePixels : null;
+}
+
 function cacheRowToFrame(row: RadarCacheRow): RadarFrame {
   const offset = normalizeOffset(row.ef_minutes);
   const status: RadarFrameStatus = row.status === "available"
@@ -171,6 +189,7 @@ function cacheRowToFrame(row: RadarCacheRow): RadarFrame {
     zoomLvl: row.zoom_lvl ? Number(row.zoom_lvl) : null,
     nodata,
     errorMessage: row.error_message,
+    hasVisibleRadarEcho: readDebugImageStats(row.debug),
   };
 }
 
@@ -193,7 +212,10 @@ function framesToRecord(frameSet: RadarFrameSet) {
   const nextFrames: Partial<Record<RadarOffset, RadarFrame>> = {};
   for (const frame of frameSet.frames) {
     if (frame.imageUrl && !frame.nodata && frame.status === "available") {
-      nextFrames[frame.offsetMinutes] = frame;
+      nextFrames[frame.offsetMinutes] = {
+        ...frame,
+        hasVisibleRadarEcho: frame.hasVisibleRadarEcho ?? readFrameImageStats(frame),
+      };
     }
   }
   return nextFrames;
@@ -272,7 +294,7 @@ export function RadarForecastPanel() {
       const { data: frameRows, error: frameError } = await supabase
         .from("weather_radar_frames")
         .select(
-          "provider, base_time_kst, ef_minutes, qpf, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message, frame_kind, frame_set_id, source_endpoint, status",
+          "provider, base_time_kst, ef_minutes, qpf, image_url, legend_url, date_time_text, zoom_lvl, coverage, nodata, fetched_at, expires_at, error_message, frame_kind, frame_set_id, source_endpoint, status, debug",
         )
         .eq("provider", RADAR_CACHE_PROVIDER)
         .eq("frame_set_id", setRow.id)
@@ -464,6 +486,7 @@ export function RadarForecastPanel() {
               frame={selectedFrame}
               label={selectedOffsetLabel}
               opacity={overlayOpacity}
+              hasVisibleRadarEcho={selectedFrame.hasVisibleRadarEcho}
               onImageError={handleRadarImageError}
             />
           ) : (

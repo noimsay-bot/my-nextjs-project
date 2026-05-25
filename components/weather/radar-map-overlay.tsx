@@ -16,12 +16,13 @@ type RadarMapOverlayProps = {
   };
   label: string;
   opacity: number;
+  hasVisibleRadarEcho?: boolean | null;
   onImageError?: () => void;
 };
 
 type LeafletModule = typeof import("leaflet");
 
-export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMapOverlayProps) {
+export function RadarMapOverlay({ frame, label, opacity, hasVisibleRadarEcho, onImageError }: RadarMapOverlayProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const leafletRef = useRef<LeafletModule | null>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -161,6 +162,9 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
             referrerPolicy="no-referrer"
           />
         ) : null}
+        {hasVisibleRadarEcho === false ? (
+          <div className={styles.mapNoEchoNotice}>강수 에코 없음</div>
+        ) : null}
         <div className={styles.mapOverlayNotice}>
           레이더 오버레이 좌표를 확정하지 못해 원본 영상만 표시합니다.
         </div>
@@ -182,6 +186,9 @@ export function RadarMapOverlay({ frame, label, opacity, onImageError }: RadarMa
           loading="lazy"
           referrerPolicy="no-referrer"
         />
+      ) : null}
+      {hasVisibleRadarEcho === false ? (
+        <div className={styles.mapNoEchoNotice}>강수 에코 없음</div>
       ) : null}
     </div>
   );
