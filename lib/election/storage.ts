@@ -1,6 +1,8 @@
 import { getSession, type SessionUser } from "@/lib/auth/storage";
 import { addDaysToDateKey, getKstDateKey, getMonthRangeFromMonthKey } from "@/lib/election/dates";
 import type {
+  ElectionCellColorKey,
+  ElectionCellColors,
   ElectionEvent,
   ElectionPoint,
   ElectionPointInput,
@@ -59,6 +61,8 @@ interface ElectionPointRow {
   note: string | null;
   live_position: string | null;
   lighting: string | null;
+  region_color?: string | null;
+  cell_colors?: Record<string, unknown> | null;
   is_active: boolean | null;
   created_at: string;
   updated_at: string;
@@ -69,6 +73,23 @@ interface ElectionProfileRow {
   name: string;
   role: string;
 }
+
+const electionCellColorKeys = new Set<ElectionCellColorKey>([
+  "place",
+  "poolVideo",
+  "equipmentName",
+  "trs",
+  "cameraStaff",
+  "audioStaff",
+  "liveTime",
+  "reporter",
+  "address",
+  "note",
+  "livePosition",
+  "lighting",
+]);
+
+let electionPointStyleColumnsAvailable: boolean | null = null;
 
 export function canManageElection(session: SessionUser | null | undefined) {
   return Boolean(
@@ -112,6 +133,8 @@ function rowToPoint(row: ElectionPointRow): ElectionPoint {
     note: row.note ?? "",
     livePosition: row.live_position ?? "",
     lighting: row.lighting ?? "",
+    regionColor: normalizeColorToken(row.region_color),
+    cellColors: normalizeCellColors(row.cell_colors),
     isActive: row.is_active ?? true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -153,8 +176,40 @@ function normalizeNullableId(value: string | null | undefined) {
   return trimmed || null;
 }
 
-function pointInputToRow(eventId: string, point: ElectionPointInput, index: number) {
-  return {
+function normalizeColorToken(value: string | null | undefined) {
+  return value?.trim() ?? "";
+}
+
+function normalizeCellColors(value: unknown): ElectionCellColors {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.entries(value as Record<string, unknown>).reduce<ElectionCellColors>((colors, [key, color]) => {
+    if (!electionCellColorKeys.has(key as ElectionCellColorKey) || typeof color !== "string") return colors;
+    const normalizedColor = normalizeColorToken(color);
+    if (normalizedColor) {
+      colors[key as ElectionCellColorKey] = normalizedColor;
+    }
+    return colors;
+  }, {});
+}
+
+function hasPointStyles(points: ElectionPointInput[]) {
+  return points.some((point) => (point.regionColor?.trim() ?? "") || Object.keys(normalizeCellColors(point.cellColors)).length > 0);
+}
+
+async function hasElectionPointStyleColumns() {
+  if (electionPointStyleColumnsAvailable !== null) return electionPointStyleColumnsAvailable;
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase
+    .from("election_points")
+    .select("region_color, cell_colors")
+    .limit(1);
+
+  electionPointStyleColumnsAvailable = !error;
+  return electionPointStyleColumnsAvailable;
+}
+
+function pointInputToRow(eventId: string, point: ElectionPointInput, index: number, includeStyles: boolean) {
+  const row = {
     event_id: eventId,
     sort_order: index,
     region: normalizeNullableText(point.region),
@@ -180,6 +235,14 @@ function pointInputToRow(eventId: string, point: ElectionPointInput, index: numb
     live_position: normalizeNullableText(point.livePosition),
     lighting: normalizeNullableText(point.lighting),
     is_active: point.isActive !== false,
+  };
+
+  if (!includeStyles) return row;
+
+  return {
+    ...row,
+    region_color: normalizeNullableText(point.regionColor ?? ""),
+    cell_colors: normalizeCellColors(point.cellColors),
   };
 }
 
@@ -208,9 +271,7 @@ async function fetchPoints(eventId: string) {
   const supabase = await getPortalSupabaseClient();
   const { data, error } = await supabase
     .from("election_points")
-    .select(
-      "id, event_id, sort_order, region, place, pool_video, equipment_name, equipment_type, trs, camera_staff_name, camera_staff_user_id, camera_staff_name_pm, camera_staff_user_id_pm, audio_staff_name, audio_staff_user_id, audio_staff_name_pm, reporter_name, reporter_user_id, reporter_name_pm, live_time, live_time_pm, address, note, live_position, lighting, is_active, created_at, updated_at",
-    )
+    .select("*")
     .eq("event_id", eventId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
@@ -297,6 +358,10 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
 
   const supabase = await getPortalSupabaseClient();
   let eventId = input.id?.trim() || "";
+  const includePointStyles = await hasElectionPointStyleColumns();
+  if (!includePointStyles && hasPointStyles(input.points)) {
+    throw new Error(`선거표 색상 저장 컬럼이 아직 적용되지 않았습니다. ${ELECTION_SCHEMA_GUIDE}`);
+  }
 
   if (!eventId) {
     const { data, error } = await supabase
@@ -343,7 +408,7 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
     throw new Error(electionStorageError(deleteError, "election_points"));
   }
 
-  const pointRows = input.points.map((point, index) => pointInputToRow(eventId, point, index));
+  const pointRows = input.points.map((point, index) => pointInputToRow(eventId, point, index, includePointStyles));
 
   if (pointRows.length > 0) {
     const { error: insertError } = await supabase.from("election_points").insert(pointRows);

@@ -1,5 +1,19 @@
 export type ElectionStatus = "draft" | "published" | "closed";
 export type ElectionEquipmentType = "seoul" | "regional" | "rental" | "car" | "none" | "";
+export type ElectionCellColorKey =
+  | "place"
+  | "poolVideo"
+  | "equipmentName"
+  | "trs"
+  | "cameraStaff"
+  | "audioStaff"
+  | "liveTime"
+  | "reporter"
+  | "address"
+  | "note"
+  | "livePosition"
+  | "lighting";
+export type ElectionCellColors = Partial<Record<ElectionCellColorKey, string>>;
 
 export interface ElectionPoint {
   id: string;
@@ -27,6 +41,8 @@ export interface ElectionPoint {
   note: string;
   livePosition: string;
   lighting: string;
+  regionColor: string;
+  cellColors: ElectionCellColors;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -85,6 +101,8 @@ export interface ElectionPointInput {
   note: string;
   livePosition: string;
   lighting: string;
+  regionColor: string;
+  cellColors: ElectionCellColors;
   isActive: boolean;
 }
 

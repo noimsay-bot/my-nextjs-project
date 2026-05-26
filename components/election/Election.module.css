@@ -131,7 +131,50 @@
   font-weight: 900;
 }
 
+.tableShell {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.managementRail {
+  flex: 0 0 104px;
+  width: 104px;
+}
+
+.managementRailHeader {
+  display: grid;
+  min-height: 34px;
+  place-items: center;
+  padding: 6px 4px;
+  border: 1px solid var(--line);
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.managementRailBody {
+  display: grid;
+}
+
+.managementRailCell {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 4px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.08);
+}
+
 .tableWrap {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow-x: visible;
 }
 
@@ -175,9 +218,131 @@
 
 .placeCellInner {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.cellEditor {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px;
   align-items: center;
+}
+
+.positionCellInner {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.colorMenu {
+  position: relative;
+  display: inline-grid;
+}
+
+.colorMenu summary {
+  list-style: none;
+}
+
+.colorMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.colorMenuButton,
+.colorOption {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(125, 211, 252, 0.5);
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+}
+
+.colorMenuButton:hover,
+.colorOption:hover:not(:disabled) {
+  border-color: rgba(186, 230, 253, 0.86);
+  background: rgba(186, 230, 253, 0.2);
+}
+
+.colorOption:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.colorPalette {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 18px);
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid rgba(125, 211, 252, 0.46);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.32);
+}
+
+.colorSwatch {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border: 1px solid rgba(15, 23, 42, 0.24);
+}
+
+.colorSwatchEmpty {
+  background:
+    linear-gradient(135deg, transparent 46%, #f87171 47%, #f87171 53%, transparent 54%),
+    rgba(248, 250, 252, 0.92);
+}
+
+.colorOptionSelected {
+  border-color: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(248, 250, 252, 0.68);
+}
+
+.colorableCell {
+  background: var(--election-cell-bg, transparent);
+  color: var(--election-cell-color, var(--text));
+}
+
+.coloredCell {
+  background: var(--election-cell-bg) !important;
+  color: var(--election-cell-color, var(--text));
+}
+
+.coloredCell input,
+.coloredCell select {
+  border-color: rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.78);
+  color: #0f172a;
+}
+
+.darkColorCell input,
+.darkColorCell select {
+  border-color: rgba(255, 255, 255, 0.36);
+  background: rgba(15, 23, 42, 0.28);
+  color: #ffffff;
+}
+
+.darkColorCell input::placeholder {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.darkColorCell .splitStack span,
+.darkColorCell .readOnlyCell,
+.darkColorCell .readOnlySplit,
+.darkColorCell .readOnlySplit b {
+  color: #ffffff;
+}
+
+.darkColorCell .readOnlyCellEmpty {
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .cellActionRow {
@@ -273,10 +438,6 @@
   width: 6%;
 }
 
-.managementColumn {
-  width: 92px;
-}
-
 th.poolVideoColumn {
   white-space: normal;
   font-size: 11px;
@@ -292,11 +453,11 @@ th.poolVideoColumn {
 }
 
 .nameColumn {
-  width: 6%;
+  width: 7.5%;
 }
 
 .addressColumn {
-  width: 15%;
+  width: 22%;
 }
 
 .wideColumn {
@@ -379,7 +540,7 @@ th.positionColumn {
 
 .splitStack label {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(64px, 1fr);
   gap: 4px;
   align-items: center;
   text-align: center;
@@ -543,7 +704,7 @@ th.positionColumn {
   }
 
   .table {
-    min-width: 1280px;
+    min-width: 1480px;
   }
 
   .formGrid {
@@ -621,11 +782,25 @@ th.positionColumn {
     background: #fff !important;
   }
 
+  :global(body.election-print-mode.election-print-color-mode) .printTable th,
+  :global(body.election-print-mode.election-print-color-mode) .printTable td.coloredCell {
+    background: var(--election-cell-bg) !important;
+    color: var(--election-cell-color, #000) !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
   :global(body.election-print-mode) .readOnlyCell,
   :global(body.election-print-mode) .readOnlySplit,
   :global(body.election-print-mode) .readOnlySplit b,
   :global(body.election-print-mode) .numberCell {
     color: #000 !important;
+  }
+
+  :global(body.election-print-mode.election-print-color-mode) .printTable .coloredCell .readOnlyCell,
+  :global(body.election-print-mode.election-print-color-mode) .printTable .coloredCell .readOnlySplit,
+  :global(body.election-print-mode.election-print-color-mode) .printTable .coloredCell .readOnlySplit b {
+    color: var(--election-cell-color, #000) !important;
   }
 
   :global(body.election-print-mode) .positionReadOnly {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   closeElectionEvent,
   fetchElectionWorkspace,
@@ -10,6 +10,8 @@ import {
 import { getKstDateKey } from "@/lib/election/dates";
 import type {
   ElectionEvent,
+  ElectionCellColorKey,
+  ElectionCellColors,
   ElectionPointInput,
   ElectionProfileOption,
   ElectionSaveInput,
@@ -23,6 +25,7 @@ type DayPart = "am" | "pm";
 type AutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type PrintPaperSize = "A3" | "A4";
 type PrintOrientation = "portrait" | "landscape";
+type PrintColorMode = "color" | "mono";
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -54,10 +57,10 @@ const poolVideoOptions = [
   "obs",
   "ytn",
   "mbn",
+  "국회방송",
 ] as const;
 
 const tableColumns = [
-  "관리",
   "#",
   "지역",
   "장소",
@@ -80,9 +83,34 @@ const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
 const AUTO_SAVE_DEBOUNCE_MS = 900;
 const ELECTION_PRINT_STYLE_ID = "election-print-page-style";
+const ELECTION_PRINT_COLOR_MODE_CLASS = "election-print-color-mode";
+
+const regionColorOptions = [
+  { value: "", label: "없음", background: "transparent", text: "#0f172a" },
+  { value: "region-sky", label: "하늘", background: "#dff3ff", text: "#0f172a" },
+  { value: "region-mint", label: "민트", background: "#def7ec", text: "#0f172a" },
+  { value: "region-rose", label: "분홍", background: "#ffe4e6", text: "#0f172a" },
+  { value: "region-amber", label: "노랑", background: "#fef3c7", text: "#0f172a" },
+  { value: "region-lavender", label: "보라", background: "#ede9fe", text: "#0f172a" },
+  { value: "region-slate", label: "회색", background: "#e2e8f0", text: "#0f172a" },
+] as const;
+
+const cellColorOptions = [
+  { value: "", label: "없음", background: "transparent", text: "#0f172a" },
+  { value: "cell-blue", label: "파랑", background: "#1d4ed8", text: "#ffffff" },
+  { value: "cell-green", label: "초록", background: "#047857", text: "#ffffff" },
+  { value: "cell-red", label: "빨강", background: "#be123c", text: "#ffffff" },
+  { value: "cell-purple", label: "보라", background: "#6d28d9", text: "#ffffff" },
+  { value: "cell-amber", label: "갈색", background: "#b45309", text: "#ffffff" },
+  { value: "cell-slate", label: "진회색", background: "#334155", text: "#ffffff" },
+] as const;
+
+type TableMeasurements = {
+  headerHeight: number;
+  rowHeights: Record<string, number>;
+};
 
 function getTableColumnClassName(column: string) {
-  if (column === "관리") return styles.managementColumn;
   if (column === "#") return styles.numberColumn;
   if (column === "코리아풀영상") return styles.poolVideoColumn;
   if (staffNameColumns.has(column)) return styles.nameColumn;
@@ -112,6 +140,14 @@ function renderTableColumnLabel(column: string) {
     );
   }
   return column;
+}
+
+function areTableMeasurementsEqual(left: TableMeasurements, right: TableMeasurements) {
+  if (left.headerHeight !== right.headerHeight) return false;
+  const leftKeys = Object.keys(left.rowHeights);
+  const rightKeys = Object.keys(right.rowHeights);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left.rowHeights[key] === right.rowHeights[key]);
 }
 
 function normalizeRegionValue(value: string | null | undefined) {
@@ -157,6 +193,50 @@ function canMovePointWithinRegion(points: Pick<ElectionPointInput, "region">[], 
   return direction === "up" ? index > range.start : index < range.end;
 }
 
+function getRegionColorOption(value: string) {
+  return regionColorOptions.find((option) => option.value === value);
+}
+
+function getCellColorOption(value: string) {
+  return cellColorOptions.find((option) => option.value === value);
+}
+
+function getRegionGroupColor(points: Pick<ElectionPointInput, "region" | "regionColor">[], index: number) {
+  const range = getRegionGroupRange(points, index);
+  for (let pointIndex = range.start; pointIndex <= range.end; pointIndex += 1) {
+    const color = points[pointIndex]?.regionColor?.trim() ?? "";
+    if (getRegionColorOption(color)?.value) return color;
+  }
+  return "";
+}
+
+function getCellColor(point: Pick<ElectionPointInput, "cellColors">, key: ElectionCellColorKey) {
+  const color = point.cellColors?.[key]?.trim() ?? "";
+  return getCellColorOption(color)?.value ? color : "";
+}
+
+function getCellDisplayColor(points: ElectionPointInput[], point: ElectionPointInput, index: number, key: ElectionCellColorKey) {
+  return getCellColor(point, key) || getRegionGroupColor(points, index);
+}
+
+function getColorStyle(value: string): CSSProperties | undefined {
+  const option = getCellColorOption(value) ?? getRegionColorOption(value);
+  if (!option?.value) return undefined;
+  return {
+    "--election-cell-bg": option.background,
+    "--election-cell-color": option.text,
+  } as CSSProperties;
+}
+
+function getColorableCellClassName(baseClassName: string | undefined, color: string) {
+  return [
+    baseClassName,
+    styles.colorableCell,
+    color ? styles.coloredCell : "",
+    getCellColorOption(color)?.value ? styles.darkColorCell : "",
+  ].filter(Boolean).join(" ");
+}
+
 function ReorderMenu({
   label,
   canMoveUp,
@@ -195,6 +275,53 @@ function ReorderMenu({
   );
 }
 
+function ColorMenu({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string; background: string; text: string }[];
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <details className={styles.colorMenu}>
+      <summary className={styles.colorMenuButton} title={label} aria-label={label}>
+        <span
+          className={`${styles.colorSwatch} ${selected.value ? "" : styles.colorSwatchEmpty}`.trim()}
+          style={selected.value ? { backgroundColor: selected.background } : undefined}
+        />
+      </summary>
+      <span className={styles.colorPalette}>
+        {options.map((option) => (
+          <button
+            type="button"
+            key={option.value || "none"}
+            className={`${styles.colorOption} ${option.value === value ? styles.colorOptionSelected : ""}`.trim()}
+            disabled={disabled}
+            onClick={(event) => {
+              event.currentTarget.closest("details")?.removeAttribute("open");
+              onChange(option.value);
+            }}
+            title={`${label}: ${option.label}`}
+            aria-label={`${label}: ${option.label}`}
+          >
+            <span
+              className={`${styles.colorSwatch} ${option.value ? "" : styles.colorSwatchEmpty}`.trim()}
+              style={option.value ? { backgroundColor: option.background } : undefined}
+            />
+          </button>
+        ))}
+      </span>
+    </details>
+  );
+}
+
 function upsertElectionPrintPageStyle(paperSize: PrintPaperSize, orientation: PrintOrientation) {
   const styleText = `@page { size: ${paperSize} ${orientation}; margin: 10mm; }`;
   let styleElement = document.getElementById(ELECTION_PRINT_STYLE_ID) as HTMLStyleElement | null;
@@ -209,16 +336,20 @@ function upsertElectionPrintPageStyle(paperSize: PrintPaperSize, orientation: Pr
 function ElectionPrintControls({
   paperSize,
   orientation,
+  colorMode,
   disabled,
   onPaperSizeChange,
   onOrientationChange,
+  onColorModeChange,
   onPrint,
 }: {
   paperSize: PrintPaperSize;
   orientation: PrintOrientation;
+  colorMode: PrintColorMode;
   disabled?: boolean;
   onPaperSizeChange: (value: PrintPaperSize) => void;
   onOrientationChange: (value: PrintOrientation) => void;
+  onColorModeChange: (value: PrintColorMode) => void;
   onPrint: () => void;
 }) {
   return (
@@ -240,6 +371,15 @@ function ElectionPrintControls({
       >
         <option value="portrait">세로</option>
         <option value="landscape">가로</option>
+      </select>
+      <select
+        className="field-select"
+        value={colorMode}
+        aria-label="출력 컬러"
+        onChange={(event) => onColorModeChange(event.target.value as PrintColorMode)}
+      >
+        <option value="color">컬러</option>
+        <option value="mono">흑백</option>
       </select>
       <button type="button" className="btn" disabled={disabled} onClick={onPrint}>
         출력
@@ -281,6 +421,8 @@ function createBlankPoint(sortOrder = 0): DraftPoint {
     note: "",
     livePosition: "",
     lighting: "",
+    regionColor: "",
+    cellColors: {},
     isActive: true,
   };
 }
@@ -327,6 +469,8 @@ function eventToDraft(event: ElectionEvent): DraftEvent {
           note: point.note,
           livePosition: point.livePosition,
           lighting: point.lighting,
+          regionColor: point.regionColor,
+          cellColors: point.cellColors,
           isActive: point.isActive,
         }))
       : [createBlankPoint(0)],
@@ -397,6 +541,28 @@ function readOnlySplitValue(morning: string | null | undefined, afternoon: strin
       <span><b>오전</b>{morningText}</span>
       <span><b>오후</b>{afternoonText}</span>
     </span>
+  );
+}
+
+function CellColorMenu({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <ColorMenu
+      label={`${label} 칸 색상`}
+      value={value}
+      options={cellColorOptions}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
 
@@ -479,26 +645,45 @@ function ElectionPrintableTable({
           {points.length ? (
             points.map((point, index) => {
               const regionRowSpan = getRegionRowSpan(points, index);
+              const regionColor = getRegionGroupColor(points, index);
+              const placeColor = getCellDisplayColor(points, point, index, "place");
+              const poolVideoColor = getCellDisplayColor(points, point, index, "poolVideo");
+              const equipmentNameColor = getCellDisplayColor(points, point, index, "equipmentName");
+              const trsColor = getCellDisplayColor(points, point, index, "trs");
+              const cameraStaffColor = getCellDisplayColor(points, point, index, "cameraStaff");
+              const audioStaffColor = getCellDisplayColor(points, point, index, "audioStaff");
+              const liveTimeColor = getCellDisplayColor(points, point, index, "liveTime");
+              const reporterColor = getCellDisplayColor(points, point, index, "reporter");
+              const addressColor = getCellDisplayColor(points, point, index, "address");
+              const noteColor = getCellDisplayColor(points, point, index, "note");
+              const livePositionColor = getCellDisplayColor(points, point, index, "livePosition");
+              const lightingColor = getCellDisplayColor(points, point, index, "lighting");
               return (
                 <tr key={`${point.sortOrder}-${index}`}>
                   <td className={styles.numberCell}>{index + 1}.</td>
                   {regionRowSpan > 0 ? (
-                    <td rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}>{readOnlyValue(point.region)}</td>
+                    <td
+                      className={getColorableCellClassName(undefined, regionColor)}
+                      style={getColorStyle(regionColor)}
+                      rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
+                    >
+                      {readOnlyValue(point.region)}
+                    </td>
                   ) : null}
-                  <td>{readOnlyValue(point.place)}</td>
-                  <td className={styles.poolVideoColumn}>{readOnlyValue(point.poolVideo)}</td>
-                  <td>{readOnlyValue(point.equipmentName)}</td>
-                  <td>{readOnlyValue(point.trs)}</td>
-                  <td className={styles.nameColumn}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
-                  <td className={styles.nameColumn}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                  <td className={styles.timeColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
-                  <td className={styles.nameColumn}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
-                  <td className={styles.addressColumn}>{readOnlyValue(point.address)}</td>
-                  <td className={styles.wideColumn}>{readOnlyValue(point.note)}</td>
-                  <td className={styles.positionColumn}>
+                  <td className={getColorableCellClassName(undefined, placeColor)} style={getColorStyle(placeColor)}>{readOnlyValue(point.place)}</td>
+                  <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>{readOnlyValue(point.poolVideo)}</td>
+                  <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>{readOnlyValue(point.equipmentName)}</td>
+                  <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>{readOnlyValue(point.trs)}</td>
+                  <td className={getColorableCellClassName(styles.nameColumn, cameraStaffColor)} style={getColorStyle(cameraStaffColor)}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                  <td className={getColorableCellClassName(styles.nameColumn, audioStaffColor)} style={getColorStyle(audioStaffColor)}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                  <td className={getColorableCellClassName(styles.timeColumn, liveTimeColor)} style={getColorStyle(liveTimeColor)}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                  <td className={getColorableCellClassName(styles.nameColumn, reporterColor)} style={getColorStyle(reporterColor)}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                  <td className={getColorableCellClassName(styles.addressColumn, addressColor)} style={getColorStyle(addressColor)}>{readOnlyValue(point.address)}</td>
+                  <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>{readOnlyValue(point.note)}</td>
+                  <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
                     <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
                   </td>
-                  <td>{readOnlyValue(point.lighting)}</td>
+                  <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>{readOnlyValue(point.lighting)}</td>
                 </tr>
               );
             })
@@ -538,28 +723,45 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
               {event.points.length ? (
                 event.points.map((point, index) => {
                   const regionRowSpan = getRegionRowSpan(event.points, index);
+                  const regionColor = getRegionGroupColor(event.points, index);
+                  const placeColor = getCellDisplayColor(event.points, point, index, "place");
+                  const poolVideoColor = getCellDisplayColor(event.points, point, index, "poolVideo");
+                  const equipmentNameColor = getCellDisplayColor(event.points, point, index, "equipmentName");
+                  const trsColor = getCellDisplayColor(event.points, point, index, "trs");
+                  const cameraStaffColor = getCellDisplayColor(event.points, point, index, "cameraStaff");
+                  const audioStaffColor = getCellDisplayColor(event.points, point, index, "audioStaff");
+                  const liveTimeColor = getCellDisplayColor(event.points, point, index, "liveTime");
+                  const reporterColor = getCellDisplayColor(event.points, point, index, "reporter");
+                  const addressColor = getCellDisplayColor(event.points, point, index, "address");
+                  const noteColor = getCellDisplayColor(event.points, point, index, "note");
+                  const livePositionColor = getCellDisplayColor(event.points, point, index, "livePosition");
+                  const lightingColor = getCellDisplayColor(event.points, point, index, "lighting");
                   return (
                   <tr key={point.id}>
                     <td className={styles.numberCell}>{index + 1}.</td>
                     {regionRowSpan > 0 ? (
-                      <td rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}>
+                      <td
+                        className={getColorableCellClassName(undefined, regionColor)}
+                        style={getColorStyle(regionColor)}
+                        rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
+                      >
                         {readOnlyValue(point.region)}
                       </td>
                     ) : null}
-                    <td>{readOnlyValue(point.place)}</td>
-                    <td className={styles.poolVideoColumn}>{readOnlyValue(point.poolVideo)}</td>
-                    <td>{readOnlyValue(point.equipmentName)}</td>
-                    <td>{readOnlyValue(point.trs)}</td>
-                    <td className={styles.nameColumn}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
-                    <td className={styles.nameColumn}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                    <td className={styles.timeColumn}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
-                    <td className={styles.nameColumn}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
-                    <td className={styles.addressColumn}>{readOnlyValue(point.address)}</td>
-                    <td className={styles.wideColumn}>{readOnlyValue(point.note)}</td>
-                    <td className={styles.positionColumn}>
+                    <td className={getColorableCellClassName(undefined, placeColor)} style={getColorStyle(placeColor)}>{readOnlyValue(point.place)}</td>
+                    <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>{readOnlyValue(point.poolVideo)}</td>
+                    <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>{readOnlyValue(point.equipmentName)}</td>
+                    <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>{readOnlyValue(point.trs)}</td>
+                    <td className={getColorableCellClassName(styles.nameColumn, cameraStaffColor)} style={getColorStyle(cameraStaffColor)}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                    <td className={getColorableCellClassName(styles.nameColumn, audioStaffColor)} style={getColorStyle(audioStaffColor)}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                    <td className={getColorableCellClassName(styles.timeColumn, liveTimeColor)} style={getColorStyle(liveTimeColor)}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                    <td className={getColorableCellClassName(styles.nameColumn, reporterColor)} style={getColorStyle(reporterColor)}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                    <td className={getColorableCellClassName(styles.addressColumn, addressColor)} style={getColorStyle(addressColor)}>{readOnlyValue(point.address)}</td>
+                    <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>{readOnlyValue(point.note)}</td>
+                    <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
                       <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
                     </td>
-                    <td>{readOnlyValue(point.lighting)}</td>
+                    <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>{readOnlyValue(point.lighting)}</td>
                   </tr>
                   );
                 })
@@ -591,18 +793,68 @@ export function ElectionPage() {
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>("idle");
   const [printPaperSize, setPrintPaperSize] = useState<PrintPaperSize>("A3");
   const [printOrientation, setPrintOrientation] = useState<PrintOrientation>("portrait");
+  const [printColorMode, setPrintColorMode] = useState<PrintColorMode>("color");
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const autoSaveInFlightRef = useRef(false);
   const autoSavePendingRef = useRef(false);
   const lastSavedSignatureRef = useRef("");
+  const tableHeaderRowRef = useRef<HTMLTableRowElement | null>(null);
+  const tableRowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const [tableMeasurements, setTableMeasurements] = useState<TableMeasurements>({ headerHeight: 0, rowHeights: {} });
 
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
+  const pointMeasurementKey = draft?.points.map((point) => point.localId).join("|") ?? "";
+
+  const setPointRowRef = useCallback((localId: string, element: HTMLTableRowElement | null) => {
+    if (element) {
+      tableRowRefs.current.set(localId, element);
+      return;
+    }
+    tableRowRefs.current.delete(localId);
+  }, []);
 
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  useLayoutEffect(() => {
+    if (!draft) {
+      setTableMeasurements({ headerHeight: 0, rowHeights: {} });
+      return;
+    }
+
+    const updateMeasurements = () => {
+      const nextMeasurements: TableMeasurements = {
+        headerHeight: tableHeaderRowRef.current?.getBoundingClientRect().height ?? 0,
+        rowHeights: {},
+      };
+      for (const point of draft.points) {
+        const row = tableRowRefs.current.get(point.localId);
+        if (row) {
+          nextMeasurements.rowHeights[point.localId] = row.getBoundingClientRect().height;
+        }
+      }
+      setTableMeasurements((current) => (
+        areTableMeasurementsEqual(current, nextMeasurements) ? current : nextMeasurements
+      ));
+    };
+
+    updateMeasurements();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const resizeObserver = new ResizeObserver(updateMeasurements);
+    if (tableHeaderRowRef.current) resizeObserver.observe(tableHeaderRowRef.current);
+    for (const point of draft.points) {
+      const row = tableRowRefs.current.get(point.localId);
+      if (row) resizeObserver.observe(row);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [draft, pointMeasurementKey]);
 
   const clearAutoSaveTimer = useCallback(() => {
     if (autoSaveTimerRef.current === null) return;
@@ -736,6 +988,7 @@ export function ElectionPage() {
   useEffect(() => {
     const clearPrintMode = () => {
       document.body.classList.remove("election-print-mode");
+      document.body.classList.remove(ELECTION_PRINT_COLOR_MODE_CLASS);
     };
 
     window.addEventListener("afterprint", clearPrintMode);
@@ -748,6 +1001,7 @@ export function ElectionPage() {
   const printElectionBoard = () => {
     upsertElectionPrintPageStyle(printPaperSize, printOrientation);
     document.body.classList.add("election-print-mode");
+    document.body.classList.toggle(ELECTION_PRINT_COLOR_MODE_CLASS, printColorMode === "color");
     window.setTimeout(() => window.print(), 0);
   };
 
@@ -778,15 +1032,52 @@ export function ElectionPage() {
     });
   };
 
+  const updateRegionGroupColor = (index: number, regionColor: string) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const range = getRegionGroupRange(current.points, index);
+      return {
+        ...current,
+        points: current.points.map((point, pointIndex) =>
+          pointIndex >= range.start && pointIndex <= range.end ? { ...point, regionColor } : point,
+        ),
+      };
+    });
+  };
+
+  const updatePointCellColor = (index: number, key: ElectionCellColorKey, color: string) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const point = current.points[index];
+      if (!point) return current;
+
+      const nextCellColors: ElectionCellColors = { ...point.cellColors };
+      if (color) {
+        nextCellColors[key] = color;
+      } else {
+        delete nextCellColors[key];
+      }
+
+      return {
+        ...current,
+        points: current.points.map((currentPoint, pointIndex) =>
+          pointIndex === index ? { ...currentPoint, cellColors: nextCellColors } : currentPoint,
+        ),
+      };
+    });
+  };
+
   const addPointToRegion = (index: number) => {
     setDraft((current) => {
       if (!current) return current;
       const range = getRegionGroupRange(current.points, index);
       const region = current.points[range.start]?.region ?? "";
+      const regionColor = getRegionGroupColor(current.points, index);
       if (!region.trim()) return current;
       const nextPoint = {
         ...createBlankPoint(current.points.length),
         region,
+        regionColor,
       };
       return {
         ...current,
@@ -969,9 +1260,11 @@ export function ElectionPage() {
                 <ElectionPrintControls
                   paperSize={printPaperSize}
                   orientation={printOrientation}
+                  colorMode={printColorMode}
                   disabled={!publishedEvent}
                   onPaperSizeChange={setPrintPaperSize}
                   onOrientationChange={setPrintOrientation}
+                  onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
                 />
               </div>
@@ -1020,9 +1313,11 @@ export function ElectionPage() {
               <ElectionPrintControls
                 paperSize={printPaperSize}
                 orientation={printOrientation}
+                colorMode={printColorMode}
                 disabled={!draft}
                 onPaperSizeChange={setPrintPaperSize}
                 onOrientationChange={setPrintOrientation}
+                onColorModeChange={setPrintColorMode}
                 onPrint={printElectionBoard}
               />
               <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
@@ -1083,23 +1378,23 @@ export function ElectionPage() {
                   <option key={name} value={name} />
                 ))}
               </datalist>
-              <div className={styles.tableWrap}>
-                <table className={`table-like ${styles.table}`}>
-                  <thead>
-                    <tr>
-                      {tableColumns.map((column) => (
-                        <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
+              <div className={styles.tableShell}>
+                <div className={styles.managementRail} aria-label="행 관리">
+                  <div
+                    className={styles.managementRailHeader}
+                    style={tableMeasurements.headerHeight ? { height: tableMeasurements.headerHeight } : undefined}
+                  >
+                    관리
+                  </div>
+                  <div className={styles.managementRailBody}>
                     {draft.points.map((point, index) => {
                       const split = isPointSplit(point);
-                      const regionRowSpan = getRegionRowSpan(draft.points, index);
-                      const hasRegionText = Boolean(normalizeRegionValue(point.region));
                       return (
-                      <tr key={point.localId}>
-                        <td className={styles.managementColumn}>
+                        <div
+                          key={point.localId}
+                          className={styles.managementRailCell}
+                          style={tableMeasurements.rowHeights[point.localId] ? { height: tableMeasurements.rowHeights[point.localId] } : undefined}
+                        >
                           <div className={styles.rowActions}>
                             <button
                               type="button"
@@ -1113,17 +1408,58 @@ export function ElectionPage() {
                               삭제
                             </button>
                           </div>
-                        </td>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className={styles.tableWrap}>
+                  <table className={`table-like ${styles.table}`}>
+                    <thead>
+                      <tr ref={tableHeaderRowRef}>
+                        {tableColumns.map((column) => (
+                          <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                  <tbody>
+                    {draft.points.map((point, index) => {
+                      const split = isPointSplit(point);
+                      const regionRowSpan = getRegionRowSpan(draft.points, index);
+                      const hasRegionText = Boolean(normalizeRegionValue(point.region));
+                      const regionColor = getRegionGroupColor(draft.points, index);
+                      const placeColor = getCellDisplayColor(draft.points, point, index, "place");
+                      const poolVideoColor = getCellDisplayColor(draft.points, point, index, "poolVideo");
+                      const equipmentNameColor = getCellDisplayColor(draft.points, point, index, "equipmentName");
+                      const trsColor = getCellDisplayColor(draft.points, point, index, "trs");
+                      const cameraStaffColor = getCellDisplayColor(draft.points, point, index, "cameraStaff");
+                      const audioStaffColor = getCellDisplayColor(draft.points, point, index, "audioStaff");
+                      const liveTimeColor = getCellDisplayColor(draft.points, point, index, "liveTime");
+                      const reporterColor = getCellDisplayColor(draft.points, point, index, "reporter");
+                      const addressColor = getCellDisplayColor(draft.points, point, index, "address");
+                      const noteColor = getCellDisplayColor(draft.points, point, index, "note");
+                      const livePositionColor = getCellDisplayColor(draft.points, point, index, "livePosition");
+                      const lightingColor = getCellDisplayColor(draft.points, point, index, "lighting");
+                      return (
+                      <tr key={point.localId} ref={(element) => setPointRowRef(point.localId, element)}>
                         <td className={styles.numberCell}>
                           {index + 1}.
                         </td>
                         {regionRowSpan > 0 ? (
                           <td
-                            className={styles.regionColumn}
+                            className={getColorableCellClassName(styles.regionColumn, regionColor)}
+                            style={getColorStyle(regionColor)}
                             rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
                           >
                             <div className={styles.regionCellInner}>
                               <input className="field-input" value={point.region} onChange={(event) => updateRegionGroup(index, event.target.value)} />
+                              <ColorMenu
+                                label="지역 색상"
+                                value={regionColor}
+                                options={regionColorOptions}
+                                disabled={saving}
+                                onChange={(value) => updateRegionGroupColor(index, value)}
+                              />
                               {hasRegionText ? (
                                 <div className={styles.cellActionRow}>
                                   <button
@@ -1148,9 +1484,15 @@ export function ElectionPage() {
                             </div>
                           </td>
                         ) : null}
-                        <td className={styles.placeColumn}>
+                        <td className={getColorableCellClassName(styles.placeColumn, placeColor)} style={getColorStyle(placeColor)}>
                           <div className={styles.placeCellInner}>
                             <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                            <CellColorMenu
+                              label="장소"
+                              value={getCellColor(point, "place")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "place", value)}
+                            />
                             {hasRegionText ? (
                               <ReorderMenu
                                 label="장소"
@@ -1162,102 +1504,191 @@ export function ElectionPage() {
                             ) : null}
                           </div>
                         </td>
-                        <td className={styles.poolVideoColumn}>
-                          <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
-                            <option value="">선택</option>
-                            {getPoolVideoOptions(point.poolVideo).map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
-                        </td>
-                        <td>
-                          <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
-                        </td>
-                        <td className={styles.nameColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.cameraStaffName}
-                              afternoon={point.cameraStaffNamePm}
-                              listId="election-profile-options"
-                              onMorningChange={(value) => updateCameraStaff(index, "am", value)}
-                              onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
+                        <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>
+                          <div className={styles.cellEditor}>
+                            <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
+                              <option value=""></option>
+                              {getPoolVideoOptions(point.poolVideo).map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                            <CellColorMenu
+                              label="코리아풀영상"
+                              value={getCellColor(point, "poolVideo")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "poolVideo", value)}
                             />
-                          ) : (
-                            <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
-                          )}
+                          </div>
                         </td>
-                        <td className={styles.nameColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.audioStaffName}
-                              afternoon={point.audioStaffNamePm}
-                              onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
-                              onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
+                        <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>
+                          <div className={styles.cellEditor}>
+                            <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
+                            <CellColorMenu
+                              label="장비배정"
+                              value={getCellColor(point, "equipmentName")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "equipmentName", value)}
                             />
-                          ) : (
-                            <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
-                          )}
+                          </div>
                         </td>
-                        <td className={styles.timeColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.liveTime}
-                              afternoon={point.liveTimePm}
-                              placeholder="10:00 - 12:00"
-                              onMorningChange={(value) => updatePoint(index, { liveTime: value })}
-                              onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
+                        <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>
+                          <div className={styles.cellEditor}>
+                            <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
+                            <CellColorMenu
+                              label="TRS"
+                              value={getCellColor(point, "trs")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "trs", value)}
                             />
-                          ) : (
-                            <input className="field-input" value={point.liveTime} placeholder="10:00 - 12:00" onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
-                          )}
+                          </div>
                         </td>
-                        <td className={styles.nameColumn}>
-                          {split ? (
-                            <SplitTextInput
-                              morning={point.reporterName}
-                              afternoon={point.reporterNamePm}
-                              onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
-                              onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
+                        <td className={getColorableCellClassName(styles.nameColumn, cameraStaffColor)} style={getColorStyle(cameraStaffColor)}>
+                          <div className={styles.cellEditor}>
+                            {split ? (
+                              <SplitTextInput
+                                morning={point.cameraStaffName}
+                                afternoon={point.cameraStaffNamePm}
+                                listId="election-profile-options"
+                                onMorningChange={(value) => updateCameraStaff(index, "am", value)}
+                                onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
+                              />
+                            ) : (
+                              <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
+                            )}
+                            <CellColorMenu
+                              label="촬영기자"
+                              value={getCellColor(point, "cameraStaff")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "cameraStaff", value)}
                             />
-                          ) : (
-                            <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
-                          )}
+                          </div>
                         </td>
-                        <td className={styles.addressColumn}>
-                          <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
-                        </td>
-                        <td className={styles.wideColumn}>
-                          <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
-                        </td>
-                        <td className={styles.positionColumn}>
-                          <label
-                            className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
-                            title="중계자리"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isLivePositionChecked(point.livePosition)}
-                              onChange={(event) =>
-                                updatePoint(index, {
-                                  livePosition: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
-                                })
-                              }
+                        <td className={getColorableCellClassName(styles.nameColumn, audioStaffColor)} style={getColorStyle(audioStaffColor)}>
+                          <div className={styles.cellEditor}>
+                            {split ? (
+                              <SplitTextInput
+                                morning={point.audioStaffName}
+                                afternoon={point.audioStaffNamePm}
+                                onMorningChange={(value) => updatePoint(index, { audioStaffName: value, audioStaffUserId: null })}
+                                onAfternoonChange={(value) => updatePoint(index, { audioStaffNamePm: value })}
+                              />
+                            ) : (
+                              <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
+                            )}
+                            <CellColorMenu
+                              label="오디오맨"
+                              value={getCellColor(point, "audioStaff")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "audioStaff", value)}
                             />
-                          </label>
+                          </div>
                         </td>
-                        <td>
-                          <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
+                        <td className={getColorableCellClassName(styles.timeColumn, liveTimeColor)} style={getColorStyle(liveTimeColor)}>
+                          <div className={styles.cellEditor}>
+                            {split ? (
+                              <SplitTextInput
+                                morning={point.liveTime}
+                                afternoon={point.liveTimePm}
+                                placeholder="10:00 - 12:00"
+                                onMorningChange={(value) => updatePoint(index, { liveTime: value })}
+                                onAfternoonChange={(value) => updatePoint(index, { liveTimePm: value })}
+                              />
+                            ) : (
+                              <input className="field-input" value={point.liveTime} placeholder="10:00 - 12:00" onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
+                            )}
+                            <CellColorMenu
+                              label="중계시간"
+                              value={getCellColor(point, "liveTime")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "liveTime", value)}
+                            />
+                          </div>
+                        </td>
+                        <td className={getColorableCellClassName(styles.nameColumn, reporterColor)} style={getColorStyle(reporterColor)}>
+                          <div className={styles.cellEditor}>
+                            {split ? (
+                              <SplitTextInput
+                                morning={point.reporterName}
+                                afternoon={point.reporterNamePm}
+                                onMorningChange={(value) => updatePoint(index, { reporterName: value, reporterUserId: null })}
+                                onAfternoonChange={(value) => updatePoint(index, { reporterNamePm: value })}
+                              />
+                            ) : (
+                              <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
+                            )}
+                            <CellColorMenu
+                              label="취재기자"
+                              value={getCellColor(point, "reporter")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "reporter", value)}
+                            />
+                          </div>
+                        </td>
+                        <td className={getColorableCellClassName(styles.addressColumn, addressColor)} style={getColorStyle(addressColor)}>
+                          <div className={styles.cellEditor}>
+                            <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
+                            <CellColorMenu
+                              label="주소"
+                              value={getCellColor(point, "address")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "address", value)}
+                            />
+                          </div>
+                        </td>
+                        <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>
+                          <div className={styles.cellEditor}>
+                            <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
+                            <CellColorMenu
+                              label="비고"
+                              value={getCellColor(point, "note")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "note", value)}
+                            />
+                          </div>
+                        </td>
+                        <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
+                          <div className={styles.positionCellInner}>
+                            <label
+                              className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
+                              title="중계자리"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isLivePositionChecked(point.livePosition)}
+                                onChange={(event) =>
+                                  updatePoint(index, {
+                                    livePosition: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
+                                  })
+                                }
+                              />
+                            </label>
+                            <CellColorMenu
+                              label="중계자리"
+                              value={getCellColor(point, "livePosition")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "livePosition", value)}
+                            />
+                          </div>
+                        </td>
+                        <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>
+                          <div className={styles.cellEditor}>
+                            <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
+                            <CellColorMenu
+                              label="조명"
+                              value={getCellColor(point, "lighting")}
+                              disabled={saving}
+                              onChange={(value) => updatePointCellColor(index, "lighting", value)}
+                            />
+                          </div>
                         </td>
                       </tr>
                     );
                     })}
-                  </tbody>
-                </table>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
             </article>

@@ -39,6 +39,8 @@ create table if not exists public.election_points (
   note text,
   live_position text,
   lighting text,
+  region_color text,
+  cell_colors jsonb not null default '{}'::jsonb,
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -49,7 +51,9 @@ alter table public.election_points
   add column if not exists camera_staff_user_id_pm uuid references public.profiles (id) on delete set null,
   add column if not exists audio_staff_name_pm text,
   add column if not exists reporter_name_pm text,
-  add column if not exists live_time_pm text;
+  add column if not exists live_time_pm text,
+  add column if not exists region_color text,
+  add column if not exists cell_colors jsonb not null default '{}'::jsonb;
 
 create unique index if not exists election_events_single_open_idx
 on public.election_events ((true))
