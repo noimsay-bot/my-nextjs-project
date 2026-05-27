@@ -794,14 +794,19 @@ function readOnlySplitValue(morning: string | null | undefined, afternoon: strin
   );
 }
 
-function getPrintTableStyle(pointCount: number) {
+function getPrintTableStyle(pointCount: number, orientation: PrintOrientation) {
   const fontSize = pointCount <= 6 ? 12 : pointCount <= 10 ? 11 : pointCount <= 16 ? 10 : pointCount <= 24 ? 9 : 8.4;
   const headerFontSize = Math.max(8.8, fontSize - 0.6);
   const splitLabelFontSize = Math.max(7.6, fontSize - 1.4);
+  const nameBoost = orientation === "portrait"
+    ? pointCount <= 10 ? 2.2 : pointCount <= 18 ? 1.8 : pointCount <= 28 ? 1.45 : 1.15
+    : pointCount <= 18 ? 1.2 : 0.9;
+  const nameFontSize = fontSize + nameBoost;
   const cellPadding = pointCount <= 10 ? "5px 3px" : pointCount <= 18 ? "4px 3px" : "3px 2px";
 
   return {
     "--election-print-font-size": `${fontSize}px`,
+    "--election-print-name-font-size": `${nameFontSize}px`,
     "--election-print-header-font-size": `${headerFontSize}px`,
     "--election-print-split-label-font-size": `${splitLabelFontSize}px`,
     "--election-print-cell-padding": cellPadding,
@@ -920,10 +925,12 @@ function ElectionPrintableTable({
   title,
   electionDate,
   points,
+  orientation,
 }: {
   title: string;
   electionDate: string;
   points: ElectionPointInput[];
+  orientation: PrintOrientation;
 }) {
   return (
     <article className={styles.printSheet}>
@@ -931,7 +938,7 @@ function ElectionPrintableTable({
         <h1>{formatElectionBoardTitle(title)}</h1>
         <span>{electionDate}</span>
       </header>
-      <table className={styles.printTable} style={getPrintTableStyle(points.length)}>
+      <table className={styles.printTable} style={getPrintTableStyle(points.length, orientation)}>
         <thead>
           <tr>
             {readOnlyTableColumns.map((column) => (
@@ -1264,6 +1271,17 @@ export function ElectionPage() {
       .filter((point) => pointMatchesSession(point, currentSession))
       .map(getPointLocationKey);
 
+    const alreadyHighlighted =
+      nextKeys.length > 0 &&
+      nextKeys.length === highlightedLocationKeys.length &&
+      nextKeys.every((key) => highlightedLocationKeys.includes(key));
+
+    if (alreadyHighlighted) {
+      setHighlightedLocationKeys([]);
+      setMessage({ tone: "note", text: "내 위치 강조를 해제했습니다." });
+      return;
+    }
+
     setHighlightedLocationKeys(nextKeys);
 
     if (!nextKeys.length) {
@@ -1279,7 +1297,7 @@ export function ElectionPage() {
         .querySelector<HTMLElement>(`[data-election-point-key="${escapedKey}"]`)
         ?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
-  }, [currentSession]);
+  }, [currentSession, highlightedLocationKeys]);
 
   const persistDraftSnapshot = useCallback(async (snapshot: DraftEvent, options?: { showMessage?: boolean }) => {
     const signature = getDraftSaveSignature(snapshot);
@@ -1718,7 +1736,7 @@ export function ElectionPage() {
         </div>
         {publishedEvent ? (
           <div className={styles.printOnly}>
-            <ElectionPrintableTable title={publishedEvent.title} electionDate={publishedEvent.electionDate} points={publishedEvent.points} />
+            <ElectionPrintableTable title={publishedEvent.title} electionDate={publishedEvent.electionDate} points={publishedEvent.points} orientation={printOrientation} />
           </div>
         ) : null}
       </section>
@@ -1770,6 +1788,7 @@ export function ElectionPage() {
             title={closedReadOnlyEvent.title}
             electionDate={closedReadOnlyEvent.electionDate}
             points={closedReadOnlyEvent.points}
+            orientation={printOrientation}
           />
         </div>
       </section>
@@ -2277,6 +2296,7 @@ export function ElectionPage() {
             title={draft.title}
             electionDate={draft.electionDate}
             points={draft.points}
+            orientation={printOrientation}
           />
         </div>
       ) : null}

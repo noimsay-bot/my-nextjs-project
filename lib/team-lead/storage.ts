@@ -2258,8 +2258,11 @@ interface ActiveTripState {
 }
 
 function getTripFlowKey(
-  trip: Pick<ActiveTripState, "tripTagLabel" | "travelType"> | null,
+  trip: Pick<ActiveTripState, "tripTagId" | "tripTagLabel" | "travelType"> | null,
 ) {
+  const tripTagId = trip?.tripTagId.trim() ?? "";
+  if (tripTagId) return `${trip?.travelType ?? ""}::${tripTagId}`;
+
   const label = trip?.tripTagLabel.trim() ?? "";
   const travelType = trip?.travelType ?? "";
   if (!label || !travelType || travelType === "당일출장") return "";
@@ -2272,6 +2275,7 @@ function isSameTripFlow(
 ) {
   if (!activeTrip || !explicitTrip) return false;
   if (explicitTrip.tripTagId && explicitTrip.tripTagId === activeTrip.tripTagId) return true;
+  if (explicitTrip.tripTagId && activeTrip.tripTagId) return false;
 
   const activeLabel = activeTrip.tripTagLabel.trim();
   const explicitLabel = explicitTrip.tripTagLabel.trim();

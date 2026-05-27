@@ -680,6 +680,8 @@ function isSameTripFlowEntry(
   visibleTripTag: Pick<ScheduleAssignmentVisibleTripTag, "tripTagId" | "tripTagLabel" | "travelType">,
 ) {
   if (entry.tripTagId && entry.tripTagId === visibleTripTag.tripTagId) return true;
+  if (entry.tripTagId && visibleTripTag.tripTagId) return false;
+
   const entryLabel = entry.tripTagLabel.trim();
   const visibleLabel = visibleTripTag.tripTagLabel.trim();
   if (!entryLabel || !visibleLabel) return false;
@@ -2613,8 +2615,13 @@ export function ScheduleAssignmentPage() {
     const targetName = row.name.trim();
     if (!targetName || !travelType || travelType === "당일출장") return null;
 
-    let bestMatch: { tripTagId: string; tripTagLabel: string; distance: number } | null = null;
-    const targetTime = new Date(`${targetDateKey}T00:00:00`).getTime();
+    const candidates: Array<{
+      dateKey: string;
+      rowKey: string;
+      tripTagId: string;
+      tripTagLabel: string;
+      phase: ScheduleAssignmentVisibleTripTag["phase"];
+    }> = [];
 
     schedules.forEach((schedule) => {
       const monthRows = store.rows[schedule.monthKey] ?? {};
@@ -2627,26 +2634,42 @@ export function ScheduleAssignmentPage() {
             scheduleBigEvents,
           );
           candidateRows.forEach((candidateRow) => {
-            if (schedule.monthKey === selectedMonthKey && candidateRow.key === row.key) return;
+            if (candidateRow.key === row.key) return;
+            if (dayItem.dateKey > targetDateKey) return;
             if (candidateRow.name.trim() !== targetName) return;
             const candidateTrip = visibleTripTagMap.get(candidateRow.key);
             if (!candidateTrip || candidateTrip.travelType !== travelType) return;
             if (!candidateTrip.tripTagId || !candidateTrip.tripTagLabel.trim()) return;
 
-            const candidateTime = new Date(`${dayItem.dateKey}T00:00:00`).getTime();
-            const distance = Math.abs(candidateTime - targetTime);
-            if (!bestMatch || distance < bestMatch.distance) {
-              bestMatch = {
-                tripTagId: candidateTrip.tripTagId,
-                tripTagLabel: candidateTrip.tripTagLabel,
-                distance,
-              };
-            }
+            candidates.push({
+              dateKey: dayItem.dateKey,
+              rowKey: candidateRow.key,
+              tripTagId: candidateTrip.tripTagId,
+              tripTagLabel: candidateTrip.tripTagLabel,
+              phase: candidateTrip.phase,
+            });
           });
         });
     });
 
-    return bestMatch;
+    let activeTrip: { tripTagId: string; tripTagLabel: string } | null = null;
+    candidates
+      .sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.rowKey.localeCompare(right.rowKey))
+      .forEach((candidate) => {
+        if (candidate.phase === "return") {
+          if (!activeTrip || activeTrip.tripTagId === candidate.tripTagId) {
+            activeTrip = null;
+          }
+          return;
+        }
+
+        activeTrip = {
+          tripTagId: candidate.tripTagId,
+          tripTagLabel: candidate.tripTagLabel,
+        };
+      });
+
+    return activeTrip;
   };
 
   const createTripTag = (

@@ -270,31 +270,100 @@
 
 .myLocationRow {
   position: relative;
-  z-index: 5;
-  animation: myLocationLift 1.6s ease-in-out 2;
-  filter: drop-shadow(0 16px 22px rgba(245, 158, 11, 0.24));
-  transform: perspective(900px) translateZ(18px) scale(1.012);
+  z-index: 20;
+  animation: myLocationLift 1.55s ease-in-out infinite;
+  filter: drop-shadow(0 18px 24px rgba(14, 165, 233, 0.32));
+  transform: perspective(900px) translateY(-2px) translateZ(24px) scale(1.016);
   transform-origin: center;
 }
 
 .myLocationRow > td {
-  border-top-color: rgba(245, 158, 11, 0.94) !important;
-  border-bottom-color: rgba(245, 158, 11, 0.94) !important;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  isolation: isolate;
+  background-color: rgba(224, 242, 254, 0.34) !important;
+  border-top-color: rgba(56, 189, 248, 0.98) !important;
+  border-bottom-color: rgba(56, 189, 248, 0.98) !important;
   box-shadow:
-    inset 0 0 0 2px rgba(250, 204, 21, 0.9),
-    0 10px 20px rgba(15, 23, 42, 0.16);
+    inset 0 0 0 3px rgba(56, 189, 248, 0.92),
+    inset 0 0 22px rgba(125, 211, 252, 0.34),
+    0 12px 24px rgba(15, 23, 42, 0.2);
+  transform: translateY(-2px) scale(1.01);
+}
+
+.myLocationRow > td:first-child {
+  border-left-color: rgba(56, 189, 248, 0.98) !important;
+}
+
+.myLocationRow > td:last-child {
+  border-right-color: rgba(56, 189, 248, 0.98) !important;
+}
+
+.myLocationRow > td::after {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0%, transparent 28%, #e0f2fe 43%, #38bdf8 50%, #0284c7 57%, transparent 72%, transparent 100%) top / 260% 4px no-repeat,
+    linear-gradient(90deg, transparent 0%, transparent 28%, #e0f2fe 43%, #38bdf8 50%, #0284c7 57%, transparent 72%, transparent 100%) bottom / 260% 4px no-repeat,
+    linear-gradient(180deg, transparent 0%, transparent 28%, #e0f2fe 43%, #38bdf8 50%, #0284c7 57%, transparent 72%, transparent 100%) left / 4px 260% no-repeat,
+    linear-gradient(180deg, transparent 0%, transparent 28%, #e0f2fe 43%, #38bdf8 50%, #0284c7 57%, transparent 72%, transparent 100%) right / 4px 260% no-repeat;
+  background-position:
+    220% 0,
+    -120% 100%,
+    0 -120%,
+    100% 220%;
+  content: "";
+  animation: myLocationBorderRun 1.05s linear infinite;
+}
+
+.myLocationRow > td::before {
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  border-radius: 3px;
+  background: linear-gradient(135deg, rgba(186, 230, 253, 0.52), rgba(14, 165, 233, 0.12));
+  content: "";
 }
 
 @keyframes myLocationLift {
   0%,
   100% {
-    filter: drop-shadow(0 16px 22px rgba(245, 158, 11, 0.24));
-    transform: perspective(900px) translateZ(18px) scale(1.012);
+    filter: drop-shadow(0 16px 22px rgba(14, 165, 233, 0.3));
+    transform: perspective(900px) translateY(-2px) translateZ(24px) scale(1.016);
   }
 
   50% {
-    filter: drop-shadow(0 22px 30px rgba(245, 158, 11, 0.42));
-    transform: perspective(900px) translateY(-4px) translateZ(28px) scale(1.018);
+    filter: drop-shadow(0 24px 34px rgba(14, 165, 233, 0.5));
+    transform: perspective(900px) translateY(-5px) translateZ(34px) scale(1.022);
+  }
+}
+
+@keyframes myLocationBorderRun {
+  0% {
+    background-position:
+      220% 0,
+      -120% 100%,
+      0 -120%,
+      100% 220%;
+  }
+
+  50% {
+    background-position:
+      -120% 0,
+      220% 100%,
+      0 220%,
+      100% -120%;
+  }
+
+  100% {
+    background-position:
+      -460% 0,
+      560% 100%,
+      0 560%,
+      100% -460%;
   }
 }
 
@@ -1042,6 +1111,26 @@ th.positionColumn {
   font-size: var(--election-print-split-label-font-size, 8px);
 }
 
+.printTable .nameColumn .readOnlyCell,
+.printTable .nameColumn .readOnlySplit {
+  font-size: var(--election-print-name-font-size, 11px);
+  font-weight: 900;
+  line-height: 1.14;
+}
+
+.printTable .nameColumn .readOnlySplit {
+  gap: 1px;
+}
+
+.printTable .nameColumn .readOnlySplit span {
+  align-items: center;
+}
+
+.printTable .nameColumn .readOnlySplit b {
+  font-size: var(--election-print-split-label-font-size, 8px);
+  line-height: 1;
+}
+
 @media (min-width: 1025px) {
   :global(.portal-sidebar__inset):has(.electionPageScope) {
     padding-left: var(--portal-sidebar-collapsed-width, 68px);
@@ -1187,5 +1276,13 @@ th.positionColumn {
 
   :global(body.election-print-mode) .positionReadOnlyOn {
     background: #111 !important;
+  }
+
+  :global(body.election-print-mode.election-print-color-mode) .positionReadOnlyOn {
+    border-color: rgba(34, 197, 94, 0.9) !important;
+    background: rgba(34, 197, 94, 0.34) !important;
+    box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.18) !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 }
