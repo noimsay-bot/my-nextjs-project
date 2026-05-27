@@ -1548,7 +1548,7 @@ export function ElectionPage() {
 
   if (loading) {
     return (
-      <section className={styles.page}>
+      <section className={`${styles.page} ${styles.electionPageScope}`}>
         <article className="panel">
           <div className="panel-pad">
             <div className="status note">선거 중계표를 불러오는 중입니다.</div>
@@ -1560,7 +1560,7 @@ export function ElectionPage() {
 
   if (!canManage) {
     return (
-      <section className={`${styles.page} ${styles.printRoot}`.trim()}>
+      <section className={`${styles.page} ${styles.printRoot} ${styles.electionPageScope}`.trim()}>
         <div className={styles.screenOnly}>
           <article className="panel">
             <div className={`panel-pad ${styles.header}`}>
@@ -1607,7 +1607,7 @@ export function ElectionPage() {
 
   if (closedReadOnlyEvent) {
     return (
-      <section className={`${styles.page} ${styles.printRoot}`.trim()}>
+      <section className={`${styles.page} ${styles.printRoot} ${styles.electionPageScope}`.trim()}>
         <div className={styles.screenOnly}>
           <article className="panel">
             <div className={`panel-pad ${styles.header}`}>
@@ -1650,7 +1650,7 @@ export function ElectionPage() {
   }
 
   return (
-    <section className={`${styles.page} ${styles.printRoot}`.trim()}>
+    <section className={`${styles.page} ${styles.printRoot} ${styles.electionPageScope}`.trim()}>
       <div className={styles.screenOnly}>
         <article className="panel">
           <div className={`panel-pad ${styles.header}`}>

@@ -3,6 +3,11 @@
   gap: 16px;
 }
 
+.electionPageScope {
+  width: 100%;
+  min-width: 0;
+}
+
 .printRoot {
   min-width: 0;
 }
@@ -208,6 +213,7 @@
   padding: 6px 4px;
   border: 1px solid var(--line);
   text-align: center;
+  vertical-align: middle !important;
 }
 
 .resizableHeader {
@@ -259,7 +265,7 @@
   padding: 5px 4px;
   border: 1px solid var(--line);
   text-align: center;
-  vertical-align: middle;
+  vertical-align: middle !important;
 }
 
 .regionColumn {
@@ -269,28 +275,37 @@
 .regionCellInner {
   display: grid;
   gap: 5px;
+  align-content: center;
+  align-items: center;
   justify-items: center;
+  min-height: 30px;
 }
 
 .placeCellInner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px;
+  align-content: center;
   align-items: center;
+  min-height: 30px;
 }
 
 .cellEditor {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
+  align-content: center;
   align-items: center;
+  min-height: 30px;
 }
 
 .addressEditor {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
-  align-items: start;
+  align-content: center;
+  align-items: center;
+  min-height: 30px;
 }
 
 .addressRows {
@@ -309,7 +324,10 @@
 .positionCellInner {
   display: grid;
   gap: 4px;
+  align-content: center;
+  align-items: center;
   justify-items: center;
+  min-height: 30px;
 }
 
 .colorPaintMenu {
@@ -471,21 +489,27 @@
 }
 
 .darkColorCell {
+  --election-cell-color: #ffffff;
   color: #ffffff !important;
 }
 
 .darkColorCell input,
-.darkColorCell select {
+.darkColorCell select,
+.darkColorCell textarea,
+.darkColorCell :global(.field-input) {
   border-color: rgba(255, 255, 255, 0.36);
   background: rgba(15, 23, 42, 0.28);
+  caret-color: #ffffff;
   color: #ffffff !important;
 }
 
-.darkColorCell input::placeholder {
-  color: rgba(255, 255, 255, 0.72);
+.darkColorCell input::placeholder,
+.darkColorCell textarea::placeholder,
+.darkColorCell :global(.field-input)::placeholder {
+  color: rgba(255, 255, 255, 0.78) !important;
 }
 
-.darkColorCell :where(label, span, b, button) {
+.darkColorCell :where(div, label, span, b, strong, small, button, svg) {
   color: #ffffff !important;
 }
 
@@ -498,6 +522,12 @@
 
 .darkColorCell .readOnlyCellEmpty {
   color: rgba(255, 255, 255, 0.72) !important;
+}
+
+:global(html[data-theme="light"]) .darkColorCell,
+:global(html[data-theme="light"]) .darkColorCell :where(div, label, span, b, strong, small, button, svg),
+:global(html[data-theme="light"]) .darkColorCell :global(.field-input) {
+  color: #ffffff !important;
 }
 
 .cellActionRow {
@@ -652,8 +682,9 @@ th.positionColumn {
 }
 
 .readOnlyCell {
-  display: block;
+  display: grid;
   min-height: 28px;
+  place-items: center;
   overflow-wrap: anywhere;
   color: var(--text);
   font-weight: 700;
@@ -675,6 +706,7 @@ th.positionColumn {
   display: grid;
   gap: 3px;
   min-height: 28px;
+  align-content: center;
   color: var(--text);
   font-size: 12px;
   font-weight: 800;
@@ -965,10 +997,24 @@ th.positionColumn {
 }
 
 @media (min-width: 1025px) {
-  .wideTablePanel {
-    width: min(calc(100vw - var(--portal-sidebar-collapsed-width, 68px) - 48px), 1880px);
+  :global(.portal-sidebar__inset):has(.electionPageScope) {
+    padding-left: var(--portal-sidebar-collapsed-width, 68px);
+    padding-right: 0;
+  }
+
+  :global(.portal-shell-main):has(.electionPageScope) {
+    width: 100%;
     max-width: none;
-    justify-self: center;
+    margin-right: 0;
+    margin-left: 0;
+    padding-right: 12px;
+    padding-left: 0;
+  }
+
+  .wideTablePanel {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
   }
 
   .wideTablePanel .tableWrap {
