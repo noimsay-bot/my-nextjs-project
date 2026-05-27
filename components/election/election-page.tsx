@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   closeElectionEvent,
   fetchElectionWorkspace,
@@ -18,7 +18,7 @@ import type {
   ElectionSaveInput,
   ElectionStatus,
 } from "@/lib/election/types";
-import { subscribeToAuth } from "@/lib/auth/storage";
+import { getSession, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
 import styles from "./Election.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
@@ -34,6 +34,8 @@ type PaintTarget = "region" | ElectionCellColorKey;
 interface DraftPoint extends ElectionPointInput {
   localId: string;
 }
+
+type LocationPoint = DraftPoint | ElectionPoint;
 
 interface DraftEvent {
   id: string | null;
@@ -91,6 +93,10 @@ const AUTO_SAVE_DEBOUNCE_MS = 900;
 const ELECTION_PRINT_STYLE_ID = "election-print-page-style";
 const ELECTION_PRINT_COLOR_MODE_CLASS = "election-print-color-mode";
 const ELECTION_COLUMN_WIDTH_STORAGE_KEY = "jtbc-election-column-widths-v1";
+const printPaperDimensions: Record<PrintPaperSize, { width: number; height: number }> = {
+  A3: { width: 297, height: 420 },
+  A4: { width: 210, height: 297 },
+};
 
 const defaultColumnWidths: Record<ElectionTableColumn, number> = {
   "#": 30,
@@ -175,6 +181,42 @@ function readStoredColumnWidths() {
 
 function getTableColumnsWidth(columns: readonly ElectionTableColumn[], widths: Record<ElectionTableColumn, number>) {
   return columns.reduce((sum, column) => sum + widths[column], 0);
+}
+
+function getPointLocationKey(point: LocationPoint) {
+  if ("localId" in point) return point.localId;
+  return point.id;
+}
+
+function normalizeLocationName(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/\s+/g, "") ?? "";
+}
+
+function locationTextIncludesUserName(value: string | null | undefined, username: string) {
+  const normalizedValue = normalizeLocationName(value);
+  const normalizedName = normalizeLocationName(username);
+  return Boolean(normalizedName && normalizedValue.includes(normalizedName));
+}
+
+function pointMatchesSession(point: LocationPoint, session: SessionUser) {
+  const userId = session.id;
+  const userIdMatched = [
+    point.cameraStaffUserId,
+    point.cameraStaffUserIdPm,
+    point.audioStaffUserId,
+    point.reporterUserId,
+  ].some((id) => Boolean(id && id === userId));
+
+  if (userIdMatched) return true;
+
+  return [
+    point.cameraStaffName,
+    point.cameraStaffNamePm,
+    point.audioStaffName,
+    point.audioStaffNamePm,
+    point.reporterName,
+    point.reporterNamePm,
+  ].some((name) => locationTextIncludesUserName(name, session.username));
 }
 
 function getTableColumnClassName(column: ElectionTableColumn) {
@@ -451,11 +493,27 @@ function ColorPaintMenu({
 }
 
 function upsertElectionPrintPageStyle(paperSize: PrintPaperSize, orientation: PrintOrientation) {
-  const styleText = `@page { size: ${paperSize} ${orientation}; margin: 10mm; }`;
+  const dimensions = printPaperDimensions[paperSize];
+  const width = orientation === "landscape" ? dimensions.height : dimensions.width;
+  const height = orientation === "landscape" ? dimensions.width : dimensions.height;
+  const styleText = `
+@page {
+  size: ${width}mm ${height}mm;
+  margin: 10mm;
+}
+
+@media print {
+  body.election-print-mode .${styles.printSheet} {
+    width: calc(${width}mm - 20mm);
+    min-height: calc(${height}mm - 20mm);
+  }
+}
+`;
   let styleElement = document.getElementById(ELECTION_PRINT_STYLE_ID) as HTMLStyleElement | null;
   if (!styleElement) {
     styleElement = document.createElement("style");
     styleElement.id = ELECTION_PRINT_STYLE_ID;
+    styleElement.media = "print";
     document.head.appendChild(styleElement);
   }
   styleElement.textContent = styleText;
@@ -773,12 +831,21 @@ function getPoolVideoOptions(value: string) {
   return [trimmed, ...poolVideoOptions];
 }
 
+function showInputPicker(input: HTMLInputElement) {
+  try {
+    (input as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
+  } catch {
+    // Some browsers restrict picker opening unless it is triggered by a direct user gesture.
+  }
+}
+
 function SplitTextInput({
   morning,
   afternoon,
   onMorningChange,
   onAfternoonChange,
   listId,
+  inputClassName,
   placeholder,
 }: {
   morning: string;
@@ -786,17 +853,25 @@ function SplitTextInput({
   onMorningChange: (value: string) => void;
   onAfternoonChange: (value: string) => void;
   listId?: string;
+  inputClassName?: string;
   placeholder?: string;
 }) {
+  const className = ["field-input", inputClassName].filter(Boolean).join(" ");
+  const inputPickerProps = listId
+    ? {
+        onClick: (event: ReactMouseEvent<HTMLInputElement>) => showInputPicker(event.currentTarget),
+      }
+    : {};
+
   return (
     <div className={styles.splitStack}>
       <label>
         <span>오전</span>
-        <input className="field-input" list={listId} value={morning} placeholder={placeholder} onChange={(event) => onMorningChange(event.target.value)} />
+        <input className={className} list={listId} value={morning} placeholder={placeholder} onChange={(event) => onMorningChange(event.target.value)} {...inputPickerProps} />
       </label>
       <label>
         <span>오후</span>
-        <input className="field-input" list={listId} value={afternoon} placeholder={placeholder} onChange={(event) => onAfternoonChange(event.target.value)} />
+        <input className={className} list={listId} value={afternoon} placeholder={placeholder} onChange={(event) => onAfternoonChange(event.target.value)} {...inputPickerProps} />
       </label>
     </div>
   );
@@ -925,7 +1000,13 @@ function ElectionPrintableTable({
   );
 }
 
-function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
+function ElectionReadOnlyTable({
+  event,
+  highlightedLocationKeys,
+}: {
+  event: ElectionEvent;
+  highlightedLocationKeys: string[];
+}) {
   return (
     <article className={`panel ${styles.wideTablePanel}`}>
       <div className={`panel-pad ${styles.emptyPanel}`}>
@@ -949,6 +1030,7 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
             <tbody>
               {event.points.length ? (
                 event.points.map((point, index) => {
+                  const pointLocationKey = getPointLocationKey(point);
                   const regionRowSpan = getRegionRowSpan(event.points, index);
                   const regionColor = getRegionGroupColor(event.points, index);
                   const placeColor = getCellDisplayColor(event.points, point, index, "place");
@@ -965,7 +1047,11 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
                   const lanColor = getCellDisplayColor(event.points, point, index, "lan");
                   const lightingColor = getCellDisplayColor(event.points, point, index, "lighting");
                   return (
-                  <tr key={point.id}>
+                  <tr
+                    key={point.id}
+                    className={highlightedLocationKeys.includes(pointLocationKey) ? styles.myLocationRow : undefined}
+                    data-election-point-key={pointLocationKey}
+                  >
                     <td className={styles.numberCell}>{index + 1}.</td>
                     {regionRowSpan > 0 ? (
                       <td
@@ -1027,6 +1113,8 @@ export function ElectionPage() {
   const [printColorMode, setPrintColorMode] = useState<PrintColorMode>("color");
   const [columnWidths, setColumnWidths] = useState<Record<ElectionTableColumn, number>>(() => sanitizeColumnWidths(null));
   const [paintSelection, setPaintSelection] = useState<ColorPaintSelection | null>(null);
+  const [currentSession, setCurrentSession] = useState<SessionUser | null>(() => getSession());
+  const [highlightedLocationKeys, setHighlightedLocationKeys] = useState<string[]>([]);
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -1160,7 +1248,38 @@ export function ElectionPage() {
     void load();
   }, [load]);
 
-  useEffect(() => subscribeToAuth(() => void load()), [load]);
+  useEffect(() => subscribeToAuth((session) => {
+    setCurrentSession(session);
+    void load();
+  }), [load]);
+
+  const locateMyRows = useCallback((points: LocationPoint[]) => {
+    if (!currentSession) {
+      setHighlightedLocationKeys([]);
+      setMessage({ tone: "warn", text: "로그인 정보를 확인하지 못해 내 위치를 찾을 수 없습니다." });
+      return;
+    }
+
+    const nextKeys = points
+      .filter((point) => pointMatchesSession(point, currentSession))
+      .map(getPointLocationKey);
+
+    setHighlightedLocationKeys(nextKeys);
+
+    if (!nextKeys.length) {
+      setMessage({ tone: "note", text: `${currentSession.username} 이름이 들어간 행을 찾지 못했습니다.` });
+      return;
+    }
+
+    setMessage({ tone: "ok", text: `${currentSession.username} 위치 ${nextKeys.length}곳을 강조했습니다.` });
+
+    window.requestAnimationFrame(() => {
+      const escapedKey = window.CSS?.escape ? window.CSS.escape(nextKeys[0]) : nextKeys[0].replaceAll('"', '\\"');
+      document
+        .querySelector<HTMLElement>(`[data-election-point-key="${escapedKey}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [currentSession]);
 
   const persistDraftSnapshot = useCallback(async (snapshot: DraftEvent, options?: { showMessage?: boolean }) => {
     const signature = getDraftSaveSignature(snapshot);
@@ -1273,7 +1392,9 @@ export function ElectionPage() {
     upsertElectionPrintPageStyle(printPaperSize, printOrientation);
     document.body.classList.add("election-print-mode");
     document.body.classList.toggle(ELECTION_PRINT_COLOR_MODE_CLASS, printColorMode === "color");
-    window.setTimeout(() => window.print(), 0);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => window.print());
+    });
   };
 
   const updateDraft = (patch: Partial<Pick<DraftEvent, "title" | "electionDate">>) => {
@@ -1568,6 +1689,9 @@ export function ElectionPage() {
                 <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
               </div>
               <div className={styles.actions}>
+                <button type="button" className="btn" disabled={!publishedEvent || !currentSession} onClick={() => publishedEvent ? locateMyRows(publishedEvent.points) : undefined}>
+                  내 위치보기
+                </button>
                 <ElectionPrintControls
                   paperSize={printPaperSize}
                   orientation={printOrientation}
@@ -1583,7 +1707,7 @@ export function ElectionPage() {
           </article>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
           {publishedEvent ? (
-            <ElectionReadOnlyTable event={publishedEvent} />
+            <ElectionReadOnlyTable event={publishedEvent} highlightedLocationKeys={highlightedLocationKeys} />
           ) : (
             <article className="panel">
               <div className="panel-pad">
@@ -1618,6 +1742,9 @@ export function ElectionPage() {
                 </div>
               </div>
               <div className={styles.actions}>
+                <button type="button" className="btn" disabled={!currentSession} onClick={() => locateMyRows(closedReadOnlyEvent.points)}>
+                  내 위치보기
+                </button>
                 <ElectionPrintControls
                   paperSize={printPaperSize}
                   orientation={printOrientation}
@@ -1636,7 +1763,7 @@ export function ElectionPage() {
           </article>
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-          <ElectionReadOnlyTable event={closedReadOnlyEvent} />
+          <ElectionReadOnlyTable event={closedReadOnlyEvent} highlightedLocationKeys={highlightedLocationKeys} />
         </div>
         <div className={styles.printOnly}>
           <ElectionPrintableTable
@@ -1666,6 +1793,9 @@ export function ElectionPage() {
               </div>
             </div>
             <div className={styles.actions}>
+              <button type="button" className="btn" disabled={!draft || !currentSession} onClick={() => draft ? locateMyRows(draft.points) : undefined}>
+                내 위치보기
+              </button>
               <ElectionPrintControls
                 paperSize={printPaperSize}
                 orientation={printOrientation}
@@ -1844,8 +1974,14 @@ export function ElectionPage() {
                       const livePositionColor = getCellDisplayColor(draft.points, point, index, "livePosition");
                       const lanColor = getCellDisplayColor(draft.points, point, index, "lan");
                       const lightingColor = getCellDisplayColor(draft.points, point, index, "lighting");
+                      const pointLocationKey = getPointLocationKey(point);
                       return (
-                      <tr key={point.localId} ref={(element) => setPointRowRef(point.localId, element)}>
+                      <tr
+                        key={point.localId}
+                        ref={(element) => setPointRowRef(point.localId, element)}
+                        className={highlightedLocationKeys.includes(pointLocationKey) ? styles.myLocationRow : undefined}
+                        data-election-point-key={pointLocationKey}
+                      >
                         <td className={styles.numberCell}>
                           {index + 1}.
                         </td>
@@ -1945,11 +2081,18 @@ export function ElectionPage() {
                                 morning={point.cameraStaffName}
                                 afternoon={point.cameraStaffNamePm}
                                 listId="election-profile-options"
+                                inputClassName={styles.staffListInput}
                                 onMorningChange={(value) => updateCameraStaff(index, "am", value)}
                                 onAfternoonChange={(value) => updateCameraStaff(index, "pm", value)}
                               />
                             ) : (
-                              <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
+                              <input
+                                className={`field-input ${styles.staffListInput}`}
+                                list="election-profile-options"
+                                value={point.cameraStaffName}
+                                onClick={(event) => showInputPicker(event.currentTarget)}
+                                onChange={(event) => updateCameraStaff(index, "am", event.target.value)}
+                              />
                             )}
                           </div>
                         </td>
