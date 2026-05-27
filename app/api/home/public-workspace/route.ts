@@ -1418,6 +1418,117 @@ function filterCurrentTripCards(cards: TeamLeadTripPersonCard[], todayKey: strin
     .filter((card) => card.items.length > 0);
 }
 
+function normalizeHomeCurrentTripCards(value: unknown): TeamLeadTripPersonCard[] | null {
+  if (!Array.isArray(value)) return null;
+
+  return value
+    .map((card) => {
+      if (!card || typeof card !== "object") return null;
+      const record = card as Record<string, unknown>;
+      const name = typeof record.name === "string" ? record.name.trim() : "";
+      const rawItems = Array.isArray(record.items) ? record.items : [];
+      const items = rawItems
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const itemRecord = item as Record<string, unknown>;
+          const tripTagId = typeof itemRecord.tripTagId === "string" ? itemRecord.tripTagId.trim() : "";
+          const tripTagLabel = typeof itemRecord.tripTagLabel === "string" ? itemRecord.tripTagLabel.trim() : "";
+          const travelType = typeof itemRecord.travelType === "string" ? itemRecord.travelType.trim() : "";
+          const startDateKey = typeof itemRecord.startDateKey === "string" ? itemRecord.startDateKey.trim() : "";
+          const endDateKey = typeof itemRecord.endDateKey === "string" ? itemRecord.endDateKey.trim() : "";
+          const dateKeys = Array.isArray(itemRecord.dateKeys)
+            ? itemRecord.dateKeys.filter((dateKey): dateKey is string => typeof dateKey === "string")
+            : [];
+          const schedules = Array.isArray(itemRecord.schedules)
+            ? itemRecord.schedules.filter((schedule): schedule is string => typeof schedule === "string")
+            : [];
+          if (!tripTagId || !travelType || !startDateKey || !endDateKey) return null;
+          return {
+            tripTagId,
+            tripTagLabel,
+            travelType: travelType as AssignmentTravelType,
+            startDateKey,
+            endDateKey,
+            dayCount: typeof itemRecord.dayCount === "number" ? itemRecord.dayCount : Math.max(1, dateKeys.length),
+            dateKeys,
+            duties: [] as string[],
+            schedules,
+          } satisfies TeamLeadTripItem;
+        })
+        .filter((item): item is TeamLeadTripItem => Boolean(item));
+      if (!name || items.length === 0) return null;
+      return { name, items };
+    })
+    .filter((card): card is TeamLeadTripPersonCard => Boolean(card));
+}
+
+async function fetchHomeCurrentTripCardsFromRpc(
+  supabase: Awaited<ReturnType<typeof createServerClient>>,
+  tripWindow: ReturnType<typeof getHomeTripDateWindow>,
+) {
+  let result: Awaited<ReturnType<typeof supabase.rpc>>;
+  try {
+    result = await withTimeout(
+      supabase.rpc("get_home_current_trips", {
+        p_start_date: tripWindow.startKey,
+        p_end_date: tripWindow.endKey,
+      }),
+      "홈 출장자 RPC 조회가 지연되고 있습니다.",
+    );
+  } catch (error) {
+    console.warn("[home-public-workspace] get_home_current_trips RPC did not complete; using JSONB fallback.", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
+  const { data, error } = result;
+  if (error) {
+    console.warn("[home-public-workspace] get_home_current_trips RPC failed; using JSONB fallback.", {
+      code: error.code,
+    });
+    return null;
+  }
+
+  const tripCards = normalizeHomeCurrentTripCards(data);
+  if (!tripCards) {
+    console.warn("[home-public-workspace] get_home_current_trips RPC returned an unexpected shape; using JSONB fallback.");
+    return null;
+  }
+
+  return tripCards;
+}
+
+async function fetchHomeCurrentTripCardsFallback(
+  admin: ReturnType<typeof createAdminClient>,
+  tripWindow: ReturnType<typeof getHomeTripDateWindow>,
+) {
+  // This reads monthly JSONB only when the RPC is unavailable or returns an unexpected shape.
+  const [{ data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
+    Promise.all([
+      admin
+        .from("schedule_months")
+        .select("month_key, published_state")
+        .in("month_key", tripWindow.monthKeys)
+        .returns<ScheduleMonthRow[]>(),
+      admin
+        .from("team_lead_schedule_assignments")
+        .select("month_key, entries, rows")
+        .in("month_key", tripWindow.monthKeys)
+        .returns<TeamLeadScheduleAssignmentRow[]>(),
+    ]),
+    "홈 출장자 fallback 조회가 지연되고 있습니다.",
+  );
+
+  return filterCurrentTripCards(
+    buildTripCards(
+      filterScheduleRowsToDateWindow(scheduleRows ?? [], tripWindow.startKey, tripWindow.endKey),
+      assignmentRows ?? [],
+    ),
+    tripWindow.todayKey,
+  );
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
 
@@ -1475,27 +1586,14 @@ export async function GET(request: Request) {
     }
 
     const tripWindow = includeTrips ? getHomeTripDateWindow() : null;
-    const monthKeys = tripWindow?.monthKeys ?? [];
-    const [{ data: noticeRow, error: noticeError }, { data: scheduleRows }, { data: assignmentRows }] = await withTimeout(
-      Promise.all([
-        selectHomePopupNoticeRow(admin),
-        includeTrips
-          ? admin
-            .from("schedule_months")
-            .select("month_key, published_state")
-            .in("month_key", monthKeys)
-            .returns<ScheduleMonthRow[]>()
-          : Promise.resolve({ data: [] as ScheduleMonthRow[] }),
-        includeTrips
-          ? admin
-            .from("team_lead_schedule_assignments")
-            .select("month_key, entries, rows")
-            .in("month_key", monthKeys)
-            .returns<TeamLeadScheduleAssignmentRow[]>()
-          : Promise.resolve({ data: [] as TeamLeadScheduleAssignmentRow[] }),
-      ]),
+    const rpcTripCardsPromise = includeTrips && tripWindow
+      ? fetchHomeCurrentTripCardsFromRpc(supabase, tripWindow)
+      : Promise.resolve(null);
+    const { data: noticeRow, error: noticeError } = await withTimeout(
+      selectHomePopupNoticeRow(admin),
       "홈 워크스페이스 조회가 지연되고 있습니다.",
     );
+    const rpcTripCards = await rpcTripCardsPromise;
 
     if (noticeError) {
       throw new Error("커뮤니티 게시글 조회에 실패했습니다.");
@@ -1539,6 +1637,11 @@ export async function GET(request: Request) {
 
     const safeWorkspace = sanitizeWorkspaceForProfile(workspaceWithVotes, profile);
     const safeActivePopup = getActivePopupNotice(safeWorkspace.notices);
+    const tripCards = includeTrips && tripWindow
+      ? (rpcTripCards
+        ? filterCurrentTripCards(rpcTripCards, tripWindow.todayKey)
+        : await fetchHomeCurrentTripCardsFallback(admin, tripWindow))
+      : undefined;
     const payload = {
       notice: safeActivePopup,
       notices: safeWorkspace.notices,
@@ -1547,17 +1650,7 @@ export async function GET(request: Request) {
       communityComments: includeCommunity ? safeWorkspace.communityComments : [],
       applications,
       ownApplied,
-      ...(includeTrips && tripWindow
-        ? {
-            tripCards: filterCurrentTripCards(
-              buildTripCards(
-                filterScheduleRowsToDateWindow(scheduleRows ?? [], tripWindow.startKey, tripWindow.endKey),
-                assignmentRows ?? [],
-              ),
-              tripWindow.todayKey,
-            ),
-          }
-        : {}),
+      ...(includeTrips ? { tripCards: tripCards ?? [] } : {}),
     };
 
     return jsonWithUsageDebug(request, startedAt, payload);

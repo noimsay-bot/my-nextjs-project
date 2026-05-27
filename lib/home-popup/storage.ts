@@ -200,6 +200,8 @@ const HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS = 4_000;
 const HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS = 30_000;
 const HOME_WORKSPACE_LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const HOME_CURRENT_TRIPS_RPC_FAILURE_COOLDOWN_MS = 30_000;
+const HOME_CURRENT_TRIPS_LOOKBACK_DAYS = 14;
+const HOME_CURRENT_TRIPS_LOOKAHEAD_DAYS = 7;
 
 type PortalSession = Awaited<ReturnType<typeof getPortalSession>> | null;
 
@@ -1192,6 +1194,23 @@ export function getHomePublicTripCards() {
   return cloneTripCards(tripCardCache);
 }
 
+function formatHomeTripDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addHomeTripDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function getHomeCurrentTripsDateWindow(now = new Date()) {
+  return {
+    startKey: formatHomeTripDateKey(addHomeTripDays(now, -HOME_CURRENT_TRIPS_LOOKBACK_DAYS)),
+    endKey: formatHomeTripDateKey(addHomeTripDays(now, HOME_CURRENT_TRIPS_LOOKAHEAD_DAYS)),
+  };
+}
+
 function normalizeHomeCurrentTripCards(value: unknown): TeamLeadTripPersonCard[] {
   const rows = Array.isArray(value) ? value : [];
   return rows
@@ -1248,7 +1267,11 @@ export async function refreshHomeCurrentTripsFromSupabase() {
   }
 
   const supabase = await getPortalSupabaseClient();
-  const { data, error } = await supabase.rpc("get_home_current_trips");
+  const tripWindow = getHomeCurrentTripsDateWindow();
+  const { data, error } = await supabase.rpc("get_home_current_trips", {
+    p_start_date: tripWindow.startKey,
+    p_end_date: tripWindow.endKey,
+  });
   if (error) {
     homeCurrentTripsRpcRetryAfter = Date.now() + HOME_CURRENT_TRIPS_RPC_FAILURE_COOLDOWN_MS;
     logPortalTrafficDebug({

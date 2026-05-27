@@ -7,6 +7,7 @@
     "start": "next start",
     "lint": "eslint .",
     "debug:rebalance": "ts-node --project scripts/tsconfig.debug.json -r tsconfig-paths/register scripts/replay-rebalance.ts",
+    "audit:legacy-home-dataurl": "node scripts/audit-legacy-home-dataurl.mjs",
     "migrate:home-community-attachments": "node scripts/migrate-home-community-attachments.mjs",
     "test:e2e": "playwright test",
     "harness:routes": "node scripts/harness/generate-route-map.mjs",
@@ -42,6 +43,7 @@
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.3",
+    "supabase": "^2.101.0",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.6.0"

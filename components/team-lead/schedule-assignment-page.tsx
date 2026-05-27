@@ -409,6 +409,12 @@ function getPreviousMonthKeys(baseMonthKey: string, count: number) {
   return getMonthKeysInRange(startMonthKey, normalizedBase);
 }
 
+function getPublishedScheduleRefreshMonthKeys(baseMonthKey: string) {
+  const normalizedBase = normalizeSearchMonthKey(baseMonthKey);
+  if (!normalizedBase) return [];
+  return [addMonthsToMonthKey(normalizedBase, -1), normalizedBase, addMonthsToMonthKey(normalizedBase, 1)].filter(Boolean);
+}
+
 function formatSearchRangeLabel(monthKeys: string[]) {
   if (monthKeys.length === 0) return "";
   const first = monthKeys[0];
@@ -1632,7 +1638,11 @@ export function ScheduleAssignmentPage() {
     const refreshSchedules = async () => {
       setAssignmentMonthLoading(true);
       try {
-        await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
+        const publishedMonthKeys = getPublishedScheduleRefreshMonthKeys(selectedMonthKeyRef.current || todayMonthKey);
+        await Promise.all([
+          refreshScheduleState(),
+          refreshPublishedSchedules({ monthKeys: publishedMonthKeys, repair: false }),
+        ]);
         const nextSchedules = getTeamLeadSchedules();
         const targetMonthKey =
           nextSchedules.some((schedule) => schedule.monthKey === selectedMonthKeyRef.current)
@@ -1699,17 +1709,22 @@ export function ScheduleAssignmentPage() {
       setAssignmentMonthLoading(false);
       return undefined;
     }
-    if (isScheduleAssignmentMonthLoaded(selectedMonthKey)) {
-      setAssignmentMonthLoading(false);
-      return undefined;
-    }
 
     let cancelled = false;
-    setAssignmentMonthLoading(true);
-    void refreshTeamLeadAssignmentMonth(selectedMonthKey)
+    const shouldLoadAssignmentMonth = !isScheduleAssignmentMonthLoaded(selectedMonthKey);
+    setAssignmentMonthLoading(shouldLoadAssignmentMonth);
+    void Promise.all([
+      refreshPublishedSchedules({
+        monthKeys: getPublishedScheduleRefreshMonthKeys(selectedMonthKey),
+        repair: false,
+      }),
+      shouldLoadAssignmentMonth ? refreshTeamLeadAssignmentMonth(selectedMonthKey) : Promise.resolve(),
+    ])
       .then(async () => {
         if (cancelled) return;
-        await ensureScheduleAssignmentDailyBackups(getScheduleAssignmentStore(), [selectedMonthKey]);
+        if (shouldLoadAssignmentMonth) {
+          await ensureScheduleAssignmentDailyBackups(getScheduleAssignmentStore(), [selectedMonthKey]);
+        }
         setStore(getScheduleAssignmentStore());
         await syncBackupItems();
       })
@@ -2374,7 +2389,11 @@ export function ScheduleAssignmentPage() {
           text: "수정 중인 일정배정이 있어 현재 화면에 불러온 데이터 기준으로 검색합니다.",
         });
       } else if (nextRange.all) {
-        await Promise.all([refreshScheduleState(), refreshPublishedSchedules()]);
+        await Promise.all([
+          refreshScheduleState(),
+          // Explicit full-range search: keep the broad published read only for this user-requested mode.
+          refreshPublishedSchedules({ repair: false }),
+        ]);
         await refreshTeamLeadState();
       } else {
         await refreshTeamLeadAssignmentMonths(nextRange.monthKeys);
