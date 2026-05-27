@@ -28,6 +28,10 @@ const statusLabels: Record<ElectionStatus, string> = {
 
 export const ELECTION_PRINT_CSS = `
   .election-print-sheet {
+    --election-print-font-size: 9pt;
+    --election-print-header-font-size: 8.4pt;
+    --election-print-split-label-font-size: 7.4pt;
+    --election-print-cell-padding: 2mm 1.4mm;
     width: 100%;
     min-height: 100vh;
     display: grid;
@@ -89,19 +93,19 @@ export const ELECTION_PRINT_CSS = `
     padding: 2.2mm 1mm;
     background: #dbeafe;
     color: #0f172a;
-    font-size: 7.2pt;
+    font-size: var(--election-print-header-font-size);
     font-weight: 900;
-    line-height: 1.1;
+    line-height: 1.15;
     text-align: center;
   }
 
   .election-print-table td {
     min-height: 10mm;
-    padding: 1.8mm 1.2mm;
+    padding: var(--election-print-cell-padding);
     background: #ffffff;
-    font-size: 7.5pt;
-    font-weight: 700;
-    line-height: 1.22;
+    font-size: var(--election-print-font-size);
+    font-weight: 800;
+    line-height: 1.28;
     text-align: center;
     vertical-align: middle;
     overflow-wrap: anywhere;
@@ -137,19 +141,21 @@ export const ELECTION_PRINT_CSS = `
 
   .election-print-split {
     display: grid;
-    gap: 0.8mm;
+    gap: 0.6mm;
+    font-size: var(--election-print-font-size);
+    line-height: 1.24;
     text-align: left;
   }
 
   .election-print-split-row {
     display: grid;
-    grid-template-columns: 7mm minmax(0, 1fr);
-    gap: 1mm;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.8mm;
   }
 
   .election-print-split b {
     color: #64748b;
-    font-size: 6.3pt;
+    font-size: var(--election-print-split-label-font-size);
     font-weight: 900;
   }
 
@@ -179,6 +185,20 @@ function escapeHtml(value: string) {
 function printableValue(value: string | null | undefined) {
   const trimmed = value?.trim() ?? "";
   return trimmed ? escapeHtml(trimmed) : '<span class="election-print-empty">-</span>';
+}
+
+function getPrintSheetStyle(pointCount: number) {
+  const fontSize = pointCount <= 6 ? 10.5 : pointCount <= 10 ? 9.8 : pointCount <= 16 ? 9.2 : pointCount <= 24 ? 8.4 : 7.8;
+  const headerFontSize = Math.max(7.8, fontSize - 0.6);
+  const splitLabelFontSize = Math.max(7, fontSize - 1.2);
+  const cellPadding = pointCount <= 10 ? "2.3mm 1.5mm" : pointCount <= 18 ? "2mm 1.3mm" : "1.7mm 1.1mm";
+
+  return [
+    `--election-print-font-size:${fontSize}pt`,
+    `--election-print-header-font-size:${headerFontSize}pt`,
+    `--election-print-split-label-font-size:${splitLabelFontSize}pt`,
+    `--election-print-cell-padding:${cellPadding}`,
+  ].join(";");
 }
 
 function splitValue(morning: string | null | undefined, afternoon: string | null | undefined) {
@@ -274,7 +294,7 @@ export function renderElectionPrintHtml({
     : `<tr><td colspan="${printColumns.length}"><span class="election-print-empty">입력된 중계 포인트가 없습니다.</span></td></tr>`;
 
   return `
-    <section class="election-print-sheet" data-print-frame="true">
+    <section class="election-print-sheet" data-print-frame="true" style="${getPrintSheetStyle(points.length)}">
       <header class="election-print-header">
         <div>
           <h1 class="election-print-title">${escapeHtml(title)}</h1>

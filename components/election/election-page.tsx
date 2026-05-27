@@ -736,6 +736,20 @@ function readOnlySplitValue(morning: string | null | undefined, afternoon: strin
   );
 }
 
+function getPrintTableStyle(pointCount: number) {
+  const fontSize = pointCount <= 6 ? 12 : pointCount <= 10 ? 11 : pointCount <= 16 ? 10 : pointCount <= 24 ? 9 : 8.4;
+  const headerFontSize = Math.max(8.8, fontSize - 0.6);
+  const splitLabelFontSize = Math.max(7.6, fontSize - 1.4);
+  const cellPadding = pointCount <= 10 ? "5px 3px" : pointCount <= 18 ? "4px 3px" : "3px 2px";
+
+  return {
+    "--election-print-font-size": `${fontSize}px`,
+    "--election-print-header-font-size": `${headerFontSize}px`,
+    "--election-print-split-label-font-size": `${splitLabelFontSize}px`,
+    "--election-print-cell-padding": cellPadding,
+  } as CSSProperties;
+}
+
 function hasAfternoonValues(point: ElectionPointInput) {
   return Boolean(
     point.cameraStaffNamePm.trim() ||
@@ -842,7 +856,7 @@ function ElectionPrintableTable({
         <h1>{formatElectionBoardTitle(title)}</h1>
         <span>{electionDate}</span>
       </header>
-      <table className={styles.printTable}>
+      <table className={styles.printTable} style={getPrintTableStyle(points.length)}>
         <thead>
           <tr>
             {readOnlyTableColumns.map((column) => (
@@ -913,7 +927,7 @@ function ElectionPrintableTable({
 
 function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
   return (
-    <article className="panel">
+    <article className={`panel ${styles.wideTablePanel}`}>
       <div className={`panel-pad ${styles.emptyPanel}`}>
         <div className={styles.toolbar}>
           <div>
@@ -1707,7 +1721,7 @@ export function ElectionPage() {
               </div>
             </article>
 
-          <article className="panel">
+          <article className={`panel ${styles.wideTablePanel}`}>
             <div className={`panel-pad ${styles.emptyPanel}`}>
               <div className={styles.toolbar}>
                 <div className={styles.summary}>{draft.points.length}개 포인트</div>
@@ -1788,8 +1802,8 @@ export function ElectionPage() {
                     })}
                   </div>
                 </div>
-                <div className={styles.tableWrap}>
-                  <table className={`table-like ${styles.table} ${styles.resizableTable}`} style={{ width: editableTableWidth, minWidth: "100%" }}>
+                <div className={`${styles.tableWrap} ${styles.editableTableWrap}`} style={{ "--election-editable-table-width": `${editableTableWidth}px` } as CSSProperties}>
+                  <table className={`table-like ${styles.table} ${styles.resizableTable}`}>
                     <ElectionTableColGroup columns={tableColumns} widths={columnWidths} />
                     <thead>
                       <tr ref={tableHeaderRowRef}>
