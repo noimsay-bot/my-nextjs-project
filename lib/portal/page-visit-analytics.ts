@@ -22,9 +22,17 @@ export interface PageVisitVisitorRank {
   visits: number;
 }
 
+export interface PageVisitTrendPoint {
+  key: string;
+  label: string;
+  visits: number;
+}
+
 export interface PageVisitAnalytics {
   week: PageVisitMetric[];
   month: PageVisitMetric[];
+  weeklyTrend: PageVisitTrendPoint[];
+  monthlyTrend: PageVisitTrendPoint[];
   monthlyTopVisitors: PageVisitVisitorRank[];
   schemaMissing: boolean;
   message: string | null;
@@ -46,6 +54,8 @@ interface PageVisitProfileRow {
 
 const PAGE_VISIT_TABLE = "page_visit_events";
 const PAGE_VISIT_THROTTLE_MS = 5 * 60 * 1000;
+const PAGE_VISIT_WEEKLY_TREND_COUNT = 8;
+const PAGE_VISIT_MONTHLY_TREND_COUNT = 6;
 const PAGE_VISIT_META: Record<PageVisitKey, { label: string; pathPrefixes: string[] }> = {
   me: {
     label: "마이페이지",
@@ -126,6 +136,37 @@ function getCurrentMonthStartDate() {
   return date;
 }
 
+function getWeekStartDate(source: Date) {
+  const date = new Date(source);
+  date.setHours(0, 0, 0, 0);
+  const mondayOffset = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - mondayOffset);
+  return date;
+}
+
+function addDays(source: Date, days: number) {
+  const date = new Date(source);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function addMonths(source: Date, months: number) {
+  const date = new Date(source);
+  date.setMonth(date.getMonth() + months);
+  return date;
+}
+
+function formatTrendDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function countVisitsInRange(rows: PageVisitEventRow[], start: Date, end: Date) {
+  return rows.filter((row) => {
+    const visitedAt = new Date(row.visited_at);
+    return visitedAt >= start && visitedAt < end;
+  }).length;
+}
+
 function buildMetrics(rows: PageVisitEventRow[], rangeStart: Date) {
   const rangeRows = rows.filter((row) => new Date(row.visited_at) >= rangeStart);
   const metrics = Object.entries(PAGE_VISIT_META).map(([pageKey, meta]) => {
@@ -138,6 +179,32 @@ function buildMetrics(rows: PageVisitEventRow[], rangeStart: Date) {
   });
 
   return metrics;
+}
+
+function buildWeeklyTrend(rows: PageVisitEventRow[], weekCount = PAGE_VISIT_WEEKLY_TREND_COUNT) {
+  const currentWeekStart = getWeekStartDate(new Date());
+  return Array.from({ length: weekCount }, (_, index) => {
+    const start = addDays(currentWeekStart, (index - weekCount + 1) * 7);
+    const end = addDays(start, 7);
+    return {
+      key: formatTrendDateKey(start),
+      label: index === weekCount - 1 ? "이번 주" : `${start.getMonth() + 1}/${start.getDate()} 주`,
+      visits: countVisitsInRange(rows, start, end),
+    } satisfies PageVisitTrendPoint;
+  });
+}
+
+function buildMonthlyTrend(rows: PageVisitEventRow[], monthCount = PAGE_VISIT_MONTHLY_TREND_COUNT) {
+  const currentMonthStart = getCurrentMonthStartDate();
+  return Array.from({ length: monthCount }, (_, index) => {
+    const start = addMonths(currentMonthStart, index - monthCount + 1);
+    const end = addMonths(start, 1);
+    return {
+      key: formatTrendDateKey(start),
+      label: index === monthCount - 1 ? "이번 달" : `${start.getFullYear()}.${start.getMonth() + 1}`,
+      visits: countVisitsInRange(rows, start, end),
+    } satisfies PageVisitTrendPoint;
+  });
 }
 
 function buildMonthlyTopVisitors(rows: PageVisitEventRow[], monthStart: Date, profileMap: Map<string, PageVisitProfileRow>) {
@@ -172,6 +239,8 @@ export async function getAdminPageVisitAnalytics(): Promise<PageVisitAnalytics> 
     return {
       week: [],
       month: [],
+      weeklyTrend: [],
+      monthlyTrend: [],
       monthlyTopVisitors: [],
       schemaMissing: false,
       message: "방문 통계 조회 권한이 없습니다.",
@@ -180,7 +249,11 @@ export async function getAdminPageVisitAnalytics(): Promise<PageVisitAnalytics> 
 
   const monthStart = getCurrentMonthStartDate();
   const weekStart = getRangeStartDate(7);
-  const queryStart = weekStart < monthStart ? weekStart : monthStart;
+  const weeklyTrendStart = addDays(getWeekStartDate(new Date()), -(PAGE_VISIT_WEEKLY_TREND_COUNT - 1) * 7);
+  const monthlyTrendStart = addMonths(monthStart, -(PAGE_VISIT_MONTHLY_TREND_COUNT - 1));
+  const queryStart = [weekStart, monthStart, weeklyTrendStart, monthlyTrendStart].reduce((earliest, date) =>
+    date < earliest ? date : earliest,
+  );
 
   try {
     const supabase = await getPortalSupabaseClient();
@@ -196,6 +269,8 @@ export async function getAdminPageVisitAnalytics(): Promise<PageVisitAnalytics> 
         return {
           week: buildMetrics([], weekStart),
           month: buildMetrics([], monthStart),
+          weeklyTrend: buildWeeklyTrend([]),
+          monthlyTrend: buildMonthlyTrend([]),
           monthlyTopVisitors: [],
           schemaMissing: true,
           message: getSupabaseStorageErrorMessage(error, PAGE_VISIT_TABLE),
@@ -219,6 +294,8 @@ export async function getAdminPageVisitAnalytics(): Promise<PageVisitAnalytics> 
     return {
       week: buildMetrics(rows, weekStart),
       month: buildMetrics(rows, monthStart),
+      weeklyTrend: buildWeeklyTrend(rows),
+      monthlyTrend: buildMonthlyTrend(rows),
       monthlyTopVisitors: buildMonthlyTopVisitors(rows, monthStart, profileMap),
       schemaMissing: false,
       message: null,
@@ -227,6 +304,8 @@ export async function getAdminPageVisitAnalytics(): Promise<PageVisitAnalytics> 
     return {
       week: buildMetrics([], weekStart),
       month: buildMetrics([], monthStart),
+      weeklyTrend: buildWeeklyTrend([]),
+      monthlyTrend: buildMonthlyTrend([]),
       monthlyTopVisitors: [],
       schemaMissing: false,
       message: error instanceof Error ? error.message : "방문 통계를 불러오지 못했습니다.",

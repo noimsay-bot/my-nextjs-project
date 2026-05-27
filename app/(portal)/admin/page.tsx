@@ -24,6 +24,7 @@ import {
   PageVisitMetric,
   PageVisitVisitorRank,
   PageVisitRange,
+  PageVisitTrendPoint,
 } from "@/lib/portal/page-visit-analytics";
 
 const roles = ["member", "outlet", "reviewer", "observer", "partner", "team_lead", "desk", "admin"] as const;
@@ -174,6 +175,8 @@ function formatCustomerSupportRequester(item: CustomerSupportMessageWorkspace["i
 const emptyPageVisitAnalytics: PageVisitAnalytics = {
   week: [],
   month: [],
+  weeklyTrend: [],
+  monthlyTrend: [],
   monthlyTopVisitors: [],
   schemaMissing: false,
   message: null,
@@ -264,6 +267,93 @@ function PageVisitChart({
                   }}
                 />
               </div>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function PageVisitTrendChart({
+  title,
+  subtitle,
+  rows,
+}: {
+  title: string;
+  subtitle: string;
+  rows: PageVisitTrendPoint[];
+}) {
+  const maxVisits = Math.max(...rows.map((row) => row.visits), 1);
+  const totalVisits = rows.reduce((sum, row) => sum + row.visits, 0);
+
+  return (
+    <article
+      style={{
+        display: "grid",
+        gap: 14,
+        padding: 16,
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,.08)",
+        background: "rgba(255,255,255,.03)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <strong style={{ fontSize: 18 }}>{title}</strong>
+          <span className="muted" style={{ fontSize: 12 }}>{subtitle}</span>
+        </div>
+        <strong style={{ color: "#bae6fd" }}>{totalVisits}회</strong>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${Math.max(rows.length, 1)}, minmax(0, 1fr))`,
+          gap: 8,
+          alignItems: "end",
+          minHeight: 178,
+          padding: "12px 10px 10px",
+          borderRadius: 14,
+          border: "1px solid rgba(255,255,255,.08)",
+          background: "linear-gradient(180deg, rgba(15,23,42,.16), rgba(15,23,42,.36))",
+        }}
+      >
+        {rows.map((row) => {
+          const height = `${Math.max(row.visits > 0 ? 8 : 3, Math.round((row.visits / maxVisits) * 132))}px`;
+          return (
+            <div
+              key={row.key}
+              aria-label={`${row.label} 방문 ${row.visits}회`}
+              style={{ display: "grid", gap: 7, alignItems: "end", minWidth: 0 }}
+            >
+              <span style={{ color: "#f8fbff", fontSize: 12, fontWeight: 900, textAlign: "center" }}>
+                {row.visits}
+              </span>
+              <div
+                style={{
+                  height,
+                  minHeight: 3,
+                  borderRadius: "8px 8px 2px 2px",
+                  border: "1px solid rgba(125,211,252,.34)",
+                  background: row.visits > 0
+                    ? "linear-gradient(180deg, rgba(125,211,252,.96), rgba(14,165,233,.62))"
+                    : "rgba(148,163,184,.2)",
+                  boxShadow: row.visits > 0 ? "0 0 18px rgba(56,189,248,.22)" : "none",
+                }}
+              />
+              <span
+                className="muted"
+                style={{
+                  minHeight: 26,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  lineHeight: 1.15,
+                  textAlign: "center",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {row.label}
+              </span>
             </div>
           );
         })}
@@ -694,6 +784,18 @@ export default function AdminPage() {
           <div className="subgrid-2">
             <PageVisitChart title={visitRangeLabels.week} rows={visitAnalytics.week} />
             <PageVisitChart title={visitRangeLabels.month} rows={visitAnalytics.month} />
+          </div>
+          <div className="subgrid-2">
+            <PageVisitTrendChart
+              title="주별 방문 그래프"
+              subtitle="최근 8주 전체 방문 추이"
+              rows={visitAnalytics.weeklyTrend}
+            />
+            <PageVisitTrendChart
+              title="월별 방문 그래프"
+              subtitle="최근 6개월 전체 방문 추이"
+              rows={visitAnalytics.monthlyTrend}
+            />
           </div>
           <MonthlyVisitorRanking rows={visitAnalytics.monthlyTopVisitors} />
         </div>
