@@ -665,12 +665,27 @@
   color: #000000 !important;
 }
 
+.viewerPlainTable {
+  font-size: 15.6px;
+}
+
 .viewerPlainTable .readOnlyCell,
 .viewerPlainTable .readOnlyCellEmpty,
 .viewerPlainTable .readOnlySplit,
 .viewerPlainTable .readOnlySplit b,
 .viewerPlainTable .numberCell {
   color: #000000 !important;
+}
+
+.viewerPlainTable .readOnlyCell,
+.viewerPlainTable .readOnlyCellEmpty,
+.viewerPlainTable .readOnlySplit,
+.viewerPlainTable .numberCell {
+  font-size: 15.6px;
+}
+
+.viewerPlainTable .readOnlySplit b {
+  font-size: 14.3px;
 }
 
 .viewerPlainTable .darkColorCell {
@@ -1303,6 +1318,13 @@ th.positionColumn {
   :global(body.election-print-mode) .printTable {
     color: #000 !important;
     background: #fff !important;
+  }
+
+  :global(body.election-print-mode) .printTable.viewerPlainTable {
+    --election-print-font-size: 13px;
+    --election-print-header-font-size: 12.22px;
+    --election-print-name-font-size: 14.3px;
+    --election-print-split-label-font-size: 10.4px;
   }
 
   :global(body.election-print-mode) .printTable th,
