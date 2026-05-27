@@ -20,6 +20,7 @@ import {
 } from "@/lib/supabase/portal";
 
 const ELECTION_SCHEMA_GUIDE = "Supabase SQL Editor에서 supabase/incremental_election_events.sql을 실행해 주세요.";
+export const ELECTION_NAV_EVENT = "j-special-force-election-nav-updated";
 
 interface ElectionEventRow {
   id: string;
@@ -60,6 +61,7 @@ interface ElectionPointRow {
   address: string | null;
   note: string | null;
   live_position: string | null;
+  lan?: string | null;
   lighting: string | null;
   region_color?: string | null;
   cell_colors?: Record<string, unknown> | null;
@@ -86,16 +88,34 @@ const electionCellColorKeys = new Set<ElectionCellColorKey>([
   "address",
   "note",
   "livePosition",
+  "lan",
   "lighting",
 ]);
 
 let electionPointStyleColumnsAvailable: boolean | null = null;
+let electionPointLanColumnAvailable: boolean | null = null;
+let electionSidebarOpenCache = false;
 
 export function canManageElection(session: SessionUser | null | undefined) {
   return Boolean(
     session?.approved &&
     (session.actualRole === "desk" || session.actualRole === "team_lead" || session.actualRole === "admin"),
   );
+}
+
+export function isElectionSidebarOpen() {
+  return electionSidebarOpenCache;
+}
+
+function emitElectionNavEvent() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(ELECTION_NAV_EVENT));
+}
+
+function setElectionSidebarOpenCache(nextOpen: boolean) {
+  if (electionSidebarOpenCache === nextOpen) return;
+  electionSidebarOpenCache = nextOpen;
+  emitElectionNavEvent();
 }
 
 function electionStorageError(error: unknown, objectLabel: string) {
@@ -132,6 +152,7 @@ function rowToPoint(row: ElectionPointRow): ElectionPoint {
     address: row.address ?? "",
     note: row.note ?? "",
     livePosition: row.live_position ?? "",
+    lan: row.lan ?? "",
     lighting: row.lighting ?? "",
     regionColor: normalizeColorToken(row.region_color),
     cellColors: normalizeCellColors(row.cell_colors),
@@ -196,6 +217,10 @@ function hasPointStyles(points: ElectionPointInput[]) {
   return points.some((point) => (point.regionColor?.trim() ?? "") || Object.keys(normalizeCellColors(point.cellColors)).length > 0);
 }
 
+function hasPointLan(points: ElectionPointInput[]) {
+  return points.some((point) => point.lan?.trim());
+}
+
 async function hasElectionPointStyleColumns() {
   if (electionPointStyleColumnsAvailable !== null) return electionPointStyleColumnsAvailable;
   const supabase = await getPortalSupabaseClient();
@@ -208,7 +233,19 @@ async function hasElectionPointStyleColumns() {
   return electionPointStyleColumnsAvailable;
 }
 
-function pointInputToRow(eventId: string, point: ElectionPointInput, index: number, includeStyles: boolean) {
+async function hasElectionPointLanColumn() {
+  if (electionPointLanColumnAvailable !== null) return electionPointLanColumnAvailable;
+  const supabase = await getPortalSupabaseClient();
+  const { error } = await supabase
+    .from("election_points")
+    .select("lan")
+    .limit(1);
+
+  electionPointLanColumnAvailable = !error;
+  return electionPointLanColumnAvailable;
+}
+
+function pointInputToRow(eventId: string, point: ElectionPointInput, index: number, options: { includeStyles: boolean; includeLan: boolean }) {
   const row = {
     event_id: eventId,
     sort_order: index,
@@ -237,10 +274,17 @@ function pointInputToRow(eventId: string, point: ElectionPointInput, index: numb
     is_active: point.isActive !== false,
   };
 
-  if (!includeStyles) return row;
+  const rowWithLan = options.includeLan
+    ? {
+        ...row,
+        lan: normalizeNullableText(point.lan),
+      }
+    : row;
+
+  if (!options.includeStyles) return rowWithLan;
 
   return {
-    ...row,
+    ...rowWithLan,
     region_color: normalizeNullableText(point.regionColor ?? ""),
     cell_colors: normalizeCellColors(point.cellColors),
   };
@@ -297,6 +341,23 @@ async function fetchEventsWithPoints(rows: ElectionEventRow[]) {
   );
 }
 
+async function fetchLatestEventRowByStatuses(statuses: ElectionStatus[]) {
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("election_events")
+    .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
+    .in("status", statuses)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<ElectionEventRow>();
+
+  if (error) {
+    throw new Error(electionStorageError(error, "election_events"));
+  }
+
+  return data ?? null;
+}
+
 export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {
   const session = await getPortalSession();
   if (!session?.approved) {
@@ -305,18 +366,9 @@ export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {
 
   const canManage = canManageElection(session);
   const supabase = await getPortalSupabaseClient();
-  let query = supabase
-    .from("election_events")
-    .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
-    .order("updated_at", { ascending: false })
-    .limit(1);
-
-  query = canManage ? query.in("status", ["draft", "published"]) : query.eq("status", "published");
-
-  const { data, error } = await query.maybeSingle<ElectionEventRow>();
-  if (error) {
-    throw new Error(electionStorageError(error, "election_events"));
-  }
+  const activeRow = await fetchLatestEventRowByStatuses(canManage ? ["draft", "published"] : ["published"]);
+  const fallbackClosedRow = activeRow ? null : await fetchLatestEventRowByStatuses(["closed"]);
+  const visibleRow = activeRow ?? fallbackClosedRow;
 
   const archivedEventsPromise = canManage
     ? supabase
@@ -330,7 +382,7 @@ export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {
     : Promise.resolve({ data: [], error: null });
 
   const [event, profiles, archivedRowsResult] = await Promise.all([
-    fetchEventWithPoints(data ?? null),
+    fetchEventWithPoints(visibleRow),
     canManage ? fetchProfiles() : Promise.resolve([]),
     archivedEventsPromise,
   ]);
@@ -342,6 +394,33 @@ export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {
   const archivedEvents = canManage ? await fetchEventsWithPoints(archivedRowsResult.data ?? []) : [];
 
   return { event, archivedEvents, profiles, canManage };
+}
+
+export async function refreshElectionSidebarOpenState() {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    setElectionSidebarOpenCache(false);
+    return electionSidebarOpenCache;
+  }
+
+  try {
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("election_events")
+      .select("id")
+      .eq("status", "published")
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+
+    if (error) {
+      return electionSidebarOpenCache;
+    }
+
+    setElectionSidebarOpenCache(Boolean(data));
+    return electionSidebarOpenCache;
+  } catch {
+    return electionSidebarOpenCache;
+  }
 }
 
 export async function saveElectionWorkspace(input: ElectionSaveInput) {
@@ -359,8 +438,12 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
   const supabase = await getPortalSupabaseClient();
   let eventId = input.id?.trim() || "";
   const includePointStyles = await hasElectionPointStyleColumns();
+  const includePointLan = await hasElectionPointLanColumn();
   if (!includePointStyles && hasPointStyles(input.points)) {
     throw new Error(`선거표 색상 저장 컬럼이 아직 적용되지 않았습니다. ${ELECTION_SCHEMA_GUIDE}`);
+  }
+  if (!includePointLan && hasPointLan(input.points)) {
+    throw new Error(`선거표 LAN 저장 컬럼이 아직 적용되지 않았습니다. ${ELECTION_SCHEMA_GUIDE}`);
   }
 
   if (!eventId) {
@@ -408,7 +491,10 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
     throw new Error(electionStorageError(deleteError, "election_points"));
   }
 
-  const pointRows = input.points.map((point, index) => pointInputToRow(eventId, point, index, includePointStyles));
+  const pointRows = input.points.map((point, index) => pointInputToRow(eventId, point, index, {
+    includeStyles: includePointStyles,
+    includeLan: includePointLan,
+  }));
 
   if (pointRows.length > 0) {
     const { error: insertError } = await supabase.from("election_points").insert(pointRows);
@@ -444,6 +530,7 @@ export async function publishElectionEvent(eventId: string) {
     throw new Error(electionStorageError(error, "election_events"));
   }
 
+  setElectionSidebarOpenCache(true);
   return fetchElectionWorkspace();
 }
 
@@ -467,6 +554,7 @@ export async function closeElectionEvent(eventId: string) {
     throw new Error(electionStorageError(error, "election_events"));
   }
 
+  setElectionSidebarOpenCache(false);
   return fetchElectionWorkspace();
 }
 

@@ -15,7 +15,7 @@ type HomeNewsMetaProps = {
   onManageDday?: (item: HomeDdayItem) => void;
 };
 
-const WORLD_CUP_PROJECT_URL = "https://2026worldcup-project.vercel.app/?mode=view";
+const WORLD_CUP_PROJECT_URL = "https://wc26-ops-layout.vercel.app/";
 
 function formatKstDate(value: string) {
   const parsed = new Date(`${value}T00:00:00+09:00`);

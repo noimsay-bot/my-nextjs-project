@@ -4,12 +4,18 @@ import {
   VACATION_EVENT,
 } from "@/lib/vacation/storage";
 import {
+  ELECTION_NAV_EVENT,
+  isElectionSidebarOpen,
+  refreshElectionSidebarOpenState,
+} from "@/lib/election/storage";
+import {
   isTeamLeadSubmissionAccessOpen,
   refreshTeamLeadSubmissionAccessState,
   TEAM_LEAD_SUBMISSION_ACCESS_EVENT,
 } from "@/lib/team-lead/storage";
 
 export interface PortalAccessState {
+  electionSidebarOpen: boolean;
   submissionAccessOpen: boolean;
   vacationRequestOpen: boolean;
 }
@@ -17,6 +23,7 @@ export interface PortalAccessState {
 type PortalAccessListener = (state: PortalAccessState) => void;
 
 let portalAccessState: PortalAccessState = {
+  electionSidebarOpen: isElectionSidebarOpen(),
   vacationRequestOpen: isVacationRequestOpen(),
   submissionAccessOpen: isTeamLeadSubmissionAccessOpen(),
 };
@@ -31,6 +38,7 @@ const PORTAL_ACCESS_FAILURE_COOLDOWN_MS = 10_000;
 
 function readPortalAccessState(): PortalAccessState {
   return {
+    electionSidebarOpen: isElectionSidebarOpen(),
     vacationRequestOpen: isVacationRequestOpen(),
     submissionAccessOpen: isTeamLeadSubmissionAccessOpen(),
   };
@@ -43,6 +51,7 @@ function emitPortalAccessState() {
 function syncPortalAccessState() {
   const nextState = readPortalAccessState();
   if (
+    nextState.electionSidebarOpen === portalAccessState.electionSidebarOpen &&
     nextState.vacationRequestOpen === portalAccessState.vacationRequestOpen &&
     nextState.submissionAccessOpen === portalAccessState.submissionAccessOpen
   ) {
@@ -65,6 +74,7 @@ function initPortalAccessListeners() {
   };
 
   window.addEventListener("focus", handleFocus);
+  window.addEventListener(ELECTION_NAV_EVENT, syncPortalAccessState);
   window.addEventListener(VACATION_EVENT, syncPortalAccessState);
   window.addEventListener(TEAM_LEAD_SUBMISSION_ACCESS_EVENT, syncPortalAccessState);
 
@@ -94,6 +104,7 @@ export async function refreshPortalAccessState(options?: { force?: boolean }) {
   }
 
   portalAccessRefreshPromise = Promise.all([
+    refreshElectionSidebarOpenState(),
     refreshVacationRequestOpenState(),
     refreshTeamLeadSubmissionAccessState(),
   ])

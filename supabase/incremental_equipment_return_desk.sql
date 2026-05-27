@@ -1,6 +1,68 @@
 -- Purpose: Allow DESK users to return borrowed equipment for any borrower.
 -- Impact: Borrowers can still return their own items; desk/team_lead/admin can process returns for all borrowed equipment.
 
+drop policy if exists "equipment_loans_update_own_or_admin" on public.equipment_loans;
+create policy "equipment_loans_update_own_or_admin"
+on public.equipment_loans
+for update
+to authenticated
+using (
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
+  or (
+    public.current_profile_approved() = true
+    and public.current_profile_role() <> 'observer'
+    and borrower_profile_id = auth.uid()
+  )
+)
+with check (
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
+  or (
+    public.current_profile_approved() = true
+    and public.current_profile_role() <> 'observer'
+    and borrower_profile_id = auth.uid()
+  )
+);
+
+drop policy if exists "equipment_loan_items_update_own_or_admin" on public.equipment_loan_items;
+create policy "equipment_loan_items_update_own_or_admin"
+on public.equipment_loan_items
+for update
+to authenticated
+using (
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
+  or exists (
+    select 1
+    from public.equipment_loans
+    where equipment_loans.id = equipment_loan_items.loan_id
+      and equipment_loans.borrower_profile_id = auth.uid()
+      and public.current_profile_approved() = true
+      and public.current_profile_role() <> 'observer'
+  )
+)
+with check (
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
+  or exists (
+    select 1
+    from public.equipment_loans
+    where equipment_loans.id = equipment_loan_items.loan_id
+      and equipment_loans.borrower_profile_id = auth.uid()
+      and public.current_profile_approved() = true
+      and public.current_profile_role() <> 'observer'
+  )
+);
+
 create or replace function public.return_equipment_loan_items(
   p_loan_item_ids uuid[]
 )

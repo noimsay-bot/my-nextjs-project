@@ -12,6 +12,7 @@ export type ElectionCellColorKey =
   | "address"
   | "note"
   | "livePosition"
+  | "lan"
   | "lighting";
 export type ElectionCellColors = Partial<Record<ElectionCellColorKey, string>>;
 
@@ -40,6 +41,7 @@ export interface ElectionPoint {
   address: string;
   note: string;
   livePosition: string;
+  lan: string;
   lighting: string;
   regionColor: string;
   cellColors: ElectionCellColors;
@@ -100,6 +102,7 @@ export interface ElectionPointInput {
   address: string;
   note: string;
   livePosition: string;
+  lan: string;
   lighting: string;
   regionColor: string;
   cellColors: ElectionCellColors;

@@ -2667,7 +2667,10 @@ on public.equipment_loans
 for update
 to authenticated
 using (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or (
     public.current_profile_approved() = true
     and public.current_profile_role() <> 'observer'
@@ -2675,7 +2678,10 @@ using (
   )
 )
 with check (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or (
     public.current_profile_approved() = true
     and public.current_profile_role() <> 'observer'
@@ -2713,7 +2719,10 @@ on public.equipment_loan_items
 for update
 to authenticated
 using (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or exists (
     select 1
     from public.equipment_loans
@@ -2724,7 +2733,10 @@ using (
   )
 )
 with check (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or exists (
     select 1
     from public.equipment_loans
@@ -3806,6 +3818,7 @@ create table if not exists public.election_points (
   address text,
   note text,
   live_position text,
+  lan text,
   lighting text,
   region_color text,
   cell_colors jsonb not null default '{}'::jsonb,
@@ -3820,6 +3833,7 @@ alter table public.election_points
   add column if not exists audio_staff_name_pm text,
   add column if not exists reporter_name_pm text,
   add column if not exists live_time_pm text,
+  add column if not exists lan text,
   add column if not exists region_color text,
   add column if not exists cell_colors jsonb not null default '{}'::jsonb;
 
@@ -3867,7 +3881,7 @@ using (
     and public.current_profile_approved() = true
   )
   or (
-    status = 'published'
+    status in ('published', 'closed')
     and public.current_profile_approved() = true
   )
 );
@@ -3922,7 +3936,7 @@ using (
       select 1
       from public.election_events e
       where e.id = election_points.event_id
-        and e.status = 'published'
+        and e.status in ('published', 'closed')
     )
   )
 );

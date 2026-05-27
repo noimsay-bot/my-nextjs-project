@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   closeElectionEvent,
   fetchElectionWorkspace,
@@ -12,6 +12,7 @@ import type {
   ElectionEvent,
   ElectionCellColorKey,
   ElectionCellColors,
+  ElectionPoint,
   ElectionPointInput,
   ElectionProfileOption,
   ElectionSaveInput,
@@ -26,6 +27,9 @@ type AutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type PrintPaperSize = "A3" | "A4";
 type PrintOrientation = "portrait" | "landscape";
 type PrintColorMode = "color" | "mono";
+type ColorPaintPalette = "light" | "dark";
+type ColorPaintSelection = { color: string; palette: ColorPaintPalette };
+type PaintTarget = "region" | ElectionCellColorKey;
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -74,16 +78,55 @@ const tableColumns = [
   "주소",
   "비고",
   "중계자리",
+  "LAN",
   "조명",
-];
+] as const;
 
-const readOnlyTableColumns = tableColumns.filter((column) => column !== "관리");
+const readOnlyTableColumns = tableColumns;
+type ElectionTableColumn = (typeof tableColumns)[number];
 const staffNameColumns = new Set(["촬영기자", "오디오맨", "취재기자"]);
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
 const AUTO_SAVE_DEBOUNCE_MS = 900;
 const ELECTION_PRINT_STYLE_ID = "election-print-page-style";
 const ELECTION_PRINT_COLOR_MODE_CLASS = "election-print-color-mode";
+const ELECTION_COLUMN_WIDTH_STORAGE_KEY = "jtbc-election-column-widths-v1";
+
+const defaultColumnWidths: Record<ElectionTableColumn, number> = {
+  "#": 30,
+  "지역": 86,
+  "장소": 128,
+  "코리아풀영상": 82,
+  "장비배정": 106,
+  "TRS": 78,
+  "촬영기자": 106,
+  "오디오맨": 104,
+  "중계시간": 116,
+  "취재기자": 106,
+  "주소": 290,
+  "비고": 146,
+  "중계자리": 54,
+  "LAN": 54,
+  "조명": 82,
+};
+
+const minColumnWidths: Record<ElectionTableColumn, number> = {
+  "#": 26,
+  "지역": 58,
+  "장소": 72,
+  "코리아풀영상": 58,
+  "장비배정": 72,
+  "TRS": 54,
+  "촬영기자": 72,
+  "오디오맨": 72,
+  "중계시간": 78,
+  "취재기자": 72,
+  "주소": 120,
+  "비고": 86,
+  "중계자리": 42,
+  "LAN": 42,
+  "조명": 58,
+};
 
 const regionColorOptions = [
   { value: "", label: "없음", background: "transparent", text: "#0f172a" },
@@ -110,17 +153,41 @@ type TableMeasurements = {
   rowHeights: Record<string, number>;
 };
 
-function getTableColumnClassName(column: string) {
+function sanitizeColumnWidths(input: unknown): Record<ElectionTableColumn, number> {
+  const source = input && typeof input === "object" ? input as Partial<Record<ElectionTableColumn, unknown>> : {};
+  return tableColumns.reduce<Record<ElectionTableColumn, number>>((widths, column) => {
+    const value = Number(source[column]);
+    widths[column] = Number.isFinite(value)
+      ? Math.max(minColumnWidths[column], Math.min(520, Math.round(value)))
+      : defaultColumnWidths[column];
+    return widths;
+  }, {} as Record<ElectionTableColumn, number>);
+}
+
+function readStoredColumnWidths() {
+  if (typeof window === "undefined") return sanitizeColumnWidths(null);
+  try {
+    return sanitizeColumnWidths(JSON.parse(window.localStorage.getItem(ELECTION_COLUMN_WIDTH_STORAGE_KEY) ?? "null"));
+  } catch {
+    return sanitizeColumnWidths(null);
+  }
+}
+
+function getTableColumnsWidth(columns: readonly ElectionTableColumn[], widths: Record<ElectionTableColumn, number>) {
+  return columns.reduce((sum, column) => sum + widths[column], 0);
+}
+
+function getTableColumnClassName(column: ElectionTableColumn) {
   if (column === "#") return styles.numberColumn;
   if (column === "코리아풀영상") return styles.poolVideoColumn;
   if (staffNameColumns.has(column)) return styles.nameColumn;
   if (column === "중계시간") return styles.timeColumn;
   if (column === "주소") return styles.addressColumn;
   if (column === "비고") return styles.wideColumn;
-  return column === "중계자리" ? styles.positionColumn : undefined;
+  return column === "중계자리" || column === "LAN" ? styles.positionColumn : undefined;
 }
 
-function renderTableColumnLabel(column: string) {
+function renderTableColumnLabel(column: ElectionTableColumn) {
   if (column === "코리아풀영상") {
     return (
       <>
@@ -140,6 +207,22 @@ function renderTableColumnLabel(column: string) {
     );
   }
   return column;
+}
+
+function ElectionTableColGroup({
+  columns,
+  widths,
+}: {
+  columns: readonly ElectionTableColumn[];
+  widths: Record<ElectionTableColumn, number>;
+}) {
+  return (
+    <colgroup>
+      {columns.map((column) => (
+        <col key={column} style={{ width: `${widths[column]}px` }} />
+      ))}
+    </colgroup>
+  );
 }
 
 function areTableMeasurementsEqual(left: TableMeasurements, right: TableMeasurements) {
@@ -201,18 +284,26 @@ function getCellColorOption(value: string) {
   return cellColorOptions.find((option) => option.value === value);
 }
 
+function getKnownColorOption(value: string) {
+  return getCellColorOption(value) ?? getRegionColorOption(value);
+}
+
+function isKnownColorToken(value: string) {
+  return Boolean(getKnownColorOption(value)?.value);
+}
+
 function getRegionGroupColor(points: Pick<ElectionPointInput, "region" | "regionColor">[], index: number) {
   const range = getRegionGroupRange(points, index);
   for (let pointIndex = range.start; pointIndex <= range.end; pointIndex += 1) {
     const color = points[pointIndex]?.regionColor?.trim() ?? "";
-    if (getRegionColorOption(color)?.value) return color;
+    if (isKnownColorToken(color)) return color;
   }
   return "";
 }
 
 function getCellColor(point: Pick<ElectionPointInput, "cellColors">, key: ElectionCellColorKey) {
   const color = point.cellColors?.[key]?.trim() ?? "";
-  return getCellColorOption(color)?.value ? color : "";
+  return isKnownColorToken(color) ? color : "";
 }
 
 function getCellDisplayColor(points: ElectionPointInput[], point: ElectionPointInput, index: number, key: ElectionCellColorKey) {
@@ -275,49 +366,86 @@ function ReorderMenu({
   );
 }
 
-function ColorMenu({
-  label,
-  value,
-  options,
+function ColorPaintMenu({
+  selection,
   disabled,
-  onChange,
+  onSelect,
+  onCancel,
 }: {
-  label: string;
-  value: string;
-  options: readonly { value: string; label: string; background: string; text: string }[];
+  selection: ColorPaintSelection | null;
   disabled?: boolean;
-  onChange: (value: string) => void;
+  onSelect: (selection: ColorPaintSelection) => void;
+  onCancel: () => void;
 }) {
-  const selected = options.find((option) => option.value === value) ?? options[0];
+  const selected = selection?.color ? getKnownColorOption(selection.color) : null;
   return (
-    <details className={styles.colorMenu}>
-      <summary className={styles.colorMenuButton} title={label} aria-label={label}>
+    <details className={styles.colorPaintMenu}>
+      <summary
+        className={`${styles.colorPaintButton} ${selection ? styles.colorPaintButtonActive : ""}`.trim()}
+        title="색상 지정"
+        aria-label="색상 지정"
+      >
         <span
-          className={`${styles.colorSwatch} ${selected.value ? "" : styles.colorSwatchEmpty}`.trim()}
-          style={selected.value ? { backgroundColor: selected.background } : undefined}
+          className={`${styles.colorSwatch} ${selected?.value ? "" : styles.colorSwatchEmpty}`.trim()}
+          style={selected?.value ? { backgroundColor: selected.background } : undefined}
         />
+        <span>색상 지정</span>
       </summary>
-      <span className={styles.colorPalette}>
-        {options.map((option) => (
-          <button
-            type="button"
-            key={option.value || "none"}
-            className={`${styles.colorOption} ${option.value === value ? styles.colorOptionSelected : ""}`.trim()}
-            disabled={disabled}
-            onClick={(event) => {
-              event.currentTarget.closest("details")?.removeAttribute("open");
-              onChange(option.value);
-            }}
-            title={`${label}: ${option.label}`}
-            aria-label={`${label}: ${option.label}`}
-          >
-            <span
-              className={`${styles.colorSwatch} ${option.value ? "" : styles.colorSwatchEmpty}`.trim()}
-              style={option.value ? { backgroundColor: option.background } : undefined}
-            />
+      <div className={styles.colorPaintPanel}>
+        <div className={styles.colorPaletteGroup}>
+          <span className={styles.colorPaletteTitle}>연한</span>
+          <div className={styles.colorPaletteGrid}>
+            {regionColorOptions.map((option) => (
+              <button
+                type="button"
+                key={`light-${option.value || "none"}`}
+                className={`${styles.colorOption} ${selection?.palette === "light" && option.value === selection.color ? styles.colorOptionSelected : ""}`.trim()}
+                disabled={disabled}
+                onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  onSelect({ color: option.value, palette: "light" });
+                }}
+                title={`연한 색상: ${option.label}`}
+                aria-label={`연한 색상: ${option.label}`}
+              >
+                <span
+                  className={`${styles.colorSwatch} ${option.value ? "" : styles.colorSwatchEmpty}`.trim()}
+                  style={option.value ? { backgroundColor: option.background } : undefined}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.colorPaletteGroup}>
+          <span className={styles.colorPaletteTitle}>진한</span>
+          <div className={styles.colorPaletteGrid}>
+            {cellColorOptions.map((option) => (
+              <button
+                type="button"
+                key={`dark-${option.value || "none"}`}
+                className={`${styles.colorOption} ${selection?.palette === "dark" && option.value === selection.color ? styles.colorOptionSelected : ""}`.trim()}
+                disabled={disabled}
+                onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  onSelect({ color: option.value, palette: "dark" });
+                }}
+                title={`진한 색상: ${option.label}`}
+                aria-label={`진한 색상: ${option.label}`}
+              >
+                <span
+                  className={`${styles.colorSwatch} ${option.value ? "" : styles.colorSwatchEmpty}`.trim()}
+                  style={option.value ? { backgroundColor: option.background } : undefined}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+        {selection ? (
+          <button type="button" className={styles.colorPaintCancel} disabled={disabled} onClick={onCancel}>
+            해제
           </button>
-        ))}
-      </span>
+        ) : null}
+      </div>
     </details>
   );
 }
@@ -420,6 +548,7 @@ function createBlankPoint(sortOrder = 0): DraftPoint {
     address: "",
     note: "",
     livePosition: "",
+    lan: "",
     lighting: "",
     regionColor: "",
     cellColors: {},
@@ -468,6 +597,7 @@ function eventToDraft(event: ElectionEvent): DraftEvent {
           address: point.address,
           note: point.note,
           livePosition: point.livePosition,
+          lan: point.lan,
           lighting: point.lighting,
           regionColor: point.regionColor,
           cellColors: point.cellColors,
@@ -483,6 +613,56 @@ function draftToSaveInput(draft: DraftEvent): ElectionSaveInput {
     title: draft.title,
     electionDate: draft.electionDate,
     points: draft.points.map((point, index) => ({ ...point, sortOrder: index })),
+  };
+}
+
+function draftToReadOnlyEvent(draft: DraftEvent): ElectionEvent {
+  const now = new Date().toISOString();
+  return {
+    id: draft.id ?? "election-closed-preview",
+    title: draft.title,
+    electionDate: draft.electionDate,
+    status: draft.status,
+    publishedAt: null,
+    publishedBy: null,
+    closedAt: null,
+    closedBy: null,
+    createdBy: null,
+    createdAt: now,
+    updatedAt: now,
+    points: draft.points.map((point, index) => ({
+      id: point.id ?? point.localId,
+      eventId: draft.id ?? "",
+      sortOrder: index,
+      region: point.region,
+      place: point.place,
+      poolVideo: point.poolVideo,
+      equipmentName: point.equipmentName,
+      equipmentType: point.equipmentType,
+      trs: point.trs,
+      cameraStaffName: point.cameraStaffName,
+      cameraStaffUserId: point.cameraStaffUserId,
+      cameraStaffNamePm: point.cameraStaffNamePm,
+      cameraStaffUserIdPm: point.cameraStaffUserIdPm,
+      audioStaffName: point.audioStaffName,
+      audioStaffUserId: point.audioStaffUserId,
+      audioStaffNamePm: point.audioStaffNamePm,
+      reporterName: point.reporterName,
+      reporterUserId: point.reporterUserId,
+      reporterNamePm: point.reporterNamePm,
+      liveTime: point.liveTime,
+      liveTimePm: point.liveTimePm,
+      address: point.address,
+      note: point.note,
+      livePosition: point.livePosition,
+      lan: point.lan,
+      lighting: point.lighting,
+      regionColor: point.regionColor,
+      cellColors: point.cellColors,
+      isActive: point.isActive,
+      createdAt: now,
+      updatedAt: now,
+    } satisfies ElectionPoint)),
   };
 }
 
@@ -517,9 +697,21 @@ function formatElectionBoardTitle(title: string | null | undefined) {
 
 function readOnlyValue(value: string | null | undefined) {
   const display = value?.trim() || "-";
+  const lines = display === "-" ? [] : display.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  if (lines.length > 1) {
+    return (
+      <span className={`${styles.readOnlyCell} ${styles.readOnlyCellMultiline}`}>
+        {lines.map((line, index) => (
+          <span key={`${line}-${index}`}>{line}</span>
+        ))}
+      </span>
+    );
+  }
+
   return (
     <span className={`${styles.readOnlyCell} ${display === "-" ? styles.readOnlyCellEmpty : ""}`.trim()}>
-      {display}
+      {lines[0] ?? display}
     </span>
   );
 }
@@ -541,28 +733,6 @@ function readOnlySplitValue(morning: string | null | undefined, afternoon: strin
       <span><b>오전</b>{morningText}</span>
       <span><b>오후</b>{afternoonText}</span>
     </span>
-  );
-}
-
-function CellColorMenu({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <ColorMenu
-      label={`${label} 칸 색상`}
-      value={value}
-      options={cellColorOptions}
-      disabled={disabled}
-      onChange={onChange}
-    />
   );
 }
 
@@ -618,6 +788,45 @@ function SplitTextInput({
   );
 }
 
+function getAddressInputLines(value: string) {
+  const lines = value.split(/\r?\n/);
+  return lines.length > 0 ? lines : [""];
+}
+
+function setAddressInputLine(value: string, index: number, nextLine: string) {
+  const lines = getAddressInputLines(value);
+  lines[index] = nextLine;
+  return lines.join("\n");
+}
+
+function addAddressInputLine(value: string) {
+  return [...getAddressInputLines(value), ""].join("\n");
+}
+
+function removeAddressInputLine(value: string, index: number) {
+  const lines = getAddressInputLines(value);
+  if (lines.length <= 1) return "";
+  return lines.filter((_, lineIndex) => lineIndex !== index).join("\n");
+}
+
+function SunMoonIcon() {
+  return (
+    <span className={styles.sunMoonIcon} aria-hidden="true">
+      <span>☼</span>
+      <span>☾</span>
+    </span>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg className={styles.trashIcon} aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M9 4h6l1 2h4v2H4V6h4l1-2Z" />
+      <path d="M7 10h10l-.7 10H7.7L7 10Zm3 2v6h1.5v-6H10Zm2.5 0v6H14v-6h-1.5Z" />
+    </svg>
+  );
+}
+
 function ElectionPrintableTable({
   title,
   electionDate,
@@ -657,6 +866,7 @@ function ElectionPrintableTable({
               const addressColor = getCellDisplayColor(points, point, index, "address");
               const noteColor = getCellDisplayColor(points, point, index, "note");
               const livePositionColor = getCellDisplayColor(points, point, index, "livePosition");
+              const lanColor = getCellDisplayColor(points, point, index, "lan");
               const lightingColor = getCellDisplayColor(points, point, index, "lighting");
               return (
                 <tr key={`${point.sortOrder}-${index}`}>
@@ -682,6 +892,9 @@ function ElectionPrintableTable({
                   <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>{readOnlyValue(point.note)}</td>
                   <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
                     <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                  </td>
+                  <td className={getColorableCellClassName(styles.positionColumn, lanColor)} style={getColorStyle(lanColor)}>
+                    <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.lan) ? styles.positionReadOnlyOn : ""}`.trim()} />
                   </td>
                   <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>{readOnlyValue(point.lighting)}</td>
                 </tr>
@@ -735,6 +948,7 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
                   const addressColor = getCellDisplayColor(event.points, point, index, "address");
                   const noteColor = getCellDisplayColor(event.points, point, index, "note");
                   const livePositionColor = getCellDisplayColor(event.points, point, index, "livePosition");
+                  const lanColor = getCellDisplayColor(event.points, point, index, "lan");
                   const lightingColor = getCellDisplayColor(event.points, point, index, "lighting");
                   return (
                   <tr key={point.id}>
@@ -760,6 +974,9 @@ function ElectionReadOnlyTable({ event }: { event: ElectionEvent }) {
                     <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>{readOnlyValue(point.note)}</td>
                     <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
                       <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                    </td>
+                    <td className={getColorableCellClassName(styles.positionColumn, lanColor)} style={getColorStyle(lanColor)}>
+                      <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.lan) ? styles.positionReadOnlyOn : ""}`.trim()} />
                     </td>
                     <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>{readOnlyValue(point.lighting)}</td>
                   </tr>
@@ -794,6 +1011,8 @@ export function ElectionPage() {
   const [printPaperSize, setPrintPaperSize] = useState<PrintPaperSize>("A3");
   const [printOrientation, setPrintOrientation] = useState<PrintOrientation>("portrait");
   const [printColorMode, setPrintColorMode] = useState<PrintColorMode>("color");
+  const [columnWidths, setColumnWidths] = useState<Record<ElectionTableColumn, number>>(() => sanitizeColumnWidths(null));
+  const [paintSelection, setPaintSelection] = useState<ColorPaintSelection | null>(null);
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -806,6 +1025,8 @@ export function ElectionPage() {
 
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
   const pointMeasurementKey = draft?.points.map((point) => point.localId).join("|") ?? "";
+  const editableTableWidth = useMemo(() => getTableColumnsWidth(tableColumns, columnWidths), [columnWidths]);
+  const paintModeActive = Boolean(paintSelection);
 
   const setPointRowRef = useCallback((localId: string, element: HTMLTableRowElement | null) => {
     if (element) {
@@ -815,9 +1036,44 @@ export function ElectionPage() {
     tableRowRefs.current.delete(localId);
   }, []);
 
+  const startColumnResize = useCallback((column: ElectionTableColumn, event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = columnWidths[column];
+    const minWidth = minColumnWidths[column];
+
+    const handlePointerMove = (pointerEvent: PointerEvent) => {
+      const nextWidth = Math.max(minWidth, Math.min(520, Math.round(startWidth + pointerEvent.clientX - startX)));
+      setColumnWidths((current) => ({ ...current, [column]: nextWidth }));
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }, [columnWidths]);
+
+  const resetColumnWidth = useCallback((column: ElectionTableColumn) => {
+    setColumnWidths((current) => ({ ...current, [column]: defaultColumnWidths[column] }));
+  }, []);
+
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  useEffect(() => {
+    setColumnWidths(readStoredColumnWidths());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ELECTION_COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
 
   useLayoutEffect(() => {
     if (!draft) {
@@ -921,7 +1177,7 @@ export function ElectionPage() {
 
   const runAutoSave = useCallback(async () => {
     const snapshot = draftRef.current;
-    if (!snapshot || !canManage) return;
+    if (!snapshot || !canManage || snapshot.status === "closed") return;
 
     const signature = getDraftSaveSignature(snapshot);
     if (!signature || signature === lastSavedSignatureRef.current) {
@@ -958,6 +1214,7 @@ export function ElectionPage() {
 
   useEffect(() => {
     if (!autoSaveReadyRef.current || !canManage || !draft) return;
+    if (draft.status === "closed") return;
     const signature = getDraftSaveSignature(draft);
     if (signature === lastSavedSignatureRef.current) return;
 
@@ -1066,6 +1323,27 @@ export function ElectionPage() {
       };
     });
   };
+
+  const applyPaintToCell = (event: ReactPointerEvent<HTMLTableCellElement>, index: number, target: PaintTarget) => {
+    if (!paintSelection || saving) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (target === "region") {
+      updateRegionGroupColor(index, paintSelection.color);
+    } else {
+      updatePointCellColor(index, target, paintSelection.color);
+    }
+
+    setPaintSelection(null);
+  };
+
+  const getEditableCellClassName = (baseClassName: string | undefined, color: string) => (
+    [
+      getColorableCellClassName(baseClassName, color),
+      paintModeActive ? styles.paintableCell : "",
+    ].filter(Boolean).join(" ")
+  );
 
   const addPointToRegion = (index: number) => {
     setDraft((current) => {
@@ -1180,6 +1458,10 @@ export function ElectionPage() {
 
   const saveDraft = async () => {
     if (!draft) return null;
+    if (draft.status === "closed") {
+      setMessage({ tone: "warn", text: "게시종료된 선거 중계표는 수정할 수 없습니다. 새 선거표를 만든 뒤 저장해 주세요." });
+      return null;
+    }
     clearAutoSaveTimer();
     setSaving(true);
     try {
@@ -1195,6 +1477,10 @@ export function ElectionPage() {
   };
 
   const publishDraft = async () => {
+    if (draft?.status === "closed") {
+      setMessage({ tone: "warn", text: "게시종료된 선거 중계표는 다시 게시할 수 없습니다. 새 선거표를 만든 뒤 게시해 주세요." });
+      return;
+    }
     const savedEvent = await saveDraft();
     if (!savedEvent) return;
     setSaving(true);
@@ -1219,20 +1505,31 @@ export function ElectionPage() {
 
     setSaving(true);
     try {
-      await closeElectionEvent(draft.id);
-      const nextDraft = createBlankDraft();
+      const workspace = await closeElectionEvent(draft.id);
+      const nextDraft = workspace.event ? eventToDraft(workspace.event) : { ...draft, status: "closed" as const };
       setDraft(nextDraft);
       draftRef.current = nextDraft;
       lastSavedSignatureRef.current = getDraftSaveSignature(nextDraft);
       setPublishedEvent(null);
-      setSavedDisplayTitle(null);
+      setSavedDisplayTitle(nextDraft.title);
       setAutoSaveStatus("idle");
-      setMessage({ tone: "ok", text: "게시종료했습니다. 새 선거 중계표를 작성할 수 있습니다." });
+      setMessage({ tone: "ok", text: "게시종료했습니다. 데이터는 읽기 전용으로 유지되고 일반 사용자 사이드바에서는 선거 메뉴가 숨겨집니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "게시종료에 실패했습니다." });
     } finally {
       setSaving(false);
     }
+  };
+
+  const startNewDraft = () => {
+    clearAutoSaveTimer();
+    const nextDraft = createBlankDraft();
+    setDraft(nextDraft);
+    draftRef.current = nextDraft;
+    lastSavedSignatureRef.current = getDraftSaveSignature(nextDraft);
+    setSavedDisplayTitle(null);
+    setAutoSaveStatus("idle");
+    setMessage({ tone: "note", text: "새 선거 중계표를 작성합니다." });
   };
 
   if (loading) {
@@ -1292,6 +1589,51 @@ export function ElectionPage() {
 
   const currentStatus = draft?.status ?? "draft";
   const autoSaveStatusLabel = getAutoSaveStatusLabel(autoSaveStatus);
+  const closedReadOnlyEvent = draft && currentStatus === "closed" ? draftToReadOnlyEvent(draft) : null;
+
+  if (closedReadOnlyEvent) {
+    return (
+      <section className={`${styles.page} ${styles.printRoot}`.trim()}>
+        <div className={styles.screenOnly}>
+          <article className="panel">
+            <div className={`panel-pad ${styles.header}`}>
+              <div className={styles.titleBlock}>
+                <h1 className="page-title">{formatElectionBoardTitle(closedReadOnlyEvent.title)}</h1>
+                <div className={styles.statusLine}>
+                  <span className={getStatusClassName("closed")}>{statusLabels.closed}</span>
+                </div>
+              </div>
+              <div className={styles.actions}>
+                <ElectionPrintControls
+                  paperSize={printPaperSize}
+                  orientation={printOrientation}
+                  colorMode={printColorMode}
+                  disabled={false}
+                  onPaperSizeChange={setPrintPaperSize}
+                  onOrientationChange={setPrintOrientation}
+                  onColorModeChange={setPrintColorMode}
+                  onPrint={printElectionBoard}
+                />
+                <button type="button" className="btn primary" disabled={saving} onClick={startNewDraft}>
+                  새 선거표 작성
+                </button>
+              </div>
+            </div>
+          </article>
+
+          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+          <ElectionReadOnlyTable event={closedReadOnlyEvent} />
+        </div>
+        <div className={styles.printOnly}>
+          <ElectionPrintableTable
+            title={closedReadOnlyEvent.title}
+            electionDate={closedReadOnlyEvent.electionDate}
+            points={closedReadOnlyEvent.points}
+          />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className={`${styles.page} ${styles.printRoot}`.trim()}>
@@ -1369,9 +1711,17 @@ export function ElectionPage() {
             <div className={`panel-pad ${styles.emptyPanel}`}>
               <div className={styles.toolbar}>
                 <div className={styles.summary}>{draft.points.length}개 포인트</div>
-                <button type="button" className="btn" disabled={saving} onClick={addPoint}>
-                  행 추가
-                </button>
+                <div className={styles.toolbarActions}>
+                  <ColorPaintMenu
+                    selection={paintSelection}
+                    disabled={saving}
+                    onSelect={setPaintSelection}
+                    onCancel={() => setPaintSelection(null)}
+                  />
+                  <button type="button" className="btn" disabled={saving} onClick={addPoint}>
+                    행 추가
+                  </button>
+                </div>
               </div>
               <datalist id="election-profile-options">
                 {profileNames.map((name) => (
@@ -1395,30 +1745,69 @@ export function ElectionPage() {
                           className={styles.managementRailCell}
                           style={tableMeasurements.rowHeights[point.localId] ? { height: tableMeasurements.rowHeights[point.localId] } : undefined}
                         >
-                          <div className={styles.rowActions}>
-                            <button
-                              type="button"
-                              className="btn"
-                              disabled={saving}
-                              onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
+                          <details className={styles.rowActionMenu}>
+                            <summary
+                              className={styles.rowActionTrigger}
+                              aria-label="행 관리 메뉴"
+                              title="행 관리"
+                              aria-disabled={saving}
+                              onClick={(event) => {
+                                if (saving) event.preventDefault();
+                              }}
+                              onKeyDown={(event) => {
+                                if (saving && (event.key === "Enter" || event.key === " ")) event.preventDefault();
+                              }}
                             >
-                              {split ? "합치기" : "오전/오후"}
-                            </button>
-                            <button type="button" className={`btn ${styles.deleteButton}`} disabled={saving} onClick={() => removePoint(index)}>
-                              삭제
-                            </button>
-                          </div>
+                              +
+                            </summary>
+                            <div className={styles.rowActionPanel}>
+                              <button
+                                type="button"
+                                className={styles.rowIconButton}
+                                disabled={saving}
+                                onClick={() => (split ? mergePoint(index, point) : splitPoint(point))}
+                                aria-label={split ? "오전 오후 합치기" : "오전 오후 나누기"}
+                                title={split ? "오전 오후 합치기" : "오전 오후 나누기"}
+                              >
+                                <SunMoonIcon />
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.rowIconButton} ${styles.deleteButton}`}
+                                disabled={saving}
+                                onClick={() => removePoint(index)}
+                                aria-label="행 삭제"
+                                title="행 삭제"
+                              >
+                                <TrashIcon />
+                              </button>
+                            </div>
+                          </details>
                         </div>
                       );
                     })}
                   </div>
                 </div>
                 <div className={styles.tableWrap}>
-                  <table className={`table-like ${styles.table}`}>
+                  <table className={`table-like ${styles.table} ${styles.resizableTable}`} style={{ width: editableTableWidth, minWidth: "100%" }}>
+                    <ElectionTableColGroup columns={tableColumns} widths={columnWidths} />
                     <thead>
                       <tr ref={tableHeaderRowRef}>
                         {tableColumns.map((column) => (
-                          <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
+                          <th
+                            key={column}
+                            className={[getTableColumnClassName(column), styles.resizableHeader].filter(Boolean).join(" ")}
+                          >
+                            <span className={styles.resizableHeaderLabel}>{renderTableColumnLabel(column)}</span>
+                            <button
+                              type="button"
+                              className={styles.columnResizeHandle}
+                              aria-label={`${column} 칸 너비 조절`}
+                              title="드래그해서 칸 너비 조절"
+                              onPointerDown={(event) => startColumnResize(column, event)}
+                              onDoubleClick={() => resetColumnWidth(column)}
+                            />
+                          </th>
                         ))}
                       </tr>
                     </thead>
@@ -1439,6 +1828,7 @@ export function ElectionPage() {
                       const addressColor = getCellDisplayColor(draft.points, point, index, "address");
                       const noteColor = getCellDisplayColor(draft.points, point, index, "note");
                       const livePositionColor = getCellDisplayColor(draft.points, point, index, "livePosition");
+                      const lanColor = getCellDisplayColor(draft.points, point, index, "lan");
                       const lightingColor = getCellDisplayColor(draft.points, point, index, "lighting");
                       return (
                       <tr key={point.localId} ref={(element) => setPointRowRef(point.localId, element)}>
@@ -1447,19 +1837,13 @@ export function ElectionPage() {
                         </td>
                         {regionRowSpan > 0 ? (
                           <td
-                            className={getColorableCellClassName(styles.regionColumn, regionColor)}
+                            className={getEditableCellClassName(styles.regionColumn, regionColor)}
                             style={getColorStyle(regionColor)}
                             rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
+                            onPointerDownCapture={(event) => applyPaintToCell(event, index, "region")}
                           >
                             <div className={styles.regionCellInner}>
                               <input className="field-input" value={point.region} onChange={(event) => updateRegionGroup(index, event.target.value)} />
-                              <ColorMenu
-                                label="지역 색상"
-                                value={regionColor}
-                                options={regionColorOptions}
-                                disabled={saving}
-                                onChange={(value) => updateRegionGroupColor(index, value)}
-                              />
                               {hasRegionText ? (
                                 <div className={styles.cellActionRow}>
                                   <button
@@ -1484,15 +1868,13 @@ export function ElectionPage() {
                             </div>
                           </td>
                         ) : null}
-                        <td className={getColorableCellClassName(styles.placeColumn, placeColor)} style={getColorStyle(placeColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.placeColumn, placeColor)}
+                          style={getColorStyle(placeColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "place")}
+                        >
                           <div className={styles.placeCellInner}>
                             <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
-                            <CellColorMenu
-                              label="장소"
-                              value={getCellColor(point, "place")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "place", value)}
-                            />
                             {hasRegionText ? (
                               <ReorderMenu
                                 label="장소"
@@ -1504,7 +1886,11 @@ export function ElectionPage() {
                             ) : null}
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.poolVideoColumn, poolVideoColor)}
+                          style={getColorStyle(poolVideoColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "poolVideo")}
+                        >
                           <div className={styles.cellEditor}>
                             <select className="field-select" value={point.poolVideo} onChange={(event) => updatePoint(index, { poolVideo: event.target.value })}>
                               <option value=""></option>
@@ -1514,37 +1900,31 @@ export function ElectionPage() {
                                 </option>
                               ))}
                             </select>
-                            <CellColorMenu
-                              label="코리아풀영상"
-                              value={getCellColor(point, "poolVideo")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "poolVideo", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>
+                        <td
+                          className={getEditableCellClassName(undefined, equipmentNameColor)}
+                          style={getColorStyle(equipmentNameColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "equipmentName")}
+                        >
                           <div className={styles.cellEditor}>
                             <input className="field-input" value={point.equipmentName} onChange={(event) => updatePoint(index, { equipmentName: event.target.value })} placeholder="TVU-21" />
-                            <CellColorMenu
-                              label="장비배정"
-                              value={getCellColor(point, "equipmentName")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "equipmentName", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>
+                        <td
+                          className={getEditableCellClassName(undefined, trsColor)}
+                          style={getColorStyle(trsColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "trs")}
+                        >
                           <div className={styles.cellEditor}>
                             <input className="field-input" value={point.trs} onChange={(event) => updatePoint(index, { trs: event.target.value })} />
-                            <CellColorMenu
-                              label="TRS"
-                              value={getCellColor(point, "trs")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "trs", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.nameColumn, cameraStaffColor)} style={getColorStyle(cameraStaffColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.nameColumn, cameraStaffColor)}
+                          style={getColorStyle(cameraStaffColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "cameraStaff")}
+                        >
                           <div className={styles.cellEditor}>
                             {split ? (
                               <SplitTextInput
@@ -1557,15 +1937,13 @@ export function ElectionPage() {
                             ) : (
                               <input className="field-input" list="election-profile-options" value={point.cameraStaffName} onChange={(event) => updateCameraStaff(index, "am", event.target.value)} />
                             )}
-                            <CellColorMenu
-                              label="촬영기자"
-                              value={getCellColor(point, "cameraStaff")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "cameraStaff", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.nameColumn, audioStaffColor)} style={getColorStyle(audioStaffColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.nameColumn, audioStaffColor)}
+                          style={getColorStyle(audioStaffColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "audioStaff")}
+                        >
                           <div className={styles.cellEditor}>
                             {split ? (
                               <SplitTextInput
@@ -1577,15 +1955,13 @@ export function ElectionPage() {
                             ) : (
                               <input className="field-input" value={point.audioStaffName} onChange={(event) => updatePoint(index, { audioStaffName: event.target.value, audioStaffUserId: null })} />
                             )}
-                            <CellColorMenu
-                              label="오디오맨"
-                              value={getCellColor(point, "audioStaff")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "audioStaff", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.timeColumn, liveTimeColor)} style={getColorStyle(liveTimeColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.timeColumn, liveTimeColor)}
+                          style={getColorStyle(liveTimeColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "liveTime")}
+                        >
                           <div className={styles.cellEditor}>
                             {split ? (
                               <SplitTextInput
@@ -1598,15 +1974,13 @@ export function ElectionPage() {
                             ) : (
                               <input className="field-input" value={point.liveTime} placeholder="10:00 - 12:00" onChange={(event) => updatePoint(index, { liveTime: event.target.value })} />
                             )}
-                            <CellColorMenu
-                              label="중계시간"
-                              value={getCellColor(point, "liveTime")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "liveTime", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.nameColumn, reporterColor)} style={getColorStyle(reporterColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.nameColumn, reporterColor)}
+                          style={getColorStyle(reporterColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "reporter")}
+                        >
                           <div className={styles.cellEditor}>
                             {split ? (
                               <SplitTextInput
@@ -1618,37 +1992,68 @@ export function ElectionPage() {
                             ) : (
                               <input className="field-input" value={point.reporterName} onChange={(event) => updatePoint(index, { reporterName: event.target.value, reporterUserId: null })} />
                             )}
-                            <CellColorMenu
-                              label="취재기자"
-                              value={getCellColor(point, "reporter")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "reporter", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.addressColumn, addressColor)} style={getColorStyle(addressColor)}>
-                          <div className={styles.cellEditor}>
-                            <input className="field-input" value={point.address} onChange={(event) => updatePoint(index, { address: event.target.value })} />
-                            <CellColorMenu
-                              label="주소"
-                              value={getCellColor(point, "address")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "address", value)}
-                            />
+                        <td
+                          className={getEditableCellClassName(styles.addressColumn, addressColor)}
+                          style={getColorStyle(addressColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "address")}
+                        >
+                          <div className={styles.addressEditor}>
+                            <div className={styles.addressRows}>
+                              {getAddressInputLines(point.address).map((addressLine, addressIndex) => (
+                                <div key={addressIndex} className={styles.addressRow}>
+                                  <input
+                                    className="field-input"
+                                    value={addressLine}
+                                    onChange={(event) =>
+                                      updatePoint(index, {
+                                        address: setAddressInputLine(point.address, addressIndex, event.target.value),
+                                      })
+                                    }
+                                  />
+                                  {addressIndex === 0 ? (
+                                    <button
+                                      type="button"
+                                      className={styles.cellActionButton}
+                                      disabled={saving}
+                                      onClick={() => updatePoint(index, { address: addAddressInputLine(point.address) })}
+                                      title="주소칸 추가"
+                                      aria-label="주소칸 추가"
+                                    >
+                                      +
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className={styles.cellActionButton}
+                                      disabled={saving}
+                                      onClick={() => updatePoint(index, { address: removeAddressInputLine(point.address, addressIndex) })}
+                                      title="주소칸 삭제"
+                                      aria-label="주소칸 삭제"
+                                    >
+                                      -
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.wideColumn, noteColor)}
+                          style={getColorStyle(noteColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "note")}
+                        >
                           <div className={styles.cellEditor}>
                             <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
-                            <CellColorMenu
-                              label="비고"
-                              value={getCellColor(point, "note")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "note", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.positionColumn, livePositionColor)}
+                          style={getColorStyle(livePositionColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "livePosition")}
+                        >
                           <div className={styles.positionCellInner}>
                             <label
                               className={`${styles.positionToggle} ${isLivePositionChecked(point.livePosition) ? styles.positionToggleOn : ""}`.trim()}
@@ -1664,23 +2069,37 @@ export function ElectionPage() {
                                 }
                               />
                             </label>
-                            <CellColorMenu
-                              label="중계자리"
-                              value={getCellColor(point, "livePosition")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "livePosition", value)}
-                            />
                           </div>
                         </td>
-                        <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>
+                        <td
+                          className={getEditableCellClassName(styles.positionColumn, lanColor)}
+                          style={getColorStyle(lanColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "lan")}
+                        >
+                          <div className={styles.positionCellInner}>
+                            <label
+                              className={`${styles.positionToggle} ${isLivePositionChecked(point.lan) ? styles.positionToggleOn : ""}`.trim()}
+                              title="LAN"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isLivePositionChecked(point.lan)}
+                                onChange={(event) =>
+                                  updatePoint(index, {
+                                    lan: event.target.checked ? LIVE_POSITION_CHECKED_VALUE : "",
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        </td>
+                        <td
+                          className={getEditableCellClassName(undefined, lightingColor)}
+                          style={getColorStyle(lightingColor)}
+                          onPointerDownCapture={(event) => applyPaintToCell(event, index, "lighting")}
+                        >
                           <div className={styles.cellEditor}>
                             <input className="field-input" value={point.lighting} onChange={(event) => updatePoint(index, { lighting: event.target.value })} />
-                            <CellColorMenu
-                              label="조명"
-                              value={getCellColor(point, "lighting")}
-                              disabled={saving}
-                              onChange={(value) => updatePointCellColor(index, "lighting", value)}
-                            />
                           </div>
                         </td>
                       </tr>

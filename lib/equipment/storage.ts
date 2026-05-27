@@ -1,4 +1,4 @@
-import { getSession, hasDeskAccess, isReadOnlyPortalRole } from "@/lib/auth/storage";
+import { getSession, hasDeskAccess, isReadOnlyPortalRole, type SessionUser } from "@/lib/auth/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -407,15 +407,19 @@ function assertCanMutate() {
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
-  if (isReadOnlyPortalRole(session.role)) {
+  if (isReadOnlyPortalRole(session.role) && !hasEquipmentDeskAccess(session)) {
     throw new Error("읽기 전용 계정은 장비 대여/반납을 할 수 없습니다.");
   }
   return session;
 }
 
+export function hasEquipmentDeskAccess(session: Pick<SessionUser, "role" | "actualRole" | "approved"> | null | undefined) {
+  return Boolean(session?.approved && (hasDeskAccess(session.role) || hasDeskAccess(session.actualRole)));
+}
+
 function assertCanManageRepair() {
   const session = getSession();
-  if (!session?.approved || !hasDeskAccess(session.role)) {
+  if (!hasEquipmentDeskAccess(session)) {
     throw new Error("장비 수리 처리 권한이 없습니다.");
   }
   return session;
@@ -423,7 +427,7 @@ function assertCanManageRepair() {
 
 function assertCanManageLiveStatus() {
   const session = getSession();
-  if (!session?.approved || !hasDeskAccess(session.actualRole)) {
+  if (!hasEquipmentDeskAccess(session)) {
     throw new Error("라이브장비 현황판 저장 권한이 없습니다.");
   }
   return session;
@@ -453,10 +457,11 @@ function assertCanManageTvuGrid() {
   return session;
 }
 
-export function canReturnLoanItem(loanItem: EquipmentLoanItem) {
-  const session = getSession();
+export function canReturnLoanItem(loanItem: EquipmentLoanItem, session: SessionUser | null = getSession()) {
   if (!session?.approved) return false;
-  return loanItem.loan.borrowerProfileId === session.id || hasDeskAccess(session.actualRole);
+  if (hasEquipmentDeskAccess(session)) return true;
+  if (isReadOnlyPortalRole(session.role)) return false;
+  return loanItem.loan.borrowerProfileId === session.id;
 }
 
 export async function borrowEquipmentItems(
@@ -697,7 +702,7 @@ export async function returnEquipmentLoanItems(loanItemIds: string[]) {
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
-  if (isReadOnlyPortalRole(session.role) && !hasDeskAccess(session.actualRole)) {
+  if (isReadOnlyPortalRole(session.role) && !hasEquipmentDeskAccess(session)) {
     throw new Error("장비 반납 권한이 없습니다.");
   }
   const normalizedIds = Array.from(new Set(loanItemIds.map((item) => item.trim()).filter(Boolean)));

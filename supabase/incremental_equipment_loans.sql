@@ -136,7 +136,10 @@ on public.equipment_loans
 for update
 to authenticated
 using (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or (
     public.current_profile_approved() = true
     and public.current_profile_role() <> 'observer'
@@ -144,7 +147,10 @@ using (
   )
 )
 with check (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or (
     public.current_profile_approved() = true
     and public.current_profile_role() <> 'observer'
@@ -182,7 +188,10 @@ on public.equipment_loan_items
 for update
 to authenticated
 using (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or exists (
     select 1
     from public.equipment_loans
@@ -193,7 +202,10 @@ using (
   )
 )
 with check (
-  public.is_admin()
+  (
+    public.current_profile_approved() = true
+    and public.current_profile_role() in ('desk', 'admin', 'team_lead')
+  )
   or exists (
     select 1
     from public.equipment_loans

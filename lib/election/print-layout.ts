@@ -16,6 +16,7 @@ const printColumns = [
   { key: "address", label: "주소", className: "election-print-col-address" },
   { key: "note", label: "비고", className: "election-print-col-note" },
   { key: "livePosition", label: "중계자리", className: "election-print-col-position" },
+  { key: "lan", label: "LAN", className: "election-print-col-position" },
   { key: "lighting", label: "조명", className: "election-print-col-lighting" },
 ] as const;
 
@@ -219,6 +220,9 @@ function renderPointRow(point: ElectionPrintPoint, index: number, regionCellHtml
   const livePositionClassName = isLivePositionChecked(point.livePosition)
     ? "election-print-position election-print-position--on"
     : "election-print-position";
+  const lanClassName = isLivePositionChecked(point.lan)
+    ? "election-print-position election-print-position--on"
+    : "election-print-position";
 
   return `
     <tr>
@@ -235,6 +239,7 @@ function renderPointRow(point: ElectionPrintPoint, index: number, regionCellHtml
       <td>${printableValue(point.address)}</td>
       <td>${printableValue(point.note)}</td>
       <td><span class="${livePositionClassName}"></span></td>
+      <td><span class="${lanClassName}"></span></td>
       <td>${printableValue(point.lighting)}</td>
     </tr>
   `;

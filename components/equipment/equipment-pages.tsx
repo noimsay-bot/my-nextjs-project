@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getSession,
-  hasDeskAccess,
   isReadOnlyPortalRole,
   subscribeToAuth,
   type SessionUser,
@@ -21,6 +20,7 @@ import {
   fetchEquipmentLoanItems,
   fetchEquipmentProfiles,
   fetchLiveEquipmentStatusEntries,
+  hasEquipmentDeskAccess,
   renameRentalTvuItem,
   returnEquipmentLoanItems,
   saveLiveEquipmentStatusEntries,
@@ -618,7 +618,7 @@ function getEngBadgeSortRank(badges: EngScheduleBadge[]) {
 }
 
 function canViewEquipmentStatus(session: SessionUser | null) {
-  return Boolean(session?.approved && hasDeskAccess(session.role) && hasDeskAccess(session.actualRole));
+  return hasEquipmentDeskAccess(session);
 }
 
 function EquipmentNav({ activeHref, showStatusLink }: { activeHref: string; showStatusLink: boolean }) {
@@ -2229,13 +2229,14 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [gridPendingItemId, setGridPendingItemId] = useState<string | null>(null);
 
   const isEngSetPage = category === "eng_set";
-  const canMutate = Boolean(session?.approved && !isReadOnlyPortalRole(session.role));
-  const canReturnEquipment = Boolean(session?.approved && (!isReadOnlyPortalRole(session.role) || hasDeskAccess(session.actualRole)));
-  const canManageRepair = Boolean(session?.approved && hasDeskAccess(session.role));
+  const hasDeskRoleAccess = hasEquipmentDeskAccess(session);
+  const canMutate = Boolean(session?.approved && (!isReadOnlyPortalRole(session.role) || hasDeskRoleAccess));
+  const canReturnEquipment = Boolean(session?.approved && (!isReadOnlyPortalRole(session.role) || hasDeskRoleAccess));
+  const canManageRepair = hasDeskRoleAccess;
   const canManageRentalTvu = Boolean(session?.approved && hasRentalTvuManagerRole(session.actualRole));
   const canManageEquipmentItems = Boolean(session?.approved && hasEquipmentItemManagerRole(session.actualRole) && isDeskManagedEquipmentCategory(category));
   const canManageTvuGrid = canManageRentalTvu;
-  const canViewRegionalTransmissionItems = Boolean(session?.approved && hasDeskAccess(session.actualRole));
+  const canViewRegionalTransmissionItems = hasDeskRoleAccess;
   const showEquipmentStatusLink = canViewEquipmentStatus(session);
   const highlightDateKey = useMemo(() => getTodayDateKey(), []);
 
@@ -2431,8 +2432,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   }, [category, isEngSetPage, itemById, loading, profileSelectionById, selectedEntries, session?.id]);
 
   const returnableItems = useMemo(() => {
-    return currentLoanItems.filter((loanItem) => canReturnLoanItem(loanItem));
-  }, [currentLoanItems]);
+    return currentLoanItems.filter((loanItem) => canReturnLoanItem(loanItem, session));
+  }, [currentLoanItems, session]);
 
   const showLiveFields = useMemo(() => {
     if (confirmMode !== "borrow") return false;
@@ -3415,7 +3416,7 @@ export function LiveEquipmentStatusPage() {
   const regionalTvuItems = useMemo(() => items.filter(isRegionalTransmissionTvuItem), [items]);
   const tvuItems = useMemo(() => items.filter((item) => isTvuItem(item) && !isRegionalTransmissionTvuItem(item)), [items]);
   const statusBoardItems = useMemo(() => [...tvuItems, ...regionalTvuItems], [regionalTvuItems, tvuItems]);
-  const canManageLiveStatus = Boolean(session?.approved && hasDeskAccess(session.actualRole));
+  const canManageLiveStatus = hasEquipmentDeskAccess(session);
   const hasDirtyDrafts = useMemo(() => (
     editMode && statusBoardItems.some((item) => !liveStatusDraftsEqual(drafts[item.id], editBaselineDrafts[item.id]))
   ), [drafts, editBaselineDrafts, editMode, statusBoardItems]);

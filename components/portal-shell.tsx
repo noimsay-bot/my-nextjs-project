@@ -180,8 +180,7 @@ function hasEquipmentStatusAccessRole(role: UserRole | null | undefined) {
 function canViewEquipmentStatusLink(session: SessionUser | null) {
   return Boolean(
     session?.approved &&
-    hasEquipmentStatusAccessRole(session.role) &&
-    hasEquipmentStatusAccessRole(session.actualRole),
+    (hasEquipmentStatusAccessRole(session.role) || hasEquipmentStatusAccessRole(session.actualRole)),
   );
 }
 
@@ -192,6 +191,17 @@ function withVisibleEquipmentChildren(link: PortalNavLink, session: SessionUser 
     ...link,
     children: link.children.filter((child) => child.href !== "/equipment/status" || canViewStatus),
   };
+}
+
+function hasElectionManagerRole(role: UserRole | null | undefined) {
+  return role === "desk" || role === "team_lead" || role === "admin";
+}
+
+function canViewElectionLink(session: SessionUser | null, electionSidebarOpen: boolean) {
+  return Boolean(
+    session?.approved &&
+    (electionSidebarOpen || hasElectionManagerRole(session.actualRole)),
+  );
 }
 
 type PortalTheme = "dark" | "light" | "pink" | "green";
@@ -250,10 +260,13 @@ function getVisibleLinks(
   vacationRequestOpen: boolean,
   submissionAccessOpen: boolean,
   reviewLocked: boolean,
+  electionSidebarOpen: boolean,
 ) {
-  const visibleRoleLinks = links.map((link) => (
-    link.href === "/equipment" ? withVisibleEquipmentChildren(link, session) : link
-  ));
+  const visibleRoleLinks = links
+    .filter((link) => link.href !== "/election" || canViewElectionLink(session, electionSidebarOpen))
+    .map((link) => (
+      link.href === "/equipment" ? withVisibleEquipmentChildren(link, session) : link
+    ));
 
   switch (session?.role) {
     case "member":
@@ -876,6 +889,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const [adminCustomerSupportOpenCount, setAdminCustomerSupportOpenCount] = useState(0);
   const [desktopSidebarPinned, setDesktopSidebarPinned] = useState(false);
   const [experienceDraftRole, setExperienceDraftRole] = useState<UserRole>("member");
+  const [electionSidebarOpen, setElectionSidebarOpen] = useState(() => getPortalAccessState().electionSidebarOpen);
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
   const [reviewLocked, setReviewLocked] = useState(false);
@@ -1148,6 +1162,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 
   useEffect(() => {
     return subscribeToPortalAccessState((accessState) => {
+      setElectionSidebarOpen(accessState.electionSidebarOpen);
       setVacationRequestOpen(accessState.vacationRequestOpen);
       setSubmissionAccessOpen(accessState.submissionAccessOpen);
     });
@@ -1178,8 +1193,8 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   }, [shouldTrackReviewLock, session?.id]);
 
   const visibleLinks = useMemo(
-    () => getVisibleLinks(session, vacationRequestOpen, submissionAccessOpen, reviewLocked),
-    [reviewLocked, session, submissionAccessOpen, vacationRequestOpen],
+    () => getVisibleLinks(session, vacationRequestOpen, submissionAccessOpen, reviewLocked, electionSidebarOpen),
+    [electionSidebarOpen, reviewLocked, session, submissionAccessOpen, vacationRequestOpen],
   );
 
   const adminSession = hasAdminAccess(session?.actualRole) ? session : null;
