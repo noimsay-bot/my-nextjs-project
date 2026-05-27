@@ -51,7 +51,7 @@ type PortalNavLink = {
   children?: PortalNavChild[];
 };
 
-type SidebarNavActionId = "customer-support" | "theme";
+type SidebarNavActionId = "customer-support" | "theme" | "admin-member-view";
 
 type SidebarNavEntry =
   | { kind: "link"; link: PortalNavLink }
@@ -134,6 +134,7 @@ const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
 };
 
 const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
+  "admin-member-view": "/images/sidebar-icons/my-page.webp",
   "customer-support": "/images/sidebar-icons/customer-support.webp",
   theme: "/images/sidebar-icons/theme-mode.webp",
 };
@@ -151,6 +152,7 @@ const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"
   { kind: "link", href: "/schedule" },
   { kind: "link", href: "/team-lead" },
   { kind: "action", id: "customer-support" },
+  { kind: "action", id: "admin-member-view" },
   { kind: "link", href: "/weather" },
   { kind: "link", href: "/admin" },
 ];
@@ -506,8 +508,10 @@ function PortalSidebar({
   adminSession,
   adminCustomerSupportOpenCount,
   canOpenAdminArea,
+  canUseAdminMemberView,
   onCycleTheme,
   onOpenCustomerSupport,
+  onToggleAdminMemberView,
   onCycleExperienceRole,
   onConfirmRoleExperience,
   desktopSidebarPinned,
@@ -523,8 +527,10 @@ function PortalSidebar({
   adminSession: SessionUser | null;
   adminCustomerSupportOpenCount: number;
   canOpenAdminArea: boolean;
+  canUseAdminMemberView: boolean;
   onCycleTheme: () => void;
   onOpenCustomerSupport: () => void;
+  onToggleAdminMemberView: () => void;
   onCycleExperienceRole: () => void;
   onConfirmRoleExperience: () => void;
   desktopSidebarPinned: boolean;
@@ -552,10 +558,18 @@ function PortalSidebar({
 
     SIDEBAR_NAV_ORDER.forEach((item) => {
       if (item.kind === "action") {
+        if (item.id === "admin-member-view" && !canUseAdminMemberView) return;
         entries.push({
           kind: "action",
           id: item.id,
-          label: item.id === "customer-support" ? "고객센터" : "모드변경",
+          label:
+            item.id === "customer-support"
+              ? "고객센터"
+              : item.id === "admin-member-view" && session?.experienceRole === "member"
+                ? "관리자보기"
+                : item.id === "admin-member-view"
+                  ? "팀원보기"
+                  : "모드변경",
         });
         return;
       }
@@ -569,7 +583,7 @@ function PortalSidebar({
     appendRemainingLinks();
 
     return entries;
-  }, [visibleLinks]);
+  }, [canUseAdminMemberView, session?.experienceRole, visibleLinks]);
 
   useEffect(() => {
     if (!openMobile) {
@@ -681,6 +695,10 @@ function PortalSidebar({
                   closeMobileSidebar();
                   if (entry.id === "customer-support") {
                     onOpenCustomerSupport();
+                    return;
+                  }
+                  if (entry.id === "admin-member-view") {
+                    onToggleAdminMemberView();
                     return;
                   }
                   onCycleTheme();
@@ -1199,6 +1217,7 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
 
   const adminSession = hasAdminAccess(session?.actualRole) ? session : null;
   const canOpenAdminArea = hasAdminAccess(session?.role);
+  const canUseAdminMemberView = Boolean(session?.approved && session.actualRole === "admin");
 
   const cycleTheme = () => {
     setTheme((current) => {
@@ -1234,6 +1253,12 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
     router.refresh();
   };
 
+  const toggleAdminMemberView = () => {
+    if (!canUseAdminMemberView) return;
+    setRoleExperience(session?.experienceRole === "member" ? null : "member");
+    router.refresh();
+  };
+
   const confirmCustomerSupportFeedback = () => {
     const notification = customerSupportFeedback;
     if (!notification) return;
@@ -1264,8 +1289,10 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
         adminSession={adminSession}
         adminCustomerSupportOpenCount={adminCustomerSupportOpenCount}
         canOpenAdminArea={canOpenAdminArea}
+        canUseAdminMemberView={canUseAdminMemberView}
         onCycleTheme={cycleTheme}
         onOpenCustomerSupport={() => setCustomerSupportOpen(true)}
+        onToggleAdminMemberView={toggleAdminMemberView}
         onCycleExperienceRole={cycleExperienceRole}
         onConfirmRoleExperience={confirmRoleExperience}
         desktopSidebarPinned={desktopSidebarPinned}

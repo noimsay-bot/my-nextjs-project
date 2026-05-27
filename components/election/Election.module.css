@@ -268,13 +268,13 @@
   vertical-align: middle !important;
 }
 
+.regionGroupEnd > td,
+.regionGroupBoundaryCell {
+  border-bottom: 1.5px solid #000 !important;
+}
+
 .myLocationRow {
   position: relative;
-  z-index: 20;
-  animation: myLocationLift 0.9s ease-out 1 both;
-  filter: drop-shadow(0 18px 24px rgba(14, 165, 233, 0.32));
-  transform: perspective(900px) translateY(-2px) translateZ(24px) scale(1.016);
-  transform-origin: center;
 }
 
 .myLocationRow > td {
@@ -282,96 +282,120 @@
   overflow: hidden;
   z-index: 1;
   isolation: isolate;
-  background-color: rgba(224, 242, 254, 0.34) !important;
-  border-top-color: rgba(56, 189, 248, 0.98) !important;
-  border-bottom-color: rgba(56, 189, 248, 0.98) !important;
+  border-top-color: #f97316 !important;
+  border-bottom-color: #f97316 !important;
   box-shadow:
-    inset 0 0 22px rgba(125, 211, 252, 0.34),
-    0 12px 24px rgba(15, 23, 42, 0.2);
-  transform: translateY(-2px) scale(1.01);
+    inset 0 2px 0 #f97316,
+    inset 0 -2px 0 #f97316,
+    inset 0 0 0 999px rgba(255, 247, 237, 0.28);
+  animation: ownRowPulse 1.2s ease-in-out 0s 2;
 }
 
 .myLocationRow > td:first-child {
-  border-left-color: rgba(56, 189, 248, 0.98) !important;
+  border-left-color: #ea580c !important;
+  box-shadow:
+    inset 6px 0 0 #ea580c,
+    inset 0 2px 0 #f97316,
+    inset 0 -2px 0 #f97316,
+    inset 0 0 0 999px rgba(255, 247, 237, 0.28);
+  animation-name: ownRowPulseStart;
 }
 
 .myLocationRow > td:last-child {
-  border-right-color: rgba(56, 189, 248, 0.98) !important;
-}
-
-.myLocationRow::before,
-.myLocationRow::after {
-  position: absolute;
-  inset: -3px;
-  pointer-events: none;
-  border-radius: 6px;
-  content: "";
-}
-
-.myLocationRow::before {
-  z-index: 2;
-  border: 2px solid rgba(56, 189, 248, 0.86);
+  border-right-color: #f97316 !important;
   box-shadow:
-    0 0 0 1px rgba(224, 242, 254, 0.72),
-    0 0 20px rgba(56, 189, 248, 0.34);
+    inset -2px 0 0 #f97316,
+    inset 0 2px 0 #f97316,
+    inset 0 -2px 0 #f97316,
+    inset 0 0 0 999px rgba(255, 247, 237, 0.28);
+  animation-name: ownRowPulseEnd;
 }
 
-.myLocationRow::after {
-  z-index: 3;
-  padding: 4px;
-  background:
-    conic-gradient(
-      from var(--my-location-border-angle),
-      transparent 0deg,
-      transparent 238deg,
-      rgba(224, 242, 254, 0.98) 252deg,
-      #7dd3fc 268deg,
-      #0284c7 286deg,
-      transparent 308deg,
-      transparent 360deg
-    );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  animation: myLocationBorderOrbit 1.15s linear infinite;
-}
-
-.myLocationRow > td::before {
+.ownLocationBadge {
   position: absolute;
-  inset: 3px;
-  z-index: -1;
-  border-radius: 3px;
-  background: linear-gradient(135deg, rgba(186, 230, 253, 0.52), rgba(14, 165, 233, 0.12));
-  content: "";
+  top: 50%;
+  left: 8px;
+  z-index: 5;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #ea580c;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  animation: ownLocationBadgeVisible 5s ease-out both;
 }
 
-@keyframes myLocationLift {
+.regionGroupEnd.myLocationRow > td,
+.myLocationRow > .regionGroupBoundaryCell {
+  border-bottom: 1.5px solid #000 !important;
+}
+
+@keyframes ownRowPulse {
   0%,
   100% {
-    filter: drop-shadow(0 16px 22px rgba(14, 165, 233, 0.3));
-    transform: perspective(900px) translateY(-2px) translateZ(24px) scale(1.016);
+    filter: brightness(1);
   }
 
-  50% {
-    filter: drop-shadow(0 24px 34px rgba(14, 165, 233, 0.5));
-    transform: perspective(900px) translateY(-5px) translateZ(34px) scale(1.022);
+  45% {
+    filter: brightness(1.08);
+    box-shadow:
+      inset 0 2px 0 #f97316,
+      inset 0 -2px 0 #f97316,
+      inset 0 0 0 999px rgba(255, 247, 237, 0.34),
+      0 0 0 4px rgba(249, 115, 22, 0.22),
+      0 0 18px rgba(249, 115, 22, 0.35);
   }
 }
 
-@property --my-location-border-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+@keyframes ownRowPulseStart {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  45% {
+    filter: brightness(1.08);
+    box-shadow:
+      inset 6px 0 0 #ea580c,
+      inset 0 2px 0 #f97316,
+      inset 0 -2px 0 #f97316,
+      inset 0 0 0 999px rgba(255, 247, 237, 0.34),
+      0 0 0 4px rgba(249, 115, 22, 0.22),
+      0 0 18px rgba(249, 115, 22, 0.35);
+  }
 }
 
-@keyframes myLocationBorderOrbit {
-  to {
-    --my-location-border-angle: 360deg;
+@keyframes ownRowPulseEnd {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  45% {
+    filter: brightness(1.08);
+    box-shadow:
+      inset -2px 0 0 #f97316,
+      inset 0 2px 0 #f97316,
+      inset 0 -2px 0 #f97316,
+      inset 0 0 0 999px rgba(255, 247, 237, 0.34),
+      0 0 0 4px rgba(249, 115, 22, 0.22),
+      0 0 18px rgba(249, 115, 22, 0.35);
+  }
+}
+
+@keyframes ownLocationBadgeVisible {
+  0%,
+  86% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
   }
 }
 
@@ -633,6 +657,34 @@
   color: rgba(255, 255, 255, 0.72) !important;
 }
 
+.viewerPlainTable th,
+.viewerPlainTable td,
+.viewerPlainTable .colorableCell,
+.viewerPlainTable .coloredCell {
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.viewerPlainTable .readOnlyCell,
+.viewerPlainTable .readOnlyCellEmpty,
+.viewerPlainTable .readOnlySplit,
+.viewerPlainTable .readOnlySplit b,
+.viewerPlainTable .numberCell {
+  color: #000000 !important;
+}
+
+.viewerPlainTable .darkColorCell {
+  background: var(--election-cell-bg) !important;
+  color: #ffffff !important;
+}
+
+.viewerPlainTable .darkColorCell .readOnlyCell,
+.viewerPlainTable .darkColorCell .readOnlyCellEmpty,
+.viewerPlainTable .darkColorCell .readOnlySplit,
+.viewerPlainTable .darkColorCell .readOnlySplit b {
+  color: #ffffff !important;
+}
+
 :global(html[data-theme="light"]) .darkColorCell,
 :global(html[data-theme="light"]) .darkColorCell :where(div, label, span, b, strong, small, button, svg),
 :global(html[data-theme="light"]) .darkColorCell :global(.field-input),
@@ -762,6 +814,13 @@ th.poolVideoColumn {
 
 .nameColumn {
   width: 7.5%;
+}
+
+.nameColumn .readOnlyCell,
+.nameColumn .readOnlySplit,
+.nameColumn :global(.field-input),
+.nameColumn :global(.field-select) {
+  font-weight: 900;
 }
 
 .addressColumn {
@@ -1251,6 +1310,11 @@ th.positionColumn {
     border-color: #111 !important;
     color: #000 !important;
     background: #fff !important;
+  }
+
+  :global(body.election-print-mode) .printTable .regionGroupEnd > td,
+  :global(body.election-print-mode) .printTable .regionGroupBoundaryCell {
+    border-bottom: 1.5px solid #000 !important;
   }
 
   :global(body.election-print-mode.election-print-color-mode) .printTable th,

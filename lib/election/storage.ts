@@ -99,7 +99,7 @@ let electionSidebarOpenCache = false;
 export function canManageElection(session: SessionUser | null | undefined) {
   return Boolean(
     session?.approved &&
-    (session.actualRole === "desk" || session.actualRole === "team_lead" || session.actualRole === "admin"),
+    (session.role === "desk" || session.role === "team_lead" || session.role === "admin"),
   );
 }
 

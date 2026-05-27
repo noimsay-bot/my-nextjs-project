@@ -423,7 +423,7 @@ function buildSessionWithExperience(
   const actualRole = normalizeUserRole(base.actualRole ?? base.role);
   const actualCanReview = base.actualCanReview ?? base.canReview;
   const experienceRole =
-    hasTeamLeadAccess(actualRole)
+    hasAdminAccess(actualRole)
       ? normalizeExperienceRole(requestedExperienceRole)
       : null;
   const effectiveExperienceRole =
@@ -1104,7 +1104,7 @@ export function primeSession(session: SessionUser | null) {
 }
 
 export function setRoleExperience(role: UserRole | null) {
-  if (!cachedSession || !hasTeamLeadAccess(cachedSession.actualRole)) {
+  if (!cachedSession || !hasAdminAccess(cachedSession.actualRole)) {
     return cachedSession;
   }
 

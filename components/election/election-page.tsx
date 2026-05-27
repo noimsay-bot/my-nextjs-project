@@ -308,6 +308,15 @@ function getRegionRowSpan(points: Pick<ElectionPointInput, "region">[], index: n
   return range.end - range.start + 1;
 }
 
+function hasElectionManagerViewRole(session: SessionUser | null | undefined) {
+  return session?.role === "desk" || session?.role === "team_lead" || session?.role === "admin";
+}
+
+function isRegionGroupEnd(points: Pick<ElectionPointInput, "region">[], index: number) {
+  const region = normalizeRegionValue(points[index]?.region);
+  return Boolean(region && getRegionGroupRange(points, index).end === index);
+}
+
 function canMoveRegionGroup(points: Pick<ElectionPointInput, "region">[], index: number, direction: "up" | "down") {
   const range = getRegionGroupRange(points, index);
   return direction === "up" ? range.start > 0 : range.end < points.length - 1;
@@ -950,6 +959,8 @@ function ElectionPrintableTable({
           {points.length ? (
             points.map((point, index) => {
               const regionRowSpan = getRegionRowSpan(points, index);
+              const hasRegionText = Boolean(normalizeRegionValue(point.region));
+              const isRegionBoundary = isRegionGroupEnd(points, index);
               const regionColor = getRegionGroupColor(points, index);
               const placeColor = getCellDisplayColor(points, point, index, "place");
               const poolVideoColor = getCellDisplayColor(points, point, index, "poolVideo");
@@ -965,11 +976,11 @@ function ElectionPrintableTable({
               const lanColor = getCellDisplayColor(points, point, index, "lan");
               const lightingColor = getCellDisplayColor(points, point, index, "lighting");
               return (
-                <tr key={`${point.sortOrder}-${index}`}>
+                <tr key={`${point.sortOrder}-${index}`} className={isRegionBoundary ? styles.regionGroupEnd : undefined}>
                   <td className={styles.numberCell}>{index + 1}.</td>
                   {regionRowSpan > 0 ? (
                     <td
-                      className={getColorableCellClassName(undefined, regionColor)}
+                      className={`${getColorableCellClassName(undefined, regionColor)} ${hasRegionText ? styles.regionGroupBoundaryCell : ""}`.trim()}
                       style={getColorStyle(regionColor)}
                       rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
                     >
@@ -1010,9 +1021,11 @@ function ElectionPrintableTable({
 function ElectionReadOnlyTable({
   event,
   highlightedLocationKeys,
+  forcePlainViewerTable,
 }: {
   event: ElectionEvent;
   highlightedLocationKeys: string[];
+  forcePlainViewerTable: boolean;
 }) {
   return (
     <article className={`panel ${styles.wideTablePanel}`}>
@@ -1026,7 +1039,7 @@ function ElectionReadOnlyTable({
           <div className={styles.summary}>{event.points.length}개 포인트</div>
         </div>
         <div className={styles.tableWrap}>
-          <table className={`table-like ${styles.table}`}>
+          <table className={`table-like ${styles.table} ${forcePlainViewerTable ? styles.viewerPlainTable : ""}`.trim()}>
             <thead>
               <tr>
                 {readOnlyTableColumns.map((column) => (
@@ -1038,7 +1051,10 @@ function ElectionReadOnlyTable({
               {event.points.length ? (
                 event.points.map((point, index) => {
                   const pointLocationKey = getPointLocationKey(point);
+                  const isOwnLocationHighlighted = highlightedLocationKeys.includes(pointLocationKey);
                   const regionRowSpan = getRegionRowSpan(event.points, index);
+                  const hasRegionText = Boolean(normalizeRegionValue(point.region));
+                  const isRegionBoundary = isRegionGroupEnd(event.points, index);
                   const regionColor = getRegionGroupColor(event.points, index);
                   const placeColor = getCellDisplayColor(event.points, point, index, "place");
                   const poolVideoColor = getCellDisplayColor(event.points, point, index, "poolVideo");
@@ -1056,13 +1072,19 @@ function ElectionReadOnlyTable({
                   return (
                   <tr
                     key={point.id}
-                    className={highlightedLocationKeys.includes(pointLocationKey) ? styles.myLocationRow : undefined}
+                    className={[
+                      isOwnLocationHighlighted ? styles.myLocationRow : "",
+                      isRegionBoundary ? styles.regionGroupEnd : "",
+                    ].filter(Boolean).join(" ") || undefined}
                     data-election-point-key={pointLocationKey}
                   >
-                    <td className={styles.numberCell}>{index + 1}.</td>
+                    <td className={styles.numberCell}>
+                      {isOwnLocationHighlighted ? <span className={styles.ownLocationBadge}>내 위치</span> : null}
+                      {index + 1}.
+                    </td>
                     {regionRowSpan > 0 ? (
                       <td
-                        className={getColorableCellClassName(undefined, regionColor)}
+                        className={`${getColorableCellClassName(undefined, regionColor)} ${hasRegionText ? styles.regionGroupBoundaryCell : ""}`.trim()}
                         style={getColorStyle(regionColor)}
                         rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
                       >
@@ -1725,7 +1747,11 @@ export function ElectionPage() {
           </article>
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
           {publishedEvent ? (
-            <ElectionReadOnlyTable event={publishedEvent} highlightedLocationKeys={highlightedLocationKeys} />
+            <ElectionReadOnlyTable
+              event={publishedEvent}
+              highlightedLocationKeys={highlightedLocationKeys}
+              forcePlainViewerTable={!hasElectionManagerViewRole(currentSession)}
+            />
           ) : (
             <article className="panel">
               <div className="panel-pad">
@@ -1781,7 +1807,11 @@ export function ElectionPage() {
           </article>
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-          <ElectionReadOnlyTable event={closedReadOnlyEvent} highlightedLocationKeys={highlightedLocationKeys} />
+          <ElectionReadOnlyTable
+            event={closedReadOnlyEvent}
+            highlightedLocationKeys={highlightedLocationKeys}
+            forcePlainViewerTable={!hasElectionManagerViewRole(currentSession)}
+          />
         </div>
         <div className={styles.printOnly}>
           <ElectionPrintableTable
@@ -1979,6 +2009,7 @@ export function ElectionPage() {
                       const split = isPointSplit(point);
                       const regionRowSpan = getRegionRowSpan(draft.points, index);
                       const hasRegionText = Boolean(normalizeRegionValue(point.region));
+                      const isRegionBoundary = isRegionGroupEnd(draft.points, index);
                       const regionColor = getRegionGroupColor(draft.points, index);
                       const placeColor = getCellDisplayColor(draft.points, point, index, "place");
                       const poolVideoColor = getCellDisplayColor(draft.points, point, index, "poolVideo");
@@ -1994,19 +2025,24 @@ export function ElectionPage() {
                       const lanColor = getCellDisplayColor(draft.points, point, index, "lan");
                       const lightingColor = getCellDisplayColor(draft.points, point, index, "lighting");
                       const pointLocationKey = getPointLocationKey(point);
+                      const isOwnLocationHighlighted = highlightedLocationKeys.includes(pointLocationKey);
                       return (
                       <tr
                         key={point.localId}
                         ref={(element) => setPointRowRef(point.localId, element)}
-                        className={highlightedLocationKeys.includes(pointLocationKey) ? styles.myLocationRow : undefined}
+                        className={[
+                          isOwnLocationHighlighted ? styles.myLocationRow : "",
+                          isRegionBoundary ? styles.regionGroupEnd : "",
+                        ].filter(Boolean).join(" ") || undefined}
                         data-election-point-key={pointLocationKey}
                       >
                         <td className={styles.numberCell}>
+                          {isOwnLocationHighlighted ? <span className={styles.ownLocationBadge}>내 위치</span> : null}
                           {index + 1}.
                         </td>
                         {regionRowSpan > 0 ? (
                           <td
-                            className={getEditableCellClassName(styles.regionColumn, regionColor)}
+                            className={`${getEditableCellClassName(styles.regionColumn, regionColor)} ${hasRegionText ? styles.regionGroupBoundaryCell : ""}`.trim()}
                             style={getColorStyle(regionColor)}
                             rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
                             onPointerDownCapture={(event) => applyPaintToCell(event, index, "region")}
