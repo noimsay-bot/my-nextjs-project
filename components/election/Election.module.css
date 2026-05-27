@@ -4,6 +4,11 @@
 }
 
 .electionPageScope {
+  --election-table-bg: #ffffff;
+  --election-table-text: #000000;
+  --election-table-muted: #334155;
+  --election-table-line: #d6dee8;
+  --election-table-line-strong: #b8c4d2;
   width: 100%;
   min-width: 0;
 }
@@ -157,9 +162,9 @@
   min-height: 34px;
   place-items: center;
   padding: 6px 4px;
-  border: 1px solid var(--line);
-  background: rgba(148, 163, 184, 0.14);
-  color: var(--text);
+  border: 1px solid var(--election-table-line);
+  background: var(--election-table-bg);
+  color: var(--election-table-text);
   font-size: 12px;
   font-weight: 900;
   line-height: 1.2;
@@ -176,10 +181,10 @@
   align-items: center;
   justify-content: center;
   padding: 5px 3px;
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  border-left: 1px solid var(--line);
-  background: rgba(15, 23, 42, 0.08);
+  border-right: 1px solid var(--election-table-line);
+  border-bottom: 1px solid var(--election-table-line);
+  border-left: 1px solid var(--election-table-line);
+  background: var(--election-table-bg);
   overflow: visible;
 }
 
@@ -199,6 +204,9 @@
   width: var(--election-table-width, 100%);
   min-width: 0;
   table-layout: fixed;
+  border-collapse: collapse;
+  background: var(--election-table-bg);
+  color: var(--election-table-text);
   font-size: 12px;
   text-align: center;
 }
@@ -211,7 +219,9 @@
   position: relative;
   white-space: nowrap;
   padding: 6px 4px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--election-table-line);
+  background: var(--election-table-bg);
+  color: var(--election-table-text);
   text-align: center;
   vertical-align: middle !important;
 }
@@ -263,7 +273,9 @@
 
 .table td {
   padding: 5px 4px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--election-table-line);
+  background: var(--election-table-bg);
+  color: var(--election-table-text);
   text-align: center;
   vertical-align: middle !important;
 }
@@ -591,8 +603,8 @@
 }
 
 .colorableCell {
-  background: var(--election-cell-bg, transparent);
-  color: var(--election-cell-color, var(--text));
+  background: var(--election-cell-bg, var(--election-table-bg));
+  color: var(--election-cell-color, var(--election-table-text));
 }
 
 .paintableCell {
@@ -609,7 +621,7 @@
 
 .coloredCell {
   background: var(--election-cell-bg) !important;
-  color: var(--election-cell-color, var(--text));
+  color: var(--election-cell-color, var(--election-table-text));
 }
 
 .coloredCell input,
@@ -663,6 +675,7 @@
 .viewerPlainTable .coloredCell {
   background: #ffffff !important;
   color: #000000 !important;
+  border-color: var(--election-table-line) !important;
 }
 
 .viewerPlainTable {
@@ -793,7 +806,10 @@
   min-width: 0;
   height: 30px;
   padding: 5px 6px;
+  border: 1px solid var(--election-table-line-strong);
   border-radius: 0 !important;
+  background: #ffffff;
+  color: #000000;
   font-size: 12px;
   text-align: center;
   text-align-last: center;
@@ -871,7 +887,7 @@ th.positionColumn {
   width: 26px;
   padding-right: 2px !important;
   padding-left: 2px !important;
-  color: var(--muted);
+  color: var(--election-table-muted);
   font-size: 12px;
   font-weight: 900;
   text-align: center;
@@ -883,13 +899,13 @@ th.positionColumn {
   min-height: 28px;
   place-items: center;
   overflow-wrap: anywhere;
-  color: var(--text);
+  color: var(--election-table-text);
   font-weight: 700;
   text-align: center;
 }
 
 .readOnlyCellEmpty {
-  color: var(--muted);
+  color: var(--election-table-muted);
   font-weight: 700;
 }
 
@@ -904,7 +920,7 @@ th.positionColumn {
   gap: 3px;
   min-height: 28px;
   align-content: center;
-  color: var(--text);
+  color: var(--election-table-text);
   font-size: 12px;
   font-weight: 800;
   line-height: 1.3;
@@ -919,7 +935,7 @@ th.positionColumn {
 }
 
 .readOnlySplit b {
-  color: var(--muted);
+  color: var(--election-table-muted);
   font-size: 11px;
 }
 
@@ -937,7 +953,7 @@ th.positionColumn {
 }
 
 .splitStack span {
-  color: var(--muted);
+  color: var(--election-table-muted);
   font-size: 11px;
   font-weight: 900;
   line-height: 1;
@@ -1126,7 +1142,7 @@ th.positionColumn {
 }
 
 .printHeader span {
-  color: #111;
+  color: #000;
   font-size: 11px;
   font-weight: 800;
 }
@@ -1144,8 +1160,9 @@ th.positionColumn {
 .printTable td {
   min-height: 0;
   padding: var(--election-print-cell-padding, 4px 3px);
-  border: 1px solid #111;
+  border: 1px solid #d6dee8;
   color: #000;
+  background: #fff;
   text-align: center;
   vertical-align: middle;
   overflow-wrap: anywhere;
@@ -1312,7 +1329,7 @@ th.positionColumn {
   }
 
   :global(body.election-print-mode) .printHeader span {
-    color: #111 !important;
+    color: #000 !important;
   }
 
   :global(body.election-print-mode) .printTable {
@@ -1329,7 +1346,7 @@ th.positionColumn {
 
   :global(body.election-print-mode) .printTable th,
   :global(body.election-print-mode) .printTable td {
-    border-color: #111 !important;
+    border-color: #d6dee8 !important;
     color: #000 !important;
     background: #fff !important;
   }
@@ -1339,7 +1356,6 @@ th.positionColumn {
     border-bottom: 1.5px solid #000 !important;
   }
 
-  :global(body.election-print-mode.election-print-color-mode) .printTable th,
   :global(body.election-print-mode.election-print-color-mode) .printTable td.coloredCell {
     background: var(--election-cell-bg) !important;
     color: var(--election-cell-color, #000) !important;
@@ -1363,13 +1379,13 @@ th.positionColumn {
   :global(body.election-print-mode) .positionReadOnly {
     width: 12px;
     height: 12px;
-    border-color: #111 !important;
+    border-color: #94a3b8 !important;
     background: #fff !important;
     box-shadow: none !important;
   }
 
   :global(body.election-print-mode) .positionReadOnlyOn {
-    background: #111 !important;
+    background: #000 !important;
   }
 
   :global(body.election-print-mode.election-print-color-mode) .positionReadOnlyOn {

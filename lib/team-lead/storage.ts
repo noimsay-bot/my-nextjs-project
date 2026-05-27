@@ -1905,9 +1905,15 @@ function parseScheduleAssignmentRowKey(rowKey: string) {
 function getScheduleAssignmentNameTagForDuty(duty: string): ScheduleAssignmentNameTag | null {
   switch (normalizeDutyLabel(duty)) {
     case "국회지원":
+    case "국방부":
       return "gov";
     case "법조지원":
       return "law";
+    case "시청":
+      return "city";
+    case "청사":
+    case "서울청사":
+      return "office";
     case "오전반차":
     case "오후반차":
       return "half";
@@ -1916,11 +1922,21 @@ function getScheduleAssignmentNameTagForDuty(duty: string): ScheduleAssignmentNa
   }
 }
 
+const scheduleAssignmentAutoNameTags = new Set<ScheduleAssignmentNameTag>([
+  "gov",
+  "law",
+  "half",
+  "city",
+  "office",
+]);
+
 const scheduleAssignmentLinkedDutyCategoryMap: Record<string, string> = {
   국회: "국회",
   청와대: "청와대",
   청사: "청사",
   서울청사: "청사",
+  국방부: "청사",
+  시청: "청사",
 };
 
 function getScheduleAssignmentLinkedDutyCategory(duty: string) {
@@ -1931,6 +1947,37 @@ function addUniqueName(target: string[], name: string) {
   const trimmed = name.trim();
   if (!trimmed || target.includes(trimmed)) return;
   target.push(trimmed);
+}
+
+function getScheduleAssignmentLinkedSourceNameTag(
+  dayRows: ScheduleAssignmentDayRows,
+  category: string,
+  name: string,
+) {
+  const normalizedName = name.trim();
+  if (!normalizedName) return null;
+
+  for (const row of dayRows.addedRows) {
+    if (row.name.trim() !== normalizedName) continue;
+    if (getScheduleAssignmentLinkedDutyCategory(row.duty) !== category) continue;
+    const tag = getScheduleAssignmentNameTagForDuty(row.duty);
+    if (tag) return tag;
+  }
+
+  for (const [rowKey, override] of Object.entries(dayRows.rowOverrides)) {
+    if (dayRows.deletedRowKeys.includes(rowKey)) continue;
+    const parsed = parseScheduleAssignmentRowKey(rowKey);
+    if (!parsed?.name) continue;
+
+    const overrideName = override.name.trim() || parsed.name;
+    if (overrideName !== normalizedName) continue;
+    if (getScheduleAssignmentLinkedDutyCategory(override.duty) !== category) continue;
+
+    const tag = getScheduleAssignmentNameTagForDuty(override.duty);
+    if (tag) return tag;
+  }
+
+  return null;
 }
 
 function isScheduleAssignmentDateKey(value: string) {
@@ -2090,10 +2137,12 @@ export function applyScheduleAssignmentNameTagsToSchedule(
       if (!parsed?.name) return;
 
       const tagKey = buildScheduleAssignmentNameTagKey(parsed.category, parsed.name);
-      const nextTag = getScheduleAssignmentNameTagForDuty(row.duty);
+      const nextTag =
+        getScheduleAssignmentLinkedSourceNameTag(dayRows, parsed.category, parsed.name) ??
+        getScheduleAssignmentNameTagForDuty(row.duty);
       const currentTag = nextTags[tagKey] ?? null;
 
-      if (currentTag && (currentTag === "gov" || currentTag === "law" || currentTag === "half")) {
+      if (currentTag && scheduleAssignmentAutoNameTags.has(currentTag)) {
         delete nextTags[tagKey];
         dayChanged = true;
       }

@@ -312,6 +312,10 @@ function hasElectionManagerViewRole(session: SessionUser | null | undefined) {
   return session?.role === "desk" || session?.role === "team_lead" || session?.role === "admin";
 }
 
+function hasElectionGeneralPreviewRole(session: SessionUser | null | undefined) {
+  return session?.role === "desk" || session?.role === "team_lead";
+}
+
 function isRegionGroupEnd(points: Pick<ElectionPointInput, "region">[], index: number) {
   const region = normalizeRegionValue(points[index]?.region);
   return Boolean(region && getRegionGroupRange(points, index).end === index);
@@ -935,11 +939,13 @@ function ElectionPrintableTable({
   electionDate,
   points,
   orientation,
+  forcePlainViewerTable = false,
 }: {
   title: string;
   electionDate: string;
   points: ElectionPointInput[];
   orientation: PrintOrientation;
+  forcePlainViewerTable?: boolean;
 }) {
   return (
     <article className={styles.printSheet}>
@@ -947,7 +953,10 @@ function ElectionPrintableTable({
         <h1>{formatElectionBoardTitle(title)}</h1>
         <span>{electionDate}</span>
       </header>
-      <table className={styles.printTable} style={getPrintTableStyle(points.length, orientation)}>
+      <table
+        className={`${styles.printTable} ${forcePlainViewerTable ? styles.viewerPlainTable : ""}`.trim()}
+        style={getPrintTableStyle(points.length, orientation)}
+      >
         <thead>
           <tr>
             {readOnlyTableColumns.map((column) => (
@@ -1144,6 +1153,7 @@ export function ElectionPage() {
   const [paintSelection, setPaintSelection] = useState<ColorPaintSelection | null>(null);
   const [currentSession, setCurrentSession] = useState<SessionUser | null>(() => getSession());
   const [highlightedLocationKeys, setHighlightedLocationKeys] = useState<string[]>([]);
+  const [managerGeneralView, setManagerGeneralView] = useState(false);
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -1762,7 +1772,13 @@ export function ElectionPage() {
         </div>
         {publishedEvent ? (
           <div className={styles.printOnly}>
-            <ElectionPrintableTable title={publishedEvent.title} electionDate={publishedEvent.electionDate} points={publishedEvent.points} orientation={printOrientation} />
+            <ElectionPrintableTable
+              title={publishedEvent.title}
+              electionDate={publishedEvent.electionDate}
+              points={publishedEvent.points}
+              orientation={printOrientation}
+              forcePlainViewerTable={!hasElectionManagerViewRole(currentSession)}
+            />
           </div>
         ) : null}
       </section>
@@ -1772,6 +1788,8 @@ export function ElectionPage() {
   const currentStatus = draft?.status ?? "draft";
   const autoSaveStatusLabel = getAutoSaveStatusLabel(autoSaveStatus);
   const closedReadOnlyEvent = draft && currentStatus === "closed" ? draftToReadOnlyEvent(draft) : null;
+  const canUseManagerGeneralView = canManage && hasElectionGeneralPreviewRole(currentSession);
+  const managerGeneralViewEvent = canUseManagerGeneralView && managerGeneralView && draft ? draftToReadOnlyEvent(draft) : null;
 
   if (closedReadOnlyEvent) {
     return (
@@ -1789,6 +1807,11 @@ export function ElectionPage() {
                 <button type="button" className="btn" disabled={!currentSession} onClick={() => locateMyRows(closedReadOnlyEvent.points)}>
                   내 위치보기
                 </button>
+                {canUseManagerGeneralView ? (
+                  <button type="button" className="btn" onClick={() => setManagerGeneralView((current) => !current)}>
+                    {managerGeneralView ? "관리보기" : "일반보기"}
+                  </button>
+                ) : null}
                 <ElectionPrintControls
                   paperSize={printPaperSize}
                   orientation={printOrientation}
@@ -1799,9 +1822,11 @@ export function ElectionPage() {
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
                 />
-                <button type="button" className="btn primary" disabled={saving} onClick={startNewDraft}>
-                  새 선거표 작성
-                </button>
+                {!managerGeneralView ? (
+                  <button type="button" className="btn primary" disabled={saving} onClick={startNewDraft}>
+                    새 선거표 작성
+                  </button>
+                ) : null}
               </div>
             </div>
           </article>
@@ -1810,7 +1835,7 @@ export function ElectionPage() {
           <ElectionReadOnlyTable
             event={closedReadOnlyEvent}
             highlightedLocationKeys={highlightedLocationKeys}
-            forcePlainViewerTable={!hasElectionManagerViewRole(currentSession)}
+            forcePlainViewerTable={managerGeneralView || !hasElectionManagerViewRole(currentSession)}
           />
         </div>
         <div className={styles.printOnly}>
@@ -1819,6 +1844,61 @@ export function ElectionPage() {
             electionDate={closedReadOnlyEvent.electionDate}
             points={closedReadOnlyEvent.points}
             orientation={printOrientation}
+            forcePlainViewerTable={managerGeneralView || !hasElectionManagerViewRole(currentSession)}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  if (managerGeneralViewEvent) {
+    return (
+      <section className={`${styles.page} ${styles.printRoot} ${styles.electionPageScope}`.trim()}>
+        <div className={styles.screenOnly}>
+          <article className="panel">
+            <div className={`panel-pad ${styles.header}`}>
+              <div className={styles.titleBlock}>
+                <h1 className="page-title">{formatElectionBoardTitle(managerGeneralViewEvent.title)}</h1>
+                <div className={styles.statusLine}>
+                  <span className={getStatusClassName(currentStatus)}>{statusLabels[currentStatus]}</span>
+                  <span className={styles.autoSaveStatus}>일반보기</span>
+                </div>
+              </div>
+              <div className={styles.actions}>
+                <button type="button" className="btn" disabled={!currentSession} onClick={() => locateMyRows(managerGeneralViewEvent.points)}>
+                  내 위치보기
+                </button>
+                <button type="button" className="btn" onClick={() => setManagerGeneralView(false)}>
+                  편집보기
+                </button>
+                <ElectionPrintControls
+                  paperSize={printPaperSize}
+                  orientation={printOrientation}
+                  colorMode={printColorMode}
+                  disabled={false}
+                  onPaperSizeChange={setPrintPaperSize}
+                  onOrientationChange={setPrintOrientation}
+                  onColorModeChange={setPrintColorMode}
+                  onPrint={printElectionBoard}
+                />
+              </div>
+            </div>
+          </article>
+
+          {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
+          <ElectionReadOnlyTable
+            event={managerGeneralViewEvent}
+            highlightedLocationKeys={highlightedLocationKeys}
+            forcePlainViewerTable
+          />
+        </div>
+        <div className={styles.printOnly}>
+          <ElectionPrintableTable
+            title={managerGeneralViewEvent.title}
+            electionDate={managerGeneralViewEvent.electionDate}
+            points={managerGeneralViewEvent.points}
+            orientation={printOrientation}
+            forcePlainViewerTable
           />
         </div>
       </section>
@@ -1845,6 +1925,11 @@ export function ElectionPage() {
               <button type="button" className="btn" disabled={!draft || !currentSession} onClick={() => draft ? locateMyRows(draft.points) : undefined}>
                 내 위치보기
               </button>
+              {canUseManagerGeneralView ? (
+                <button type="button" className="btn" disabled={!draft} onClick={() => setManagerGeneralView(true)}>
+                  일반보기
+                </button>
+              ) : null}
               <ElectionPrintControls
                 paperSize={printPaperSize}
                 orientation={printOrientation}
@@ -2333,6 +2418,7 @@ export function ElectionPage() {
             electionDate={draft.electionDate}
             points={draft.points}
             orientation={printOrientation}
+            forcePlainViewerTable={managerGeneralView}
           />
         </div>
       ) : null}

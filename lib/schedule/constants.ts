@@ -78,6 +78,8 @@ export const scheduleAssignmentNameTagLabels: Record<ScheduleAssignmentNameTag, 
   gov: "(국)",
   law: "(법)",
   half: "(반)",
+  city: "(시)",
+  office: "(청)",
 };
 
 export const scheduleAssignmentNameTagColors: Record<
@@ -98,6 +100,16 @@ export const scheduleAssignmentNameTagColors: Record<
     background: "rgba(16,185,129,.18)",
     border: "1px solid rgba(52,211,153,.52)",
     color: "#d1fae5",
+  },
+  city: {
+    background: "rgba(251,146,60,.2)",
+    border: "1px solid rgba(251,146,60,.55)",
+    color: "#ffedd5",
+  },
+  office: {
+    background: "rgba(168,85,247,.18)",
+    border: "1px solid rgba(192,132,252,.52)",
+    color: "#f3e8ff",
   },
 };
 
