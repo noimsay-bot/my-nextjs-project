@@ -1043,6 +1043,7 @@ th.positionColumn {
   min-height: 520px;
   border: 0;
   background: #ffffff;
+  overflow: hidden;
 }
 
 .deleteButton {
@@ -1362,6 +1363,8 @@ th.positionColumn {
     width: 100%;
     color: #000 !important;
     background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   :global(body.election-print-mode) .printHeader h1 {
@@ -1376,6 +1379,8 @@ th.positionColumn {
   :global(body.election-print-mode) .printTable {
     color: #000 !important;
     background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   :global(body.election-print-mode) .printTable.viewerPlainTable {
@@ -1390,6 +1395,12 @@ th.positionColumn {
     border-color: #d6dee8 !important;
     color: #000 !important;
     background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  :global(body.election-print-mode.election-print-color-mode) .printTable th {
+    background: #dbeafe !important;
   }
 
   :global(body.election-print-mode) .printTable .regionGroupEnd > td,

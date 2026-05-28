@@ -680,6 +680,7 @@ function ElectionPrintControls({
   onOrientationChange,
   onColorModeChange,
   onPrint,
+  onSavePdf,
   onExportWord,
   onExportExcel,
 }: {
@@ -691,6 +692,7 @@ function ElectionPrintControls({
   onOrientationChange: (value: PrintOrientation) => void;
   onColorModeChange: (value: PrintColorMode) => void;
   onPrint: () => void;
+  onSavePdf: () => void;
   onExportWord: () => void;
   onExportExcel: () => void;
 }) {
@@ -725,6 +727,9 @@ function ElectionPrintControls({
       </select>
       <button type="button" className="btn" disabled={disabled} onClick={onPrint}>
         출력
+      </button>
+      <button type="button" className="btn" disabled={disabled} onClick={onSavePdf}>
+        PDF 저장
       </button>
       <button type="button" className="btn" disabled={disabled} onClick={onExportWord}>
         워드
@@ -1218,6 +1223,7 @@ function ElectionReadOnlyTable({
               src="/election-map.html"
               title="6.3 지선 배치표 지도"
               loading="lazy"
+              scrolling="no"
             />
           </div>
         ) : (
@@ -1639,13 +1645,21 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
     };
   }, []);
 
-  const printElectionBoard = () => {
+  const openElectionPrintDialog = ({ forceColor = false }: { forceColor?: boolean } = {}) => {
     upsertElectionPrintPageStyle(printPaperSize, printOrientation);
     document.body.classList.add("election-print-mode");
-    document.body.classList.toggle(ELECTION_PRINT_COLOR_MODE_CLASS, printColorMode === "color");
+    document.body.classList.toggle(ELECTION_PRINT_COLOR_MODE_CLASS, forceColor || printColorMode === "color");
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => window.print());
     });
+  };
+
+  const printElectionBoard = () => {
+    openElectionPrintDialog();
+  };
+
+  const saveElectionBoardPdf = () => {
+    openElectionPrintDialog({ forceColor: true });
   };
 
   const exportWord = (event: ElectionEvent | null | undefined) => {
@@ -1966,6 +1980,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                   onOrientationChange={setPrintOrientation}
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
+                  onSavePdf={saveElectionBoardPdf}
                   onExportWord={() => exportWord(publishedEvent)}
                   onExportExcel={() => exportExcel(publishedEvent)}
                 />
@@ -2040,6 +2055,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                   onOrientationChange={setPrintOrientation}
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
+                  onSavePdf={saveElectionBoardPdf}
                   onExportWord={() => exportWord(closedReadOnlyEvent)}
                   onExportExcel={() => exportExcel(closedReadOnlyEvent)}
                 />
@@ -2103,6 +2119,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                   onOrientationChange={setPrintOrientation}
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
+                  onSavePdf={saveElectionBoardPdf}
                   onExportWord={() => exportWord(managerGeneralViewEvent)}
                   onExportExcel={() => exportExcel(managerGeneralViewEvent)}
                 />
@@ -2166,6 +2183,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                 onOrientationChange={setPrintOrientation}
                 onColorModeChange={setPrintColorMode}
                 onPrint={printElectionBoard}
+                onSavePdf={saveElectionBoardPdf}
                 onExportWord={() => exportWord(draft ? draftToReadOnlyEvent(draft) : null)}
                 onExportExcel={() => exportExcel(draft ? draftToReadOnlyEvent(draft) : null)}
               />

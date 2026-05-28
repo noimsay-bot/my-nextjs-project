@@ -9,7 +9,7 @@ const HOME_PUBLIC_WORKSPACE_TIMEOUT_MS = 4_000;
 const HOME_COMMUNITY_ATTACHMENT_BUCKET = "home-community-attachments";
 const HOME_TRIP_LOOKBACK_DAYS = 14;
 const HOME_TRIP_LOOKAHEAD_DAYS = 7;
-const CURRENT_TRIP_TRAVEL_TYPES = new Set<AssignmentTravelType>(["국내출장", "해외출장"]);
+const CURRENT_TRIP_TRAVEL_TYPES = new Set<AssignmentTravelType>(["국내출장", "해외출장", "당일출장"]);
 
 function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknown, init?: ResponseInit) {
   const status = init?.status ?? 200;

@@ -11,7 +11,7 @@ import { logPortalTrafficDebug } from "@/lib/portal/traffic-debug";
 import type { TeamLeadTripPersonCard } from "@/lib/team-lead/storage";
 
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
-const CURRENT_TRIP_TRAVEL_TYPES = new Set(["국내출장", "해외출장"]);
+const CURRENT_TRIP_TRAVEL_TYPES = new Set(["국내출장", "해외출장", "당일출장"]);
 
 function toDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
