@@ -57,6 +57,7 @@
   .election-card-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:20px;height:20px;border-radius:99px;background:#111827;color:#fff;font-size:10px;font-weight:900;}
   .election-card-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
   .election-card-row{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);gap:4px;min-height:21px;align-items:center;padding:3px 5px;border:1px solid rgba(148,163,184,.26);border-radius:5px;background:rgba(248,250,252,.86);}
+  .election-card-row.wide{grid-column:1 / -1;}
   .election-card-row.expandable{cursor:pointer;}
   .election-card-row b{color:#64748b;font-weight:900;}
   .election-card-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800;color:#111827;}
@@ -1041,8 +1042,10 @@ function isExpandableCardValue(label, value){
 function renderPointCardRow(label, value){
   const text = String(value ?? '').trim();
   const expandable = isExpandableCardValue(label, text);
+  const wide = /주소|비고/.test(label);
+  const classes = ['election-card-row', wide ? 'wide' : '', expandable ? 'expandable' : ''].filter(Boolean).join(' ');
   const attrs = expandable ? ` data-full="${escapeHtml(text)}" title="${escapeHtml(text)}"` : '';
-  return `<div class="election-card-row${expandable ? ' expandable' : ''}"${attrs}><b>${escapeHtml(label)}</b><span class="election-card-value">${escapeHtml(text)}</span></div>`;
+  return `<div class="${classes}"${attrs}><b>${escapeHtml(label)}</b><span class="election-card-value">${escapeHtml(text)}</span></div>`;
 }
 
 function renderPointCard(point){
