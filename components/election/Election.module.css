@@ -1039,8 +1039,8 @@ th.positionColumn {
 .mapFrame {
   display: block;
   width: 100%;
-  height: min(760px, 74vh);
-  min-height: 520px;
+  height: min(1080px, 94vh);
+  min-height: 780px;
   border: 0;
   background: #ffffff;
   overflow: hidden;
@@ -1299,8 +1299,8 @@ th.positionColumn {
   }
 
   .mapFrame {
-    height: 72vh;
-    min-height: 420px;
+    height: 88vh;
+    min-height: 640px;
   }
 
   .tableWrap {

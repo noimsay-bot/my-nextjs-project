@@ -470,7 +470,6 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
         election_date: electionDate,
       })
       .eq("id", eventId)
-      .neq("status", "closed")
       .select("id")
       .maybeSingle<{ id: string }>();
 
@@ -478,7 +477,7 @@ export async function saveElectionWorkspace(input: ElectionSaveInput) {
       throw new Error(electionStorageError(error, "election_events"));
     }
     if (!data) {
-      throw new Error("최종 저장된 선거 중계표는 수정할 수 없습니다.");
+      throw new Error("선거 중계표를 찾지 못했습니다.");
     }
   }
 
@@ -537,14 +536,14 @@ export async function publishElectionEvent(eventId: string) {
 export async function closeElectionEvent(eventId: string) {
   const session = await getPortalSession();
   if (!canManageElection(session)) {
-    throw new Error("선거 중계표 최종 저장 권한이 없습니다.");
+    throw new Error("선거 중계표 게시종료 권한이 없습니다.");
   }
 
   const supabase = await getPortalSupabaseClient();
   const { error } = await supabase
     .from("election_events")
     .update({
-      status: "closed",
+      status: "draft",
       closed_at: new Date().toISOString(),
       closed_by: session?.id,
     })

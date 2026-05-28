@@ -50,7 +50,7 @@ interface DraftEvent {
 const statusLabels: Record<ElectionStatus, string> = {
   draft: "작성중",
   published: "게시중",
-  closed: "종료",
+  closed: "게시숨김",
 };
 
 const poolVideoOptions = [
@@ -1091,23 +1091,23 @@ function SplitTextInput({
   );
 }
 
-function getAddressInputLines(value: string) {
+function getMultilineInputLines(value: string) {
   const lines = value.split(/\r?\n/);
   return lines.length > 0 ? lines : [""];
 }
 
-function setAddressInputLine(value: string, index: number, nextLine: string) {
-  const lines = getAddressInputLines(value);
+function setMultilineInputLine(value: string, index: number, nextLine: string) {
+  const lines = getMultilineInputLines(value);
   lines[index] = nextLine;
   return lines.join("\n");
 }
 
-function addAddressInputLine(value: string) {
-  return [...getAddressInputLines(value), ""].join("\n");
+function addMultilineInputLine(value: string) {
+  return [...getMultilineInputLines(value), ""].join("\n");
 }
 
-function removeAddressInputLine(value: string, index: number) {
-  const lines = getAddressInputLines(value);
+function removeMultilineInputLine(value: string, index: number) {
+  const lines = getMultilineInputLines(value);
   if (lines.length <= 1) return "";
   return lines.filter((_, lineIndex) => lineIndex !== index).join("\n");
 }
@@ -1609,7 +1609,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   const runAutoSave = useCallback(async () => {
     const snapshot = draftRef.current;
-    if (!snapshot || !canManage || snapshot.status === "closed") return;
+    if (!snapshot || !canManage) return;
 
     const signature = getDraftSaveSignature(snapshot);
     if (!signature || signature === lastSavedSignatureRef.current) {
@@ -1646,7 +1646,6 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   useEffect(() => {
     if (!autoSaveReadyRef.current || !canManage || !draft) return;
-    if (draft.status === "closed") return;
     const signature = getDraftSaveSignature(draft);
     if (signature === lastSavedSignatureRef.current) return;
 
@@ -1912,10 +1911,6 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   const saveDraft = async () => {
     if (!draft) return null;
-    if (draft.status === "closed") {
-      setMessage({ tone: "warn", text: "게시종료된 선거 중계표는 수정할 수 없습니다. 새 선거표를 만든 뒤 저장해 주세요." });
-      return null;
-    }
     clearAutoSaveTimer();
     setSaving(true);
     try {
@@ -1931,10 +1926,6 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
   };
 
   const publishDraft = async () => {
-    if (draft?.status === "closed") {
-      setMessage({ tone: "warn", text: "게시종료된 선거 중계표는 다시 게시할 수 없습니다. 새 선거표를 만든 뒤 게시해 주세요." });
-      return;
-    }
     const savedEvent = await saveDraft();
     if (!savedEvent) return;
     setSaving(true);
@@ -1954,20 +1945,20 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   const closePublishedEvent = async () => {
     if (!draft?.id) return;
-    const ok = window.confirm("게시종료 후 저장하시겠습니까?");
+    const ok = window.confirm("선거 메뉴와 공개 페이지에서만 숨기겠습니까? 편집본은 계속 유지됩니다.");
     if (!ok) return;
 
     setSaving(true);
     try {
       const workspace = await closeElectionEvent(draft.id);
-      const nextDraft = workspace.event ? eventToDraft(workspace.event) : { ...draft, status: "closed" as const };
+      const nextDraft = workspace.event ? eventToDraft(workspace.event) : { ...draft, status: "draft" as const };
       setDraft(nextDraft);
       draftRef.current = nextDraft;
       lastSavedSignatureRef.current = getDraftSaveSignature(nextDraft);
       setPublishedEvent(null);
       setSavedDisplayTitle(nextDraft.title);
       setAutoSaveStatus("idle");
-      setMessage({ tone: "ok", text: "게시종료했습니다. 데이터는 읽기 전용으로 유지되고 일반 사용자 사이드바에서는 선거 메뉴가 숨겨집니다." });
+      setMessage({ tone: "ok", text: "게시종료했습니다. 선거 메뉴와 공개 페이지에서 숨겼고 편집은 계속 가능합니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "게시종료에 실패했습니다." });
     } finally {
@@ -2063,7 +2054,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   const currentStatus = draft?.status ?? "draft";
   const autoSaveStatusLabel = getAutoSaveStatusLabel(autoSaveStatus);
-  const closedReadOnlyEvent = draft && currentStatus === "closed" ? draftToReadOnlyEvent(draft) : null;
+  const closedReadOnlyEvent = null as ElectionEvent | null;
   const canUseManagerGeneralView = canManage && hasElectionGeneralPreviewRole(currentSession);
   const managerGeneralViewEvent = canUseManagerGeneralView && managerGeneralView && draft ? draftToReadOnlyEvent(draft) : null;
 
@@ -2230,7 +2221,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                 onExportExcel={() => exportExcel(draft ? draftToReadOnlyEvent(draft) : null)}
               />
               <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
-                {saving ? "최종저장 중" : "최종저장"}
+                {saving ? "저장 중" : "저장"}
               </button>
               <button type="button" className="btn primary" disabled={saving || !draft} onClick={publishDraft}>
                 게시
@@ -2587,14 +2578,14 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                         >
                           <div className={styles.addressEditor}>
                             <div className={styles.addressRows}>
-                              {getAddressInputLines(point.address).map((addressLine, addressIndex) => (
+                              {getMultilineInputLines(point.address).map((addressLine, addressIndex) => (
                                 <div key={addressIndex} className={styles.addressRow}>
                                   <input
                                     className="field-input"
                                     value={addressLine}
                                     onChange={(event) =>
                                       updatePoint(index, {
-                                        address: setAddressInputLine(point.address, addressIndex, event.target.value),
+                                        address: setMultilineInputLine(point.address, addressIndex, event.target.value),
                                       })
                                     }
                                   />
@@ -2603,7 +2594,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                                       type="button"
                                       className={styles.cellActionButton}
                                       disabled={saving}
-                                      onClick={() => updatePoint(index, { address: addAddressInputLine(point.address) })}
+                                      onClick={() => updatePoint(index, { address: addMultilineInputLine(point.address) })}
                                       title="주소칸 추가"
                                       aria-label="주소칸 추가"
                                     >
@@ -2614,7 +2605,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                                       type="button"
                                       className={styles.cellActionButton}
                                       disabled={saving}
-                                      onClick={() => updatePoint(index, { address: removeAddressInputLine(point.address, addressIndex) })}
+                                      onClick={() => updatePoint(index, { address: removeMultilineInputLine(point.address, addressIndex) })}
                                       title="주소칸 삭제"
                                       aria-label="주소칸 삭제"
                                     >
@@ -2631,8 +2622,45 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                           style={getColorStyle(noteColor)}
                           onPointerDownCapture={(event) => applyPaintToCell(event, index, "note")}
                         >
-                          <div className={styles.cellEditor}>
-                            <input className="field-input" value={point.note} onChange={(event) => updatePoint(index, { note: event.target.value })} />
+                          <div className={styles.addressEditor}>
+                            <div className={styles.addressRows}>
+                              {getMultilineInputLines(point.note).map((noteLine, noteIndex) => (
+                                <div key={noteIndex} className={styles.addressRow}>
+                                  <input
+                                    className="field-input"
+                                    value={noteLine}
+                                    onChange={(event) =>
+                                      updatePoint(index, {
+                                        note: setMultilineInputLine(point.note, noteIndex, event.target.value),
+                                      })
+                                    }
+                                  />
+                                  {noteIndex === 0 ? (
+                                    <button
+                                      type="button"
+                                      className={styles.cellActionButton}
+                                      disabled={saving}
+                                      onClick={() => updatePoint(index, { note: addMultilineInputLine(point.note) })}
+                                      title="비고칸 추가"
+                                      aria-label="비고칸 추가"
+                                    >
+                                      +
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className={styles.cellActionButton}
+                                      disabled={saving}
+                                      onClick={() => updatePoint(index, { note: removeMultilineInputLine(point.note, noteIndex) })}
+                                      title="비고칸 삭제"
+                                      aria-label="비고칸 삭제"
+                                    >
+                                      -
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </td>
                         <td
