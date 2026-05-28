@@ -27,9 +27,11 @@ type AutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 type PrintPaperSize = "A3" | "A4";
 type PrintOrientation = "portrait" | "landscape";
 type PrintColorMode = "color" | "mono";
+type ReadOnlyViewMode = "table" | "map";
 type ColorPaintPalette = "light" | "dark";
 type ColorPaintSelection = { color: string; palette: ColorPaintPalette };
 type PaintTarget = "region" | ElectionCellColorKey;
+type ElectionPageMode = "portal" | "public";
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -383,6 +385,143 @@ function getColorableCellClassName(baseClassName: string | undefined, color: str
   ].filter(Boolean).join(" ");
 }
 
+function getExportFileBaseName(event: Pick<ElectionEvent, "title" | "electionDate">) {
+  const title = formatElectionBoardTitle(event.title)
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${title || "선거 취재 배치표"}_${event.electionDate || getKstDateKey()}`;
+}
+
+function exportSplitValue(morning: string | null | undefined, afternoon: string | null | undefined) {
+  const morningText = morning?.trim() ?? "";
+  const afternoonText = afternoon?.trim() ?? "";
+  if (morningText && afternoonText && morningText !== afternoonText) {
+    return `오전 ${morningText}\n오후 ${afternoonText}`;
+  }
+  return morningText || afternoonText || "-";
+}
+
+function exportCheckValue(value: string | null | undefined) {
+  return isLivePositionChecked(value) ? "체크" : "";
+}
+
+function getElectionExportRows(event: Pick<ElectionEvent, "points">) {
+  return event.points.map((point, index) => [
+    `${index + 1}.`,
+    point.region || "-",
+    point.place || "-",
+    point.poolVideo || "-",
+    point.equipmentName || "-",
+    point.trs || "-",
+    exportSplitValue(point.cameraStaffName, point.cameraStaffNamePm),
+    exportSplitValue(point.audioStaffName, point.audioStaffNamePm),
+    exportSplitValue(point.liveTime, point.liveTimePm),
+    exportSplitValue(point.reporterName, point.reporterNamePm),
+    point.address || "-",
+    point.note || "-",
+    exportCheckValue(point.livePosition),
+    exportCheckValue(point.lan),
+    point.lighting || "-",
+  ]);
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+async function exportElectionToExcel(event: ElectionEvent) {
+  const XLSX = await import("xlsx");
+  const headers = [...tableColumns];
+  const rows = getElectionExportRows(event);
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    [formatElectionBoardTitle(event.title)],
+    [`선거일: ${event.electionDate}`],
+    [],
+    headers,
+    ...rows,
+  ]);
+
+  worksheet["!cols"] = [
+    { wch: 5 },
+    { wch: 12 },
+    { wch: 16 },
+    { wch: 14 },
+    { wch: 12 },
+    { wch: 10 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 16 },
+    { wch: 44 },
+    { wch: 28 },
+    { wch: 10 },
+    { wch: 8 },
+    { wch: 12 },
+  ];
+  worksheet["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "선거 배치표");
+  XLSX.writeFile(workbook, `${getExportFileBaseName(event)}.xlsx`, { compression: true });
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function exportElectionToWord(event: ElectionEvent) {
+  const headers = [...tableColumns];
+  const rows = getElectionExportRows(event);
+  const bodyRows = rows
+    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell).replace(/\n/g, "<br>")}</td>`).join("")}</tr>`)
+    .join("");
+  const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(formatElectionBoardTitle(event.title))}</title>
+<style>
+  @page { size: A3 landscape; margin: 12mm; }
+  body { font-family: "Malgun Gothic", Arial, sans-serif; color: #111827; }
+  h1 { margin: 0 0 6px; font-size: 24px; text-align: center; }
+  .meta { margin: 0 0 14px; text-align: center; font-size: 13px; color: #334155; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #94a3b8; padding: 5px 6px; font-size: 10px; line-height: 1.35; text-align: center; vertical-align: middle; word-break: keep-all; }
+  th { background: #dbeafe; font-weight: 700; }
+  td:nth-child(11), td:nth-child(12) { text-align: left; word-break: break-word; }
+</style>
+</head>
+<body>
+  <h1>${escapeHtml(formatElectionBoardTitle(event.title))}</h1>
+  <p class="meta">선거일: ${escapeHtml(event.electionDate)} · ${rows.length}개 포인트</p>
+  <table>
+    <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${bodyRows || `<tr><td colspan="${headers.length}">입력된 중계 포인트가 없습니다.</td></tr>`}</tbody>
+  </table>
+</body>
+</html>`;
+
+  downloadBlob(
+    new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" }),
+    `${getExportFileBaseName(event)}.doc`,
+  );
+}
+
 function ReorderMenu({
   label,
   canMoveUp,
@@ -541,6 +680,8 @@ function ElectionPrintControls({
   onOrientationChange,
   onColorModeChange,
   onPrint,
+  onExportWord,
+  onExportExcel,
 }: {
   paperSize: PrintPaperSize;
   orientation: PrintOrientation;
@@ -550,6 +691,8 @@ function ElectionPrintControls({
   onOrientationChange: (value: PrintOrientation) => void;
   onColorModeChange: (value: PrintColorMode) => void;
   onPrint: () => void;
+  onExportWord: () => void;
+  onExportExcel: () => void;
 }) {
   return (
     <div className={styles.printControls}>
@@ -582,6 +725,12 @@ function ElectionPrintControls({
       </select>
       <button type="button" className="btn" disabled={disabled} onClick={onPrint}>
         출력
+      </button>
+      <button type="button" className="btn" disabled={disabled} onClick={onExportWord}>
+        워드
+      </button>
+      <button type="button" className="btn" disabled={disabled} onClick={onExportExcel}>
+        엑셀
       </button>
     </div>
   );
@@ -1031,11 +1180,17 @@ function ElectionReadOnlyTable({
   event,
   highlightedLocationKeys,
   forcePlainViewerTable,
+  viewMode,
+  onViewModeChange,
 }: {
   event: ElectionEvent;
   highlightedLocationKeys: string[];
   forcePlainViewerTable: boolean;
+  viewMode: ReadOnlyViewMode;
+  onViewModeChange: (viewMode: ReadOnlyViewMode) => void;
 }) {
+  const showingMap = viewMode === "map";
+
   return (
     <article className={`panel ${styles.wideTablePanel}`}>
       <div className={`panel-pad ${styles.emptyPanel}`}>
@@ -1045,97 +1200,127 @@ function ElectionReadOnlyTable({
             <h2 style={{ margin: "10px 0 4px" }}>{event.title}</h2>
             <div className={styles.summary}>{event.electionDate}</div>
           </div>
-          <div className={styles.summary}>{event.points.length}개 포인트</div>
+          <div className={styles.readOnlyViewControls}>
+            <button
+              type="button"
+              className={`btn ${styles.mapToggleButton}`.trim()}
+              onClick={() => onViewModeChange(showingMap ? "table" : "map")}
+            >
+              {showingMap ? "표로 보기" : "지도로 보기"}
+            </button>
+            <div className={styles.summary}>{event.points.length}개 포인트</div>
+          </div>
         </div>
-        <div className={styles.tableWrap}>
-          <table className={`table-like ${styles.table} ${forcePlainViewerTable ? styles.viewerPlainTable : ""}`.trim()}>
-            <thead>
-              <tr>
-                {readOnlyTableColumns.map((column) => (
-                  <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {event.points.length ? (
-                event.points.map((point, index) => {
-                  const pointLocationKey = getPointLocationKey(point);
-                  const isOwnLocationHighlighted = highlightedLocationKeys.includes(pointLocationKey);
-                  const regionRowSpan = getRegionRowSpan(event.points, index);
-                  const hasRegionText = Boolean(normalizeRegionValue(point.region));
-                  const isRegionBoundary = isRegionGroupEnd(event.points, index);
-                  const regionColor = getRegionGroupColor(event.points, index);
-                  const placeColor = getCellDisplayColor(event.points, point, index, "place");
-                  const poolVideoColor = getCellDisplayColor(event.points, point, index, "poolVideo");
-                  const equipmentNameColor = getCellDisplayColor(event.points, point, index, "equipmentName");
-                  const trsColor = getCellDisplayColor(event.points, point, index, "trs");
-                  const cameraStaffColor = getCellDisplayColor(event.points, point, index, "cameraStaff");
-                  const audioStaffColor = getCellDisplayColor(event.points, point, index, "audioStaff");
-                  const liveTimeColor = getCellDisplayColor(event.points, point, index, "liveTime");
-                  const reporterColor = getCellDisplayColor(event.points, point, index, "reporter");
-                  const addressColor = getCellDisplayColor(event.points, point, index, "address");
-                  const noteColor = getCellDisplayColor(event.points, point, index, "note");
-                  const livePositionColor = getCellDisplayColor(event.points, point, index, "livePosition");
-                  const lanColor = getCellDisplayColor(event.points, point, index, "lan");
-                  const lightingColor = getCellDisplayColor(event.points, point, index, "lighting");
-                  return (
-                  <tr
-                    key={point.id}
-                    className={[
-                      isOwnLocationHighlighted ? styles.myLocationRow : "",
-                      isRegionBoundary ? styles.regionGroupEnd : "",
-                    ].filter(Boolean).join(" ") || undefined}
-                    data-election-point-key={pointLocationKey}
-                  >
-                    <td className={styles.numberCell}>
-                      {isOwnLocationHighlighted ? <span className={styles.ownLocationBadge}>내 위치</span> : null}
-                      {index + 1}.
-                    </td>
-                    {regionRowSpan > 0 ? (
-                      <td
-                        className={`${getColorableCellClassName(undefined, regionColor)} ${hasRegionText ? styles.regionGroupBoundaryCell : ""}`.trim()}
-                        style={getColorStyle(regionColor)}
-                        rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
-                      >
-                        {readOnlyValue(point.region)}
-                      </td>
-                    ) : null}
-                    <td className={getColorableCellClassName(undefined, placeColor)} style={getColorStyle(placeColor)}>{readOnlyValue(point.place)}</td>
-                    <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>{readOnlyValue(point.poolVideo)}</td>
-                    <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>{readOnlyValue(point.equipmentName)}</td>
-                    <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>{readOnlyValue(point.trs)}</td>
-                    <td className={getColorableCellClassName(styles.nameColumn, cameraStaffColor)} style={getColorStyle(cameraStaffColor)}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
-                    <td className={getColorableCellClassName(styles.nameColumn, audioStaffColor)} style={getColorStyle(audioStaffColor)}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
-                    <td className={getColorableCellClassName(styles.timeColumn, liveTimeColor)} style={getColorStyle(liveTimeColor)}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
-                    <td className={getColorableCellClassName(styles.nameColumn, reporterColor)} style={getColorStyle(reporterColor)}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
-                    <td className={getColorableCellClassName(styles.addressColumn, addressColor)} style={getColorStyle(addressColor)}>{readOnlyValue(point.address)}</td>
-                    <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>{readOnlyValue(point.note)}</td>
-                    <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
-                      <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
-                    </td>
-                    <td className={getColorableCellClassName(styles.positionColumn, lanColor)} style={getColorStyle(lanColor)}>
-                      <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.lan) ? styles.positionReadOnlyOn : ""}`.trim()} />
-                    </td>
-                    <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>{readOnlyValue(point.lighting)}</td>
-                  </tr>
-                  );
-                })
-              ) : (
+        {showingMap ? (
+          <div className={styles.mapFramePanel}>
+            <iframe
+              className={styles.mapFrame}
+              src="/election-map.html"
+              title="6.3 지선 배치표 지도"
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div className={styles.tableWrap}>
+            <table className={`table-like ${styles.table} ${forcePlainViewerTable ? styles.viewerPlainTable : ""}`.trim()}>
+              <thead>
                 <tr>
-                  <td colSpan={readOnlyTableColumns.length}>
-                    <div className="status note">입력된 중계 포인트가 없습니다.</div>
-                  </td>
+                  {readOnlyTableColumns.map((column) => (
+                    <th key={column} className={getTableColumnClassName(column)}>{renderTableColumnLabel(column)}</th>
+                  ))}
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {event.points.length ? (
+                  event.points.map((point, index) => {
+                    const pointLocationKey = getPointLocationKey(point);
+                    const isOwnLocationHighlighted = highlightedLocationKeys.includes(pointLocationKey);
+                    const regionRowSpan = getRegionRowSpan(event.points, index);
+                    const hasRegionText = Boolean(normalizeRegionValue(point.region));
+                    const isRegionBoundary = isRegionGroupEnd(event.points, index);
+                    const regionColor = getRegionGroupColor(event.points, index);
+                    const placeColor = getCellDisplayColor(event.points, point, index, "place");
+                    const poolVideoColor = getCellDisplayColor(event.points, point, index, "poolVideo");
+                    const equipmentNameColor = getCellDisplayColor(event.points, point, index, "equipmentName");
+                    const trsColor = getCellDisplayColor(event.points, point, index, "trs");
+                    const cameraStaffColor = getCellDisplayColor(event.points, point, index, "cameraStaff");
+                    const audioStaffColor = getCellDisplayColor(event.points, point, index, "audioStaff");
+                    const liveTimeColor = getCellDisplayColor(event.points, point, index, "liveTime");
+                    const reporterColor = getCellDisplayColor(event.points, point, index, "reporter");
+                    const addressColor = getCellDisplayColor(event.points, point, index, "address");
+                    const noteColor = getCellDisplayColor(event.points, point, index, "note");
+                    const livePositionColor = getCellDisplayColor(event.points, point, index, "livePosition");
+                    const lanColor = getCellDisplayColor(event.points, point, index, "lan");
+                    const lightingColor = getCellDisplayColor(event.points, point, index, "lighting");
+                    return (
+                    <tr
+                      key={point.id}
+                      className={[
+                        isOwnLocationHighlighted ? styles.myLocationRow : "",
+                        isRegionBoundary ? styles.regionGroupEnd : "",
+                      ].filter(Boolean).join(" ") || undefined}
+                      data-election-point-key={pointLocationKey}
+                    >
+                      <td className={styles.numberCell}>
+                        {isOwnLocationHighlighted ? <span className={styles.ownLocationBadge}>내 위치</span> : null}
+                        {index + 1}.
+                      </td>
+                      {regionRowSpan > 0 ? (
+                        <td
+                          className={`${getColorableCellClassName(undefined, regionColor)} ${hasRegionText ? styles.regionGroupBoundaryCell : ""}`.trim()}
+                          style={getColorStyle(regionColor)}
+                          rowSpan={regionRowSpan > 1 ? regionRowSpan : undefined}
+                        >
+                          {readOnlyValue(point.region)}
+                        </td>
+                      ) : null}
+                      <td className={getColorableCellClassName(undefined, placeColor)} style={getColorStyle(placeColor)}>{readOnlyValue(point.place)}</td>
+                      <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>{readOnlyValue(point.poolVideo)}</td>
+                      <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>{readOnlyValue(point.equipmentName)}</td>
+                      <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>{readOnlyValue(point.trs)}</td>
+                      <td className={getColorableCellClassName(styles.nameColumn, cameraStaffColor)} style={getColorStyle(cameraStaffColor)}>{readOnlySplitValue(point.cameraStaffName, point.cameraStaffNamePm)}</td>
+                      <td className={getColorableCellClassName(styles.nameColumn, audioStaffColor)} style={getColorStyle(audioStaffColor)}>{readOnlySplitValue(point.audioStaffName, point.audioStaffNamePm)}</td>
+                      <td className={getColorableCellClassName(styles.timeColumn, liveTimeColor)} style={getColorStyle(liveTimeColor)}>{readOnlySplitValue(point.liveTime, point.liveTimePm)}</td>
+                      <td className={getColorableCellClassName(styles.nameColumn, reporterColor)} style={getColorStyle(reporterColor)}>{readOnlySplitValue(point.reporterName, point.reporterNamePm)}</td>
+                      <td className={getColorableCellClassName(styles.addressColumn, addressColor)} style={getColorStyle(addressColor)}>{readOnlyValue(point.address)}</td>
+                      <td className={getColorableCellClassName(styles.wideColumn, noteColor)} style={getColorStyle(noteColor)}>{readOnlyValue(point.note)}</td>
+                      <td className={getColorableCellClassName(styles.positionColumn, livePositionColor)} style={getColorStyle(livePositionColor)}>
+                        <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.livePosition) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                      </td>
+                      <td className={getColorableCellClassName(styles.positionColumn, lanColor)} style={getColorStyle(lanColor)}>
+                        <span className={`${styles.positionReadOnly} ${isLivePositionChecked(point.lan) ? styles.positionReadOnlyOn : ""}`.trim()} />
+                      </td>
+                      <td className={getColorableCellClassName(undefined, lightingColor)} style={getColorStyle(lightingColor)}>{readOnlyValue(point.lighting)}</td>
+                    </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={readOnlyTableColumns.length}>
+                      <div className="status note">입력된 중계 포인트가 없습니다.</div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </article>
   );
 }
 
-export function ElectionPage() {
+async function fetchPublicPublishedElection() {
+  const response = await fetch("/api/election/public", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("공개 선거 중계표를 불러오지 못했습니다.");
+  }
+
+  const payload = await response.json() as { event?: ElectionEvent | null };
+  return payload.event ?? null;
+}
+
+export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = {}) {
   const [draft, setDraft] = useState<DraftEvent | null>(null);
   const [publishedEvent, setPublishedEvent] = useState<ElectionEvent | null>(null);
   const [profiles, setProfiles] = useState<ElectionProfileOption[]>([]);
@@ -1154,6 +1339,7 @@ export function ElectionPage() {
   const [currentSession, setCurrentSession] = useState<SessionUser | null>(() => getSession());
   const [highlightedLocationKeys, setHighlightedLocationKeys] = useState<string[]>([]);
   const [managerGeneralView, setManagerGeneralView] = useState(false);
+  const [readOnlyViewMode, setReadOnlyViewMode] = useState<ReadOnlyViewMode>("table");
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -1164,6 +1350,7 @@ export function ElectionPage() {
   const tableRowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const [tableMeasurements, setTableMeasurements] = useState<TableMeasurements>({ headerHeight: 0, rowHeights: {} });
 
+  const publicViewer = mode === "public";
   const profileNames = useMemo(() => profiles.map((profile) => profile.name), [profiles]);
   const pointMeasurementKey = draft?.points.map((point) => point.localId).join("|") ?? "";
   const editableTableWidth = useMemo(() => getTableColumnsWidth(tableColumns, columnWidths), [columnWidths]);
@@ -1264,6 +1451,20 @@ export function ElectionPage() {
     autoSaveReadyRef.current = false;
     clearAutoSaveTimer();
     try {
+      if (publicViewer) {
+        const event = await fetchPublicPublishedElection();
+        setCanManage(false);
+        setProfiles([]);
+        setPublishedEvent(event);
+        setDraft(null);
+        draftRef.current = null;
+        lastSavedSignatureRef.current = "";
+        setSavedDisplayTitle(event?.title ?? null);
+        setAutoSaveStatus("idle");
+        setMessage(null);
+        return;
+      }
+
       const workspace = await fetchElectionWorkspace();
       const nextDraft = workspace.canManage ? (workspace.event ? eventToDraft(workspace.event) : createBlankDraft()) : null;
       setCanManage(workspace.canManage);
@@ -1281,7 +1482,7 @@ export function ElectionPage() {
       autoSaveReadyRef.current = true;
       setLoading(false);
     }
-  }, [clearAutoSaveTimer]);
+  }, [clearAutoSaveTimer, publicViewer]);
 
   useEffect(() => {
     void load();
@@ -1289,8 +1490,8 @@ export function ElectionPage() {
 
   useEffect(() => subscribeToAuth((session) => {
     setCurrentSession(session);
-    void load();
-  }), [load]);
+    if (!publicViewer) void load();
+  }), [load, publicViewer]);
 
   const locateMyRows = useCallback((points: LocationPoint[]) => {
     if (!currentSession) {
@@ -1444,6 +1645,18 @@ export function ElectionPage() {
     document.body.classList.toggle(ELECTION_PRINT_COLOR_MODE_CLASS, printColorMode === "color");
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => window.print());
+    });
+  };
+
+  const exportWord = (event: ElectionEvent | null | undefined) => {
+    if (!event) return;
+    exportElectionToWord(event);
+  };
+
+  const exportExcel = (event: ElectionEvent | null | undefined) => {
+    if (!event) return;
+    void exportElectionToExcel(event).catch((error) => {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "엑셀 파일을 만들지 못했습니다." });
     });
   };
 
@@ -1739,9 +1952,11 @@ export function ElectionPage() {
                 <h1 className="page-title">{formatElectionBoardTitle(publishedEvent?.title)}</h1>
               </div>
               <div className={styles.actions}>
-                <button type="button" className="btn" disabled={!publishedEvent || !currentSession} onClick={() => publishedEvent ? locateMyRows(publishedEvent.points) : undefined}>
-                  내 위치보기
-                </button>
+                {!publicViewer ? (
+                  <button type="button" className="btn" disabled={!publishedEvent || !currentSession} onClick={() => publishedEvent ? locateMyRows(publishedEvent.points) : undefined}>
+                    내 위치보기
+                  </button>
+                ) : null}
                 <ElectionPrintControls
                   paperSize={printPaperSize}
                   orientation={printOrientation}
@@ -1751,6 +1966,8 @@ export function ElectionPage() {
                   onOrientationChange={setPrintOrientation}
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
+                  onExportWord={() => exportWord(publishedEvent)}
+                  onExportExcel={() => exportExcel(publishedEvent)}
                 />
               </div>
             </div>
@@ -1760,7 +1977,9 @@ export function ElectionPage() {
             <ElectionReadOnlyTable
               event={publishedEvent}
               highlightedLocationKeys={highlightedLocationKeys}
-              forcePlainViewerTable={!hasElectionManagerViewRole(currentSession)}
+              forcePlainViewerTable={publicViewer || !hasElectionManagerViewRole(currentSession)}
+              viewMode={readOnlyViewMode}
+              onViewModeChange={setReadOnlyViewMode}
             />
           ) : (
             <article className="panel">
@@ -1777,7 +1996,7 @@ export function ElectionPage() {
               electionDate={publishedEvent.electionDate}
               points={publishedEvent.points}
               orientation={printOrientation}
-              forcePlainViewerTable={!hasElectionManagerViewRole(currentSession)}
+              forcePlainViewerTable={publicViewer || !hasElectionManagerViewRole(currentSession)}
             />
           </div>
         ) : null}
@@ -1821,6 +2040,8 @@ export function ElectionPage() {
                   onOrientationChange={setPrintOrientation}
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
+                  onExportWord={() => exportWord(closedReadOnlyEvent)}
+                  onExportExcel={() => exportExcel(closedReadOnlyEvent)}
                 />
                 {!managerGeneralView ? (
                   <button type="button" className="btn primary" disabled={saving} onClick={startNewDraft}>
@@ -1836,6 +2057,8 @@ export function ElectionPage() {
             event={closedReadOnlyEvent}
             highlightedLocationKeys={highlightedLocationKeys}
             forcePlainViewerTable={managerGeneralView || !hasElectionManagerViewRole(currentSession)}
+            viewMode={readOnlyViewMode}
+            onViewModeChange={setReadOnlyViewMode}
           />
         </div>
         <div className={styles.printOnly}>
@@ -1880,6 +2103,8 @@ export function ElectionPage() {
                   onOrientationChange={setPrintOrientation}
                   onColorModeChange={setPrintColorMode}
                   onPrint={printElectionBoard}
+                  onExportWord={() => exportWord(managerGeneralViewEvent)}
+                  onExportExcel={() => exportExcel(managerGeneralViewEvent)}
                 />
               </div>
             </div>
@@ -1890,6 +2115,8 @@ export function ElectionPage() {
             event={managerGeneralViewEvent}
             highlightedLocationKeys={highlightedLocationKeys}
             forcePlainViewerTable
+            viewMode={readOnlyViewMode}
+            onViewModeChange={setReadOnlyViewMode}
           />
         </div>
         <div className={styles.printOnly}>
@@ -1939,6 +2166,8 @@ export function ElectionPage() {
                 onOrientationChange={setPrintOrientation}
                 onColorModeChange={setPrintColorMode}
                 onPrint={printElectionBoard}
+                onExportWord={() => exportWord(draft ? draftToReadOnlyEvent(draft) : null)}
+                onExportExcel={() => exportExcel(draft ? draftToReadOnlyEvent(draft) : null)}
               />
               <button type="button" className="btn" disabled={saving || !draft} onClick={saveDraft}>
                 {saving ? "최종저장 중" : "최종저장"}

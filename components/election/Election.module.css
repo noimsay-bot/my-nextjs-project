@@ -1011,10 +1011,38 @@ th.positionColumn {
   flex-wrap: wrap;
 }
 
+.readOnlyViewControls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.mapToggleButton {
+  min-height: 32px;
+  white-space: nowrap;
+}
+
 .summary {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;
+}
+
+.mapFramePanel {
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: #f8fafc;
+}
+
+.mapFrame {
+  display: block;
+  width: 100%;
+  height: min(760px, 74vh);
+  min-height: 520px;
+  border: 0;
+  background: #ffffff;
 }
 
 .deleteButton {
@@ -1261,6 +1289,19 @@ th.positionColumn {
 }
 
 @media (max-width: 720px) {
+  .toolbar {
+    align-items: flex-start;
+  }
+
+  .readOnlyViewControls {
+    justify-content: flex-start;
+  }
+
+  .mapFrame {
+    height: 72vh;
+    min-height: 420px;
+  }
+
   .tableWrap {
     overflow-x: auto;
   }

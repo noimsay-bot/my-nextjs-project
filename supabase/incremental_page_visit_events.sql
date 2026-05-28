@@ -36,3 +36,7 @@ using (
   public.current_profile_role() in ('team_lead', 'admin')
   and public.current_profile_approved() = true
 );
+
+revoke all on table public.page_visit_events from anon;
+grant select, insert on table public.page_visit_events to authenticated;
+grant select, insert, update, delete on table public.page_visit_events to service_role;

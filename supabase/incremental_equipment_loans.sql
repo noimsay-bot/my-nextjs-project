@@ -871,3 +871,15 @@ where code in (
   'live-bnc-cable'
 )
 or code like 'camera-gopro-battery-%';
+
+revoke all on table public.equipment_items from anon;
+grant select, insert, update, delete on table public.equipment_items to authenticated, service_role;
+revoke all on table public.equipment_loans from anon;
+grant select, insert, update on table public.equipment_loans to authenticated;
+grant select, insert, update, delete on table public.equipment_loans to service_role;
+revoke all on table public.equipment_loan_items from anon;
+grant select, insert, update on table public.equipment_loan_items to authenticated;
+grant select, insert, update, delete on table public.equipment_loan_items to service_role;
+revoke all on table public.live_equipment_status_board from anon;
+grant select, insert, update on table public.live_equipment_status_board to authenticated;
+grant select, insert, update, delete on table public.live_equipment_status_board to service_role;

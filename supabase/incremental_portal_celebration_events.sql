@@ -117,3 +117,6 @@ on public.portal_celebration_events
 for delete
 to authenticated
 using (public.is_admin());
+
+revoke all on table public.portal_celebration_events from anon;
+grant select, insert, update, delete on table public.portal_celebration_events to authenticated, service_role;

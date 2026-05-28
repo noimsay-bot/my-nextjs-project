@@ -353,3 +353,7 @@ revoke execute on function public.get_my_schedule_assignment_items(text) from pu
 revoke execute on function public.get_partner_schedule_assignment_items(date) from public, anon;
 grant execute on function public.get_my_schedule_assignment_items(text) to authenticated;
 grant execute on function public.get_partner_schedule_assignment_items(date) to authenticated;
+
+revoke all on table public.schedule_partner_entries from anon;
+grant select, insert, update on table public.schedule_partner_entries to authenticated;
+grant select, insert, update, delete on table public.schedule_partner_entries to service_role;

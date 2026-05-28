@@ -13,6 +13,7 @@
     "harness:routes": "node scripts/harness/generate-route-map.mjs",
     "harness:env": "node scripts/harness/generate-env-map.mjs",
     "harness:supabase": "node scripts/harness/generate-supabase-map.mjs",
+    "harness:supabase-grants": "node scripts/harness/check-supabase-table-grants.mjs",
     "harness:scripts": "node scripts/harness/generate-package-scripts.mjs",
     "harness:generate": "npm run harness:routes && npm run harness:env && npm run harness:supabase && npm run harness:scripts",
     "harness:docs": "node scripts/harness/check-doc-links.mjs && node scripts/harness/check-generated-freshness.mjs",

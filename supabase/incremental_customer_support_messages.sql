@@ -241,3 +241,6 @@ $$;
 
 revoke execute on function public.mark_customer_support_feedback_seen(uuid) from public, anon;
 grant execute on function public.mark_customer_support_feedback_seen(uuid) to authenticated;
+
+revoke all on table public.customer_support_messages from anon;
+grant select, insert, update, delete on table public.customer_support_messages to authenticated, service_role;

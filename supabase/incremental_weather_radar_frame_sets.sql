@@ -113,7 +113,8 @@ using (
   )
 );
 
-grant select on public.weather_radar_frame_sets to authenticated;
+grant select on table public.weather_radar_frame_sets to authenticated;
+grant select, insert, update, delete on table public.weather_radar_frame_sets to service_role;
 
 revoke all on public.weather_radar_frame_sets from anon;
 revoke insert, update, delete on public.weather_radar_frame_sets from anon, authenticated;

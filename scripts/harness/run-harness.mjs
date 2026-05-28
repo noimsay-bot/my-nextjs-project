@@ -7,6 +7,7 @@ const steps = [
   "scripts/harness/generate-env-map.mjs",
   "scripts/harness/generate-supabase-map.mjs",
   "scripts/harness/generate-package-scripts.mjs",
+  "scripts/harness/check-supabase-table-grants.mjs",
   "scripts/harness/check-boundaries.mjs",
   "scripts/harness/quality-score.mjs",
   "scripts/harness/check-doc-links.mjs",

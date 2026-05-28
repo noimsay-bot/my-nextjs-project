@@ -54,6 +54,9 @@ with check (
   and public.current_profile_approved() = true
 );
 
+revoke all on table public.team_lead_schedule_assignment_cell_locks from anon;
+grant select, insert, update, delete on table public.team_lead_schedule_assignment_cell_locks to authenticated, service_role;
+
 create or replace function public.acquire_team_lead_schedule_assignment_cell_lock(
   p_month_key text,
   p_date_key text,

@@ -87,8 +87,12 @@ using (
   )
 );
 
-grant select on public.weather_radar_frames to authenticated;
-grant select on public.weather_dispatch_cache to authenticated;
+grant select on table public.weather_radar_frames to authenticated;
+grant select, insert, update, delete on table public.weather_radar_frames to service_role;
+grant select on table public.weather_dispatch_cache to authenticated;
+grant select, insert, update, delete on table public.weather_dispatch_cache to service_role;
 
+revoke all on table public.weather_radar_frames from anon;
+revoke all on table public.weather_dispatch_cache from anon;
 revoke insert, update, delete on public.weather_radar_frames from anon, authenticated;
 revoke insert, update, delete on public.weather_dispatch_cache from anon, authenticated;

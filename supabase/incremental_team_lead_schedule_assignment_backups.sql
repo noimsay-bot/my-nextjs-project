@@ -92,3 +92,6 @@ with check (
   public.current_profile_role() in ('team_lead', 'admin', 'desk')
   and public.current_profile_approved() = true
 );
+
+revoke all on table public.team_lead_schedule_assignment_backups from anon;
+grant select, insert, update, delete on table public.team_lead_schedule_assignment_backups to authenticated, service_role;

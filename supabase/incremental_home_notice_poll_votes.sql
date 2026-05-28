@@ -51,3 +51,7 @@ using (
   public.current_profile_role() in ('desk', 'admin', 'team_lead')
   and public.current_profile_approved() = true
 );
+
+revoke all on table public.home_notice_poll_votes from anon;
+grant select, insert, delete on table public.home_notice_poll_votes to authenticated;
+grant select, insert, update, delete on table public.home_notice_poll_votes to service_role;

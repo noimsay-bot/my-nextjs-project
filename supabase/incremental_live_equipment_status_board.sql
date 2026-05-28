@@ -36,6 +36,10 @@ with check (
   and updated_by = auth.uid()
 );
 
+revoke all on table public.live_equipment_status_board from anon;
+grant select, insert, update on table public.live_equipment_status_board to authenticated;
+grant select, insert, update, delete on table public.live_equipment_status_board to service_role;
+
 drop policy if exists "live_equipment_status_board_update_privileged" on public.live_equipment_status_board;
 create policy "live_equipment_status_board_update_privileged"
 on public.live_equipment_status_board

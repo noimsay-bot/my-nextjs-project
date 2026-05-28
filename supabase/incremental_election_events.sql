@@ -195,7 +195,9 @@ using (
   and public.current_profile_approved() = true
 );
 
-grant select, insert, update, delete on public.election_events to authenticated;
-grant select, insert, update, delete on public.election_points to authenticated;
+revoke all on table public.election_events from anon;
+revoke all on table public.election_points from anon;
+grant select, insert, update, delete on table public.election_events to authenticated, service_role;
+grant select, insert, update, delete on table public.election_points to authenticated, service_role;
 
 notify pgrst, 'reload schema';

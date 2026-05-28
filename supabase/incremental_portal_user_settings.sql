@@ -63,6 +63,7 @@ using (
   and public.current_profile_approved() = true
 );
 
-grant select, insert, update, delete on public.portal_user_settings to authenticated;
+revoke all on table public.portal_user_settings from anon;
+grant select, insert, update, delete on table public.portal_user_settings to authenticated, service_role;
 
 notify pgrst, 'reload schema';

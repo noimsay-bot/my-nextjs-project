@@ -19,6 +19,8 @@ const triggers = [];
 const rls = [];
 const grants = [];
 const revokes = [];
+const tableGrants = [];
+const tableRevokes = [];
 
 for (const file of sqlFiles) {
   const text = fs.readFileSync(file, "utf8");
@@ -28,6 +30,8 @@ for (const file of sqlFiles) {
   functions.push(...collect(/create\s+(?:or\s+replace\s+)?function\s+([a-zA-Z0-9_."]+)/gi, text, file));
   triggers.push(...collect(/create\s+trigger\s+([a-zA-Z0-9_"]+)/gi, text, file));
   rls.push(...collect(/alter\s+table\s+([a-zA-Z0-9_."]+)\s+enable\s+row\s+level\s+security/gi, text, file));
+  tableGrants.push(...collect(/grant\s+[^;]+?\s+on\s+(?:table\s+)?([a-zA-Z0-9_."]+)\s+to\s+[^;]+/gi, text, file));
+  tableRevokes.push(...collect(/revoke\s+[^;]+?\s+on\s+(?:table\s+)?([a-zA-Z0-9_."]+)\s+from\s+[^;]+/gi, text, file));
   grants.push(...collect(/grant\s+execute\s+on\s+function\s+([a-zA-Z0-9_."]+\([^;]*?\))/gi, text, file));
   revokes.push(...collect(/revoke\s+execute\s+on\s+function\s+([a-zA-Z0-9_."]+\([^;]*?\))/gi, text, file));
 }
@@ -60,6 +64,8 @@ const content = [
   `- function 선언: ${functions.length}`,
   `- trigger 선언: ${triggers.length}`,
   `- RLS enable 선언: ${rls.length}`,
+  `- table grant 선언: ${tableGrants.length}`,
+  `- table revoke 선언: ${tableRevokes.length}`,
   `- function execute grant 선언: ${grants.length}`,
   `- function execute revoke 선언: ${revokes.length}`,
   "",
@@ -74,6 +80,14 @@ const content = [
   "## RLS Enabled Tables",
   "",
   markdownTable(["테이블", "파일"], uniqueRows(rls)),
+  "",
+  "## Table Grants",
+  "",
+  markdownTable(["테이블", "파일"], uniqueRows(tableGrants)),
+  "",
+  "## Table Revokes",
+  "",
+  markdownTable(["테이블", "파일"], uniqueRows(tableRevokes)),
   "",
   "## Policies",
   "",
