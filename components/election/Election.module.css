@@ -27,10 +27,12 @@
 }
 
 .header {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 14px;
   align-items: center;
+  overflow: visible;
 }
 
 .titleBlock {
@@ -55,6 +57,8 @@
 }
 
 .actions {
+  position: relative;
+  z-index: 40;
   grid-column: 3;
   display: flex;
   gap: 8px;
@@ -64,6 +68,8 @@
 }
 
 .printControls {
+  position: relative;
+  z-index: 45;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -85,6 +91,7 @@
 
 .printMenu {
   position: relative;
+  z-index: 50;
   display: inline-flex;
 }
 
@@ -109,7 +116,7 @@
 
 .printMenuPanel {
   position: absolute;
-  z-index: 20;
+  z-index: 200;
   top: calc(100% + 6px);
   right: 0;
   display: grid;

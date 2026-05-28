@@ -49,13 +49,20 @@
   .election-pin-count{fill:#fff;font-size:15px;font-weight:900;text-anchor:middle;dominant-baseline:middle;pointer-events:none;}
   .election-point-pin{fill:#ef4444;stroke:#fff;stroke-width:3;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));}
   .election-point-number{fill:#fff;font-size:11px;font-weight:900;text-anchor:middle;dominant-baseline:middle;pointer-events:none;}
-  .election-card-fo{overflow:visible;pointer-events:none;}
-  .election-card{height:100%;padding:9px 10px;border:1px solid rgba(15,23,42,.18);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 6px 16px rgba(15,23,42,.18);font-size:11px;line-height:1.3;color:#1f2937;overflow:hidden;}
-  .election-card-title{display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .election-card-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:19px;height:19px;border-radius:99px;background:#111827;color:#fff;font-size:10px;font-weight:900;}
-  .election-card-row{display:grid;grid-template-columns:43px minmax(0,1fr);gap:5px;margin-top:3px;}
+  .election-card-fo{overflow:visible;pointer-events:auto;cursor:grab;}
+  .election-card-fo.dragging{cursor:grabbing;}
+  .election-card{height:100%;padding:10px;border:1px solid rgba(15,23,42,.18);border-radius:8px;background:rgba(255,255,255,.96);box-shadow:0 8px 20px rgba(15,23,42,.20);font-size:10px;line-height:1.25;color:#1f2937;overflow:visible;user-select:none;}
+  .election-card-title{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px;margin-bottom:7px;font-size:13px;font-weight:900;}
+  .election-card-title-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .election-card-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:20px;height:20px;border-radius:99px;background:#111827;color:#fff;font-size:10px;font-weight:900;}
+  .election-card-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+  .election-card-row{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);gap:4px;min-height:21px;align-items:center;padding:3px 5px;border:1px solid rgba(148,163,184,.26);border-radius:5px;background:rgba(248,250,252,.86);}
+  .election-card-row.expandable{cursor:pointer;}
   .election-card-row b{color:#64748b;font-weight:900;}
-  .election-card-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .election-card-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800;color:#111827;}
+  .election-card-row.expanded{z-index:30;grid-column:1 / -1;align-items:start;background:#fff;box-shadow:0 8px 18px rgba(15,23,42,.14);}
+  .election-card-row.expanded .election-card-value{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35;}
+  .election-card-row[data-full]:hover::after{content:attr(data-full);position:absolute;z-index:50;left:0;top:calc(100% + 6px);width:max-content;max-width:260px;padding:7px 9px;border:1px solid rgba(15,23,42,.22);border-radius:7px;background:#111827;color:#fff;box-shadow:0 10px 24px rgba(15,23,42,.26);font-size:11px;font-weight:800;line-height:1.35;white-space:pre-wrap;pointer-events:none;}
   #hint{display:none;font-size:12px;color:var(--muted);margin:8px 2px;line-height:1.45;}
   #error{display:none;background:#fff3f1;color:#8a2d24;border:1px solid #efb2ab;border-radius:10px;padding:10px 12px;margin:10px 2px;font-size:13px;line-height:1.45;}
   .meta{display:none;font-size:11px;color:var(--muted);margin:10px 2px 0;line-height:1.4;}
@@ -224,6 +231,9 @@ const POLL_SCRIPT_URLS = [
   'https://www.poll-mbc.co.kr/region_data/candidate_info.js',
   'https://www.poll-mbc.co.kr/region_data/approve_data/front_status.js'
 ];
+const ASSEMBLY_POLL_SCRIPT_URLS = [
+  'https://www.poll-mbc.co.kr/region_data/assembly/boxplot_data.js'
+];
 const PARTY_STYLE = {
   '더불어민주당': {className:'dem', fillClass:'demFill', mark:'■', tone:'blue'},
   '국민의힘': {className:'ppp', fillClass:'pppFill', mark:'■', tone:'red'},
@@ -237,8 +247,10 @@ let currentSido = 'all';
 let selectedPollRegion = '';
 let expandedPollKey = '';
 let pollDataStatus = 'loading';
+let assemblyPollDataStatus = 'loading';
 let electionMapEvent = null;
 let electionPoints = [];
+let cardPositionOverrides = {};
 const DEFS = `
   <defs>
     <filter id="soft" x="-40%" y="-40%" width="190%" height="210%">
@@ -444,12 +456,19 @@ function loadScript(src){
 
 async function loadPollData(){
   pollDataStatus = 'loading';
+  assemblyPollDataStatus = 'loading';
   renderPollPanel();
   try{
     for(const src of POLL_SCRIPT_URLS) await loadScript(src);
     pollDataStatus = 'ready';
   }catch(e){
     pollDataStatus = 'error';
+  }
+  try{
+    for(const src of ASSEMBLY_POLL_SCRIPT_URLS) await loadScript(src);
+    assemblyPollDataStatus = 'ready';
+  }catch(e){
+    assemblyPollDataStatus = 'error';
   }
   renderPollPanel();
 }
@@ -497,9 +516,15 @@ function getPollLeadingRows(poll){
     .sort((a,b) => b.value - a.value);
 }
 
+function getRequiredPollWins(pollCount){
+  if(pollCount <= 0) return 0;
+  return Math.min(3, Math.floor(pollCount / 2) + 1);
+}
+
 function getRecentPollConsensus(regionKey){
   const recentPolls = getPollsForRegion(regionKey).slice(0, 5);
   if(!recentPolls.length) return null;
+  const requiredWins = getRequiredPollWins(recentPolls.length);
 
   const winCounts = new Map();
   const valueSums = new Map();
@@ -525,7 +550,7 @@ function getRecentPollConsensus(regionKey){
     average: valueSums.get(name) / Math.max(1, valueCounts.get(name) || 1),
   })).sort((a,b) => b.wins - a.wins || b.average - a.average);
   const winner = candidates[0];
-  if(!winner || winner.wins < 3) return {winner, margin: 0, decisive: false};
+  if(!winner || winner.wins < requiredWins) return {winner, margin: 0, decisive: false};
 
   const runnerUp = candidates
     .filter(candidate => candidate.name !== winner.name)
@@ -543,6 +568,63 @@ function getPollSummary(region){
   }
   const style = getPartyStyle(region.key, consensus.winner.name);
   return {label: `${consensus.winner.name} 우세`, tone: style.tone, isNew: Boolean(isNewMap[region.key])};
+}
+
+function getSidoElectionTitle(region){
+  if(region.sido === '세종') return `${region.label}시장`;
+  if(['서울','부산','대구','인천','대전','울산'].includes(region.sido)) return `${region.label}시장`;
+  if(region.sido === '전남') return `${region.label} 시도지사`;
+  return `${region.label}도지사`;
+}
+
+function getAssemblyPollItemsForSido(sido){
+  const items = Array.isArray(window.boxplot_data) ? window.boxplot_data : [];
+  return items
+    .filter(item =>
+      item &&
+      normalizeSidoKey(item.region1) === sido &&
+      Number(item.count || 0) >= 2 &&
+      String(item.end || '') >= POLL_DISPLAY_START_DATE &&
+      String(item.end || '') <= POLL_CUTOFF_END_DATE
+    )
+    .sort((a,b) => String(b.end || '').localeCompare(String(a.end || '')) || Number(b.count || 0) - Number(a.count || 0));
+}
+
+function getLocalPollEntries(sido){
+  const entries = [];
+  POLL_REGION_ORDER
+    .filter(region => region.sido === sido)
+    .forEach(region => {
+      const polls = getPollsForRegion(region.key);
+      if(polls.length < 2) return;
+      const summary = getPollSummary(region);
+      entries.push({
+        type: 'governor',
+        key: `governor|${region.key}`,
+        title: getSidoElectionTitle(region),
+        meta: `등록 여론조사 ${polls.length}개 · ${POLL_DISPLAY_START_DATE}~${POLL_CUTOFF_END_DATE}`,
+        label: summary.label,
+        tone: summary.tone,
+        region,
+      });
+    });
+
+  getAssemblyPollItemsForSido(sido).forEach(item => {
+    const first = item.rank?.first;
+    const second = item.rank?.second;
+    const margin = first && second ? Number(first.val || 0) - Number(second.val || 0) : 0;
+    const style = PARTY_STYLE[first?.party] || PARTY_STYLE.minor;
+    entries.push({
+      type: 'assembly',
+      key: `assembly|${item.consti}`,
+      title: `${item.region1_site || item.region1 || sido}${item.region2_site || item.region2 || ''} 재보궐`,
+      meta: `분석 여론조사 ${Number(item.count || 0)}개 · ${item.start || ''}~${item.end || ''}`,
+      label: first ? `${first.name} ${margin >= 5 ? '우세' : '경합'}` : (item.state || '분석 중'),
+      tone: margin >= 5 ? style.tone : 'purple',
+      item,
+    });
+  });
+  return entries;
 }
 
 function renderPollResultRow(regionKey, row){
@@ -599,8 +681,130 @@ function renderPollRegionPanel(region){
   return `<div class="pollRegionPanel">${content}</div>`;
 }
 
+function renderAssemblyPollCard(item){
+  const surveys = Array.isArray(item.bar_data) ? item.bar_data : [];
+  const rankRows = [item.rank?.first, item.rank?.second].filter(Boolean);
+  const rows = rankRows.length ? rankRows.map(row => {
+    const style = PARTY_STYLE[row.party] || PARTY_STYLE.minor;
+    const width = Math.max(0, Math.min(100, Number(row.val || 0)));
+    return `<div class="pollResultRow">
+      <span class="partyMark ${style.className}">${style.mark}</span>
+      <span class="candidateName">${escapeHtml(row.name)}<span class="partyName ${style.className}">${escapeHtml(row.party || '')}</span></span>
+      <span class="rate ${style.className}">${escapeHtml(row.val)}%</span>
+      <span class="barTrack"><span class="barFill ${style.fillClass}" style="width:${width}%"></span></span>
+    </div>`;
+  }).join('') : `<div class="pollEmpty">표시할 후보 분석 결과가 없습니다.</div>`;
+  const titleText = `${item.region1_site || item.region1 || ''}${item.region2_site || item.region2 || ''} 재보궐`;
+  const methodText = [item.start && item.end ? `${item.start}~${item.end}` : '', item.count ? `${item.count}개 조사` : '', item.call || item.ars ? `전화면접 ${item.call || 0}개 / ARS ${item.ars || 0}개` : ''].filter(Boolean).join(' / ');
+  const summary = `<article class="pollCard">
+    <h4 class="pollCardTitle">${escapeHtml(titleText)}</h4>
+    <p class="pollCardMeta">${escapeHtml(methodText)}</p>
+    <div class="pollResultBox">${rows}</div>
+  </article>`;
+  const surveyCards = surveys.length
+    ? surveys.map((poll, index) => renderAssemblySurveyCard(item, poll, index)).join('')
+    : `<div class="pollEmpty">표시할 개별 여론조사가 없습니다.</div>`;
+  return `${summary}${surveyCards}`;
+}
+
+function getAssemblyCandidateParty(item, name){
+  const found = Array.isArray(item.candis) ? item.candis.find(candidate => candidate.name === name) : null;
+  return found?.party || '';
+}
+
+function renderAssemblySurveyResultRow(item, name, stats){
+  const party = getAssemblyCandidateParty(item, name);
+  const style = PARTY_STYLE[party] || PARTY_STYLE.minor;
+  const value = Number(stats?.mean || 0);
+  const width = Math.max(0, Math.min(100, value));
+  const interval = Number.isFinite(Number(stats?.lower)) && Number.isFinite(Number(stats?.upper))
+    ? `${stats.lower}~${stats.upper}`
+    : '';
+  return `<div class="pollResultRow">
+    <span class="partyMark ${style.className}">${style.mark}</span>
+    <span class="candidateName">${escapeHtml(name)}<span class="partyName ${style.className}">${escapeHtml(party)}</span></span>
+    <span class="rate ${style.className}">${escapeHtml(value)}%</span>
+    <span class="barTrack" title="${escapeHtml(interval)}"><span class="barFill ${style.fillClass}" style="width:${width}%"></span></span>
+  </div>`;
+}
+
+function renderAssemblySurveyCard(item, poll, index){
+  const titleText = `${poll.house || '조사기관'}-${poll.client || '의뢰기관'}`;
+  const methodText = [poll.date_range || '', poll.type || '', poll.type2 || '', poll.response || '', poll.intertval || poll.interval || ''].filter(Boolean).join(' / ');
+  const rows = (Array.isArray(poll.survey_data) ? poll.survey_data : [])
+    .flatMap(entry => Object.entries(entry || {}))
+    .map(([name, stats]) => renderAssemblySurveyResultRow(item, name, stats))
+    .join('');
+  return `<article class="pollCard">
+    <h4 class="pollCardTitle">${poll.link ? `<a href="${escapeHtml(poll.link)}" target="_blank" rel="noopener noreferrer">↗</a> ` : ''}${escapeHtml(index + 1)}. ${escapeHtml(titleText)}</h4>
+    <p class="pollCardMeta">${escapeHtml(methodText)}</p>
+    <div class="pollResultBox">${rows || '<div class="pollEmpty">표시할 후보 결과가 없습니다.</div>'}</div>
+  </article>`;
+}
+
+function renderLocalPollEntry(entry){
+  const expanded = expandedPollKey === entry.key;
+  const body = expanded
+    ? entry.type === 'governor'
+      ? renderPollRegionPanel(entry.region)
+      : `<div class="pollCards">${renderAssemblyPollCard(entry.item)}</div>`
+    : '';
+  return `<div class="pollSurveyItem">
+    <button type="button" class="pollSurveyButton ${expanded ? 'active' : ''}" data-local-poll-key="${escapeHtml(entry.key)}">
+      <span>
+        <span class="pollSurveyTitle">${escapeHtml(entry.title)}</span>
+        <span class="pollSurveyMeta">${escapeHtml(entry.meta)}</span>
+      </span>
+      <span class="pollLead">${escapeHtml(entry.label)}</span>
+    </button>
+    ${body}
+  </div>`;
+}
+
+function renderLocalPollPanel(){
+  if(pollDataStatus === 'loading' && assemblyPollDataStatus === 'loading'){
+    pollContent.innerHTML = `<div class="pollRegionPanel"><div class="pollEmpty">해당 지역 여론조사를 불러오는 중입니다.</div></div>`;
+    return;
+  }
+  const entries = getLocalPollEntries(currentSido);
+  if(!entries.length){
+    pollContent.innerHTML = `<div class="pollRegionPanel"><div class="pollEmpty">이 지역에는 2개 이상 등록된 여론조사 묶음이 없습니다.</div></div>`;
+    return;
+  }
+  pollContent.innerHTML = `<div class="pollRegionPanel">
+    <div class="pollRegionMeta">해당 시도 기준 · 조사 2개 이상인 항목만 표시합니다.</div>
+    <div class="pollSurveyList">${entries.map(renderLocalPollEntry).join('')}</div>
+  </div>`;
+  pollContent.querySelectorAll('.pollSurveyButton[data-local-poll-key]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const nextKey = button.dataset.localPollKey || '';
+      expandedPollKey = expandedPollKey === nextKey ? '' : nextKey;
+      renderPollPanel();
+    });
+  });
+  pollContent.querySelectorAll('.pollSurveyButton[data-poll-key]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const nextKey = button.dataset.pollKey || '';
+      expandedPollKey = expandedPollKey === nextKey ? '' : nextKey;
+      renderPollPanel();
+    });
+  });
+}
+
 function renderPollPanel(){
   if(!pollContent) return;
+  const titleStrong = pollPanel?.querySelector('.pollPanelTitle strong');
+  const titleMeta = pollPanel?.querySelector('.pollPanelTitle span');
+  if(currentSido !== 'all'){
+    if(titleStrong) titleStrong.textContent = `${SIDO_FULL[currentSido] || currentSido} 여론조사`;
+    if(titleMeta) titleMeta.textContent = '2개 이상 항목';
+    renderLocalPollPanel();
+    return;
+  }
+  if(titleStrong) titleStrong.textContent = '전국 시도지사 여론조사';
+  if(titleMeta) titleMeta.textContent = '5/1~5/27 조사';
   const summaryList = POLL_REGION_ORDER.map(region => {
     const active = region.key === selectedPollRegion;
     const summary = getPollSummary(region);
@@ -686,6 +890,85 @@ function clamp(value, min, max){
   return Math.max(min, Math.min(max, value));
 }
 
+function rectsOverlap(a, b, gap = 10){
+  return !(
+    a.x + a.w + gap <= b.x ||
+    b.x + b.w + gap <= a.x ||
+    a.y + a.h + gap <= b.y ||
+    b.y + b.h + gap <= a.y
+  );
+}
+
+function getCardPositionKey(point, scope = 'detail'){
+  return [
+    electionMapEvent?.id || electionMapEvent?.title || 'draft',
+    currentSido,
+    scope,
+    point.index,
+    point.region,
+    point.place,
+  ].map(value => String(value ?? '').replace(/[|]/g, '')).join('|');
+}
+
+function getCardEdgePoint(card, pinX, pinY){
+  const centerX = card.x + card.w / 2;
+  const centerY = card.y + card.h / 2;
+  const dx = pinX - centerX;
+  const dy = pinY - centerY;
+  if(Math.abs(dx) > Math.abs(dy)){
+    return {
+      x: dx > 0 ? card.x + card.w : card.x,
+      y: clamp(pinY, card.y + 14, card.y + card.h - 14),
+    };
+  }
+  return {
+    x: clamp(pinX, card.x + 14, card.x + card.w - 14),
+    y: dy > 0 ? card.y + card.h : card.y,
+  };
+}
+
+function getNonOverlappingCardRect(pinX, pinY, index, cardW, cardH, placedRects){
+  const minX = 14;
+  const minY = 14;
+  const maxX = 900 - cardW - 14;
+  const maxY = 900 - cardH - 14;
+  const side = pinX < 450 ? 1 : -1;
+  const candidates = [];
+
+  for(let ring = 0; ring < 7; ring++){
+    const horizontal = 38 + ring * 30;
+    const verticalStep = 26 + ring * 10;
+    [-2,-1,0,1,2].forEach(offset => {
+      candidates.push({
+        x: clamp(pinX + side * horizontal - (side < 0 ? cardW : 0), minX, maxX),
+        y: clamp(pinY - cardH / 2 + offset * verticalStep, minY, maxY),
+      });
+    });
+    candidates.push({
+      x: clamp(pinX - cardW / 2, minX, maxX),
+      y: clamp(pinY + 40 + ring * 22, minY, maxY),
+    });
+    candidates.push({
+      x: clamp(pinX - cardW / 2, minX, maxX),
+      y: clamp(pinY - cardH - 40 - ring * 22, minY, maxY),
+    });
+  }
+
+  const gridXs = [18, 900 - cardW - 18];
+  for(let row = 0; row < 8; row++){
+    gridXs.forEach(x => {
+      candidates.push({
+        x: clamp(x, minX, maxX),
+        y: clamp(18 + row * (cardH + 12), minY, maxY),
+      });
+    });
+  }
+
+  const chosen = candidates.find(candidate => !placedRects.some(rect => rectsOverlap({...candidate, w: cardW, h: cardH}, rect)));
+  const position = chosen || candidates[candidates.length - 1];
+  return {x: position.x, y: position.y, w: cardW, h: cardH};
+}
+
 function getSidoCentroids(project){
   const bySido = groupBy(features, featureSido);
   return SIDO_ORDER.reduce((acc, sido) => {
@@ -738,13 +1021,35 @@ function getDetailPointAnchor(point, anchors){
   return matched || null;
 }
 
+function getPointsForDistrict(feature){
+  if(!feature) return [];
+  const anchor = {
+    key: featureCode(feature),
+    tokens: getFeatureDistrictTokens(feature),
+  };
+  return electionPoints.filter(point =>
+    point.sido === currentSido &&
+    anchor.tokens.some(token => joinedPointText(point).includes(token))
+  );
+}
+
+function isExpandableCardValue(label, value){
+  const text = String(value ?? '').trim();
+  return /주소|비고/.test(label) || text.length > 14 || /\r|\n/.test(text);
+}
+
+function renderPointCardRow(label, value){
+  const text = String(value ?? '').trim();
+  const expandable = isExpandableCardValue(label, text);
+  const attrs = expandable ? ` data-full="${escapeHtml(text)}" title="${escapeHtml(text)}"` : '';
+  return `<div class="election-card-row${expandable ? ' expandable' : ''}"${attrs}><b>${escapeHtml(label)}</b><span class="election-card-value">${escapeHtml(text)}</span></div>`;
+}
+
 function renderPointCard(point){
-  const rows = pointToCardRows(point).slice(0, 7).map(([label, value]) =>
-    `<div class="election-card-row"><b>${escapeHtml(label)}</b><span class="election-card-value">${escapeHtml(value)}</span></div>`
-  ).join('');
+  const rows = pointToCardRows(point).map(([label, value]) => renderPointCardRow(label, value)).join('');
   return `<div xmlns="http://www.w3.org/1999/xhtml" class="election-card">
-    <div class="election-card-title"><span class="election-card-badge">${Number(point.index) + 1}</span><span>${escapeHtml(getPointTitle(point))}</span></div>
-    ${rows || '<div class="election-card-row"><b>내용</b><span class="election-card-value">표 입력 대기</span></div>'}
+    <div class="election-card-title"><span class="election-card-badge">${Number(point.index) + 1}</span><span class="election-card-title-text">${escapeHtml(getPointTitle(point))}</span></div>
+    <div class="election-card-grid">${rows || '<div class="election-card-row"><b>내용</b><span class="election-card-value">표 입력 대기</span></div>'}</div>
   </div>`;
 }
 
@@ -767,8 +1072,9 @@ function renderDetailPointPins(list, project){
   fallback.y = anchors.length ? fallback.y / anchors.length : 450;
 
   const anchorCounts = {};
-  const cardW = 220;
-  const cardH = 132;
+  const placedRects = [];
+  const cardW = 304;
+  const cardH = 178;
   const lines = [];
   const nodes = [];
   points.forEach((point, index) => {
@@ -782,16 +1088,18 @@ function renderDetailPointPins(list, project){
     const radius = order ? 15 + Math.min(order, 5) * 5 : 0;
     const x = clamp(baseX + Math.cos(angle) * radius, 24, 876);
     const y = clamp(baseY + Math.sin(angle) * radius, 24, 876);
-    const side = x < 450 ? 1 : -1;
-    const cardX = clamp(x + side * 34 - (side < 0 ? cardW : 0), 18, 900 - cardW - 18);
-    const cardY = clamp(y - cardH / 2 + ((index % 3) - 1) * 24, 18, 900 - cardH - 18);
-    const lineX = side > 0 ? cardX : cardX + cardW;
-    const lineY = cardY + cardH / 2;
-    lines.push(`<line class="election-pin-line" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${lineX.toFixed(1)}" y2="${lineY.toFixed(1)}"></line>`);
+    const cardKey = getCardPositionKey(point, 'sido');
+    const override = cardPositionOverrides[cardKey];
+    const cardRect = override
+      ? {x: clamp(Number(override.x) || 0, 14, 900 - cardW - 14), y: clamp(Number(override.y) || 0, 14, 900 - cardH - 14), w: cardW, h: cardH}
+      : getNonOverlappingCardRect(x, y, index, cardW, cardH, placedRects);
+    placedRects.push(cardRect);
+    const edge = getCardEdgePoint(cardRect, x, y);
+    lines.push(`<line class="election-pin-line" data-card-key="${escapeHtml(cardKey)}" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${edge.x.toFixed(1)}" y2="${edge.y.toFixed(1)}"></line>`);
     nodes.push(`<g class="election-point-node">
       <circle class="election-point-pin" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13"></circle>
       <text class="election-point-number" x="${x.toFixed(1)}" y="${(y + 0.5).toFixed(1)}">${Number(point.index) + 1}</text>
-      <foreignObject class="election-card-fo" x="${cardX.toFixed(1)}" y="${cardY.toFixed(1)}" width="${cardW}" height="${cardH}">${renderPointCard(point)}</foreignObject>
+      <foreignObject class="election-card-fo" data-card-key="${escapeHtml(cardKey)}" data-pin-x="${x.toFixed(1)}" data-pin-y="${y.toFixed(1)}" x="${cardRect.x.toFixed(1)}" y="${cardRect.y.toFixed(1)}" width="${cardW}" height="${cardH}">${renderPointCard(point)}</foreignObject>
     </g>`);
   });
   return `<g class="election-point-layer">${lines.join('')}${nodes.join('')}</g>`;
@@ -841,7 +1149,9 @@ function buildDistrictSVG(list){
   paths.forEach(p => {
     const code = featureCode(p.f);
     const name = featureName(p.f);
-    s += `<path class="rg" data-code="${escapeHtml(code)}" data-name="${escapeHtml(name)}" data-sido="${escapeHtml(featureSido(p.f))}" d="${p.d}" fill-rule="evenodd"><title>${escapeHtml(name)}</title></path>`;
+    const pointCount = getPointsForDistrict(p.f).length;
+    const pointHint = pointCount ? ` · 포인트 ${pointCount}개` : '';
+    s += `<path class="rg" data-code="${escapeHtml(code)}" data-name="${escapeHtml(name)}" data-sido="${escapeHtml(featureSido(p.f))}" data-point-count="${pointCount}" d="${p.d}" fill-rule="evenodd"><title>${escapeHtml(name)}${escapeHtml(pointHint)}</title></path>`;
   });
   s += renderDetailPointPins(list, project);
   s += `</svg>`;
@@ -851,6 +1161,9 @@ function buildDistrictSVG(list){
 function navigateToSido(sido){
   if(!sido || currentSido === sido) return;
   currentSido = sido;
+  selectedPollRegion = '';
+  expandedPollKey = '';
+  pollPanel?.classList.remove('open');
   render();
 }
 
@@ -880,6 +1193,84 @@ function attachNationalPointNavigation(root){
   });
 }
 
+function svgClientPoint(svg, clientX, clientY){
+  const point = svg.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  return point.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function attachCardTextExpansion(root){
+  root.querySelectorAll('.election-card-row.expandable').forEach(row => {
+    row.addEventListener('pointerdown', event => {
+      event.stopPropagation();
+    });
+    row.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      row.classList.toggle('expanded');
+    });
+  });
+}
+
+function attachCardDragging(root){
+  const svg = root instanceof SVGSVGElement ? root : root.querySelector('svg');
+  if(!svg) return;
+  attachCardTextExpansion(root);
+  root.querySelectorAll('.election-card-fo').forEach(card => {
+    card.addEventListener('pointerdown', event => {
+      if(event.target.closest?.('.election-card-row.expandable')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const key = card.dataset.cardKey;
+      if(!key) return;
+      const start = svgClientPoint(svg, event.clientX, event.clientY);
+      const startX = Number(card.getAttribute('x')) || 0;
+      const startY = Number(card.getAttribute('y')) || 0;
+      const cardW = Number(card.getAttribute('width')) || 304;
+      const cardH = Number(card.getAttribute('height')) || 178;
+      const pinX = Number(card.dataset.pinX) || 0;
+      const pinY = Number(card.dataset.pinY) || 0;
+      const line = root.querySelector(`.election-pin-line[data-card-key="${CSS.escape(key)}"]`);
+
+      card.classList.add('dragging');
+      card.setPointerCapture?.(event.pointerId);
+
+      const moveCard = (clientX, clientY) => {
+        const current = svgClientPoint(svg, clientX, clientY);
+        const next = {
+          x: clamp(startX + current.x - start.x, 14, 900 - cardW - 14),
+          y: clamp(startY + current.y - start.y, 14, 900 - cardH - 14),
+          w: cardW,
+          h: cardH,
+        };
+        card.setAttribute('x', next.x.toFixed(1));
+        card.setAttribute('y', next.y.toFixed(1));
+        cardPositionOverrides[key] = {x: next.x, y: next.y};
+        if(line){
+          const edge = getCardEdgePoint(next, pinX, pinY);
+          line.setAttribute('x2', edge.x.toFixed(1));
+          line.setAttribute('y2', edge.y.toFixed(1));
+        }
+      };
+
+      const handlePointerMove = pointerEvent => moveCard(pointerEvent.clientX, pointerEvent.clientY);
+      const handlePointerUp = pointerEvent => {
+        moveCard(pointerEvent.clientX, pointerEvent.clientY);
+        card.classList.remove('dragging');
+        card.releasePointerCapture?.(pointerEvent.pointerId);
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+        window.removeEventListener('pointercancel', handlePointerUp);
+      };
+
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+      window.addEventListener('pointercancel', handlePointerUp);
+    });
+  });
+}
+
 function renderMiniNationalMap(){
   if(!miniNationalWrap || !miniNationalMap) return;
   if(currentSido === 'all'){
@@ -893,6 +1284,7 @@ function renderMiniNationalMap(){
   miniNationalMap.innerHTML = buildNationalSVG();
   attachSidoNavigation(miniNationalMap);
   attachNationalPointNavigation(miniNationalMap);
+  attachCardDragging(miniNationalMap);
 }
 
 function render(){
@@ -918,9 +1310,13 @@ function render(){
   back.style.display = 'inline-block';
   renderMiniNationalMap();
   document.querySelectorAll('.rg').forEach(p => {
-    p.addEventListener('mouseenter', () => { sub.textContent = p.dataset.name; });
+    p.addEventListener('mouseenter', () => {
+      const count = Number(p.dataset.pointCount || 0);
+      sub.textContent = count ? `${p.dataset.name} · 포인트 ${count}개` : p.dataset.name;
+    });
     p.addEventListener('mouseleave', () => { sub.textContent = ''; });
   });
+  attachCardDragging(stage);
   renderPollPanel();
 }
 
@@ -964,7 +1360,13 @@ async function init(){
   }
 }
 
-back.addEventListener('click', () => { currentSido='all'; selectedPollRegion=''; expandedPollKey=''; sub.textContent=''; render(); });
+back.addEventListener('click', () => {
+  currentSido='all';
+  selectedPollRegion='';
+  expandedPollKey='';
+  sub.textContent='';
+  render();
+});
 pollToggle?.addEventListener('click', () => pollPanel?.classList.add('open'));
 pollClose?.addEventListener('click', () => pollPanel?.classList.remove('open'));
 window.addEventListener('message', (event) => {
