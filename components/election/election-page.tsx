@@ -6,6 +6,7 @@ import {
   fetchElectionWorkspace,
   publishElectionEvent,
   saveElectionWorkspace,
+  unpublishElectionEvent,
 } from "@/lib/election/storage";
 import { getKstDateKey } from "@/lib/election/dates";
 import type {
@@ -19,6 +20,7 @@ import type {
   ElectionStatus,
 } from "@/lib/election/types";
 import { getSession, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
+import { createClient as createSupabaseClient, hasSupabaseEnv } from "@/lib/supabase/client";
 import styles from "./Election.module.css";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
@@ -39,12 +41,59 @@ interface DraftPoint extends ElectionPointInput {
 
 type LocationPoint = DraftPoint | ElectionPoint;
 
+interface ElectionMapEventLike {
+  id: string | null;
+  title: string;
+  electionDate: string;
+  points: LocationPoint[];
+}
+
 interface DraftEvent {
   id: string | null;
   title: string;
   electionDate: string;
   status: ElectionStatus;
   points: DraftPoint[];
+}
+
+interface PublicElectionEventRow {
+  id: string;
+  title: string;
+  election_date: string;
+  status: ElectionStatus;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PublicElectionPointRow {
+  id: string;
+  event_id: string;
+  sort_order: number | null;
+  region: string | null;
+  place: string | null;
+  pool_video: string | null;
+  equipment_name: string | null;
+  equipment_type: string | null;
+  trs: string | null;
+  camera_staff_name: string | null;
+  camera_staff_name_pm: string | null;
+  audio_staff_name: string | null;
+  audio_staff_name_pm: string | null;
+  reporter_name: string | null;
+  reporter_name_pm: string | null;
+  live_time: string | null;
+  live_time_pm: string | null;
+  address: string | null;
+  note: string | null;
+  live_position: string | null;
+  lan: string | null;
+  lighting: string | null;
+  region_color: string | null;
+  cell_colors: Record<string, unknown> | null;
+  is_active: boolean | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const statusLabels: Record<ElectionStatus, string> = {
@@ -315,7 +364,7 @@ function hasElectionManagerViewRole(session: SessionUser | null | undefined) {
 }
 
 function hasElectionGeneralPreviewRole(session: SessionUser | null | undefined) {
-  return session?.role === "desk" || session?.role === "team_lead";
+  return hasElectionManagerViewRole(session);
 }
 
 function isRegionGroupEnd(points: Pick<ElectionPointInput, "region">[], index: number) {
@@ -767,18 +816,34 @@ function ElectionPrintControls({
         <option value="color">컬러</option>
         <option value="mono">흑백</option>
       </select>
-      <button type="button" className="btn" disabled={disabled} onClick={onPrint}>
-        출력
-      </button>
-      <button type="button" className="btn" disabled={disabled} onClick={onSavePdf}>
-        PDF 저장
-      </button>
-      <button type="button" className="btn" disabled={disabled} onClick={onExportWord}>
-        워드
-      </button>
-      <button type="button" className="btn" disabled={disabled} onClick={onExportExcel}>
-        엑셀
-      </button>
+      <details className={styles.printMenu}>
+        <summary
+          className={`btn ${styles.printMenuTrigger}`.trim()}
+          aria-disabled={disabled}
+          onClick={(event) => {
+            if (disabled) event.preventDefault();
+          }}
+          onKeyDown={(event) => {
+            if (disabled && (event.key === "Enter" || event.key === " ")) event.preventDefault();
+          }}
+        >
+          출력
+        </summary>
+        <div className={styles.printMenuPanel}>
+          <button type="button" className={styles.printMenuItem} disabled={disabled} onClick={onPrint}>
+            인쇄
+          </button>
+          <button type="button" className={styles.printMenuItem} disabled={disabled} onClick={onSavePdf}>
+            PDF 저장
+          </button>
+          <button type="button" className={styles.printMenuItem} disabled={disabled} onClick={onExportWord}>
+            워드
+          </button>
+          <button type="button" className={styles.printMenuItem} disabled={disabled} onClick={onExportExcel}>
+            엑셀
+          </button>
+        </div>
+      </details>
     </div>
   );
 }
@@ -1223,6 +1288,63 @@ function ElectionPrintableTable({
   );
 }
 
+function ElectionMapFrame({ event }: { event: ElectionMapEventLike }) {
+  const mapFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const mapPayload = useMemo(() => ({
+    type: "election-map-points",
+    event: {
+      id: event.id ?? "",
+      title: event.title,
+      electionDate: event.electionDate,
+    },
+    points: event.points.map((point, index) => ({
+      index,
+      region: point.region,
+      place: point.place,
+      poolVideo: point.poolVideo,
+      equipmentName: point.equipmentName,
+      equipmentType: point.equipmentType,
+      trs: point.trs,
+      cameraStaffName: point.cameraStaffName,
+      cameraStaffNamePm: point.cameraStaffNamePm,
+      audioStaffName: point.audioStaffName,
+      audioStaffNamePm: point.audioStaffNamePm,
+      reporterName: point.reporterName,
+      reporterNamePm: point.reporterNamePm,
+      liveTime: point.liveTime,
+      liveTimePm: point.liveTimePm,
+      address: point.address,
+      note: point.note,
+      livePosition: point.livePosition,
+      lan: point.lan,
+      lighting: point.lighting,
+      regionColor: point.regionColor,
+      cellColors: point.cellColors,
+    })),
+  }), [event.electionDate, event.id, event.points, event.title]);
+  const postMapPayload = useCallback(() => {
+    mapFrameRef.current?.contentWindow?.postMessage(mapPayload, window.location.origin);
+  }, [mapPayload]);
+
+  useEffect(() => {
+    postMapPayload();
+  }, [postMapPayload]);
+
+  return (
+    <div className={styles.mapFramePanel}>
+      <iframe
+        ref={mapFrameRef}
+        className={styles.mapFrame}
+        src="/election-map.html"
+        title="6.3 지선 배치표 지도"
+        loading="lazy"
+        scrolling="no"
+        onLoad={postMapPayload}
+      />
+    </div>
+  );
+}
+
 function ElectionReadOnlyTable({
   event,
   highlightedLocationKeys,
@@ -1259,15 +1381,7 @@ function ElectionReadOnlyTable({
           </div>
         </div>
         {showingMap ? (
-          <div className={styles.mapFramePanel}>
-            <iframe
-              className={styles.mapFrame}
-              src="/election-map.html"
-              title="6.3 지선 배치표 지도"
-              loading="lazy"
-              scrolling="no"
-            />
-          </div>
+          <ElectionMapFrame event={event} />
         ) : (
           <div className={styles.tableWrap}>
             <table className={`table-like ${styles.table} ${forcePlainViewerTable ? styles.viewerPlainTable : ""}`.trim()}>
@@ -1358,14 +1472,103 @@ function ElectionReadOnlyTable({
   );
 }
 
+function normalizePublicElectionCellColors(value: unknown): ElectionCellColors {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(([, color]) => typeof color === "string" && color.trim()),
+  ) as ElectionCellColors;
+}
+
+function publicElectionPointRowToPoint(row: PublicElectionPointRow): ElectionPoint {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    sortOrder: row.sort_order ?? 0,
+    region: row.region ?? "",
+    place: row.place ?? "",
+    poolVideo: row.pool_video ?? "",
+    equipmentName: row.equipment_name ?? "",
+    equipmentType: row.equipment_type ?? "",
+    trs: row.trs ?? "",
+    cameraStaffName: row.camera_staff_name ?? "",
+    cameraStaffUserId: null,
+    cameraStaffNamePm: row.camera_staff_name_pm ?? "",
+    cameraStaffUserIdPm: null,
+    audioStaffName: row.audio_staff_name ?? "",
+    audioStaffUserId: null,
+    audioStaffNamePm: row.audio_staff_name_pm ?? "",
+    reporterName: row.reporter_name ?? "",
+    reporterUserId: null,
+    reporterNamePm: row.reporter_name_pm ?? "",
+    liveTime: row.live_time ?? "",
+    liveTimePm: row.live_time_pm ?? "",
+    address: row.address ?? "",
+    note: row.note ?? "",
+    livePosition: row.live_position ?? "",
+    lan: row.lan ?? "",
+    lighting: row.lighting ?? "",
+    regionColor: row.region_color ?? "",
+    cellColors: normalizePublicElectionCellColors(row.cell_colors),
+    isActive: row.is_active ?? true,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function publicElectionEventRowToEvent(row: PublicElectionEventRow, points: ElectionPoint[]): ElectionEvent {
+  return {
+    id: row.id,
+    title: row.title,
+    electionDate: row.election_date,
+    status: row.status,
+    publishedAt: row.published_at,
+    publishedBy: null,
+    closedAt: null,
+    closedBy: null,
+    createdBy: null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    points,
+  };
+}
+
 async function fetchPublicPublishedElection() {
-  const response = await fetch("/api/election/public", { cache: "no-store" });
-  if (!response.ok) {
+  if (!hasSupabaseEnv()) {
     throw new Error("공개 선거 중계표를 불러오지 못했습니다.");
   }
 
-  const payload = await response.json() as { event?: ElectionEvent | null };
-  return payload.event ?? null;
+  const supabase = createSupabaseClient();
+  const { data: eventRow, error: eventError } = await supabase
+    .from("election_events")
+    .select("id, title, election_date, status, published_at, created_at, updated_at")
+    .eq("status", "published")
+    .order("election_date", { ascending: true })
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<PublicElectionEventRow>();
+
+  if (eventError) {
+    throw new Error("공개 선거 중계표를 불러오지 못했습니다.");
+  }
+
+  if (!eventRow) {
+    return null;
+  }
+
+  const { data: pointRows, error: pointError } = await supabase
+    .from("election_points")
+    .select("id, event_id, sort_order, region, place, pool_video, equipment_name, equipment_type, trs, camera_staff_name, camera_staff_name_pm, audio_staff_name, audio_staff_name_pm, reporter_name, reporter_name_pm, live_time, live_time_pm, address, note, live_position, lan, lighting, region_color, cell_colors, is_active, created_at, updated_at")
+    .eq("event_id", eventRow.id)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true })
+    .returns<PublicElectionPointRow[]>();
+
+  if (pointError) {
+    throw new Error("공개 선거 중계표를 불러오지 못했습니다.");
+  }
+
+  return publicElectionEventRowToEvent(eventRow, (pointRows ?? []).map(publicElectionPointRowToPoint));
 }
 
 export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = {}) {
@@ -1388,6 +1591,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
   const [highlightedLocationKeys, setHighlightedLocationKeys] = useState<string[]>([]);
   const [managerGeneralView, setManagerGeneralView] = useState(false);
   const [readOnlyViewMode, setReadOnlyViewMode] = useState<ReadOnlyViewMode>("table");
+  const [editorViewMode, setEditorViewMode] = useState<ReadOnlyViewMode>("table");
   const draftRef = useRef<DraftEvent | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -1926,6 +2130,10 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
   };
 
   const publishDraft = async () => {
+    if (!draft) return;
+    const ok = window.confirm("게시하면 팀원 사이드바에 선거 아이콘이 표시되고 열람할 수 있습니다. 게시하시겠습니까?");
+    if (!ok) return;
+
     const savedEvent = await saveDraft();
     if (!savedEvent) return;
     setSaving(true);
@@ -1943,14 +2151,42 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
     }
   };
 
-  const closePublishedEvent = async () => {
+  const cancelPublishedEvent = async () => {
     if (!draft?.id) return;
-    const ok = window.confirm("선거 메뉴와 공개 페이지에서만 숨기겠습니까? 편집본은 계속 유지됩니다.");
+    const ok = window.confirm("게시를 취소하면 팀원 사이드바에서 선거 아이콘이 숨겨지고 편집본은 그대로 유지됩니다. 게시를 취소하시겠습니까?");
     if (!ok) return;
 
     setSaving(true);
     try {
-      const workspace = await closeElectionEvent(draft.id);
+      const workspace = await unpublishElectionEvent(draft.id);
+      const nextDraft = workspace.event ? eventToDraft(workspace.event) : { ...draft, status: "draft" as const };
+      const savedEvent = await persistDraftSnapshot({ ...draft, status: "draft" as const });
+      const savedDraft = savedEvent ? eventToDraft(savedEvent) : nextDraft;
+      setDraft(savedDraft);
+      draftRef.current = savedDraft;
+      lastSavedSignatureRef.current = getDraftSaveSignature(savedDraft);
+      setPublishedEvent(null);
+      setSavedDisplayTitle(savedDraft.title);
+      setAutoSaveStatus("idle");
+      setMessage({ tone: "ok", text: "게시를 취소했습니다. 선거 아이콘은 숨겼고 편집은 계속 유지됩니다." });
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "게시 취소에 실패했습니다." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closePublishedEvent = async () => {
+    if (!draft?.id) return;
+    const ok = window.confirm("게시종료하면 팀원 사이드바에서 선거 아이콘이 숨겨지고 현재 내용이 사본으로 보관됩니다. 게시종료하시겠습니까?");
+    if (!ok) return;
+
+    const savedEvent = await saveDraft();
+    if (!savedEvent) return;
+
+    setSaving(true);
+    try {
+      const workspace = await closeElectionEvent(savedEvent.id);
       const nextDraft = workspace.event ? eventToDraft(workspace.event) : { ...draft, status: "draft" as const };
       setDraft(nextDraft);
       draftRef.current = nextDraft;
@@ -1958,7 +2194,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
       setPublishedEvent(null);
       setSavedDisplayTitle(nextDraft.title);
       setAutoSaveStatus("idle");
-      setMessage({ tone: "ok", text: "게시종료했습니다. 선거 메뉴와 공개 페이지에서 숨겼고 편집은 계속 가능합니다." });
+      setMessage({ tone: "ok", text: "게시종료했습니다. 선거 아이콘은 숨겼고 현재 내용은 사본으로 보관했습니다." });
     } catch (error) {
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "게시종료에 실패했습니다." });
     } finally {
@@ -2057,6 +2293,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
   const closedReadOnlyEvent = null as ElectionEvent | null;
   const canUseManagerGeneralView = canManage && hasElectionGeneralPreviewRole(currentSession);
   const managerGeneralViewEvent = canUseManagerGeneralView && managerGeneralView && draft ? draftToReadOnlyEvent(draft) : null;
+  const editorShowingMap = editorViewMode === "map";
 
   if (closedReadOnlyEvent) {
     return (
@@ -2227,9 +2464,14 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                 게시
               </button>
               {currentStatus === "published" ? (
-                <button type="button" className="btn" disabled={saving || !draft?.id} onClick={closePublishedEvent}>
-                  게시종료
-                </button>
+                <>
+                  <button type="button" className="btn" disabled={saving || !draft?.id} onClick={cancelPublishedEvent}>
+                    게시 취소
+                  </button>
+                  <button type="button" className="btn" disabled={saving || !draft?.id} onClick={closePublishedEvent}>
+                    게시종료
+                  </button>
+                </>
               ) : null}
             </div>
           </div>
@@ -2268,7 +2510,16 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
           <article className={`panel ${styles.wideTablePanel}`}>
             <div className={`panel-pad ${styles.emptyPanel}`}>
               <div className={styles.toolbar}>
-                <div className={styles.summary}>{draft.points.length}개 포인트</div>
+                <div className={styles.readOnlyViewControls}>
+                  <button
+                    type="button"
+                    className={`btn ${styles.mapToggleButton}`.trim()}
+                    onClick={() => setEditorViewMode(editorShowingMap ? "table" : "map")}
+                  >
+                    {editorShowingMap ? "표로 보기" : "지도로 보기"}
+                  </button>
+                  <div className={styles.summary}>{draft.points.length}개 포인트</div>
+                </div>
                 <div className={styles.toolbarActions}>
                   <ColorPaintMenu
                     selection={paintSelection}
@@ -2286,6 +2537,9 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                   <option key={name} value={name} />
                 ))}
               </datalist>
+              {editorShowingMap ? (
+                <ElectionMapFrame event={draft} />
+              ) : (
               <div className={styles.tableShell}>
                 <div className={styles.managementRail} aria-label="행 관리">
                   <div
@@ -2723,6 +2977,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                   </table>
                 </div>
               </div>
+              )}
             </div>
             </article>
           </>

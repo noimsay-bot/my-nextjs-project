@@ -13,7 +13,8 @@
   html,body{height:100%;overflow:hidden;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
        background:var(--bg);color:var(--ink);}
-  #wrap{position:relative;display:grid;grid-template-columns:150px minmax(0,1fr) 306px;grid-template-rows:auto auto minmax(0,1fr);gap:6px;height:100%;width:100%;max-width:none;margin:0;padding:2px 4px;min-height:0;}
+  #wrap{position:relative;display:grid;grid-template-columns:150px minmax(0,1fr) 459px;grid-template-rows:auto auto minmax(0,1fr);gap:6px;height:100%;width:100%;max-width:none;margin:0;padding:2px 4px;min-height:0;}
+  #wrap.detailMode{grid-template-columns:300px minmax(0,1fr) 459px;}
   header{grid-column:1;grid-row:1;display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-height:0;}
   #back{border:none;background:#fff;border-radius:9px;padding:7px 13px;font-size:14px;cursor:pointer;
         box-shadow:0 2px 6px rgba(0,0,0,.12);color:var(--ink);display:none;}
@@ -25,6 +26,13 @@
   #sidoSelect{width:100%;border:none;background:#fff;border-radius:9px;padding:7px 10px;font-size:14px;cursor:pointer;
               box-shadow:0 2px 6px rgba(0,0,0,.10);color:var(--ink);}
   #loading{font-size:11px;color:var(--muted);line-height:1.35;}
+  #miniNationalWrap{display:none;gap:5px;margin-top:2px;}
+  #miniNationalWrap.open{display:grid;}
+  .miniMapTitle{font-size:11px;color:#59616d;font-weight:900;line-height:1.25;}
+  #miniNationalMap{height:440px;min-height:0;border:1px solid rgba(148,163,184,.60);border-radius:9px;background:rgba(255,255,255,.46);padding:4px;overflow:hidden;}
+  #miniNationalMap svg{width:100%;height:100%;max-width:none;max-height:none;}
+  #miniNationalMap .sido-label{font-size:16px;}
+  #miniNationalMap .sido-hit.current{fill:#2f6fe0;fill-opacity:.22;}
   #stage{grid-column:2;grid-row:1 / -1;position:relative;display:grid;width:100%;min-height:0;place-items:center;overflow:hidden;}
   svg{display:block;width:auto;max-width:100%;height:100%;max-height:100%;}
   .base path{fill:url(#sheen);stroke:none;pointer-events:none;}
@@ -35,60 +43,78 @@
       vector-effect:non-scaling-stroke;pointer-events:all;transition:fill .12s, stroke .12s;}
   .rg:hover{fill:rgba(70,110,200,.18);stroke:#8f98a7;}
   .sido-label{font-size:11px;fill:#606773;pointer-events:none;text-anchor:middle;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;}
+  .election-pin-line{stroke:#1f2937;stroke-width:1.4;stroke-opacity:.45;vector-effect:non-scaling-stroke;pointer-events:none;}
+  .election-national-pin{cursor:pointer;}
+  .election-pin-dot{fill:#111827;stroke:#fff;stroke-width:3;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));}
+  .election-pin-count{fill:#fff;font-size:15px;font-weight:900;text-anchor:middle;dominant-baseline:middle;pointer-events:none;}
+  .election-point-pin{fill:#ef4444;stroke:#fff;stroke-width:3;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));}
+  .election-point-number{fill:#fff;font-size:11px;font-weight:900;text-anchor:middle;dominant-baseline:middle;pointer-events:none;}
+  .election-card-fo{overflow:visible;pointer-events:none;}
+  .election-card{height:100%;padding:9px 10px;border:1px solid rgba(15,23,42,.18);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 6px 16px rgba(15,23,42,.18);font-size:11px;line-height:1.3;color:#1f2937;overflow:hidden;}
+  .election-card-title{display:flex;align-items:center;gap:6px;margin-bottom:5px;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .election-card-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:19px;height:19px;border-radius:99px;background:#111827;color:#fff;font-size:10px;font-weight:900;}
+  .election-card-row{display:grid;grid-template-columns:43px minmax(0,1fr);gap:5px;margin-top:3px;}
+  .election-card-row b{color:#64748b;font-weight:900;}
+  .election-card-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #hint{display:none;font-size:12px;color:var(--muted);margin:8px 2px;line-height:1.45;}
   #error{display:none;background:#fff3f1;color:#8a2d24;border:1px solid #efb2ab;border-radius:10px;padding:10px 12px;margin:10px 2px;font-size:13px;line-height:1.45;}
   .meta{display:none;font-size:11px;color:var(--muted);margin:10px 2px 0;line-height:1.4;}
   .meta a{color:#606773;}
-  #pollPanel{position:relative;z-index:2;grid-column:3;grid-row:1 / -1;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;overflow:hidden;}
-  .pollPanelTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 0;}
-  .pollPanelTitle strong{font-size:13px;line-height:1.2;}
-  .pollPanelTitle span{font-size:10px;color:var(--muted);white-space:nowrap;}
+  #pollPanel{position:relative;z-index:2;grid-column:3;grid-row:1 / -1;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);gap:12px;overflow:hidden;}
+  .pollPanelTitle{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:3px 3px 0;}
+  .pollPanelTitle strong{font-size:20px;line-height:1.2;}
+  .pollPanelTitle span{font-size:15px;color:var(--muted);white-space:nowrap;}
   #pollClose{display:none;border:0;background:#fff;border-radius:7px;width:26px;height:26px;font-size:15px;font-weight:900;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(15,23,42,.16);color:#475569;}
   #pollContent{min-height:0;overflow:auto;padding-right:2px;}
-  .pollSummaryList{display:grid;gap:5px;}
-  .pollRegionGroup{display:grid;gap:4px;}
-  .pollSummaryButton{display:grid;grid-template-columns:42px 1fr auto;align-items:center;gap:5px;width:100%;min-height:27px;border:0;border-radius:8px;padding:4px 8px;color:#fff;cursor:pointer;text-align:left;box-shadow:0 1px 3px rgba(15,23,42,.12);}
+  .pollSummaryList{display:grid;gap:8px;}
+  .pollRegionGroup{display:grid;gap:6px;}
+  .pollSummaryButton{display:grid;grid-template-columns:63px 1fr auto;align-items:center;gap:8px;width:100%;min-height:41px;border:0;border-radius:8px;padding:6px 12px;color:#fff;cursor:pointer;text-align:left;box-shadow:0 1px 3px rgba(15,23,42,.12);}
   .pollSummaryButton[data-tone="blue"]{background:#4b9af3;}
   .pollSummaryButton[data-tone="red"]{background:#ff7168;}
   .pollSummaryButton[data-tone="purple"]{background:#8b5fe8;}
   .pollSummaryButton[data-tone="gray"]{background:#d9d9d9;color:#555;}
   .pollSummaryButton.active{outline:2px solid rgba(15,23,42,.38);outline-offset:1px;}
-  .pollRegion{font-size:12px;font-weight:900;}
-  .pollNew{justify-self:start;border-radius:6px;background:rgba(255,255,255,.86);color:#4774d5;padding:1px 5px;font-size:8px;font-weight:900;}
+  .pollRegion{font-size:18px;font-weight:900;}
+  .pollRegion.long{font-size:14px;}
+  .pollNew{justify-self:start;border-radius:6px;background:rgba(255,255,255,.86);color:#4774d5;padding:2px 8px;font-size:12px;font-weight:900;}
   .pollSummaryButton[data-tone="gray"] .pollNew{color:#777;}
-  .pollLead{font-size:11px;font-weight:900;white-space:nowrap;}
-  .pollRegionPanel{display:grid;gap:7px;margin:0 0 5px 0;padding:7px;border:1px solid rgba(148,163,184,.55);border-radius:8px;background:rgba(255,255,255,.46);}
-  .pollRegionMeta{font-size:10px;color:var(--muted);font-weight:800;line-height:1.35;}
-  .pollSurveyList{display:grid;gap:6px;}
-  .pollSurveyButton{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;border:1px solid #cfd4dc;border-radius:7px;background:rgba(255,255,255,.80);padding:7px 8px;text-align:left;cursor:pointer;color:#333;}
+  .pollLead{font-size:17px;font-weight:900;white-space:nowrap;}
+  .pollRegionPanel{display:grid;gap:11px;margin:0 0 8px 0;padding:11px;border:1px solid rgba(148,163,184,.55);border-radius:8px;background:rgba(255,255,255,.46);}
+  .pollRegionMeta{font-size:15px;color:var(--muted);font-weight:800;line-height:1.35;}
+  .pollSurveyList{display:grid;gap:9px;}
+  .pollSurveyButton{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;border:1px solid #cfd4dc;border-radius:7px;background:rgba(255,255,255,.80);padding:11px 12px;text-align:left;cursor:pointer;color:#333;}
   .pollSurveyButton.active{border-color:#64748b;background:#fff;box-shadow:0 1px 5px rgba(15,23,42,.12);}
-  .pollSurveyTitle{font-size:12px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .pollSurveyMeta{display:block;margin-top:2px;font-size:10px;color:#64748b;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .pollChevron{font-size:13px;font-weight:900;color:#64748b;}
-  .pollCards{display:grid;gap:12px;}
-  .pollCardTitle{margin:0 0 4px;font-size:13px;font-weight:900;color:#333;}
-  .pollCardMeta{margin:0 0 6px;font-size:11px;color:#555;font-weight:700;}
+  .pollSurveyTitle{font-size:18px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pollSurveyMeta{display:block;margin-top:3px;font-size:15px;color:#64748b;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pollChevron{font-size:20px;font-weight:900;color:#64748b;}
+  .pollCards{display:grid;gap:18px;}
+  .pollCardTitle{margin:0 0 6px;font-size:20px;font-weight:900;color:#333;}
+  .pollCardMeta{margin:0 0 9px;font-size:17px;color:#555;font-weight:700;}
   .pollResultBox{border:1px solid #c7c7c7;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.58);}
-  .pollResultRow{display:grid;grid-template-columns:22px 84px 48px minmax(0,1fr);align-items:center;gap:6px;min-height:36px;padding:6px 8px;border-bottom:1px solid #d7d7d7;}
+  .pollResultRow{display:grid;grid-template-columns:33px 126px 72px minmax(0,1fr);align-items:center;gap:9px;min-height:54px;padding:9px 12px;border-bottom:1px solid #d7d7d7;}
   .pollResultRow:last-child{border-bottom:0;}
-  .partyMark{font-size:14px;line-height:1;text-align:center;font-weight:900;}
-  .candidateName{font-size:12px;font-weight:800;}
-  .partyName{display:block;margin-top:1px;font-size:9px;font-weight:900;}
-  .rate{font-size:13px;font-weight:900;text-align:right;}
-  .barTrack{height:8px;background:rgba(226,232,240,.55);border-radius:99px;overflow:hidden;}
+  .partyMark{font-size:21px;line-height:1;text-align:center;font-weight:900;}
+  .candidateName{font-size:18px;font-weight:800;}
+  .partyName{display:block;margin-top:2px;font-size:14px;font-weight:900;}
+  .rate{font-size:20px;font-weight:900;text-align:right;}
+  .barTrack{height:12px;background:rgba(226,232,240,.55);border-radius:99px;overflow:hidden;}
   .barFill{height:100%;border-radius:99px;}
   .dem{color:#0b2c86}.demFill{background:#283c9c}
   .ppp{color:#f10c20}.pppFill{background:#ff4354}
   .reform{color:#ff6b2c}.reformFill{background:#ff8840}
   .minor{color:#475569}.minorFill{background:#64748b}
   .none{color:#555}.noneFill{background:#888}
-  .pollEmpty{border:1px dashed #cbd5e1;border-radius:8px;padding:12px;color:#64748b;font-size:12px;line-height:1.45;background:rgba(255,255,255,.46);}
+  .pollEmpty{border:1px dashed #cbd5e1;border-radius:8px;padding:18px;color:#64748b;font-size:18px;line-height:1.45;background:rgba(255,255,255,.46);}
   @media (max-width: 720px){
     #wrap{grid-template-columns:82px minmax(0,1fr);gap:3px;padding:2px;}
+    #wrap.detailMode{grid-template-columns:164px minmax(0,1fr);}
     #title{font-size:13px;}
     #back{padding:6px 8px;font-size:12px;}
     #sidoSelect{padding:6px 7px;font-size:12px;}
     #loading,#sub{font-size:10px;}
+    .miniMapTitle{font-size:9px;}
+    #miniNationalMap{height:300px;padding:3px;}
+    #miniNationalMap .sido-label{font-size:17px;}
     #pollToggle{display:inline-block;}
     #pollPanel{position:absolute;z-index:5;grid-column:auto;grid-row:auto;left:92px;right:4px;top:4px;bottom:4px;width:auto;padding:6px;border-radius:10px;background:rgba(226,227,230,.96);box-shadow:0 8px 24px rgba(15,23,42,.22);transform:translateX(calc(100% + 10px));transition:transform .16s ease;}
     #pollPanel.open{transform:translateX(0);}
@@ -123,6 +149,10 @@
       <option>선거구 데이터를 불러오는 중...</option>
     </select>
     <span id="loading">제22대 국회의원선거 지역구 경계 데이터 로딩 중</span>
+    <div id="miniNationalWrap" aria-label="다른 지역으로 이동">
+      <div class="miniMapTitle">다른 지역으로 이동</div>
+      <div id="miniNationalMap"></div>
+    </div>
   </div>
 
   <div id="error"></div>
@@ -130,7 +160,7 @@
   <aside id="pollPanel" aria-label="전국 시도지사 여론조사">
     <div class="pollPanelTitle">
       <strong>전국 시도지사 여론조사</strong>
-      <span>5/27까지 조사</span>
+      <span>5/1~5/27 조사</span>
       <button id="pollClose" type="button" aria-label="여론조사 패널 닫기">×</button>
     </div>
     <div id="pollContent"></div>
@@ -146,29 +176,35 @@ const DATA_URLS = [
 ];
 
 const stage = document.getElementById('stage');
+const wrap = document.getElementById('wrap');
 const back  = document.getElementById('back');
 const title = document.getElementById('title');
 const sub   = document.getElementById('sub');
 const loading = document.getElementById('loading');
 const errorBox = document.getElementById('error');
 const sidoSelect = document.getElementById('sidoSelect');
+const miniNationalWrap = document.getElementById('miniNationalWrap');
+const miniNationalMap = document.getElementById('miniNationalMap');
 const pollContent = document.getElementById('pollContent');
 const pollToggle = document.getElementById('pollToggle');
 const pollPanel = document.getElementById('pollPanel');
 const pollClose = document.getElementById('pollClose');
 
-const SIDO_ORDER = ['서울','부산','대구','인천','광주','대전','울산','세종','경기','강원','충북','충남','전북','전남','경북','경남','제주'];
+const SIDO_ORDER = ['서울','부산','대구','인천','대전','울산','세종','경기','강원','충북','충남','전북','전남','경북','경남','제주'];
 const SIDO_FULL = {
-  서울:'서울특별시', 부산:'부산광역시', 대구:'대구광역시', 인천:'인천광역시', 광주:'광주광역시',
+  서울:'서울특별시', 부산:'부산광역시', 대구:'대구광역시', 인천:'인천광역시',
   대전:'대전광역시', 울산:'울산광역시', 세종:'세종특별자치시', 경기:'경기도', 강원:'강원특별자치도',
-  충북:'충청북도', 충남:'충청남도', 전북:'전북특별자치도', 전남:'전라남도', 경북:'경상북도', 경남:'경상남도', 제주:'제주특별자치도'
+  충북:'충청북도', 충남:'충청남도', 전북:'전북특별자치도', 전남:'전남광주', 경북:'경상북도', 경남:'경상남도', 제주:'제주특별자치도'
+};
+const SIDO_SEARCH_ALIASES = {
+  전남: ['전남광주', '전남·광주', '전라남도', '전남', '광주광역시', '광주'],
 };
 const POLL_REGION_ORDER = [
   {key:'서울특별시', label:'서울', sido:'서울'},
   {key:'부산광역시', label:'부산', sido:'부산'},
   {key:'대구광역시', label:'대구', sido:'대구'},
   {key:'인천광역시', label:'인천', sido:'인천'},
-  {key:'전남광주통합특별시', label:'전남광주', sido:'광주'},
+  {key:'전남광주통합특별시', label:'전남광주', sido:'전남'},
   {key:'대전광역시', label:'대전', sido:'대전'},
   {key:'울산광역시', label:'울산', sido:'울산'},
   {key:'세종특별자치시', label:'세종', sido:'세종'},
@@ -181,6 +217,7 @@ const POLL_REGION_ORDER = [
   {key:'경상남도', label:'경남', sido:'경남'},
   {key:'제주특별자치도', label:'제주', sido:'제주'}
 ];
+const POLL_DISPLAY_START_DATE = '2026-05-01';
 const POLL_CUTOFF_END_DATE = '2026-05-27';
 const POLL_SCRIPT_URLS = [
   'https://www.poll-mbc.co.kr/region_data/approve_data/region_poll_data.js',
@@ -200,6 +237,8 @@ let currentSido = 'all';
 let selectedPollRegion = '';
 let expandedPollKey = '';
 let pollDataStatus = 'loading';
+let electionMapEvent = null;
+let electionPoints = [];
 const DEFS = `
   <defs>
     <filter id="soft" x="-40%" y="-40%" width="190%" height="210%">
@@ -284,8 +323,12 @@ function featureName(f){
   return p.SIDO_SGG || `${p.SIDO || ''} ${p.SGG || ''}`.trim() || p.name || '선거구';
 }
 
+function normalizeSidoKey(sido){
+  return sido === '광주' ? '전남' : sido;
+}
+
 function featureSido(f){
-  return (f.properties && f.properties.SIDO) || '기타';
+  return normalizeSidoKey((f.properties && f.properties.SIDO) || '기타');
 }
 
 function centroidOfFeature(f, project){
@@ -311,6 +354,80 @@ function groupBy(arr, keyFn){
 
 function escapeHtml(v){
   return String(v ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+
+function normalizeMapText(value){
+  return String(value ?? '').replace(/\s+/g, '').toLowerCase();
+}
+
+function joinedPointText(point){
+  return [point.region, point.place, point.address, point.note].map(normalizeMapText).join(' ');
+}
+
+function inferPointSido(point){
+  const text = joinedPointText(point);
+  for(const sido of SIDO_ORDER){
+    const aliases = SIDO_SEARCH_ALIASES[sido] || [SIDO_FULL[sido], sido];
+    if(aliases.some(alias => text.includes(normalizeMapText(alias)))) return sido;
+  }
+  return '';
+}
+
+function getPointTitle(point){
+  return point.place || point.region || point.address || `포인트 ${Number(point.index || 0) + 1}`;
+}
+
+function joinSlash(values){
+  return values.map(value => String(value ?? '').trim()).filter(Boolean).join(' / ');
+}
+
+function pointToCardRows(point){
+  return [
+    ['장소', point.place || point.region],
+    ['시간', joinSlash([point.liveTime, point.liveTimePm])],
+    ['촬영', joinSlash([point.cameraStaffName, point.cameraStaffNamePm])],
+    ['오디오', joinSlash([point.audioStaffName, point.audioStaffNamePm])],
+    ['취재', joinSlash([point.reporterName, point.reporterNamePm])],
+    ['장비', joinSlash([point.equipmentName, point.equipmentType])],
+    ['TRS', point.trs],
+    ['주소', point.address],
+    ['비고', point.note],
+  ].filter(([, value]) => String(value ?? '').trim());
+}
+
+function normalizeElectionPoint(point, index){
+  const normalized = {
+    index: Number.isFinite(Number(point?.index)) ? Number(point.index) : index,
+    region: String(point?.region ?? ''),
+    place: String(point?.place ?? ''),
+    poolVideo: String(point?.poolVideo ?? ''),
+    equipmentName: String(point?.equipmentName ?? ''),
+    equipmentType: String(point?.equipmentType ?? ''),
+    trs: String(point?.trs ?? ''),
+    cameraStaffName: String(point?.cameraStaffName ?? ''),
+    cameraStaffNamePm: String(point?.cameraStaffNamePm ?? ''),
+    audioStaffName: String(point?.audioStaffName ?? ''),
+    audioStaffNamePm: String(point?.audioStaffNamePm ?? ''),
+    reporterName: String(point?.reporterName ?? ''),
+    reporterNamePm: String(point?.reporterNamePm ?? ''),
+    liveTime: String(point?.liveTime ?? ''),
+    liveTimePm: String(point?.liveTimePm ?? ''),
+    address: String(point?.address ?? ''),
+    note: String(point?.note ?? ''),
+    livePosition: String(point?.livePosition ?? ''),
+    lan: String(point?.lan ?? ''),
+    lighting: String(point?.lighting ?? ''),
+    regionColor: String(point?.regionColor ?? ''),
+    cellColors: point?.cellColors && typeof point.cellColors === 'object' ? point.cellColors : {},
+  };
+  normalized.sido = inferPointSido(normalized);
+  return normalized;
+}
+
+function setElectionMapPoints(payload){
+  electionMapEvent = payload?.event || null;
+  electionPoints = Array.isArray(payload?.points) ? payload.points.map(normalizeElectionPoint) : [];
+  if(features.length) render();
 }
 
 function loadScript(src){
@@ -345,7 +462,7 @@ function getPollRegionBySido(sido){
 function getPollsForRegion(regionKey){
   const allPolls = Array.isArray(window.region_poll_data) ? window.region_poll_data : [];
   return allPolls
-    .filter(poll => poll && poll.region === regionKey && (!poll.end || poll.end <= POLL_CUTOFF_END_DATE))
+    .filter(poll => poll && poll.region === regionKey && poll.end >= POLL_DISPLAY_START_DATE && poll.end <= POLL_CUTOFF_END_DATE)
     .sort((a,b) => String(b.end || '').localeCompare(String(a.end || '')) || String(b.start || '').localeCompare(String(a.start || '')) || Number(b.index || 0) - Number(a.index || 0));
 }
 
@@ -374,19 +491,58 @@ function getPollKey(regionKey, poll, index){
   return [regionKey, poll?.index ?? index, poll?.house || '', poll?.client || '', poll?.start || '', poll?.end || ''].join('|');
 }
 
+function getPollLeadingRows(poll){
+  return getPollRows(poll)
+    .filter(row => !/없음|무응답|모름|기타/.test(row.name))
+    .sort((a,b) => b.value - a.value);
+}
+
+function getRecentPollConsensus(regionKey){
+  const recentPolls = getPollsForRegion(regionKey).slice(0, 5);
+  if(!recentPolls.length) return null;
+
+  const winCounts = new Map();
+  const valueSums = new Map();
+  const valueCounts = new Map();
+
+  recentPolls.forEach(poll => {
+    const rows = getPollLeadingRows(poll);
+    rows.forEach(row => {
+      valueSums.set(row.name, (valueSums.get(row.name) || 0) + row.value);
+      valueCounts.set(row.name, (valueCounts.get(row.name) || 0) + 1);
+    });
+
+    const lead = rows[0];
+    const second = rows[1];
+    if(lead && (!second || lead.value > second.value)){
+      winCounts.set(lead.name, (winCounts.get(lead.name) || 0) + 1);
+    }
+  });
+
+  const candidates = Array.from(valueSums.keys()).map(name => ({
+    name,
+    wins: winCounts.get(name) || 0,
+    average: valueSums.get(name) / Math.max(1, valueCounts.get(name) || 1),
+  })).sort((a,b) => b.wins - a.wins || b.average - a.average);
+  const winner = candidates[0];
+  if(!winner || winner.wins < 3) return {winner, margin: 0, decisive: false};
+
+  const runnerUp = candidates
+    .filter(candidate => candidate.name !== winner.name)
+    .sort((a,b) => b.average - a.average)[0];
+  const margin = runnerUp ? winner.average - runnerUp.average : Infinity;
+  return {winner, margin, decisive: margin >= 5};
+}
+
 function getPollSummary(region){
-  const latest = getLatestPoll(region.key);
-  if(!latest) return {label: pollDataStatus === 'ready' ? '준비중' : '불러오는 중', tone:'gray', isNew:false};
-  const rows = getPollRows(latest).filter(row => !/없음|무응답|모름|기타/.test(row.name)).sort((a,b) => b.value - a.value);
-  if(!rows.length) return {label:'준비중', tone:'gray', isNew:false};
-  const lead = rows[0];
-  const second = rows[1];
-  const margin = second ? Math.abs(lead.value - second.value) : Infinity;
-  const interval = Number(latest.interval) || 0;
-  const close = second && margin <= interval;
-  const style = getPartyStyle(region.key, lead.name);
+  const consensus = getRecentPollConsensus(region.key);
+  if(!consensus) return {label: pollDataStatus === 'ready' ? '준비중' : '불러오는 중', tone:'gray', isNew:false};
   const isNewMap = window.isNew || {};
-  return {label: close ? '경합' : `${lead.name} 우세`, tone: close ? 'purple' : style.tone, isNew: Boolean(isNewMap[region.key])};
+  if(!consensus.decisive || !consensus.winner){
+    return {label:'경합', tone:'purple', isNew: Boolean(isNewMap[region.key])};
+  }
+  const style = getPartyStyle(region.key, consensus.winner.name);
+  return {label: `${consensus.winner.name} 우세`, tone: style.tone, isNew: Boolean(isNewMap[region.key])};
 }
 
 function renderPollResultRow(regionKey, row){
@@ -438,7 +594,7 @@ function renderPollRegionPanel(region){
   }
   const polls = getPollsForRegion(region.key);
   const content = polls.length
-    ? `<div class="pollRegionMeta">조사종료일 ${POLL_CUTOFF_END_DATE}까지 · 항목을 누르면 결과가 펼쳐집니다.</div><div class="pollSurveyList">${polls.map((poll, index) => renderPollSurveyItem(region.key, poll, index)).join('')}</div>`
+    ? `<div class="pollRegionMeta">조사종료일 ${POLL_DISPLAY_START_DATE}~${POLL_CUTOFF_END_DATE} · 항목을 누르면 결과가 펼쳐집니다.</div><div class="pollSurveyList">${polls.map((poll, index) => renderPollSurveyItem(region.key, poll, index)).join('')}</div>`
     : `<div class="pollEmpty">공표금지 전 기준으로 표시할 수 있는 등록 여론조사가 아직 없습니다.</div>`;
   return `<div class="pollRegionPanel">${content}</div>`;
 }
@@ -450,7 +606,7 @@ function renderPollPanel(){
     const summary = getPollSummary(region);
     return `<div class="pollRegionGroup">
       <button type="button" class="pollSummaryButton ${active ? 'active' : ''}" data-region="${escapeHtml(region.key)}" data-sido="${escapeHtml(region.sido)}" data-tone="${summary.tone}">
-      <span class="pollRegion">${escapeHtml(region.label)}</span>
+      <span class="pollRegion ${region.label.length > 3 ? 'long' : ''}">${escapeHtml(region.label)}</span>
       <span class="pollNew">${summary.isNew ? 'NEW' : ''}</span>
       <span class="pollLead">${escapeHtml(summary.label)}</span>
       </button>
@@ -463,12 +619,7 @@ function renderPollPanel(){
       const nextRegion = button.dataset.region || selectedPollRegion;
       selectedPollRegion = selectedPollRegion === nextRegion ? '' : nextRegion;
       expandedPollKey = '';
-      if(button.dataset.sido && currentSido !== button.dataset.sido){
-        currentSido = button.dataset.sido;
-        render();
-      } else {
-        renderPollPanel();
-      }
+      renderPollPanel();
     });
   });
   pollContent.querySelectorAll('.pollSurveyButton').forEach(button => {
@@ -531,6 +682,121 @@ function collectSidoBoundaryPath(list, project){
   return d;
 }
 
+function clamp(value, min, max){
+  return Math.max(min, Math.min(max, value));
+}
+
+function getSidoCentroids(project){
+  const bySido = groupBy(features, featureSido);
+  return SIDO_ORDER.reduce((acc, sido) => {
+    const group = bySido[sido];
+    if(!group || !group.length) return acc;
+    let sx=0, sy=0, n=0;
+    group.forEach(f => {
+      const c = centroidOfFeature(f, project);
+      sx += c[0];
+      sy += c[1];
+      n++;
+    });
+    if(n) acc[sido] = [sx/n, sy/n];
+    return acc;
+  }, {});
+}
+
+function renderNationalPointPins(project){
+  const centroids = getSidoCentroids(project);
+  const grouped = electionPoints.reduce((acc, point) => {
+    if(!point.sido) return acc;
+    (acc[point.sido] ||= []).push(point);
+    return acc;
+  }, {});
+  return Object.entries(grouped).map(([sido, points]) => {
+    const center = centroids[sido];
+    if(!center) return '';
+    const [x,y] = center;
+    return `<g class="election-national-pin" data-sido="${escapeHtml(sido)}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">
+      <circle class="election-pin-dot" r="17"></circle>
+      <text class="election-pin-count" y="1">${points.length}</text>
+    </g>`;
+  }).join('');
+}
+
+function getFeatureDistrictTokens(f){
+  const sido = featureSido(f);
+  const rawName = featureName(f);
+  const normalizedName = normalizeMapText(rawName);
+  const full = normalizeMapText(SIDO_FULL[sido] || '');
+  const shortSido = normalizeMapText(sido);
+  const withoutSido = normalizedName.replace(full, '').replace(shortSido, '');
+  const parts = withoutSido.split(/[·ㆍ,()/-]/).filter(Boolean);
+  return Array.from(new Set([withoutSido, ...parts, normalizedName].filter(token => token.length >= 2)));
+}
+
+function getDetailPointAnchor(point, anchors){
+  const text = joinedPointText(point);
+  const matched = anchors.find(anchor => anchor.tokens.some(token => text.includes(token)));
+  return matched || null;
+}
+
+function renderPointCard(point){
+  const rows = pointToCardRows(point).slice(0, 7).map(([label, value]) =>
+    `<div class="election-card-row"><b>${escapeHtml(label)}</b><span class="election-card-value">${escapeHtml(value)}</span></div>`
+  ).join('');
+  return `<div xmlns="http://www.w3.org/1999/xhtml" class="election-card">
+    <div class="election-card-title"><span class="election-card-badge">${Number(point.index) + 1}</span><span>${escapeHtml(getPointTitle(point))}</span></div>
+    ${rows || '<div class="election-card-row"><b>내용</b><span class="election-card-value">표 입력 대기</span></div>'}
+  </div>`;
+}
+
+function renderDetailPointPins(list, project){
+  const points = electionPoints.filter(point => point.sido === currentSido);
+  if(!points.length) return '';
+
+  const anchors = list.map(f => {
+    const center = centroidOfFeature(f, project);
+    return {
+      feature: f,
+      key: featureCode(f),
+      x: center[0],
+      y: center[1],
+      tokens: getFeatureDistrictTokens(f),
+    };
+  });
+  const fallback = anchors.reduce((acc, anchor) => ({x: acc.x + anchor.x, y: acc.y + anchor.y}), {x:0, y:0});
+  fallback.x = anchors.length ? fallback.x / anchors.length : 450;
+  fallback.y = anchors.length ? fallback.y / anchors.length : 450;
+
+  const anchorCounts = {};
+  const cardW = 220;
+  const cardH = 132;
+  const lines = [];
+  const nodes = [];
+  points.forEach((point, index) => {
+    const anchor = getDetailPointAnchor(point, anchors);
+    const key = anchor?.key || `fallback-${currentSido}`;
+    const order = anchorCounts[key] || 0;
+    anchorCounts[key] = order + 1;
+    const baseX = anchor?.x ?? fallback.x;
+    const baseY = anchor?.y ?? fallback.y;
+    const angle = (order * 67) * Math.PI / 180;
+    const radius = order ? 15 + Math.min(order, 5) * 5 : 0;
+    const x = clamp(baseX + Math.cos(angle) * radius, 24, 876);
+    const y = clamp(baseY + Math.sin(angle) * radius, 24, 876);
+    const side = x < 450 ? 1 : -1;
+    const cardX = clamp(x + side * 34 - (side < 0 ? cardW : 0), 18, 900 - cardW - 18);
+    const cardY = clamp(y - cardH / 2 + ((index % 3) - 1) * 24, 18, 900 - cardH - 18);
+    const lineX = side > 0 ? cardX : cardX + cardW;
+    const lineY = cardY + cardH / 2;
+    lines.push(`<line class="election-pin-line" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${lineX.toFixed(1)}" y2="${lineY.toFixed(1)}"></line>`);
+    nodes.push(`<g class="election-point-node">
+      <circle class="election-point-pin" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13"></circle>
+      <text class="election-point-number" x="${x.toFixed(1)}" y="${(y + 0.5).toFixed(1)}">${Number(point.index) + 1}</text>
+      <foreignObject class="election-card-fo" x="${cardX.toFixed(1)}" y="${cardY.toFixed(1)}" width="${cardW}" height="${cardH}">${renderPointCard(point)}</foreignObject>
+    </g>`);
+  });
+  return `<g class="election-point-layer">${lines.join('')}${nodes.join('')}</g>`;
+}
+
 function buildNationalSVG(){
   const list = features;
   const project = makeProjector(list, 'national');
@@ -554,14 +820,12 @@ function buildNationalSVG(){
   });
 
   // 시·도 라벨.
-  const bySido = groupBy(features, featureSido);
+  const centroids = getSidoCentroids(project);
   for(const sido of SIDO_ORDER){
-    const g = bySido[sido];
-    if(!g || !g.length) continue;
-    let sx=0, sy=0, n=0;
-    g.forEach(f => { const c = centroidOfFeature(f, project); sx += c[0]; sy += c[1]; n++; });
-    if(n) s += `<text class="sido-label" x="${(sx/n).toFixed(1)}" y="${(sy/n).toFixed(1)}">${escapeHtml(sido)}</text>`;
+    const center = centroids[sido];
+    if(center) s += `<text class="sido-label" x="${center[0].toFixed(1)}" y="${center[1].toFixed(1)}">${escapeHtml(sido)}</text>`;
   }
+  s += renderNationalPointPins(project);
   s += `</svg>`;
   return s;
 }
@@ -579,8 +843,56 @@ function buildDistrictSVG(list){
     const name = featureName(p.f);
     s += `<path class="rg" data-code="${escapeHtml(code)}" data-name="${escapeHtml(name)}" data-sido="${escapeHtml(featureSido(p.f))}" d="${p.d}" fill-rule="evenodd"><title>${escapeHtml(name)}</title></path>`;
   });
+  s += renderDetailPointPins(list, project);
   s += `</svg>`;
   return s;
+}
+
+function navigateToSido(sido){
+  if(!sido || currentSido === sido) return;
+  currentSido = sido;
+  render();
+}
+
+function attachSidoNavigation(root){
+  root.querySelectorAll('.sido-hit').forEach(p => {
+    const sido = p.dataset.sido;
+    if(sido === currentSido) p.classList.add('current');
+    p.addEventListener('click', () => navigateToSido(sido));
+    p.addEventListener('mouseenter', () => {
+      root.querySelectorAll(`.sido-hit[data-sido="${CSS.escape(sido)}"]`).forEach(el => el.classList.add('hovered'));
+      sub.textContent = `${p.dataset.name}  ›`;
+    });
+    p.addEventListener('mouseleave', () => {
+      root.querySelectorAll(`.sido-hit[data-sido="${CSS.escape(sido)}"]`).forEach(el => el.classList.remove('hovered'));
+      sub.textContent = '';
+    });
+  });
+}
+
+function attachNationalPointNavigation(root){
+  root.querySelectorAll('.election-national-pin').forEach(pin => {
+    const sido = pin.dataset.sido;
+    pin.addEventListener('click', (event) => {
+      event.stopPropagation();
+      navigateToSido(sido);
+    });
+  });
+}
+
+function renderMiniNationalMap(){
+  if(!miniNationalWrap || !miniNationalMap) return;
+  if(currentSido === 'all'){
+    wrap?.classList.remove('detailMode');
+    miniNationalWrap.classList.remove('open');
+    miniNationalMap.innerHTML = '';
+    return;
+  }
+  wrap?.classList.add('detailMode');
+  miniNationalWrap.classList.add('open');
+  miniNationalMap.innerHTML = buildNationalSVG();
+  attachSidoNavigation(miniNationalMap);
+  attachNationalPointNavigation(miniNationalMap);
 }
 
 function render(){
@@ -592,23 +904,9 @@ function render(){
     stage.innerHTML = buildNationalSVG();
     title.textContent = '전국 선거구 보기';
     back.style.display = 'none';
-    document.querySelectorAll('.sido-hit').forEach(p => {
-      const sido = p.dataset.sido;
-      p.addEventListener('click', () => {
-        currentSido = sido;
-        selectedPollRegion = getPollRegionBySido(sido);
-        expandedPollKey = '';
-        render();
-      });
-      p.addEventListener('mouseenter', () => {
-        document.querySelectorAll(`.sido-hit[data-sido="${CSS.escape(sido)}"]`).forEach(el => el.classList.add('hovered'));
-        sub.textContent = `${p.dataset.name}  ›`;
-      });
-      p.addEventListener('mouseleave', () => {
-        document.querySelectorAll(`.sido-hit[data-sido="${CSS.escape(sido)}"]`).forEach(el => el.classList.remove('hovered'));
-        sub.textContent = '';
-      });
-    });
+    renderMiniNationalMap();
+    attachSidoNavigation(stage);
+    attachNationalPointNavigation(stage);
     renderPollPanel();
     return;
   }
@@ -618,6 +916,7 @@ function render(){
   stage.innerHTML = buildDistrictSVG(list);
   title.textContent = `${SIDO_FULL[currentSido] || currentSido} 선거구`;
   back.style.display = 'inline-block';
+  renderMiniNationalMap();
   document.querySelectorAll('.rg').forEach(p => {
     p.addEventListener('mouseenter', () => { sub.textContent = p.dataset.name; });
     p.addEventListener('mouseleave', () => { sub.textContent = ''; });
@@ -634,8 +933,6 @@ function setupSelect(){
   sidoSelect.value = currentSido;
   sidoSelect.addEventListener('change', () => {
     currentSido = sidoSelect.value;
-    selectedPollRegion = currentSido !== 'all' ? getPollRegionBySido(currentSido) : '';
-    expandedPollKey = '';
     render();
   });
 }
@@ -670,6 +967,11 @@ async function init(){
 back.addEventListener('click', () => { currentSido='all'; selectedPollRegion=''; expandedPollKey=''; sub.textContent=''; render(); });
 pollToggle?.addEventListener('click', () => pollPanel?.classList.add('open'));
 pollClose?.addEventListener('click', () => pollPanel?.classList.remove('open'));
+window.addEventListener('message', (event) => {
+  if(event.origin !== window.location.origin) return;
+  if(event.data?.type !== 'election-map-points') return;
+  setElectionMapPoints(event.data);
+});
 
 init();
 loadPollData();

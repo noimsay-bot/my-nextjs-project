@@ -106,6 +106,13 @@ using (
   )
 );
 
+drop policy if exists "election_events_select_anon_published" on public.election_events;
+create policy "election_events_select_anon_published"
+on public.election_events
+for select
+to anon
+using (status = 'published');
+
 drop policy if exists "election_events_insert_desk" on public.election_events;
 create policy "election_events_insert_desk"
 on public.election_events
@@ -161,6 +168,21 @@ using (
   )
 );
 
+drop policy if exists "election_points_select_anon_published" on public.election_points;
+create policy "election_points_select_anon_published"
+on public.election_points
+for select
+to anon
+using (
+  is_active = true
+  and exists (
+    select 1
+    from public.election_events e
+    where e.id = election_points.event_id
+      and e.status = 'published'
+  )
+);
+
 drop policy if exists "election_points_insert_desk" on public.election_points;
 create policy "election_points_insert_desk"
 on public.election_points
@@ -197,6 +219,44 @@ using (
 
 revoke all on table public.election_events from anon;
 revoke all on table public.election_points from anon;
+grant select (
+  id,
+  title,
+  election_date,
+  status,
+  published_at,
+  created_at,
+  updated_at
+) on table public.election_events to anon;
+grant select (
+  id,
+  event_id,
+  sort_order,
+  region,
+  place,
+  pool_video,
+  equipment_name,
+  equipment_type,
+  trs,
+  camera_staff_name,
+  camera_staff_name_pm,
+  audio_staff_name,
+  audio_staff_name_pm,
+  reporter_name,
+  reporter_name_pm,
+  live_time,
+  live_time_pm,
+  address,
+  note,
+  live_position,
+  lan,
+  lighting,
+  region_color,
+  cell_colors,
+  is_active,
+  created_at,
+  updated_at
+) on table public.election_points to anon;
 grant select, insert, update, delete on table public.election_events to authenticated, service_role;
 grant select, insert, update, delete on table public.election_points to authenticated, service_role;
 

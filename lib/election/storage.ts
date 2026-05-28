@@ -533,10 +533,10 @@ export async function publishElectionEvent(eventId: string) {
   return fetchElectionWorkspace();
 }
 
-export async function closeElectionEvent(eventId: string) {
+export async function unpublishElectionEvent(eventId: string) {
   const session = await getPortalSession();
   if (!canManageElection(session)) {
-    throw new Error("선거 중계표 게시종료 권한이 없습니다.");
+    throw new Error("선거 중계표 게시 취소 권한이 없습니다.");
   }
 
   const supabase = await getPortalSupabaseClient();
@@ -544,13 +544,87 @@ export async function closeElectionEvent(eventId: string) {
     .from("election_events")
     .update({
       status: "draft",
-      closed_at: new Date().toISOString(),
-      closed_by: session?.id,
     })
     .eq("id", eventId);
 
   if (error) {
     throw new Error(electionStorageError(error, "election_events"));
+  }
+
+  setElectionSidebarOpenCache(false);
+  return fetchElectionWorkspace();
+}
+
+export async function closeElectionEvent(eventId: string) {
+  const session = await getPortalSession();
+  if (!canManageElection(session)) {
+    throw new Error("선거 중계표 게시종료 권한이 없습니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const now = new Date().toISOString();
+  const { data: eventRow, error: eventError } = await supabase
+    .from("election_events")
+    .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
+    .eq("id", eventId)
+    .maybeSingle<ElectionEventRow>();
+
+  if (eventError) {
+    throw new Error(electionStorageError(eventError, "election_events"));
+  }
+  if (!eventRow) {
+    throw new Error("선거 중계표를 찾지 못했습니다.");
+  }
+
+  const points = await fetchPoints(eventId);
+  const includePointStyles = await hasElectionPointStyleColumns();
+  const includePointLan = await hasElectionPointLanColumn();
+
+  const { error: updateError } = await supabase
+    .from("election_events")
+    .update({
+      status: "draft",
+      closed_at: now,
+      closed_by: session?.id,
+    })
+    .eq("id", eventId);
+
+  if (updateError) {
+    throw new Error(electionStorageError(updateError, "election_events"));
+  }
+
+  const { data: closedCopy, error: copyError } = await supabase
+    .from("election_events")
+    .insert({
+      title: eventRow.title,
+      election_date: eventRow.election_date,
+      status: "closed",
+      created_by: session?.id,
+      published_at: eventRow.published_at,
+      published_by: eventRow.published_by,
+      closed_at: now,
+      closed_by: session?.id,
+    })
+    .select("id")
+    .single<{ id: string }>();
+
+  if (copyError) {
+    setElectionSidebarOpenCache(false);
+    throw new Error(`선거 아이콘은 숨겼지만 게시종료 사본 저장에 실패했습니다. ${electionStorageError(copyError, "election_events")}`);
+  }
+
+  const copiedPointRows = points.map((point, index) => pointInputToRow(closedCopy.id, point, index, {
+    includeStyles: includePointStyles,
+    includeLan: includePointLan,
+  }));
+
+  if (copiedPointRows.length > 0) {
+    const { error: insertPointsError } = await supabase.from("election_points").insert(copiedPointRows);
+    if (insertPointsError) {
+      await supabase.from("election_events").delete().eq("id", closedCopy.id);
+      setElectionSidebarOpenCache(false);
+      throw new Error(`선거 아이콘은 숨겼지만 게시종료 사본 저장에 실패했습니다. ${electionStorageError(insertPointsError, "election_points")}`);
+    }
   }
 
   setElectionSidebarOpenCache(false);
