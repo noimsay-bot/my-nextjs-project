@@ -393,39 +393,6 @@ function getExportFileBaseName(event: Pick<ElectionEvent, "title" | "electionDat
   return `${title || "선거 취재 배치표"}_${event.electionDate || getKstDateKey()}`;
 }
 
-function exportSplitValue(morning: string | null | undefined, afternoon: string | null | undefined) {
-  const morningText = morning?.trim() ?? "";
-  const afternoonText = afternoon?.trim() ?? "";
-  if (morningText && afternoonText && morningText !== afternoonText) {
-    return `오전 ${morningText}\n오후 ${afternoonText}`;
-  }
-  return morningText || afternoonText || "-";
-}
-
-function exportCheckValue(value: string | null | undefined) {
-  return isLivePositionChecked(value) ? "체크" : "";
-}
-
-function getElectionExportRows(event: Pick<ElectionEvent, "points">) {
-  return event.points.map((point, index) => [
-    `${index + 1}.`,
-    point.region || "-",
-    point.place || "-",
-    point.poolVideo || "-",
-    point.equipmentName || "-",
-    point.trs || "-",
-    exportSplitValue(point.cameraStaffName, point.cameraStaffNamePm),
-    exportSplitValue(point.audioStaffName, point.audioStaffNamePm),
-    exportSplitValue(point.liveTime, point.liveTimePm),
-    exportSplitValue(point.reporterName, point.reporterNamePm),
-    point.address || "-",
-    point.note || "-",
-    exportCheckValue(point.livePosition),
-    exportCheckValue(point.lan),
-    point.lighting || "-",
-  ]);
-}
-
 function downloadBlob(blob: Blob, fileName: string) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -437,45 +404,6 @@ function downloadBlob(blob: Blob, fileName: string) {
   window.URL.revokeObjectURL(url);
 }
 
-async function exportElectionToExcel(event: ElectionEvent) {
-  const XLSX = await import("xlsx");
-  const headers = [...tableColumns];
-  const rows = getElectionExportRows(event);
-  const worksheet = XLSX.utils.aoa_to_sheet([
-    [formatElectionBoardTitle(event.title)],
-    [`선거일: ${event.electionDate}`],
-    [],
-    headers,
-    ...rows,
-  ]);
-
-  worksheet["!cols"] = [
-    { wch: 5 },
-    { wch: 12 },
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 44 },
-    { wch: 28 },
-    { wch: 10 },
-    { wch: 8 },
-    { wch: 12 },
-  ];
-  worksheet["!merges"] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
-  ];
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "선거 배치표");
-  XLSX.writeFile(workbook, `${getExportFileBaseName(event)}.xlsx`, { compression: true });
-}
-
 function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -484,40 +412,154 @@ function escapeHtml(value: unknown) {
     .replace(/"/g, "&quot;");
 }
 
-function exportElectionToWord(event: ElectionEvent) {
-  const headers = [...tableColumns];
-  const rows = getElectionExportRows(event);
-  const bodyRows = rows
-    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell).replace(/\n/g, "<br>")}</td>`).join("")}</tr>`)
+function normalizeExportText(value: string | null | undefined) {
+  return value?.trim() || "-";
+}
+
+function renderExportText(value: string | null | undefined, extraStyle = "") {
+  const text = normalizeExportText(value);
+  const colorStyle = text === "-" ? "color:#64748b;font-weight:700;" : "";
+  return `<div style="${colorStyle}${extraStyle}">${escapeHtml(text).replace(/\r?\n/g, "<br>")}</div>`;
+}
+
+function renderExportSplitText(morning: string | null | undefined, afternoon: string | null | undefined) {
+  const morningText = normalizeExportText(morning);
+  const afternoonText = normalizeExportText(afternoon);
+  if (afternoonText === "-") {
+    return renderExportText(morningText);
+  }
+  return [
+    `<div><span style="color:#64748b;font-size:9px;font-weight:800;">오전</span> ${escapeHtml(morningText)}</div>`,
+    `<div><span style="color:#64748b;font-size:9px;font-weight:800;">오후</span> ${escapeHtml(afternoonText)}</div>`,
+  ].join("");
+}
+
+function renderExportCheck(value: string | null | undefined) {
+  return isLivePositionChecked(value)
+    ? `<span style="color:#16a34a;font-size:13px;font-weight:900;">■</span>`
+    : `<span style="color:#94a3b8;font-size:13px;">□</span>`;
+}
+
+function getExportCellStyle(color: string, options?: { align?: "center" | "left"; groupEnd?: boolean }) {
+  const colorOption = getKnownColorOption(color);
+  const background = colorOption?.background ?? "#ffffff";
+  const textColor = colorOption?.text ?? "#000000";
+  return [
+    "border:1px solid #94a3b8",
+    options?.groupEnd ? "border-bottom:2px solid #000000" : "",
+    "padding:5px 6px",
+    "font-size:10px",
+    "line-height:1.28",
+    "font-weight:700",
+    `text-align:${options?.align ?? "center"}`,
+    "vertical-align:middle",
+    "word-break:break-word",
+    "mso-number-format:'\\@'",
+    `background:${background}`,
+    `color:${textColor}`,
+  ].filter(Boolean).join(";");
+}
+
+function renderExportCell(content: string, color: string, options?: { align?: "center" | "left"; groupEnd?: boolean; rowSpan?: number }) {
+  const rowSpan = options?.rowSpan && options.rowSpan > 1 ? ` rowspan="${options.rowSpan}"` : "";
+  return `<td${rowSpan} style="${getExportCellStyle(color, options)}">${content}</td>`;
+}
+
+function renderElectionStyledExportTable(event: ElectionEvent) {
+  const points = event.points;
+  const colgroup = readOnlyTableColumns
+    .map((column) => `<col style="width:${defaultColumnWidths[column]}px">`)
     .join("");
+  const header = readOnlyTableColumns
+    .map((column) => `<th style="border:1px solid #64748b;padding:6px 5px;background:#dbeafe;color:#000;font-size:10px;font-weight:900;text-align:center;vertical-align:middle;">${escapeHtml(column)}</th>`)
+    .join("");
+
+  const rows = points.length
+    ? points.map((point, index) => {
+        const regionRowSpan = getRegionRowSpan(points, index);
+        const isRegionBoundary = isRegionGroupEnd(points, index);
+        const regionColor = getRegionGroupColor(points, index);
+        const placeColor = getCellDisplayColor(points, point, index, "place");
+        const poolVideoColor = getCellDisplayColor(points, point, index, "poolVideo");
+        const equipmentNameColor = getCellDisplayColor(points, point, index, "equipmentName");
+        const trsColor = getCellDisplayColor(points, point, index, "trs");
+        const cameraStaffColor = getCellDisplayColor(points, point, index, "cameraStaff");
+        const audioStaffColor = getCellDisplayColor(points, point, index, "audioStaff");
+        const liveTimeColor = getCellDisplayColor(points, point, index, "liveTime");
+        const reporterColor = getCellDisplayColor(points, point, index, "reporter");
+        const addressColor = getCellDisplayColor(points, point, index, "address");
+        const noteColor = getCellDisplayColor(points, point, index, "note");
+        const livePositionColor = getCellDisplayColor(points, point, index, "livePosition");
+        const lanColor = getCellDisplayColor(points, point, index, "lan");
+        const lightingColor = getCellDisplayColor(points, point, index, "lighting");
+        const cells = [
+          renderExportCell(`${index + 1}.`, "", { groupEnd: isRegionBoundary }),
+          regionRowSpan > 0
+            ? renderExportCell(renderExportText(point.region), regionColor, {
+                groupEnd: isRegionBoundary,
+                rowSpan: regionRowSpan,
+              })
+            : "",
+          renderExportCell(renderExportText(point.place), placeColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportText(point.poolVideo), poolVideoColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportText(point.equipmentName), equipmentNameColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportText(point.trs), trsColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportSplitText(point.cameraStaffName, point.cameraStaffNamePm), cameraStaffColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportSplitText(point.audioStaffName, point.audioStaffNamePm), audioStaffColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportSplitText(point.liveTime, point.liveTimePm), liveTimeColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportSplitText(point.reporterName, point.reporterNamePm), reporterColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportText(point.address), addressColor, { align: "left", groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportText(point.note), noteColor, { align: "left", groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportCheck(point.livePosition), livePositionColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportCheck(point.lan), lanColor, { groupEnd: isRegionBoundary }),
+          renderExportCell(renderExportText(point.lighting), lightingColor, { groupEnd: isRegionBoundary }),
+        ].join("");
+        return `<tr>${cells}</tr>`;
+      }).join("")
+    : `<tr><td colspan="${readOnlyTableColumns.length}" style="${getExportCellStyle("", {})}">입력된 중계 포인트가 없습니다.</td></tr>`;
+
+  return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;color:#000;">
+    <colgroup>${colgroup}</colgroup>
+    <thead><tr>${header}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function createElectionStyledExportHtml(event: ElectionEvent, target: "word" | "excel") {
+  const title = formatElectionBoardTitle(event.title);
+  const isExcel = target === "excel";
   const html = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>${escapeHtml(formatElectionBoardTitle(event.title))}</title>
+${isExcel ? '<meta name="ProgId" content="Excel.Sheet">' : ""}
+<title>${escapeHtml(title)}</title>
 <style>
-  @page { size: A3 landscape; margin: 12mm; }
-  body { font-family: "Malgun Gothic", Arial, sans-serif; color: #111827; }
-  h1 { margin: 0 0 6px; font-size: 24px; text-align: center; }
-  .meta { margin: 0 0 14px; text-align: center; font-size: 13px; color: #334155; }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  th, td { border: 1px solid #94a3b8; padding: 5px 6px; font-size: 10px; line-height: 1.35; text-align: center; vertical-align: middle; word-break: keep-all; }
-  th { background: #dbeafe; font-weight: 700; }
-  td:nth-child(11), td:nth-child(12) { text-align: left; word-break: break-word; }
+  @page { size: A3 landscape; margin: 10mm; }
+  body { font-family: "Malgun Gothic", Arial, sans-serif; color: #111827; background: #ffffff; }
+  h1 { margin: 0 0 5px; font-size: 22px; text-align: center; }
+  .meta { margin: 0 0 12px; text-align: center; font-size: 12px; color: #334155; font-weight: 700; }
 </style>
 </head>
 <body>
-  <h1>${escapeHtml(formatElectionBoardTitle(event.title))}</h1>
-  <p class="meta">선거일: ${escapeHtml(event.electionDate)} · ${rows.length}개 포인트</p>
-  <table>
-    <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-    <tbody>${bodyRows || `<tr><td colspan="${headers.length}">입력된 중계 포인트가 없습니다.</td></tr>`}</tbody>
-  </table>
+  <h1>${escapeHtml(title)}</h1>
+  <p class="meta">선거일: ${escapeHtml(event.electionDate)} · ${event.points.length}개 포인트</p>
+  ${renderElectionStyledExportTable(event)}
 </body>
 </html>`;
+  return html;
+}
 
+async function exportElectionToExcel(event: ElectionEvent) {
   downloadBlob(
-    new Blob(["\ufeff", html], { type: "application/msword;charset=utf-8" }),
+    new Blob(["\ufeff", createElectionStyledExportHtml(event, "excel")], { type: "application/vnd.ms-excel;charset=utf-8" }),
+    `${getExportFileBaseName(event)}.xls`,
+  );
+}
+
+function exportElectionToWord(event: ElectionEvent) {
+  downloadBlob(
+    new Blob(["\ufeff", createElectionStyledExportHtml(event, "word")], { type: "application/msword;charset=utf-8" }),
     `${getExportFileBaseName(event)}.doc`,
   );
 }
