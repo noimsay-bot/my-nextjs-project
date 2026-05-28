@@ -11,7 +11,7 @@ as $$
       greatest(p_start_date, p_end_date) as end_date
     where p_start_date is not null
       and p_end_date is not null
-      and greatest(p_start_date, p_end_date) <= least(p_start_date, p_end_date) + 45
+      and greatest(p_start_date, p_end_date) <= least(p_start_date, p_end_date) + 4000
   ),
   month_keys as (
     select to_char(month_start::date, 'YYYY-MM') as month_key
@@ -384,7 +384,7 @@ security definer
 set search_path = public
 as $$
   select public.get_home_current_trips(
-    ((now() at time zone 'Asia/Seoul')::date - 14),
+    ((now() at time zone 'Asia/Seoul')::date - 3650),
     ((now() at time zone 'Asia/Seoul')::date + 7)
   );
 $$;

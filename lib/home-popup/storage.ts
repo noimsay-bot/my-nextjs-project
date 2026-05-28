@@ -200,7 +200,7 @@ const HOME_POPUP_WORKSPACE_REQUEST_TIMEOUT_MS = 4_000;
 const HOME_POPUP_WORKSPACE_FAILURE_COOLDOWN_MS = 30_000;
 const HOME_WORKSPACE_LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const HOME_CURRENT_TRIPS_RPC_FAILURE_COOLDOWN_MS = 30_000;
-const HOME_CURRENT_TRIPS_LOOKBACK_DAYS = 14;
+const HOME_CURRENT_TRIPS_LOOKBACK_DAYS = 3650;
 const HOME_CURRENT_TRIPS_LOOKAHEAD_DAYS = 7;
 
 type PortalSession = Awaited<ReturnType<typeof getPortalSession>> | null;
@@ -1283,7 +1283,12 @@ export async function refreshHomeCurrentTripsFromSupabase() {
     throw new Error(getSupabaseStorageErrorMessage(error, "get_home_current_trips"));
   }
 
-  tripCardCache = normalizeHomeCurrentTripCards(data);
+  const normalizedTripCards = normalizeHomeCurrentTripCards(data);
+  if (normalizedTripCards.length === 0) {
+    throw new Error("현재 출장자 RPC 결과가 비어 fallback 확인이 필요합니다.");
+  }
+
+  tripCardCache = normalizedTripCards;
   homeWorkspaceTripCardsLoaded = true;
   logPortalTrafficDebug({
     route: "home-current-trips",

@@ -7,7 +7,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 
 const HOME_PUBLIC_WORKSPACE_TIMEOUT_MS = 4_000;
 const HOME_COMMUNITY_ATTACHMENT_BUCKET = "home-community-attachments";
-const HOME_TRIP_LOOKBACK_DAYS = 14;
+const HOME_TRIP_LOOKBACK_DAYS = 3650;
 const HOME_TRIP_LOOKAHEAD_DAYS = 7;
 const CURRENT_TRIP_TRAVEL_TYPES = new Set<AssignmentTravelType>(["국내출장", "해외출장", "당일출장"]);
 
@@ -1493,6 +1493,10 @@ async function fetchHomeCurrentTripCardsFromRpc(
   const tripCards = normalizeHomeCurrentTripCards(data);
   if (!tripCards) {
     console.warn("[home-public-workspace] get_home_current_trips RPC returned an unexpected shape; using JSONB fallback.");
+    return null;
+  }
+  if (tripCards.length === 0) {
+    console.warn("[home-public-workspace] get_home_current_trips RPC returned no trips; verifying with JSONB fallback.");
     return null;
   }
 
