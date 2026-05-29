@@ -1410,6 +1410,9 @@ th.positionColumn {
   :global(body.election-print-mode) .printRoot,
   :global(body.election-print-mode) .printRoot * {
     visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    forced-color-adjust: none;
   }
 
   :global(body.election-print-mode) .printRoot {
@@ -1451,6 +1454,8 @@ th.positionColumn {
   }
 
   :global(body.election-print-mode) .printTable {
+    width: 100% !important;
+    max-width: 100% !important;
     color: #000 !important;
     background: #fff !important;
     print-color-adjust: exact;

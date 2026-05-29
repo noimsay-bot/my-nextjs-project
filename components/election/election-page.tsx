@@ -185,6 +185,24 @@ const minColumnWidths: Record<ElectionTableColumn, number> = {
   "조명": 58,
 };
 
+const printColumnWidths: Record<ElectionTableColumn, string> = {
+  "#": "2.2%",
+  "지역": "5.8%",
+  "장소": "8.2%",
+  "코리아풀영상": "5.8%",
+  "장비배정": "6.6%",
+  "TRS": "4.7%",
+  "촬영기자": "6.8%",
+  "오디오맨": "6.4%",
+  "중계시간": "7.2%",
+  "취재기자": "6.6%",
+  "주소": "18.6%",
+  "비고": "10.8%",
+  "중계자리": "3.6%",
+  "LAN": "2.9%",
+  "조명": "3.8%",
+};
+
 const regionColorOptions = [
   { value: "", label: "없음", background: "transparent", text: "#0f172a" },
   { value: "region-sky", label: "하늘", background: "#dff3ff", text: "#0f172a" },
@@ -413,7 +431,7 @@ function getCellColor(point: Pick<ElectionPointInput, "cellColors">, key: Electi
 }
 
 function getCellDisplayColor(points: ElectionPointInput[], point: ElectionPointInput, index: number, key: ElectionCellColorKey) {
-  return getCellColor(point, key) || getRegionGroupColor(points, index);
+  return getCellColor(point, key) || getRegionColorOption(point.regionColor)?.value || "";
 }
 
 function getColorStyle(value: string): CSSProperties | undefined {
@@ -606,6 +624,16 @@ async function exportElectionToExcel(event: ElectionEvent) {
   );
 }
 
+function ElectionPrintColGroup() {
+  return (
+    <colgroup>
+      {readOnlyTableColumns.map((column) => (
+        <col key={column} style={{ width: printColumnWidths[column] }} />
+      ))}
+    </colgroup>
+  );
+}
+
 function exportElectionToWord(event: ElectionEvent) {
   downloadBlob(
     new Blob(["\ufeff", createElectionStyledExportHtml(event, "word")], { type: "application/msword;charset=utf-8" }),
@@ -746,9 +774,25 @@ function upsertElectionPrintPageStyle(paperSize: PrintPaperSize, orientation: Pr
 }
 
 @media print {
+  html,
+  body.election-print-mode {
+    width: auto !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+    color-scheme: light;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    forced-color-adjust: none;
+  }
+
+  body.election-print-mode .${styles.printRoot},
   body.election-print-mode .${styles.printSheet} {
-    width: calc(${width}mm - 20mm);
-    min-height: calc(${height}mm - 20mm);
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    box-sizing: border-box;
   }
 }
 `;
@@ -1218,6 +1262,7 @@ function ElectionPrintableTable({
         className={`${styles.printTable} ${forcePlainViewerTable ? styles.viewerPlainTable : ""}`.trim()}
         style={getPrintTableStyle(points.length, orientation)}
       >
+        <ElectionPrintColGroup />
         <thead>
           <tr>
             {readOnlyTableColumns.map((column) => (
@@ -2007,12 +2052,10 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
       if (!current) return current;
       const range = getRegionGroupRange(current.points, index);
       const region = current.points[range.start]?.region ?? "";
-      const regionColor = getRegionGroupColor(current.points, index);
       if (!region.trim()) return current;
       const nextPoint = {
         ...createBlankPoint(current.points.length),
         region,
-        regionColor,
       };
       return {
         ...current,
