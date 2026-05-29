@@ -711,15 +711,36 @@
 }
 
 .darkColorCell input,
-.darkColorCell select,
 .darkColorCell textarea,
-.darkColorCell :global(.field-input),
-.darkColorCell :global(.field-select) {
+.darkColorCell :global(.field-input) {
   border-color: rgba(255, 255, 255, 0.36);
   background: rgba(15, 23, 42, 0.28);
   caret-color: #ffffff;
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff;
+}
+
+.darkColorCell select,
+.darkColorCell :global(.field-select) {
+  border-color: rgba(15, 23, 42, 0.16);
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #0f172a 50%),
+    linear-gradient(135deg, #0f172a 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 3px),
+    calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  caret-color: #0f172a;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a;
+}
+
+.darkColorCell select option,
+.darkColorCell :global(.field-select) option {
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .darkColorCell input::placeholder,
@@ -801,16 +822,14 @@
 
 :global(html[data-theme="light"]) .darkColorCell,
 :global(html[data-theme="light"]) .darkColorCell :where(div, label, span, b, strong, small, button, svg),
-:global(html[data-theme="light"]) .darkColorCell :global(.field-input),
-:global(html[data-theme="light"]) .darkColorCell :global(.field-select),
-:global(html[data-theme="light"]) .table .darkColorCell select:global(.field-select) {
+:global(html[data-theme="light"]) .darkColorCell :global(.field-input) {
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff;
 }
 
 :global(html[data-theme="light"]) .table .darkColorCell select:global(.field-select) option {
-  background: #0f172a;
-  color: #ffffff;
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .cellActionRow {
@@ -970,7 +989,7 @@ th.positionColumn {
 }
 
 .numberCell {
-  width: 26px;
+  width: 42px;
   padding-right: 2px !important;
   padding-left: 2px !important;
   color: var(--election-table-muted);
@@ -978,6 +997,28 @@ th.positionColumn {
   font-weight: 900;
   text-align: center;
   white-space: nowrap;
+}
+
+.table .rowNumberInput {
+  width: 100%;
+  height: 26px;
+  padding: 3px 2px;
+  border-color: rgba(148, 163, 184, 0.72);
+  background: #ffffff;
+  color: #000000;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.rowNumberInput::-webkit-outer-spin-button,
+.rowNumberInput::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.rowNumberInput[type="number"] {
+  -moz-appearance: textfield;
 }
 
 .readOnlyCell {

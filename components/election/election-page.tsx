@@ -151,7 +151,7 @@ const printPaperDimensions: Record<PrintPaperSize, { width: number; height: numb
 };
 
 const defaultColumnWidths: Record<ElectionTableColumn, number> = {
-  "#": 30,
+  "#": 46,
   "지역": 86,
   "장소": 128,
   "코리아풀영상": 82,
@@ -169,7 +169,7 @@ const defaultColumnWidths: Record<ElectionTableColumn, number> = {
 };
 
 const minColumnWidths: Record<ElectionTableColumn, number> = {
-  "#": 26,
+  "#": 42,
   "지역": 58,
   "장소": 72,
   "코리아풀영상": 58,
@@ -2112,6 +2112,28 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
     });
   };
 
+  const movePointToNumber = (index: number, value: string) => {
+    if (!value.trim()) return;
+    const parsedNumber = Number(value);
+    if (!Number.isFinite(parsedNumber)) return;
+
+    setDraft((current) => {
+      if (!current) return current;
+      const targetIndex = Math.min(Math.max(Math.trunc(parsedNumber), 1), current.points.length) - 1;
+      if (targetIndex === index) return current;
+
+      const nextPoints = [...current.points];
+      const [movedPoint] = nextPoints.splice(index, 1);
+      if (!movedPoint) return current;
+      nextPoints.splice(targetIndex, 0, movedPoint);
+
+      return {
+        ...current,
+        points: nextPoints.map((point, pointIndex) => ({ ...point, sortOrder: pointIndex })),
+      };
+    });
+  };
+
   const isPointSplit = (point: DraftPoint) => Boolean(splitRowIds[point.localId] || hasAfternoonValues(point));
 
   const splitPoint = (point: DraftPoint) => {
@@ -2701,7 +2723,19 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                       >
                         <td className={styles.numberCell}>
                           {isOwnLocationHighlighted ? <span className={styles.ownLocationBadge}>내 위치</span> : null}
-                          {index + 1}.
+                          <input
+                            className={styles.rowNumberInput}
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={draft.points.length}
+                            value={index + 1}
+                            disabled={saving}
+                            aria-label={`${index + 1}번 행 이동`}
+                            title="번호를 입력하면 해당 행이 그 위치로 이동합니다."
+                            onFocus={(event) => event.currentTarget.select()}
+                            onChange={(event) => movePointToNumber(index, event.target.value)}
+                          />
                         </td>
                         {regionRowSpan > 0 ? (
                           <td
