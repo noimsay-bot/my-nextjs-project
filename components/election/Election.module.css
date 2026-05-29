@@ -752,6 +752,11 @@
   border-color: var(--election-table-line) !important;
 }
 
+.viewerPlainTable td.coloredCell {
+  background: var(--election-cell-bg) !important;
+  color: var(--election-cell-color, #000000) !important;
+}
+
 .viewerPlainTable {
   font-size: 15.6px;
 }
@@ -773,6 +778,13 @@
 
 .viewerPlainTable .readOnlySplit b {
   font-size: 14.3px;
+}
+
+.viewerPlainTable td.coloredCell .readOnlyCell,
+.viewerPlainTable td.coloredCell .readOnlyCellEmpty,
+.viewerPlainTable td.coloredCell .readOnlySplit,
+.viewerPlainTable td.coloredCell .readOnlySplit b {
+  color: var(--election-cell-color, #000000) !important;
 }
 
 .viewerPlainTable .darkColorCell {

@@ -396,7 +396,6 @@ function joinSlash(values){
 
 function pointToCardRows(point){
   return [
-    ['장소', point.place || point.region],
     ['시간', joinSlash([point.liveTime, point.liveTimePm])],
     ['촬영', joinSlash([point.cameraStaffName, point.cameraStaffNamePm])],
     ['오디오', joinSlash([point.audioStaffName, point.audioStaffNamePm])],
