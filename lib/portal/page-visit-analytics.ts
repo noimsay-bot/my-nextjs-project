@@ -26,6 +26,7 @@ export interface PageVisitTrendPoint {
   key: string;
   label: string;
   visits: number;
+  visitsByPage: Record<PageVisitKey, number>;
 }
 
 export interface PageVisitAnalytics {
@@ -160,11 +161,28 @@ function formatTrendDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function countVisitsInRange(rows: PageVisitEventRow[], start: Date, end: Date) {
-  return rows.filter((row) => {
+function countVisitsByPageInRange(rows: PageVisitEventRow[], start: Date, end: Date) {
+  const counts = Object.fromEntries(
+    Object.keys(PAGE_VISIT_META).map((pageKey) => [pageKey, 0]),
+  ) as Record<PageVisitKey, number>;
+
+  rows.forEach((row) => {
     const visitedAt = new Date(row.visited_at);
-    return visitedAt >= start && visitedAt < end;
-  }).length;
+    if (visitedAt < start || visitedAt >= end) return;
+    counts[row.page_key] = (counts[row.page_key] ?? 0) + 1;
+  });
+
+  return counts;
+}
+
+function buildTrendPoint(rows: PageVisitEventRow[], start: Date, end: Date, label: string) {
+  const visitsByPage = countVisitsByPageInRange(rows, start, end);
+  return {
+    key: formatTrendDateKey(start),
+    label,
+    visits: Object.values(visitsByPage).reduce((sum, visits) => sum + visits, 0),
+    visitsByPage,
+  } satisfies PageVisitTrendPoint;
 }
 
 function buildMetrics(rows: PageVisitEventRow[], rangeStart: Date) {
@@ -186,11 +204,12 @@ function buildWeeklyTrend(rows: PageVisitEventRow[], weekCount = PAGE_VISIT_WEEK
   return Array.from({ length: weekCount }, (_, index) => {
     const start = addDays(currentWeekStart, (index - weekCount + 1) * 7);
     const end = addDays(start, 7);
-    return {
-      key: formatTrendDateKey(start),
-      label: index === weekCount - 1 ? "이번 주" : `${start.getMonth() + 1}/${start.getDate()} 주`,
-      visits: countVisitsInRange(rows, start, end),
-    } satisfies PageVisitTrendPoint;
+    return buildTrendPoint(
+      rows,
+      start,
+      end,
+      index === weekCount - 1 ? "이번 주" : `${start.getMonth() + 1}/${start.getDate()} 주`,
+    );
   });
 }
 
@@ -199,11 +218,12 @@ function buildMonthlyTrend(rows: PageVisitEventRow[], monthCount = PAGE_VISIT_MO
   return Array.from({ length: monthCount }, (_, index) => {
     const start = addMonths(currentMonthStart, index - monthCount + 1);
     const end = addMonths(start, 1);
-    return {
-      key: formatTrendDateKey(start),
-      label: index === monthCount - 1 ? "이번 달" : `${start.getFullYear()}.${start.getMonth() + 1}`,
-      visits: countVisitsInRange(rows, start, end),
-    } satisfies PageVisitTrendPoint;
+    return buildTrendPoint(
+      rows,
+      start,
+      end,
+      index === monthCount - 1 ? "이번 달" : `${start.getFullYear()}.${start.getMonth() + 1}`,
+    );
   });
 }
 

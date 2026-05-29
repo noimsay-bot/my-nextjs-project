@@ -49,14 +49,22 @@
   .election-pin-count{fill:#fff;font-size:15px;font-weight:900;text-anchor:middle;dominant-baseline:middle;pointer-events:none;}
   .election-point-pin{fill:#ef4444;stroke:#fff;stroke-width:3;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));}
   .election-point-number{fill:#fff;font-size:11px;font-weight:900;text-anchor:middle;dominant-baseline:middle;pointer-events:none;}
-  .election-card-fo{overflow:visible;pointer-events:auto;cursor:grab;}
+  .election-card-fo{overflow:visible;pointer-events:auto;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;}
   .election-card-fo.dragging{cursor:grabbing;}
+  .election-card-fo.press-hold .election-card{outline:2px solid rgba(47,111,224,.42);outline-offset:2px;}
   .election-card{height:100%;padding:10px;border:1px solid rgba(15,23,42,.18);border-radius:8px;background:rgba(255,255,255,.96);box-shadow:0 8px 20px rgba(15,23,42,.20);font-size:10px;line-height:1.25;color:#1f2937;overflow:visible;user-select:none;}
   .election-card-title{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px;margin-bottom:7px;font-size:13px;font-weight:900;}
   .election-card-title-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .election-card-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:20px;height:20px;border-radius:99px;background:#111827;color:#fff;font-size:10px;font-weight:900;}
   .election-card-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
   .election-card-row{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr);gap:4px;min-height:21px;align-items:center;padding:3px 5px;border:1px solid rgba(148,163,184,.26);border-radius:5px;background:rgba(248,250,252,.86);}
+  .election-card-row.highlight{border-left-width:4px;}
+  .election-card-row.highlight b{color:#1f2937;}
+  .election-card-row.highlight .election-card-value{color:#111827;}
+  .election-card-row.tone-camera{border-color:rgba(37,99,235,.42);border-left-color:#2563eb;background:rgba(219,234,254,.94);}
+  .election-card-row.tone-reporter{border-color:rgba(5,150,105,.42);border-left-color:#059669;background:rgba(209,250,229,.94);}
+  .election-card-row.tone-equipment{border-color:rgba(217,119,6,.42);border-left-color:#d97706;background:rgba(254,243,199,.94);}
+  .election-card-row.tone-trs{border-color:rgba(124,58,237,.42);border-left-color:#7c3aed;background:rgba(237,233,254,.94);}
   .election-card-row.wide{grid-column:1 / -1;}
   .election-card-row.expandable{cursor:pointer;}
   .election-card-row b{color:#64748b;font-weight:900;}
@@ -168,7 +176,7 @@
   <aside id="pollPanel" aria-label="전국 시도지사 여론조사">
     <div class="pollPanelTitle">
       <strong>전국 시도지사 여론조사</strong>
-      <span>5/1~5/27 조사</span>
+      <span>5/10~5/27 조사</span>
       <button id="pollClose" type="button" aria-label="여론조사 패널 닫기">×</button>
     </div>
     <div id="pollContent"></div>
@@ -225,7 +233,7 @@ const POLL_REGION_ORDER = [
   {key:'경상남도', label:'경남', sido:'경남'},
   {key:'제주특별자치도', label:'제주', sido:'제주'}
 ];
-const POLL_DISPLAY_START_DATE = '2026-05-01';
+const POLL_DISPLAY_START_DATE = '2026-05-10';
 const POLL_CUTOFF_END_DATE = '2026-05-27';
 const POLL_SCRIPT_URLS = [
   'https://www.poll-mbc.co.kr/region_data/approve_data/region_poll_data.js',
@@ -247,6 +255,9 @@ let features = [];
 let currentSido = 'all';
 let selectedPollRegion = '';
 let expandedPollKey = '';
+let expandedLocalPollKey = '';
+const CARD_TOUCH_DRAG_HOLD_MS = 360;
+const CARD_TOUCH_DRAG_MOVE_TOLERANCE = 9;
 let pollDataStatus = 'loading';
 let assemblyPollDataStatus = 'loading';
 let electionMapEvent = null;
@@ -396,12 +407,12 @@ function joinSlash(values){
 
 function pointToCardRows(point){
   return [
-    ['시간', joinSlash([point.liveTime, point.liveTimePm])],
     ['촬영', joinSlash([point.cameraStaffName, point.cameraStaffNamePm])],
-    ['오디오', joinSlash([point.audioStaffName, point.audioStaffNamePm])],
     ['취재', joinSlash([point.reporterName, point.reporterNamePm])],
+    ['오디오', joinSlash([point.audioStaffName, point.audioStaffNamePm])],
     ['장비', joinSlash([point.equipmentName, point.equipmentType])],
     ['TRS', point.trs],
+    ['시간', joinSlash([point.liveTime, point.liveTimePm])],
     ['주소', point.address],
     ['비고', point.note],
   ].filter(([, value]) => String(value ?? '').trim());
@@ -481,7 +492,7 @@ function getPollRegionBySido(sido){
 function getPollsForRegion(regionKey){
   const allPolls = Array.isArray(window.region_poll_data) ? window.region_poll_data : [];
   return allPolls
-    .filter(poll => poll && poll.region === regionKey && poll.end >= POLL_DISPLAY_START_DATE && poll.end <= POLL_CUTOFF_END_DATE)
+    .filter(poll => poll && poll.region === regionKey && poll.start >= POLL_DISPLAY_START_DATE && poll.end >= POLL_DISPLAY_START_DATE && poll.end <= POLL_CUTOFF_END_DATE)
     .sort((a,b) => String(b.end || '').localeCompare(String(a.end || '')) || String(b.start || '').localeCompare(String(a.start || '')) || Number(b.index || 0) - Number(a.index || 0));
 }
 
@@ -577,17 +588,56 @@ function getSidoElectionTitle(region){
   return `${region.label}도지사`;
 }
 
+function getDateRangeDates(value){
+  const matches = String(value || '').match(/\d{4}-\d{2}-\d{2}/g) || [];
+  return {
+    start: matches[0] || '',
+    end: matches[matches.length - 1] || matches[0] || '',
+  };
+}
+
+function isPollDateRangeVisible(start, end){
+  const rangeStart = String(start || end || '');
+  const rangeEnd = String(end || start || '');
+  return rangeStart >= POLL_DISPLAY_START_DATE && rangeEnd >= POLL_DISPLAY_START_DATE && rangeEnd <= POLL_CUTOFF_END_DATE;
+}
+
+function getAssemblyPollSurveys(item){
+  const surveys = Array.isArray(item?.bar_data) ? item.bar_data : [];
+  return surveys.filter(poll => {
+    const range = getDateRangeDates(poll?.date_range);
+    return isPollDateRangeVisible(range.start, range.end);
+  });
+}
+
+function getAssemblyPollDateSummary(surveys){
+  const ranges = surveys.map(poll => getDateRangeDates(poll?.date_range)).filter(range => range.start && range.end);
+  if(!ranges.length) return {start: '', end: ''};
+  return {
+    start: ranges.map(range => range.start).sort()[0] || '',
+    end: ranges.map(range => range.end).sort().at(-1) || '',
+  };
+}
+
+function hasVisibleAssemblySummary(item){
+  return isPollDateRangeVisible(item?.start, item?.end);
+}
+
 function getAssemblyPollItemsForSido(sido){
   const items = Array.isArray(window.boxplot_data) ? window.boxplot_data : [];
   return items
-    .filter(item =>
-      item &&
-      normalizeSidoKey(item.region1) === sido &&
-      Number(item.count || 0) >= 2 &&
-      String(item.end || '') >= POLL_DISPLAY_START_DATE &&
-      String(item.end || '') <= POLL_CUTOFF_END_DATE
+    .map(item => ({item, visibleSurveys: getAssemblyPollSurveys(item)}))
+    .filter(entry =>
+      entry.item &&
+      normalizeSidoKey(entry.item.region1) === sido &&
+      entry.visibleSurveys.length >= 2
     )
-    .sort((a,b) => String(b.end || '').localeCompare(String(a.end || '')) || Number(b.count || 0) - Number(a.count || 0));
+    .sort((a,b) => {
+      const leftRange = getAssemblyPollDateSummary(a.visibleSurveys);
+      const rightRange = getAssemblyPollDateSummary(b.visibleSurveys);
+      return String(rightRange.end || '').localeCompare(String(leftRange.end || '')) || b.visibleSurveys.length - a.visibleSurveys.length;
+    })
+    .map(entry => entry.item);
 }
 
 function getLocalPollEntries(sido){
@@ -610,6 +660,8 @@ function getLocalPollEntries(sido){
     });
 
   getAssemblyPollItemsForSido(sido).forEach(item => {
+    const visibleSurveys = getAssemblyPollSurveys(item);
+    const visibleRange = getAssemblyPollDateSummary(visibleSurveys);
     const first = item.rank?.first;
     const second = item.rank?.second;
     const margin = first && second ? Number(first.val || 0) - Number(second.val || 0) : 0;
@@ -618,7 +670,7 @@ function getLocalPollEntries(sido){
       type: 'assembly',
       key: `assembly|${item.consti}`,
       title: `${item.region1_site || item.region1 || sido}${item.region2_site || item.region2 || ''} 재보궐`,
-      meta: `분석 여론조사 ${Number(item.count || 0)}개 · ${item.start || ''}~${item.end || ''}`,
+      meta: `분석 여론조사 ${visibleSurveys.length}개 · ${visibleRange.start || POLL_DISPLAY_START_DATE}~${visibleRange.end || POLL_CUTOFF_END_DATE}`,
       label: first ? `${first.name} ${margin >= 5 ? '우세' : '경합'}` : (item.state || '분석 중'),
       tone: margin >= 5 ? style.tone : 'purple',
       item,
@@ -681,8 +733,15 @@ function renderPollRegionPanel(region){
   return `<div class="pollRegionPanel">${content}</div>`;
 }
 
-function renderAssemblyPollCard(item){
-  const surveys = Array.isArray(item.bar_data) ? item.bar_data : [];
+function getAssemblySummaryPollKey(item){
+  return ['assembly-summary', item?.consti || '', item?.region1 || '', item?.region2 || '', item?.start || '', item?.end || ''].join('|');
+}
+
+function getAssemblySurveyPollKey(item, poll, index){
+  return ['assembly-survey', item?.consti || '', index, poll?.house || '', poll?.client || '', poll?.date_range || ''].join('|');
+}
+
+function renderAssemblySummaryCard(item){
   const rankRows = [item.rank?.first, item.rank?.second].filter(Boolean);
   const rows = rankRows.length ? rankRows.map(row => {
     const style = PARTY_STYLE[row.party] || PARTY_STYLE.minor;
@@ -701,10 +760,36 @@ function renderAssemblyPollCard(item){
     <p class="pollCardMeta">${escapeHtml(methodText)}</p>
     <div class="pollResultBox">${rows}</div>
   </article>`;
-  const surveyCards = surveys.length
-    ? surveys.map((poll, index) => renderAssemblySurveyCard(item, poll, index)).join('')
+  return summary;
+}
+
+function renderAssemblyPollSummaryItem(item){
+  const key = getAssemblySummaryPollKey(item);
+  const expanded = expandedPollKey === key;
+  const titleText = `${item.region1_site || item.region1 || ''}${item.region2_site || item.region2 || ''} 재보궐 종합`;
+  const visibleSurveys = getAssemblyPollSurveys(item);
+  const visibleRange = getAssemblyPollDateSummary(visibleSurveys);
+  const methodText = [visibleRange.start && visibleRange.end ? `${visibleRange.start}~${visibleRange.end}` : '', visibleSurveys.length ? `${visibleSurveys.length}개 조사` : ''].filter(Boolean).join(' / ');
+  return `<div class="pollSurveyItem">
+    <button type="button" class="pollSurveyButton ${expanded ? 'active' : ''}" data-poll-key="${escapeHtml(key)}">
+      <span>
+        <span class="pollSurveyTitle">${escapeHtml(titleText)}</span>
+        <span class="pollSurveyMeta">${escapeHtml(methodText || '종합 결과')}</span>
+      </span>
+      <span class="pollChevron">${expanded ? '−' : '+'}</span>
+    </button>
+    ${expanded ? `<div class="pollCards">${renderAssemblySummaryCard(item)}</div>` : ''}
+  </div>`;
+}
+
+function renderAssemblyPollCard(item){
+  const surveys = getAssemblyPollSurveys(item);
+  const surveyItems = surveys.length
+    ? surveys.map((poll, index) => renderAssemblySurveyItem(item, poll, index)).join('')
     : `<div class="pollEmpty">표시할 개별 여론조사가 없습니다.</div>`;
-  return `${summary}${surveyCards}`;
+  const summaryItem = hasVisibleAssemblySummary(item) ? renderAssemblyPollSummaryItem(item) : '';
+  return `<div class="pollRegionMeta">항목을 누르면 결과가 펼쳐집니다.</div>
+    <div class="pollSurveyList">${summaryItem}${surveyItems}</div>`;
 }
 
 function getAssemblyCandidateParty(item, name){
@@ -742,8 +827,25 @@ function renderAssemblySurveyCard(item, poll, index){
   </article>`;
 }
 
+function renderAssemblySurveyItem(item, poll, index){
+  const key = getAssemblySurveyPollKey(item, poll, index);
+  const expanded = expandedPollKey === key;
+  const titleText = `${index + 1}. ${poll.house || '조사기관'}-${poll.client || '의뢰기관'}`;
+  const methodText = [poll.date_range || '', poll.type || '', poll.type2 || '', poll.response || '', poll.intertval || poll.interval || ''].filter(Boolean).join(' / ');
+  return `<div class="pollSurveyItem">
+    <button type="button" class="pollSurveyButton ${expanded ? 'active' : ''}" data-poll-key="${escapeHtml(key)}">
+      <span>
+        <span class="pollSurveyTitle">${escapeHtml(titleText)}</span>
+        <span class="pollSurveyMeta">${escapeHtml(methodText || '상세 정보')}</span>
+      </span>
+      <span class="pollChevron">${expanded ? '−' : '+'}</span>
+    </button>
+    ${expanded ? `<div class="pollCards">${renderAssemblySurveyCard(item, poll, index)}</div>` : ''}
+  </div>`;
+}
+
 function renderLocalPollEntry(entry){
-  const expanded = expandedPollKey === entry.key;
+  const expanded = expandedLocalPollKey === entry.key;
   const body = expanded
     ? entry.type === 'governor'
       ? renderPollRegionPanel(entry.region)
@@ -779,7 +881,9 @@ function renderLocalPollPanel(){
     button.addEventListener('click', event => {
       event.stopPropagation();
       const nextKey = button.dataset.localPollKey || '';
-      expandedPollKey = expandedPollKey === nextKey ? '' : nextKey;
+      const nextExpanded = expandedLocalPollKey === nextKey ? '' : nextKey;
+      expandedLocalPollKey = nextExpanded;
+      expandedPollKey = '';
       renderPollPanel();
     });
   });
@@ -804,7 +908,7 @@ function renderPollPanel(){
     return;
   }
   if(titleStrong) titleStrong.textContent = '전국 시도지사 여론조사';
-  if(titleMeta) titleMeta.textContent = '5/1~5/27 조사';
+  if(titleMeta) titleMeta.textContent = '5/10~5/27 조사';
   const summaryList = POLL_REGION_ORDER.map(region => {
     const active = region.key === selectedPollRegion;
     const summary = getPollSummary(region);
@@ -823,6 +927,7 @@ function renderPollPanel(){
       const nextRegion = button.dataset.region || selectedPollRegion;
       selectedPollRegion = selectedPollRegion === nextRegion ? '' : nextRegion;
       expandedPollKey = '';
+      expandedLocalPollKey = '';
       renderPollPanel();
     });
   });
@@ -1042,7 +1147,8 @@ function renderPointCardRow(label, value){
   const text = String(value ?? '').trim();
   const expandable = isExpandableCardValue(label, text);
   const wide = /주소|비고/.test(label);
-  const classes = ['election-card-row', wide ? 'wide' : '', expandable ? 'expandable' : ''].filter(Boolean).join(' ');
+  const toneClass = {촬영:'tone-camera', 취재:'tone-reporter', 장비:'tone-equipment', TRS:'tone-trs'}[label] || '';
+  const classes = ['election-card-row', toneClass ? 'highlight' : '', toneClass, wide ? 'wide' : '', expandable ? 'expandable' : ''].filter(Boolean).join(' ');
   const attrs = expandable ? ` data-full="${escapeHtml(text)}" title="${escapeHtml(text)}"` : '';
   return `<div class="${classes}"${attrs}><b>${escapeHtml(label)}</b><span class="election-card-value">${escapeHtml(text)}</span></div>`;
 }
@@ -1165,6 +1271,7 @@ function navigateToSido(sido){
   currentSido = sido;
   selectedPollRegion = '';
   expandedPollKey = '';
+  expandedLocalPollKey = '';
   pollPanel?.classList.remove('open');
   render();
 }
@@ -1205,11 +1312,13 @@ function svgClientPoint(svg, clientX, clientY){
 function attachCardTextExpansion(root){
   root.querySelectorAll('.election-card-row.expandable').forEach(row => {
     row.addEventListener('pointerdown', event => {
+      if(event.pointerType === 'touch') return;
       event.stopPropagation();
     });
     row.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
+      if(row.closest?.('.election-card-fo')?.dataset.suppressClick === 'true') return;
       row.classList.toggle('expanded');
     });
   });
@@ -1220,13 +1329,18 @@ function attachCardDragging(root){
   if(!svg) return;
   attachCardTextExpansion(root);
   root.querySelectorAll('.election-card-fo').forEach(card => {
-    card.addEventListener('pointerdown', event => {
-      if(event.target.closest?.('.election-card-row.expandable')) return;
+    card.addEventListener('contextmenu', event => {
       event.preventDefault();
+    });
+    card.addEventListener('pointerdown', event => {
+      const touchDrag = event.pointerType === 'touch';
+      if(!touchDrag && event.target.closest?.('.election-card-row.expandable')) return;
+      if(!touchDrag) event.preventDefault();
       event.stopPropagation();
       const key = card.dataset.cardKey;
       if(!key) return;
-      const start = svgClientPoint(svg, event.clientX, event.clientY);
+      const startClientX = event.clientX;
+      const startClientY = event.clientY;
       const startX = Number(card.getAttribute('x')) || 0;
       const startY = Number(card.getAttribute('y')) || 0;
       const cardW = Number(card.getAttribute('width')) || 304;
@@ -1234,11 +1348,21 @@ function attachCardDragging(root){
       const pinX = Number(card.dataset.pinX) || 0;
       const pinY = Number(card.dataset.pinY) || 0;
       const line = root.querySelector(`.election-pin-line[data-card-key="${CSS.escape(key)}"]`);
+      let dragging = false;
+      let start = null;
+      let holdTimer = 0;
 
-      card.classList.add('dragging');
-      card.setPointerCapture?.(event.pointerId);
+      const startDrag = pointerEvent => {
+        if(dragging) return;
+        dragging = true;
+        start = svgClientPoint(svg, startClientX, startClientY);
+        card.classList.remove('press-hold');
+        card.classList.add('dragging');
+        try{ card.setPointerCapture?.(pointerEvent.pointerId); }catch(_error){}
+      };
 
       const moveCard = (clientX, clientY) => {
+        if(!start) return;
         const current = svgClientPoint(svg, clientX, clientY);
         const next = {
           x: clamp(startX + current.x - start.x, 14, 900 - cardW - 14),
@@ -1256,19 +1380,62 @@ function attachCardDragging(root){
         }
       };
 
-      const handlePointerMove = pointerEvent => moveCard(pointerEvent.clientX, pointerEvent.clientY);
-      const handlePointerUp = pointerEvent => {
-        moveCard(pointerEvent.clientX, pointerEvent.clientY);
-        card.classList.remove('dragging');
-        card.releasePointerCapture?.(pointerEvent.pointerId);
+      const clearHoldTimer = () => {
+        if(!holdTimer) return;
+        window.clearTimeout(holdTimer);
+        holdTimer = 0;
+      };
+      const suppressNextClick = () => {
+        card.dataset.suppressClick = 'true';
+        window.setTimeout(() => {
+          delete card.dataset.suppressClick;
+        }, 250);
+      };
+      const cleanup = pointerEvent => {
+        clearHoldTimer();
+        card.classList.remove('press-hold');
+        if(dragging){
+          moveCard(pointerEvent.clientX, pointerEvent.clientY);
+          card.classList.remove('dragging');
+          try{ card.releasePointerCapture?.(pointerEvent.pointerId); }catch(_error){}
+          suppressNextClick();
+        }
         window.removeEventListener('pointermove', handlePointerMove);
         window.removeEventListener('pointerup', handlePointerUp);
         window.removeEventListener('pointercancel', handlePointerUp);
+      };
+      const cancelBeforeDrag = () => {
+        clearHoldTimer();
+        card.classList.remove('press-hold');
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+        window.removeEventListener('pointercancel', handlePointerUp);
+      };
+      const handlePointerMove = pointerEvent => {
+        if(!dragging){
+          const dx = pointerEvent.clientX - startClientX;
+          const dy = pointerEvent.clientY - startClientY;
+          if(touchDrag && Math.hypot(dx, dy) > CARD_TOUCH_DRAG_MOVE_TOLERANCE){
+            cancelBeforeDrag();
+          }
+          return;
+        }
+        pointerEvent.preventDefault();
+        moveCard(pointerEvent.clientX, pointerEvent.clientY);
+      };
+      const handlePointerUp = pointerEvent => {
+        cleanup(pointerEvent);
       };
 
       window.addEventListener('pointermove', handlePointerMove);
       window.addEventListener('pointerup', handlePointerUp);
       window.addEventListener('pointercancel', handlePointerUp);
+      if(touchDrag){
+        card.classList.add('press-hold');
+        holdTimer = window.setTimeout(() => startDrag(event), CARD_TOUCH_DRAG_HOLD_MS);
+      }else{
+        startDrag(event);
+      }
     });
   });
 }
@@ -1331,6 +1498,9 @@ function setupSelect(){
   sidoSelect.value = currentSido;
   sidoSelect.addEventListener('change', () => {
     currentSido = sidoSelect.value;
+    selectedPollRegion = '';
+    expandedPollKey = '';
+    expandedLocalPollKey = '';
     render();
   });
 }
@@ -1366,6 +1536,7 @@ back.addEventListener('click', () => {
   currentSido='all';
   selectedPollRegion='';
   expandedPollKey='';
+  expandedLocalPollKey='';
   sub.textContent='';
   render();
 });

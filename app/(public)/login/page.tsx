@@ -68,6 +68,10 @@ export default function LoginPage() {
     !session &&
     supabaseConfigured &&
     (recoveringSession || approvalReason === "supabase-unavailable" || hasSupabaseSessionCookie());
+  const signupEnabled: boolean = false;
+  const authTabs: Array<Extract<Mode, "login" | "signup" | "forgot">> = signupEnabled
+    ? ["login", "signup", "forgot"]
+    : ["login", "forgot"];
 
   useEffect(() => {
     let mounted = true;
@@ -278,7 +282,7 @@ export default function LoginPage() {
   return (
     <section className="panel" style={{ maxWidth: 760, margin: "0 auto" }}>
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
-        <div className="chip">로그인 / 회원가입 / 비밀번호 찾기</div>
+        <div className="chip">로그인 / 비밀번호 찾기</div>
         <Link
           href="/election-public"
           style={{
@@ -306,7 +310,7 @@ export default function LoginPage() {
           </span>
         </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {(["login", "signup", "forgot"] as const).map((item) => (
+          {authTabs.map((item) => (
             <button
               key={item}
               type="button"
@@ -358,7 +362,7 @@ export default function LoginPage() {
           </form>
         ) : null}
 
-        {mode === "signup" ? (
+        {signupEnabled && mode === "signup" ? (
           <form style={{ display: "grid", gap: 16 }} onSubmit={handleSignupSubmit}>
             <input
               className="field-input"

@@ -21,6 +21,7 @@ import { getMemberLevelMap, type MemberLevelSnapshot } from "@/lib/portal/member
 import {
   getAdminPageVisitAnalytics,
   PageVisitAnalytics,
+  PageVisitKey,
   PageVisitMetric,
   PageVisitVisitorRank,
   PageVisitRange,
@@ -215,6 +216,24 @@ const visitRangeLabels: Record<PageVisitRange, string> = {
   month: "이번 달",
 };
 
+const pageVisitLineStyles: Record<PageVisitKey, { color: string; muted: string }> = {
+  me: { color: "#38bdf8", muted: "rgba(56,189,248,.16)" },
+  community: { color: "#a78bfa", muted: "rgba(167,139,250,.16)" },
+  work_schedule: { color: "#34d399", muted: "rgba(52,211,153,.16)" },
+  restaurants: { color: "#fbbf24", muted: "rgba(251,191,36,.16)" },
+  equipment: { color: "#fb7185", muted: "rgba(251,113,133,.16)" },
+};
+
+const visitAnalyticsPageLabels: Record<PageVisitKey, string> = {
+  me: "마이페이지",
+  community: "커뮤니티",
+  work_schedule: "근무표",
+  restaurants: "내 주변 맛집",
+  equipment: "TVU/장비",
+};
+
+const visitAnalyticsPageKeys = Object.keys(pageVisitLineStyles) as PageVisitKey[];
+
 function PageVisitChart({
   title,
   rows,
@@ -284,8 +303,27 @@ function PageVisitTrendChart({
   subtitle: string;
   rows: PageVisitTrendPoint[];
 }) {
-  const maxVisits = Math.max(...rows.map((row) => row.visits), 1);
+  const pageSeries = visitAnalyticsPageKeys.map((pageKey) => ({
+    pageKey,
+    label: visitAnalyticsPageLabels[pageKey],
+    visits: rows.map((row) => row.visitsByPage[pageKey] ?? 0),
+  }));
+  const maxVisits = Math.max(...pageSeries.flatMap((series) => series.visits), 1);
   const totalVisits = rows.reduce((sum, row) => sum + row.visits, 0);
+  const svgWidth = 640;
+  const svgHeight = 232;
+  const chartLeft = 34;
+  const chartRight = 18;
+  const chartTop = 18;
+  const chartBottom = 44;
+  const chartWidth = svgWidth - chartLeft - chartRight;
+  const chartHeight = svgHeight - chartTop - chartBottom;
+  const getX = (index: number) =>
+    rows.length <= 1 ? chartLeft + chartWidth / 2 : chartLeft + (chartWidth / (rows.length - 1)) * index;
+  const getY = (visits: number) => chartTop + chartHeight - (visits / maxVisits) * chartHeight;
+  const gridValues = Array.from(
+    new Set([0, Math.ceil(maxVisits / 2), maxVisits].filter((value) => Number.isFinite(value))),
+  ).sort((left, right) => left - right);
 
   return (
     <article
@@ -308,55 +346,102 @@ function PageVisitTrendChart({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(${Math.max(rows.length, 1)}, minmax(0, 1fr))`,
-          gap: 8,
-          alignItems: "end",
-          minHeight: 178,
-          padding: "12px 10px 10px",
+          gap: 12,
+          minHeight: 248,
+          padding: 12,
           borderRadius: 14,
           border: "1px solid rgba(255,255,255,.08)",
           background: "linear-gradient(180deg, rgba(15,23,42,.16), rgba(15,23,42,.36))",
         }}
       >
-        {rows.map((row) => {
-          const height = `${Math.max(row.visits > 0 ? 8 : 3, Math.round((row.visits / maxVisits) * 132))}px`;
-          return (
-            <div
-              key={row.key}
-              aria-label={`${row.label} 방문 ${row.visits}회`}
-              style={{ display: "grid", gap: 7, alignItems: "end", minWidth: 0 }}
-            >
-              <span style={{ color: "#f8fbff", fontSize: 12, fontWeight: 900, textAlign: "center" }}>
-                {row.visits}
-              </span>
-              <div
-                style={{
-                  height,
-                  minHeight: 3,
-                  borderRadius: "8px 8px 2px 2px",
-                  border: "1px solid rgba(125,211,252,.34)",
-                  background: row.visits > 0
-                    ? "linear-gradient(180deg, rgba(125,211,252,.96), rgba(14,165,233,.62))"
-                    : "rgba(148,163,184,.2)",
-                  boxShadow: row.visits > 0 ? "0 0 18px rgba(56,189,248,.22)" : "none",
-                }}
-              />
+        <svg
+          role="img"
+          aria-label={`${title} 페이지별 꺾은선 그래프, 전체 ${totalVisits}회`}
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          preserveAspectRatio="xMidYMid meet"
+          style={{ width: "100%", height: 232, display: "block", overflow: "visible" }}
+        >
+          {gridValues.map((value) => {
+            const y = getY(value);
+            return (
+              <g key={`grid-${value}`}>
+                <line x1={chartLeft} y1={y} x2={svgWidth - chartRight} y2={y} stroke="rgba(148,163,184,.22)" strokeWidth="1" />
+                <text x={chartLeft - 8} y={y + 4} textAnchor="end" fill="rgba(226,232,240,.72)" fontSize="11" fontWeight="800">
+                  {value}
+                </text>
+              </g>
+            );
+          })}
+          {rows.map((row, index) => (
+            <g key={`axis-${row.key}`}>
+              <line x1={getX(index)} y1={chartTop} x2={getX(index)} y2={chartTop + chartHeight} stroke="rgba(148,163,184,.12)" strokeWidth="1" />
+              <text x={getX(index)} y={svgHeight - 16} textAnchor="middle" fill="rgba(226,232,240,.78)" fontSize="11" fontWeight="800">
+                {row.label}
+              </text>
+            </g>
+          ))}
+          {pageSeries.map((series) => {
+            const style = pageVisitLineStyles[series.pageKey];
+            const points = series.visits.map((visits, index) => `${getX(index)},${getY(visits)}`).join(" ");
+            return (
+              <g key={series.pageKey}>
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke={style.muted}
+                  strokeWidth="8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke={style.color}
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {series.visits.map((visits, index) => (
+                  <g key={`${series.pageKey}-${rows[index]?.key ?? index}`}>
+                    <circle cx={getX(index)} cy={getY(visits)} r="4" fill="#0f172a" stroke={style.color} strokeWidth="2" />
+                    {visits > 0 ? (
+                      <text x={getX(index)} y={getY(visits) - 8} textAnchor="middle" fill={style.color} fontSize="10" fontWeight="900">
+                        {visits}
+                      </text>
+                    ) : null}
+                  </g>
+                ))}
+              </g>
+            );
+          })}
+        </svg>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {pageSeries.map((series) => {
+            const style = pageVisitLineStyles[series.pageKey];
+            const latestVisits = series.visits[series.visits.length - 1] ?? 0;
+            return (
               <span
-                className="muted"
+                key={series.pageKey}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
                   minHeight: 26,
-                  fontSize: 11,
-                  fontWeight: 800,
-                  lineHeight: 1.15,
-                  textAlign: "center",
-                  overflowWrap: "anywhere",
+                  padding: "5px 8px",
+                  borderRadius: 999,
+                  border: `1px solid ${style.color}`,
+                  background: style.muted,
+                  color: "#f8fbff",
+                  fontSize: 12,
+                  fontWeight: 900,
                 }}
               >
-                {row.label}
+                <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 999, background: style.color }} />
+                {series.label} {latestVisits}회
               </span>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </article>
   );
