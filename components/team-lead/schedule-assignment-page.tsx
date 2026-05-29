@@ -2897,7 +2897,7 @@ export function ScheduleAssignmentPage() {
     });
 
     const normalizedDuty = duty.replace(/\s+/g, "").trim();
-    if (normalizedDuty !== "국회지원" && normalizedDuty !== "법조지원") {
+    if (!["국회", "국회지원", "법조", "법조지원", "수원"].includes(normalizedDuty)) {
       return;
     }
 

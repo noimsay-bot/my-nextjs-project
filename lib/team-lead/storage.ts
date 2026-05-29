@@ -1442,8 +1442,11 @@ function getDutyBaseTimes(duty: string, dateKey: string, day: DaySchedule | null
         ? { clockIn: 9 * 60, clockOut: 18 * 60 }
         : { clockIn: 7 * 60, clockOut: 16 * 60 };
     case "일반":
+    case "국회":
     case "국회지원":
+    case "법조":
     case "법조지원":
+    case "수원":
       return { clockIn: 9 * 60, clockOut: 18 * 60 };
     case "연장":
       return { clockIn: 10 * 60, clockOut: 19 * 60 };
@@ -1904,10 +1907,13 @@ function parseScheduleAssignmentRowKey(rowKey: string) {
 
 function getScheduleAssignmentNameTagForDuty(duty: string): ScheduleAssignmentNameTag | null {
   switch (normalizeDutyLabel(duty)) {
+    case "국회":
     case "국회지원":
     case "국방부":
       return "gov";
+    case "법조":
     case "법조지원":
+    case "수원":
       return "law";
     case "시청":
       return "city";

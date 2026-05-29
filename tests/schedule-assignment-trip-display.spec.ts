@@ -290,6 +290,103 @@ test("assembly assignment duty is reflected in the schedule management assembly 
   expect(linkedDay.assignments["일반"]).toEqual(["이지수"]);
 });
 
+test("legal assignment duty adds law tag without forcing the office category", () => {
+  const day = {
+    dateKey: "2026-06-10",
+    day: 10,
+    month: 6,
+    year: 2026,
+    dow: 3,
+    isWeekend: false,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: { 일반: ["이동현", "이지수"], 청사: [] },
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  } as DaySchedule;
+  const rowKey = createAssignmentRowKey(day.dateKey, "일반", 0, "이동현");
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    days: [day],
+    nextPointers: { ...defaultPointers },
+    nextStartDate: "2026-07-01",
+  } as GeneratedSchedule;
+  const store: ScheduleAssignmentDataStore = {
+    entries: {},
+    rows: {
+      "2026-06": {
+        [day.dateKey]: {
+          addedRows: [],
+          deletedRowKeys: [],
+          rowOverrides: {
+            [rowKey]: { name: "이동현", duty: "법조" },
+          },
+        },
+      },
+    },
+  };
+
+  const taggedSchedule = applyScheduleAssignmentNameTagsToSchedule(schedule, store);
+  const linkedSchedule = applyScheduleAssignmentDutyCategoriesToSchedule(schedule, store);
+
+  expect(taggedSchedule.days[0]?.assignmentNameTags?.["일반::이동현"]).toBe("law");
+  expect(linkedSchedule.days[0]?.assignments["일반"]).toEqual(["이동현", "이지수"]);
+  expect(linkedSchedule.days[0]?.assignments["청사"]).toBeUndefined();
+});
+
+test("assembly support duty adds government tag for main schedule display", () => {
+  const day = {
+    dateKey: "2026-06-11",
+    day: 11,
+    month: 6,
+    year: 2026,
+    dow: 4,
+    isWeekend: false,
+    isHoliday: false,
+    isCustomHoliday: false,
+    isWeekdayHoliday: false,
+    isOverflowMonth: false,
+    vacations: [],
+    assignments: { 일반: ["김재식"] },
+    manualExtras: [],
+    headerName: "",
+    conflicts: [],
+  } as DaySchedule;
+  const rowKey = createAssignmentRowKey(day.dateKey, "일반", 0, "김재식");
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    days: [day],
+    nextPointers: { ...defaultPointers },
+    nextStartDate: "2026-07-01",
+  } as GeneratedSchedule;
+  const store: ScheduleAssignmentDataStore = {
+    entries: {},
+    rows: {
+      "2026-06": {
+        [day.dateKey]: {
+          addedRows: [],
+          deletedRowKeys: [],
+          rowOverrides: {
+            [rowKey]: { name: "김재식", duty: "국회지원" },
+          },
+        },
+      },
+    },
+  };
+
+  const taggedSchedule = applyScheduleAssignmentNameTagsToSchedule(schedule, store);
+
+  expect(taggedSchedule.days[0]?.assignmentNameTags?.["일반::김재식"]).toBe("gov");
+});
+
 test("big event assignments become schedule assignment duties across month boundaries", () => {
   const maySchedule = {
     year: 2026,
