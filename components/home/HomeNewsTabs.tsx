@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { HomeNewsCard } from "@/components/home/HomeNewsCard";
-import { HomeNewsCurrentTrips } from "@/components/home/HomeNewsCurrentTrips";
 import styles from "@/components/home/HomeNews.module.css";
 import {
   HOME_NEWS_CATEGORIES,
@@ -12,39 +11,12 @@ import {
   HomeNewsTemporarySection,
   HomeNewsTemporarySectionId,
 } from "@/components/home/home-news.types";
-import {
-  getHomePublicTripCards,
-  HOME_POPUP_NOTICE_EVENT,
-  refreshHomeCurrentTripsFromSupabase,
-  refreshHomePopupNoticeWorkspace,
-} from "@/lib/home-popup/storage";
-
-const CURRENT_TRIPS_TAB_KEY = "current_trips";
-const CURRENT_TRIP_TRAVEL_TYPES = new Set(["국내출장", "해외출장", "당일출장"]);
-
-function toDateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function getCurrentTripCount() {
-  const todayKey = toDateKey(new Date());
-  return getHomePublicTripCards()
-    .map((card) => ({
-      ...card,
-      items: card.items.filter((item) =>
-        CURRENT_TRIP_TRAVEL_TYPES.has(item.travelType) &&
-        item.startDateKey <= todayKey &&
-        item.endDateKey >= todayKey,
-      ),
-    }))
-    .filter((card) => card.items.length > 0).length;
-}
 
 function getInitialCategory(cardsByCategory: Partial<HomeNewsCardsByCategory>) {
   return HOME_NEWS_CATEGORIES.find((category) => (cardsByCategory[category] ?? []).length > 0) ?? HOME_NEWS_CATEGORIES[0];
 }
 
-type HomeNewsTabKey = HomeNewsCategory | HomeNewsTemporarySectionId | typeof CURRENT_TRIPS_TAB_KEY;
+type HomeNewsTabKey = HomeNewsCategory | HomeNewsTemporarySectionId;
 
 function getInitialTab(
   cardsByCategory: Partial<HomeNewsCardsByCategory>,
@@ -90,7 +62,6 @@ export function HomeNewsTabs({
   onDeleteNotice,
 }: HomeNewsTabsProps) {
   const groupId = useId();
-  const [currentTripCount, setCurrentTripCount] = useState(0);
   const [activeCategory, setActiveCategory] = useState<HomeNewsTabKey>(() => getInitialTab(cardsByCategory, temporarySections));
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [isMobileNewsMenuOpen, setIsMobileNewsMenuOpen] = useState(false);
@@ -109,17 +80,8 @@ export function HomeNewsTabs({
   }));
   const noticeTab = temporaryTabs.find((tab) => tab.key === "notice");
   const otherTemporaryTabs = temporaryTabs.filter((tab) => tab.key !== "notice");
-  const currentTripsTab =
-    currentTripCount > 0
-      ? [{
-          key: CURRENT_TRIPS_TAB_KEY as HomeNewsTabKey,
-          label: "현재 출장자",
-          items: [],
-        }]
-      : [];
   const tabs = [
     ...(noticeTab ? [noticeTab] : []),
-    ...currentTripsTab,
     ...otherTemporaryTabs,
     ...categoryTabs,
   ];
@@ -130,41 +92,13 @@ export function HomeNewsTabs({
   ];
   const mobileNewsItemCount = mobileNewsTabs.reduce((sum, tab) => sum + tab.items.length, 0);
   const hasNoticeTab = tabs.some((tab) => tab.key === "notice");
-  const noticeItems = noticeTab?.items ?? [];
   const items = tabs.find((tab) => tab.key === activeCategory)?.items ?? [];
   const isNoticeActive = activeCategory === "notice";
-  const isCurrentTripsActive = activeCategory === CURRENT_TRIPS_TAB_KEY;
   const isMobileNewsActive = mobileNewsTabs.some((tab) => tab.key === activeCategory);
-
-  const handleCurrentTripCountChange = useCallback((count: number) => {
-    setCurrentTripCount(count);
-  }, []);
-
-  useEffect(() => {
-    const syncCurrentTripCount = () => {
-      setCurrentTripCount(getCurrentTripCount());
-    };
-
-    void refreshHomeCurrentTripsFromSupabase()
-      .catch(() => refreshHomePopupNoticeWorkspace({ includeCommunity: false }))
-      .then(syncCurrentTripCount);
-    window.addEventListener("storage", syncCurrentTripCount);
-    window.addEventListener("focus", syncCurrentTripCount);
-    window.addEventListener(HOME_POPUP_NOTICE_EVENT, syncCurrentTripCount);
-    return () => {
-      window.removeEventListener("storage", syncCurrentTripCount);
-      window.removeEventListener("focus", syncCurrentTripCount);
-      window.removeEventListener(HOME_POPUP_NOTICE_EVENT, syncCurrentTripCount);
-    };
-  }, []);
 
   useEffect(() => {
     if (!tabs.some((tab) => tab.key === activeCategory)) {
       setActiveCategory(getInitialTab(cardsByCategory, temporarySections));
-      return;
-    }
-
-    if (activeCategory === CURRENT_TRIPS_TAB_KEY) {
       return;
     }
 
@@ -281,7 +215,7 @@ export function HomeNewsTabs({
               }}
             >
               <span>{tab.label}</span>
-              <span className={styles.tabCount}>{tab.key === CURRENT_TRIPS_TAB_KEY ? currentTripCount : tab.items.length}</span>
+              <span className={styles.tabCount}>{tab.items.length}</span>
             </button>
           );
         })}
@@ -330,38 +264,6 @@ export function HomeNewsTabs({
             })}
           </div>
         ) : null}
-        {currentTripsTab.length > 0 ? (
-          currentTripsTab.map((tab) => {
-            const isActive = tab.key === activeCategory;
-            const isSelected = isActive && isPanelOpen;
-            return (
-              <button
-                key={tab.key}
-                id={`${groupId}-mobile-${tab.key}-tab`}
-                type="button"
-                role="tab"
-                aria-selected={isSelected}
-                aria-controls={isSelected ? `${groupId}-panel` : undefined}
-                tabIndex={isSelected ? 0 : -1}
-                className={`${styles.tabButton} ${isSelected ? styles.tabButtonActive : ""}`}
-                onClick={() => {
-                  setHasUserSelectedCategory(true);
-                  if (isActive && isPanelOpen) {
-                    setIsPanelOpen(false);
-                    setExpandedCardId(null);
-                    return;
-                  }
-                  setActiveCategory(tab.key);
-                  setIsPanelOpen(true);
-                  setExpandedCardId(null);
-                }}
-              >
-                <span>{tab.label}</span>
-                <span className={styles.tabCount}>{currentTripCount}</span>
-              </button>
-            );
-          })
-        ) : null}
       </div>
       {isPanelOpen ? (
         <div
@@ -370,21 +272,7 @@ export function HomeNewsTabs({
           aria-labelledby={`${groupId}-${activeCategory}-tab`}
           className={styles.panel}
         >
-          {isCurrentTripsActive ? (
-            <>
-              {noticeItems.length > 0 ? (
-                <div className={styles.mobileCurrentTripsNotice}>
-                  {renderCardGrid(noticeItems, "notice")}
-                </div>
-              ) : null}
-              <HomeNewsCurrentTrips
-                className={styles.currentTripsTabCard}
-                defaultExpanded
-                hideToggle
-                onCountChange={handleCurrentTripCountChange}
-              />
-            </>
-          ) : loading && !(isNoticeActive && items.length > 0) ? (
+          {loading && !(isNoticeActive && items.length > 0) ? (
             <div className={styles.grid}>
               {[0, 1].map((item) => (
                 <div key={item} className={styles.cardSkeleton} aria-hidden="true" />

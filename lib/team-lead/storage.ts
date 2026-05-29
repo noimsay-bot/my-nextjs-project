@@ -93,6 +93,12 @@ export interface ScheduleAssignmentVisibleTripTag {
   isInherited: boolean;
 }
 
+export interface ScheduleAssignmentTripTooltip {
+  tripTagLabel: string;
+  travelType: AssignmentTravelType;
+  schedules: string[];
+}
+
 export interface ScheduleAssignmentDisplayNameInput {
   monthKey: string;
   dateKey: string;
@@ -2589,6 +2595,56 @@ function findCustomScheduleAssignmentRowKeyForDisplay(
   });
 
   return matched ? createCustomAssignmentRowKey(input.dateKey, matched.id) : null;
+}
+
+function normalizeTripTooltipSchedules(entry: ScheduleAssignmentEntry | null | undefined) {
+  return (entry?.schedules ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getScheduleAssignmentTripTooltipForRow(
+  rowKey: string,
+  entry: ScheduleAssignmentEntry | null | undefined,
+  visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag>,
+): ScheduleAssignmentTripTooltip | null {
+  const visibleTripTag = visibleTripTagMap.get(rowKey) ?? null;
+  const tripTagLabel = (visibleTripTag?.tripTagLabel || entry?.tripTagLabel || "").trim();
+  const travelType = visibleTripTag?.travelType || entry?.travelType || "";
+  const schedules = normalizeTripTooltipSchedules(entry);
+
+  if (!tripTagLabel && !travelType && schedules.length === 0) return null;
+
+  return {
+    tripTagLabel: tripTagLabel || travelType || "출장",
+    travelType,
+    schedules,
+  };
+}
+
+export function getScheduleAssignmentTripTooltip(
+  input: ScheduleAssignmentDisplayNameInput,
+  store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
+  visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag> = getScheduleAssignmentVisibleTripTagMap(),
+) {
+  const trimmedName = input.name.trim();
+  if (!trimmedName || input.category === "휴가") return null;
+
+  const monthEntries = store.entries[input.monthKey] ?? {};
+  const rowKey = createAssignmentRowKey(input.dateKey, input.category, input.index, input.name);
+  const directTooltip = getScheduleAssignmentTripTooltipForRow(rowKey, monthEntries[rowKey], visibleTripTagMap);
+  if (directTooltip) return directTooltip;
+
+  const candidateRowKeys = new Set([...Object.keys(monthEntries), ...Array.from(visibleTripTagMap.keys())]);
+  for (const candidateRowKey of candidateRowKeys) {
+    const parsed = parseScheduleAssignmentRowKey(candidateRowKey);
+    if (!isSameScheduleAssignmentDisplayTarget(input, parsed)) continue;
+    const tooltip = getScheduleAssignmentTripTooltipForRow(candidateRowKey, monthEntries[candidateRowKey], visibleTripTagMap);
+    if (tooltip) return tooltip;
+  }
+
+  const customRowKey = findCustomScheduleAssignmentRowKeyForDisplay(input, store);
+  return customRowKey ? getScheduleAssignmentTripTooltipForRow(customRowKey, monthEntries[customRowKey], visibleTripTagMap) : null;
 }
 
 export function formatScheduleAssignmentDisplayName(

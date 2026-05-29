@@ -6,6 +6,7 @@ import { flushSync } from "react-dom";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { ScheduleBigEventsSection, type BigEventValidationMessage } from "@/components/schedule/schedule-big-events-section";
 import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
+import { ScheduleTripTooltip } from "@/components/schedule/schedule-trip-tooltip";
 import { getSession } from "@/lib/auth/storage";
 import { printHtmlDocument } from "@/lib/print";
 import {
@@ -43,6 +44,7 @@ import {
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentGeneralDisplayNames,
   getScheduleAssignmentStore,
+  getScheduleAssignmentTripTooltip,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadAssignmentMonth,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
@@ -2631,6 +2633,17 @@ export function ScheduleApp() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const tripTooltip = getScheduleAssignmentTripTooltip(
+                                    {
+                                      monthKey: dayOwnerMonthKey,
+                                      dateKey: day.dateKey,
+                                      category,
+                                      index,
+                                      name: assignmentDisplay.name,
+                                    },
+                                    scheduleAssignmentStore,
+                                    visibleTripTagMap,
+                                  );
                                   const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                   const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
@@ -2665,11 +2678,12 @@ export function ScheduleApp() {
                                         overflow: "visible",
                                       }}
                                     >
-                                      <div
-                                        className={`schedule-name-chip ${editMode ? "schedule-name-chip--edit" : ""}`}
-                                        data-selected={selected ? "true" : undefined}
-                                        draggable={canDragAssignments && !isBigEventAssignmentCategory}
-                                        onClick={() => {
+                                      <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!editMode}>
+                                        <div
+                                          className={`schedule-name-chip ${editMode ? "schedule-name-chip--edit" : ""}`}
+                                          data-selected={selected ? "true" : undefined}
+                                          draggable={canDragAssignments && !isBigEventAssignmentCategory}
+                                          onClick={() => {
                                           if (!editMode) return;
                                           if (isBigEventAssignmentCategory) return;
                                           if (category === "휴가") {
@@ -2685,8 +2699,8 @@ export function ScheduleApp() {
                                             return;
                                           }
                                           handlePersonSlotActivate({ dateKey: day.dateKey, category, index });
-                                        }}
-                                        onDragStart={(event) => {
+                                          }}
+                                          onDragStart={(event) => {
                                           if (!canDragAssignments || isBigEventAssignmentCategory) return;
                                           event.stopPropagation();
                                           event.dataTransfer.effectAllowed = "move";
@@ -2695,15 +2709,15 @@ export function ScheduleApp() {
                                             ...current,
                                             selectedPerson: { dateKey: day.dateKey, category, index },
                                           }));
-                                        }}
-                                        onDragEnd={() => {
+                                          }}
+                                          onDragEnd={() => {
                                           if (!canDragAssignments) return;
                                           setState((current) => ({
                                             ...current,
                                             selectedPerson: null,
                                           }));
-                                        }}
-                                        style={{
+                                          }}
+                                          style={{
                                           display: "flex",
                                           alignItems: "center",
                                         justifyContent: "center",
@@ -2754,17 +2768,18 @@ export function ScheduleApp() {
                                         fontWeight: 700,
                                         lineHeight: 1.3,
                                         boxShadow: "none",
-                                      }}
-                                    >
-                                        <FittedNameText
-                                          text={getAssignmentChipText(assignmentDisplayText, nameTag)}
-                                          className="schedule-name-chip__text"
-                                          minFontSize={9}
-                                          maxFontSize={(editMode ? 16 : 18) + tripDisplayFontSizeBoost}
-                                          style={{ minWidth: 0 }}
-                                        />
-                                        {personObject.pending && !editMode ? <span style={{ fontSize: 13 }}>근무변경요청중</span> : null}
-                                      </div>
+                                          }}
+                                        >
+                                          <FittedNameText
+                                            text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                            className="schedule-name-chip__text"
+                                            minFontSize={9}
+                                            maxFontSize={(editMode ? 16 : 18) + tripDisplayFontSizeBoost}
+                                            style={{ minWidth: 0 }}
+                                          />
+                                          {personObject.pending && !editMode ? <span style={{ fontSize: 13 }}>근무변경요청중</span> : null}
+                                        </div>
+                                      </ScheduleTripTooltip>
                                       {editMode && !isBigEventAssignmentCategory ? (
                                         <button
                                           className="btn"
@@ -3331,61 +3346,76 @@ export function ScheduleApp() {
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const tripTooltip = getScheduleAssignmentTripTooltip(
+                                    {
+                                      monthKey: visibleSchedule?.monthKey ?? "",
+                                      dateKey: day.dateKey,
+                                      category,
+                                      index,
+                                      name: assignmentDisplay.name,
+                                    },
+                                    scheduleAssignmentStore,
+                                    visibleTripTagMap,
+                                  );
                                   const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                   const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
                                   const conflicted = conflictSet.has(`${category}-${name}`) || duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const weekendConflict = conflicted && (day.isWeekend || day.isHoliday);
                                   return (
-                                    <div
-                                      className="schedule-name-chip"
+                                    <ScheduleTripTooltip
                                       key={`preview-${category}-${name}-${index}`}
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        width: "100%",
-                                        gap: 6,
-                                        padding: "4px",
-                                        minHeight: 34,
-                                        borderRadius: 0,
-                                        background: conflicted
-                                          ? weekendConflict
-                                            ? "rgba(34,211,238,.28)"
-                                            : "rgba(239,68,68,.22)"
-                                          : hasTaggedDisplayName
-                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
-                                          : nameTagColors
-                                            ? nameTagColors.background
-                                          : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.16)",
-                                        border: conflicted
-                                          ? weekendConflict
-                                            ? "1px solid rgba(103,232,249,.65)"
-                                            : "1px solid rgba(239,68,68,.28)"
-                                          : hasTaggedDisplayName
-                                            ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
-                                          : nameTagColors
-                                            ? nameTagColors.border
-                                          : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
-                                        color: weekendConflict
-                                          ? "#d8fbff"
-                                          : hasTaggedDisplayName
-                                              ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
-                                            : nameTagColors
-                                              ? nameTagColors.color
-                                            : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
-                                        fontWeight: 700,
-                                        lineHeight: 1.3,
-                                        boxShadow: "none",
-                                      }}
+                                      tooltip={tripTooltip}
                                     >
-                                      <FittedNameText
-                                        text={getAssignmentChipText(assignmentDisplayText, nameTag)}
-                                        className="schedule-name-chip__text"
-                                        minFontSize={9}
-                                        maxFontSize={18 + tripDisplayFontSizeBoost}
-                                      />
-                                    </div>
+                                      <div
+                                        className="schedule-name-chip"
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          width: "100%",
+                                          gap: 6,
+                                          padding: "4px",
+                                          minHeight: 34,
+                                          borderRadius: 0,
+                                          background: conflicted
+                                            ? weekendConflict
+                                              ? "rgba(34,211,238,.28)"
+                                              : "rgba(239,68,68,.22)"
+                                            : hasTaggedDisplayName
+                                              ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND
+                                            : nameTagColors
+                                              ? nameTagColors.background
+                                            : assignmentDisplay.chipStyle?.background ?? "rgba(255,255,255,.16)",
+                                          border: conflicted
+                                            ? weekendConflict
+                                              ? "1px solid rgba(103,232,249,.65)"
+                                              : "1px solid rgba(239,68,68,.28)"
+                                            : hasTaggedDisplayName
+                                              ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER
+                                            : nameTagColors
+                                              ? nameTagColors.border
+                                            : assignmentDisplay.chipStyle?.border ?? "1px solid transparent",
+                                          color: weekendConflict
+                                            ? "#d8fbff"
+                                            : hasTaggedDisplayName
+                                                ? SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR
+                                              : nameTagColors
+                                                ? nameTagColors.color
+                                              : assignmentDisplay.chipStyle?.color ?? "#f8fbff",
+                                          fontWeight: 700,
+                                          lineHeight: 1.3,
+                                          boxShadow: "none",
+                                        }}
+                                      >
+                                        <FittedNameText
+                                          text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                          className="schedule-name-chip__text"
+                                          minFontSize={9}
+                                          maxFontSize={18 + tripDisplayFontSizeBoost}
+                                        />
+                                      </div>
+                                    </ScheduleTripTooltip>
                                   );
                                 })}
                                 {names.length > 0 && names.length % 2 === 1 ? (

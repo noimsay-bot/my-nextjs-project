@@ -334,14 +334,6 @@ html[data-theme="light"] .metaBarDdayDate {
   gap: 12px;
 }
 
-.currentTripsTabCard {
-  width: min(100%, 420px);
-}
-
-.mobileCurrentTripsNotice {
-  display: none;
-}
-
 .desktopTabList {
   display: flex;
   gap: 10px;
@@ -442,12 +434,6 @@ html[data-theme="light"] .metaBarDdayDate {
     gap: 6px;
   }
 
-  .mobileCurrentTripsNotice {
-    display: grid;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
   .tabButton {
     width: 100%;
     min-height: 44px;
@@ -524,10 +510,6 @@ html[data-theme="light"] .tickerCategory {
 
 html[data-theme="light"] .tickerText {
   color: #111827;
-}
-
-.currentTripsTabCard :global(.schedule-current-trips-card__body) {
-  padding-top: 14px;
 }
 
 .panel {

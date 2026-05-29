@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
+import { ScheduleTripTooltip } from "@/components/schedule/schedule-trip-tooltip";
 import {
   getSession,
   hasDeskAccess,
@@ -54,6 +55,7 @@ import {
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER,
   getScheduleAssignmentStore,
+  getScheduleAssignmentTripTooltip,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadAssignmentMonths,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
@@ -2233,6 +2235,17 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                             scheduleAssignmentStore,
                                             visibleTripTagMap,
                                           );
+                                          const tripTooltip = getScheduleAssignmentTripTooltip(
+                                            {
+                                              monthKey: day.ownerMonthKey,
+                                              dateKey: day.dateKey,
+                                              category,
+                                              index,
+                                              name: assignmentDisplay.name,
+                                            },
+                                            scheduleAssignmentStore,
+                                            visibleTripTagMap,
+                                          );
                                           const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                           const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                           const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
@@ -2248,16 +2261,20 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 position: "relative",
                                                 minWidth: 0,
                                                 width: "100%",
-                                                overflow: isMobileThreeDayView ? "hidden" : "visible",
-                                                zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
+                                                overflow: tripTooltip ? "visible" : isMobileThreeDayView ? "hidden" : "visible",
+                                                zIndex: tripTooltip ? 20 : firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
                                               }}
                                             >
-                                              <button
-                                                type="button"
-                                                className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
-                                                disabled={!isInteractiveChip}
-                                                onClick={() => void handleNameClick(personObject)}
-                                                style={{
+                                              <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!isInteractiveChip}>
+                                                <button
+                                                  type="button"
+                                                  className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                                  disabled={!isInteractiveChip && !tripTooltip}
+                                                  onClick={() => {
+                                                    if (!isInteractiveChip) return;
+                                                    void handleNameClick(personObject);
+                                                  }}
+                                                  style={{
                                                   display: "flex",
                                                   flexDirection: "column",
                                                   gridColumn: "auto",
@@ -2341,25 +2358,26 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                       : undefined,
                                                   transformOrigin: "center",
                                                   cursor: isInteractiveChip ? "pointer" : "default",
-                                                }}
-                                              >
-                                                <FittedNameText
-                                                  text={getAssignmentChipText(assignmentDisplayText, nameTag)}
-                                                  className="schedule-name-chip__text"
-                                                  minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
-                                                  maxFontSize={(isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18) + tripDisplayFontSizeBoost}
-                                                  style={{
-                                                    display: "inline-block",
-                                                    flex: "0 1 auto",
-                                                    minWidth: 0,
-                                                    width: "100%",
-                                                    margin: "0 auto",
-                                                    overflow: "visible",
-                                                    textOverflow: "clip",
                                                   }}
-                                                />
-                                                {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
-                                              </button>
+                                                >
+                                                  <FittedNameText
+                                                    text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                                    className="schedule-name-chip__text"
+                                                    minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
+                                                    maxFontSize={(isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18) + tripDisplayFontSizeBoost}
+                                                    style={{
+                                                      display: "inline-block",
+                                                      flex: "0 1 auto",
+                                                      minWidth: 0,
+                                                      width: "100%",
+                                                      margin: "0 auto",
+                                                      overflow: "visible",
+                                                      textOverflow: "clip",
+                                                    }}
+                                                  />
+                                                  {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
+                                                </button>
+                                              </ScheduleTripTooltip>
                                               {renderInlineRecommendedCandidates(ref)}
                                             </div>
                                           );
@@ -2615,6 +2633,17 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                     scheduleAssignmentStore,
                                     visibleTripTagMap,
                                   );
+                                  const tripTooltip = getScheduleAssignmentTripTooltip(
+                                    {
+                                      monthKey: day.ownerMonthKey,
+                                      dateKey: day.dateKey,
+                                      category,
+                                      index,
+                                      name: assignmentDisplay.name,
+                                    },
+                                    scheduleAssignmentStore,
+                                    visibleTripTagMap,
+                                  );
                                   const tripDisplayFontSizeBoost = assignmentDisplayText.includes("(출)") ? 2 : 0;
                                   const hasTaggedDisplayName = Boolean(nameTag || assignmentDisplayText !== assignmentDisplay.name);
                                   const nameTagColors = nameTag ? scheduleAssignmentNameTagColors[nameTag] : null;
@@ -2630,16 +2659,20 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                         position: "relative",
                                         minWidth: 0,
                                         width: "100%",
-                                        overflow: isMobileThreeDayView ? "hidden" : "visible",
-                                        zIndex: firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
+                                        overflow: tripTooltip ? "visible" : isMobileThreeDayView ? "hidden" : "visible",
+                                        zIndex: tripTooltip ? 20 : firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
                                       }}
                                     >
-                                      <button
-                                        type="button"
-                                        className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
-                                        disabled={!isInteractiveChip}
-                                        onClick={() => void handleNameClick(personObject)}
-                                        style={{
+                                      <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!isInteractiveChip}>
+                                        <button
+                                          type="button"
+                                          className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+                                          disabled={!isInteractiveChip && !tripTooltip}
+                                          onClick={() => {
+                                            if (!isInteractiveChip) return;
+                                            void handleNameClick(personObject);
+                                          }}
+                                          style={{
                                           display: "flex",
                                           flexDirection: "column",
                                           gridColumn: "auto",
@@ -2723,25 +2756,26 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                               : undefined,
                                           transformOrigin: "center",
                                           cursor: isInteractiveChip ? "pointer" : "default",
-                                        }}
-                                      >
-                                        <FittedNameText
-                                          text={getAssignmentChipText(assignmentDisplayText, nameTag)}
-                                          className="schedule-name-chip__text"
-                                          minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
-                                          maxFontSize={(isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18) + tripDisplayFontSizeBoost}
-                                          style={{
-                                            display: "inline-block",
-                                            flex: "0 1 auto",
-                                            minWidth: 0,
-                                            width: "100%",
-                                            margin: "0 auto",
-                                            overflow: "visible",
-                                            textOverflow: "clip",
                                           }}
-                                        />
-                                        {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
-                                      </button>
+                                        >
+                                          <FittedNameText
+                                            text={getAssignmentChipText(assignmentDisplayText, nameTag)}
+                                            className="schedule-name-chip__text"
+                                            minFontSize={shouldAutoFitSchedule || isCompactThreeDayView ? 3.5 : 9}
+                                            maxFontSize={(isCompactThreeDayView ? 10 : isCompactMonthlyView ? 16 : isCompactDailyView ? 16 : 18) + tripDisplayFontSizeBoost}
+                                            style={{
+                                              display: "inline-block",
+                                              flex: "0 1 auto",
+                                              minWidth: 0,
+                                              width: "100%",
+                                              margin: "0 auto",
+                                              overflow: "visible",
+                                              textOverflow: "clip",
+                                            }}
+                                          />
+                                          {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
+                                        </button>
+                                      </ScheduleTripTooltip>
                                       {renderInlineRecommendedCandidates(ref)}
                                     </div>
                                   );

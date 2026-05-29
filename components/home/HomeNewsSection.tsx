@@ -1,5 +1,4 @@
 import { HomeNoticeFeed } from "@/components/home/HomeNoticeFeed";
-import { HomeNewsCurrentTrips } from "@/components/home/HomeNewsCurrentTrips";
 import { HomeNewsMeta } from "@/components/home/HomeNewsMeta";
 import styles from "@/components/home/HomeNews.module.css";
 import { HomeNewsCardItem } from "@/components/home/home-news.types";
@@ -45,7 +44,6 @@ export function HomeNewsSection({
         deletingNoticeId={deletingNoticeId}
         onDeleteNotice={onDeleteNotice}
       />
-      <HomeNewsCurrentTrips defaultExpanded />
     </section>
   );
 }
