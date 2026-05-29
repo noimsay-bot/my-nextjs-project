@@ -10,7 +10,7 @@ const printColumns = [
   { key: "equipmentName", label: "장비배정", className: "election-print-col-equipment" },
   { key: "trs", label: "TRS", className: "election-print-col-trs" },
   { key: "cameraStaff", label: "촬영기자", className: "election-print-col-staff" },
-  { key: "audioStaff", label: "오디오맨", className: "election-print-col-staff" },
+  { key: "audioStaff", label: "오디오맨 / 수송부", className: "election-print-col-staff" },
   { key: "liveTime", label: "중계시간", className: "election-print-col-time" },
   { key: "reporter", label: "취재기자", className: "election-print-col-staff" },
   { key: "address", label: "주소", className: "election-print-col-address" },

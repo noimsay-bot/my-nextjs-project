@@ -115,6 +115,7 @@ const poolVideoOptions = [
   "ytn",
   "mbn",
   "국회방송",
+  "아리랑",
 ] as const;
 
 const tableColumns = [
@@ -125,7 +126,7 @@ const tableColumns = [
   "장비배정",
   "TRS",
   "촬영기자",
-  "오디오맨",
+  "오디오맨 / 수송부",
   "중계시간",
   "취재기자",
   "주소",
@@ -137,7 +138,7 @@ const tableColumns = [
 
 const readOnlyTableColumns = tableColumns;
 type ElectionTableColumn = (typeof tableColumns)[number];
-const staffNameColumns = new Set(["촬영기자", "오디오맨", "취재기자"]);
+const staffNameColumns = new Set(["촬영기자", "오디오맨 / 수송부", "취재기자"]);
 const LIVE_POSITION_CHECKED_VALUE = "checked";
 const DEFAULT_EQUIPMENT_NAME = "TVU-";
 const AUTO_SAVE_DEBOUNCE_MS = 900;
@@ -157,7 +158,7 @@ const defaultColumnWidths: Record<ElectionTableColumn, number> = {
   "장비배정": 106,
   "TRS": 78,
   "촬영기자": 106,
-  "오디오맨": 104,
+  "오디오맨 / 수송부": 104,
   "중계시간": 116,
   "취재기자": 106,
   "주소": 290,
@@ -175,7 +176,7 @@ const minColumnWidths: Record<ElectionTableColumn, number> = {
   "장비배정": 72,
   "TRS": 54,
   "촬영기자": 72,
-  "오디오맨": 72,
+  "오디오맨 / 수송부": 72,
   "중계시간": 78,
   "취재기자": 72,
   "주소": 120,
@@ -193,7 +194,7 @@ const printColumnWidths: Record<ElectionTableColumn, string> = {
   "장비배정": "6.6%",
   "TRS": "4.7%",
   "촬영기자": "6.8%",
-  "오디오맨": "6.4%",
+  "오디오맨 / 수송부": "6.4%",
   "중계시간": "7.2%",
   "취재기자": "6.6%",
   "주소": "18.6%",
