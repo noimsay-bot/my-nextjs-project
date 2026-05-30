@@ -2608,6 +2608,8 @@ function getScheduleAssignmentTripTooltipForRow(
   entry: ScheduleAssignmentEntry | null | undefined,
   visibleTripTagMap: Map<string, ScheduleAssignmentVisibleTripTag>,
 ): ScheduleAssignmentTripTooltip | null {
+  if (!hasScheduleAssignmentTripDisplay(rowKey, entry, visibleTripTagMap)) return null;
+
   const visibleTripTag = visibleTripTagMap.get(rowKey) ?? null;
   const tripTagLabel = (visibleTripTag?.tripTagLabel || entry?.tripTagLabel || "").trim();
   const travelType = visibleTripTag?.travelType || entry?.travelType || "";

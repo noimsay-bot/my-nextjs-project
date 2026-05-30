@@ -9,6 +9,7 @@ import {
   formatScheduleAssignmentDisplayName,
   getScheduleAssignmentBigEventDutyOptions,
   getScheduleAssignmentBigEvents,
+  getScheduleAssignmentTripTooltip,
   getScheduleAssignmentGeneralDisplayNames,
   getScheduleAssignmentRows,
 } from "@/lib/team-lead/storage";
@@ -104,6 +105,31 @@ test("trip display follows assignment trip category rows without travel type met
       new Map(),
     ),
   ).toBe("박재현(출)");
+});
+
+test("trip tooltip only appears for names displayed with trip marker", () => {
+  const store: ScheduleAssignmentDataStore = {
+    entries: {
+      "2026-05": {
+        "2026-05-02::일반::0::박재현": {
+          ...createDefaultScheduleAssignmentEntry(),
+          schedules: ["국회 현장 일정"],
+        },
+      },
+    },
+    rows: {},
+  };
+
+  const input = {
+    monthKey: "2026-05",
+    dateKey: "2026-05-02",
+    category: "일반",
+    index: 0,
+    name: "박재현",
+  };
+
+  expect(formatScheduleAssignmentDisplayName(input, store, new Map())).toBe("박재현");
+  expect(getScheduleAssignmentTripTooltip(input, store, new Map())).toBeNull();
 });
 
 test("trip display works for custom general rows from schedule assignment", () => {
