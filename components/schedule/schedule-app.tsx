@@ -2653,6 +2653,7 @@ export function ScheduleApp() {
                                   return (
                                     <div
                                       key={personObject.key}
+                                      className="schedule-trip-tooltip-layer"
                                       onDragOver={(event) => {
                                         if (!canDropAssignments) return;
                                         const source = parseScheduleDragPayload(event.dataTransfer.getData("text/plain"));

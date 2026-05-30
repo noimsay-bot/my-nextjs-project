@@ -1411,17 +1411,26 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
   overflow: visible;
 }
 
+.schedule-day-card:has(.schedule-trip-tooltip-anchor:hover),
+.schedule-day-card:has(.schedule-trip-tooltip-anchor:focus-within),
+.schedule-day-card:has(.schedule-trip-tooltip-anchor[data-tooltip-open="true"]),
+.schedule-trip-tooltip-layer:has(.schedule-trip-tooltip-anchor:hover),
+.schedule-trip-tooltip-layer:has(.schedule-trip-tooltip-anchor:focus-within),
+.schedule-trip-tooltip-layer:has(.schedule-trip-tooltip-anchor[data-tooltip-open="true"]) {
+  z-index: 1200 !important;
+}
+
 .schedule-trip-tooltip-anchor:hover,
 .schedule-trip-tooltip-anchor:focus-within,
 .schedule-trip-tooltip-anchor[data-tooltip-open="true"] {
-  z-index: 80;
+  z-index: 1201;
 }
 
 .schedule-trip-tooltip {
   position: absolute;
   right: 50%;
   bottom: calc(100% + 8px);
-  z-index: 90;
+  z-index: 1202;
   display: grid;
   width: max-content;
   max-width: min(280px, 82vw);

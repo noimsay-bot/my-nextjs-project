@@ -2256,6 +2256,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           return (
                                             <div
                                               key={personObject.key}
+                                              className="schedule-trip-tooltip-layer"
                                               data-swap-recommendation-root={firstSelected ? "true" : undefined}
                                               style={{
                                                 position: "relative",
@@ -2654,6 +2655,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                   return (
                                     <div
                                       key={personObject.key}
+                                      className="schedule-trip-tooltip-layer"
                                       data-swap-recommendation-root={firstSelected ? "true" : undefined}
                                       style={{
                                         position: "relative",
