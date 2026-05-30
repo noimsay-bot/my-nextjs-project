@@ -7,7 +7,14 @@ import {
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
 
-export type PageVisitKey = "me" | "community" | "work_schedule" | "restaurants" | "equipment";
+export type PageVisitKey =
+  | "me"
+  | "community"
+  | "work_schedule"
+  | "restaurants"
+  | "equipment"
+  | "election_internal"
+  | "election_external";
 export type PageVisitRange = "week" | "month";
 
 export interface PageVisitMetric {
@@ -40,7 +47,7 @@ export interface PageVisitAnalytics {
 }
 
 interface PageVisitEventRow {
-  profile_id: string;
+  profile_id: string | null;
   page_key: PageVisitKey;
   visited_at: string;
 }
@@ -78,6 +85,14 @@ const PAGE_VISIT_META: Record<PageVisitKey, { label: string; pathPrefixes: strin
     label: "TVU/장비",
     pathPrefixes: ["/equipment"],
   },
+  election_internal: {
+    label: "선거(내부)",
+    pathPrefixes: ["/election"],
+  },
+  election_external: {
+    label: "선거(외부)",
+    pathPrefixes: ["/election-public"],
+  },
 };
 
 function resolvePageVisitKey(pathname: string): PageVisitKey | null {
@@ -90,6 +105,10 @@ function resolvePageVisitKey(pathname: string): PageVisitKey | null {
 
 function getThrottleStorageKey(profileId: string, pageKey: PageVisitKey) {
   return `jtbc-page-visit:${profileId}:${pageKey}`;
+}
+
+function getAnonymousThrottleStorageKey(pageKey: PageVisitKey) {
+  return `jtbc-page-visit:anonymous:${pageKey}`;
 }
 
 export async function recordPageVisit(pathname: string) {
@@ -120,6 +139,36 @@ export async function recordPageVisit(pathname: string) {
     }
   } catch (error) {
     console.warn("페이지 방문 기록 저장에 실패했습니다.", error);
+  }
+}
+
+export async function recordPublicElectionPageVisit() {
+  const pageKey = "election_external" satisfies PageVisitKey;
+  if (typeof window === "undefined") return;
+
+  const storageKey = getAnonymousThrottleStorageKey(pageKey);
+  const lastRecordedAt = Number(window.sessionStorage.getItem(storageKey));
+  if (Number.isFinite(lastRecordedAt) && Date.now() - lastRecordedAt < PAGE_VISIT_THROTTLE_MS) {
+    return;
+  }
+
+  window.sessionStorage.setItem(storageKey, String(Date.now()));
+
+  try {
+    const response = await fetch("/api/portal/page-visit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        pageKey,
+        path: window.location.pathname,
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn("공개 선거 페이지 방문 기록 저장에 실패했습니다.", await response.text());
+    }
+  } catch (error) {
+    console.warn("공개 선거 페이지 방문 기록 저장에 실패했습니다.", error);
   }
 }
 
@@ -232,6 +281,7 @@ function buildMonthlyTopVisitors(rows: PageVisitEventRow[], monthStart: Date, pr
 
   rows
     .filter((row) => new Date(row.visited_at) >= monthStart)
+    .filter((row): row is PageVisitEventRow & { profile_id: string } => Boolean(row.profile_id))
     .filter((row) => {
       const role = profileMap.get(row.profile_id)?.role;
       return role !== "admin" && role !== "team_lead" && role !== "desk";
@@ -300,7 +350,7 @@ export async function getAdminPageVisitAnalytics(): Promise<PageVisitAnalytics> 
     }
 
     const rows = data ?? [];
-    const profileIds = Array.from(new Set(rows.map((row) => row.profile_id)));
+    const profileIds = Array.from(new Set(rows.map((row) => row.profile_id).filter((profileId): profileId is string => Boolean(profileId))));
     const { data: profiles } =
       profileIds.length > 0
         ? await supabase

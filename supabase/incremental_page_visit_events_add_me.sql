@@ -16,5 +16,5 @@ begin
 
   alter table public.page_visit_events
     add constraint page_visit_events_page_key_check
-    check (page_key in ('me', 'community', 'work_schedule', 'restaurants', 'equipment'));
+    check (page_key in ('me', 'community', 'work_schedule', 'restaurants', 'equipment', 'election_internal', 'election_external'));
 end $$;

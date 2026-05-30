@@ -1,7 +1,7 @@
 create table if not exists public.page_visit_events (
   id uuid primary key default gen_random_uuid(),
-  profile_id uuid not null references public.profiles (id) on delete cascade,
-  page_key text not null check (page_key in ('me', 'community', 'work_schedule', 'restaurants', 'equipment')),
+  profile_id uuid references public.profiles (id) on delete cascade,
+  page_key text not null check (page_key in ('me', 'community', 'work_schedule', 'restaurants', 'equipment', 'election_internal', 'election_external')),
   path text not null default '',
   visited_at timestamptz not null default timezone('utc', now())
 );

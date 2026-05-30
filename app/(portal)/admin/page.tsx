@@ -222,6 +222,8 @@ const pageVisitLineStyles: Record<PageVisitKey, { color: string; muted: string }
   work_schedule: { color: "#34d399", muted: "rgba(52,211,153,.16)" },
   restaurants: { color: "#fbbf24", muted: "rgba(251,191,36,.16)" },
   equipment: { color: "#fb7185", muted: "rgba(251,113,133,.16)" },
+  election_internal: { color: "#22c55e", muted: "rgba(34,197,94,.16)" },
+  election_external: { color: "#f97316", muted: "rgba(249,115,22,.16)" },
 };
 
 const visitAnalyticsPageLabels: Record<PageVisitKey, string> = {
@@ -230,6 +232,8 @@ const visitAnalyticsPageLabels: Record<PageVisitKey, string> = {
   work_schedule: "근무표",
   restaurants: "내 주변 맛집",
   equipment: "TVU/장비",
+  election_internal: "선거(내부)",
+  election_external: "선거(외부)",
 };
 
 const visitAnalyticsPageKeys = Object.keys(pageVisitLineStyles) as PageVisitKey[];
@@ -859,7 +863,7 @@ export default function AdminPage() {
               <div className="chip">방문 통계</div>
               <strong style={{ fontSize: 22 }}>주요 페이지 방문 현황</strong>
             </div>
-            <span className="muted">마이페이지 · 커뮤니티 · 근무표 · 내 주변 맛집 · TVU/장비</span>
+            <span className="muted">마이페이지 · 커뮤니티 · 근무표 · 내 주변 맛집 · TVU/장비 · 선거(내부/외부)</span>
           </div>
           {visitAnalytics.message ? (
             <div className={`status ${visitAnalytics.schemaMissing ? "warn" : "note"}`}>

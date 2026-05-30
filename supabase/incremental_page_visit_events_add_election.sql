@@ -1,3 +1,6 @@
+alter table public.page_visit_events
+  alter column profile_id drop not null;
+
 do $$
 declare
   constraint_name text;

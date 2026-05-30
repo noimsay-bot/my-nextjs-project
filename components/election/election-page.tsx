@@ -20,6 +20,7 @@ import type {
   ElectionStatus,
 } from "@/lib/election/types";
 import { getSession, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
+import { recordPublicElectionPageVisit } from "@/lib/portal/page-visit-analytics";
 import { createClient as createSupabaseClient, hasSupabaseEnv } from "@/lib/supabase/client";
 import styles from "./Election.module.css";
 
@@ -1785,6 +1786,11 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!publicViewer) return;
+    void recordPublicElectionPageVisit();
+  }, [publicViewer]);
 
   useEffect(() => subscribeToAuth((session) => {
     setCurrentSession(session);
