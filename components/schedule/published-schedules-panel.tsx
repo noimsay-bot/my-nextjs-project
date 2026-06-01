@@ -1648,6 +1648,10 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
     if (target.closest('[data-swap-recommendation-root="true"]')) return;
+    if (target.closest('[data-schedule-change-name-chip="true"]')) {
+      setIsRecommendationPopoverOpen(false);
+      return;
+    }
     setIsRecommendationPopoverOpen(false);
     event.preventDefault();
     event.stopPropagation();
@@ -2269,6 +2273,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                               <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!isInteractiveChip}>
                                                 <button
                                                   type="button"
+                                                  data-schedule-change-name-chip="true"
                                                   className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
                                                   disabled={!isInteractiveChip && !tripTooltip}
                                                   onClick={() => {
@@ -2668,6 +2673,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                       <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!isInteractiveChip}>
                                         <button
                                           type="button"
+                                          data-schedule-change-name-chip="true"
                                           className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
                                           disabled={!isInteractiveChip && !tripTooltip}
                                           onClick={() => {
