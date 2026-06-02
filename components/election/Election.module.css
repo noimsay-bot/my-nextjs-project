@@ -510,11 +510,53 @@
 
 .placeCellInner {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 4px;
   align-content: center;
   align-items: center;
   min-height: 30px;
+}
+
+.readOnlyPlaceCellInner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+  min-height: 28px;
+}
+
+.placeCopyButton {
+  display: inline-flex;
+  min-width: 34px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border: 1px solid rgba(14, 116, 144, 0.38);
+  border-radius: 0;
+  background: rgba(240, 249, 255, 0.92);
+  color: #075985;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.placeCopyButton:hover:not(:disabled) {
+  border-color: rgba(14, 116, 144, 0.68);
+  background: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.placeCopyButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.darkColorCell .placeCopyButton {
+  background: rgba(240, 249, 255, 0.96);
+  color: #075985 !important;
 }
 
 .cellEditor {

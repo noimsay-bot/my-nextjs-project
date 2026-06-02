@@ -35,6 +35,10 @@ type ColorPaintPalette = "light" | "dark";
 type ColorPaintSelection = { color: string; palette: ColorPaintPalette };
 type PaintTarget = "region" | ElectionCellColorKey;
 type ElectionPageMode = "portal" | "public";
+type AssignmentCopyPoint = Pick<
+  ElectionPointInput,
+  "place" | "equipmentName" | "trs" | "cameraStaffName" | "cameraStaffNamePm" | "reporterName" | "reporterNamePm"
+>;
 
 interface DraftPoint extends ElectionPointInput {
   localId: string;
@@ -1073,6 +1077,61 @@ function formatElectionBoardTitle(title: string | null | undefined) {
   return trimmed ? `${trimmed} 취재 배치표` : "취재 배치표";
 }
 
+function normalizeAssignmentCopyPart(value: string | null | undefined) {
+  const trimmed = value?.replace(/\s+/g, " ").trim() ?? "";
+  return trimmed || "-";
+}
+
+function normalizeAssignmentEquipmentCopyPart(value: string | null | undefined) {
+  const trimmed = value?.replace(/\s+/g, " ").trim() ?? "";
+  if (!trimmed || /^TVU\s*-?\s*$/i.test(trimmed)) return "-";
+  return trimmed;
+}
+
+function formatAssignmentStaffCopyPart(morning: string | null | undefined, afternoon: string | null | undefined) {
+  const morningText = normalizeAssignmentCopyPart(morning);
+  const afternoonText = normalizeAssignmentCopyPart(afternoon);
+  if (afternoonText === "-") return morningText;
+  if (morningText === "-") return `오후 ${afternoonText}`;
+  return `오전 ${morningText}, 오후 ${afternoonText}`;
+}
+
+function buildAssignmentCopyText(point: AssignmentCopyPoint) {
+  return [
+    normalizeAssignmentCopyPart(point.place),
+    normalizeAssignmentEquipmentCopyPart(point.equipmentName),
+    normalizeAssignmentCopyPart(point.trs),
+    formatAssignmentStaffCopyPart(point.cameraStaffName, point.cameraStaffNamePm),
+    formatAssignmentStaffCopyPart(point.reporterName, point.reporterNamePm),
+  ].join(" / ");
+}
+
+async function copyTextToClipboard(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the textarea fallback for browsers that expose but block the Clipboard API.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error("clipboard copy failed");
+  }
+}
+
 function readOnlyValue(value: string | null | undefined) {
   const display = value?.trim() || "-";
   const lines = display === "-" ? [] : display.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -1241,6 +1300,31 @@ function TrashIcon() {
   );
 }
 
+function AssignmentCopyButton({
+  point,
+  disabled = false,
+  onCopy,
+}: {
+  point: AssignmentCopyPoint;
+  disabled?: boolean;
+  onCopy: (point: AssignmentCopyPoint) => void;
+}) {
+  const placeLabel = normalizeAssignmentCopyPart(point.place);
+  return (
+    <button
+      type="button"
+      className={styles.placeCopyButton}
+      data-election-skip-paint="true"
+      disabled={disabled}
+      onClick={() => onCopy(point)}
+      aria-label={`${placeLabel} 배치 정보 복사`}
+      title="장소 / TVU / TRS / 촬영기자 / 취재기자 복사"
+    >
+      복사
+    </button>
+  );
+}
+
 function ElectionPrintableTable({
   title,
   electionDate,
@@ -1398,12 +1482,14 @@ function ElectionReadOnlyTable({
   forcePlainViewerTable,
   viewMode,
   onViewModeChange,
+  onCopyPointAssignment,
 }: {
   event: ElectionEvent;
   highlightedLocationKeys: string[];
   forcePlainViewerTable: boolean;
   viewMode: ReadOnlyViewMode;
   onViewModeChange: (viewMode: ReadOnlyViewMode) => void;
+  onCopyPointAssignment: (point: AssignmentCopyPoint) => void;
 }) {
   const showingMap = viewMode === "map";
 
@@ -1483,7 +1569,12 @@ function ElectionReadOnlyTable({
                           {readOnlyValue(point.region)}
                         </td>
                       ) : null}
-                      <td className={getColorableCellClassName(undefined, placeColor)} style={getColorStyle(placeColor)}>{readOnlyValue(point.place)}</td>
+                      <td className={getColorableCellClassName(undefined, placeColor)} style={getColorStyle(placeColor)}>
+                        <div className={styles.readOnlyPlaceCellInner}>
+                          {readOnlyValue(point.place)}
+                          <AssignmentCopyButton point={point} onCopy={onCopyPointAssignment} />
+                        </div>
+                      </td>
                       <td className={getColorableCellClassName(styles.poolVideoColumn, poolVideoColor)} style={getColorStyle(poolVideoColor)}>{readOnlyValue(point.poolVideo)}</td>
                       <td className={getColorableCellClassName(undefined, equipmentNameColor)} style={getColorStyle(equipmentNameColor)}>{readOnlyValue(point.equipmentName)}</td>
                       <td className={getColorableCellClassName(undefined, trsColor)} style={getColorStyle(trsColor)}>{readOnlyValue(point.trs)}</td>
@@ -1687,6 +1778,15 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   const resetColumnWidth = useCallback((column: ElectionTableColumn) => {
     setColumnWidths((current) => ({ ...current, [column]: defaultColumnWidths[column] }));
+  }, []);
+
+  const handleCopyPointAssignment = useCallback(async (point: AssignmentCopyPoint) => {
+    try {
+      await copyTextToClipboard(buildAssignmentCopyText(point));
+      setMessage({ tone: "ok", text: "배치 정보를 복사했습니다." });
+    } catch {
+      setMessage({ tone: "warn", text: "배치 정보 복사에 실패했습니다. 브라우저 클립보드 권한을 확인해 주세요." });
+    }
   }, []);
 
   useEffect(() => {
@@ -2035,6 +2135,9 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
 
   const applyPaintToCell = (event: ReactPointerEvent<HTMLTableCellElement>, index: number, target: PaintTarget) => {
     if (!paintSelection || saving) return;
+    const targetElement = event.target instanceof HTMLElement ? event.target : null;
+    if (targetElement?.closest("[data-election-skip-paint='true']")) return;
+
     event.preventDefault();
     event.stopPropagation();
 
@@ -2336,6 +2439,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
               forcePlainViewerTable={publicViewer || !hasElectionManagerViewRole(currentSession)}
               viewMode={readOnlyViewMode}
               onViewModeChange={setReadOnlyViewMode}
+              onCopyPointAssignment={handleCopyPointAssignment}
             />
           ) : (
             <article className="panel">
@@ -2417,6 +2521,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
             forcePlainViewerTable={managerGeneralView || !hasElectionManagerViewRole(currentSession)}
             viewMode={readOnlyViewMode}
             onViewModeChange={setReadOnlyViewMode}
+            onCopyPointAssignment={handleCopyPointAssignment}
           />
         </div>
         <div className={styles.printOnly}>
@@ -2476,6 +2581,7 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
             forcePlainViewerTable
             viewMode={readOnlyViewMode}
             onViewModeChange={setReadOnlyViewMode}
+            onCopyPointAssignment={handleCopyPointAssignment}
           />
         </div>
         <div className={styles.printOnly}>
@@ -2783,6 +2889,11 @@ export function ElectionPage({ mode = "portal" }: { mode?: ElectionPageMode } = 
                         >
                           <div className={styles.placeCellInner}>
                             <input className="field-input" value={point.place} onChange={(event) => updatePoint(index, { place: event.target.value })} />
+                            <AssignmentCopyButton
+                              point={point}
+                              disabled={paintModeActive}
+                              onCopy={handleCopyPointAssignment}
+                            />
                             {hasRegionText ? (
                               <ReorderMenu
                                 label="장소"
