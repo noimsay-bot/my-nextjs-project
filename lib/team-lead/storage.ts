@@ -1955,6 +1955,16 @@ function getScheduleAssignmentLinkedDutyCategory(duty: string) {
   return scheduleAssignmentLinkedDutyCategoryMap[normalizeDutyLabel(duty)] ?? null;
 }
 
+function getScheduleAssignmentRowDisplayCategory(row: Pick<ScheduleAssignmentRow, "duty">) {
+  return getScheduleAssignmentLinkedDutyCategory(row.duty) ?? getScheduleCategoryLabel(row.duty);
+}
+
+function getScheduleAssignmentRowDisplaySignature(row: Pick<ScheduleAssignmentRow, "name" | "duty">) {
+  const name = row.name.trim();
+  const category = getScheduleAssignmentRowDisplayCategory(row);
+  return name && category ? `${category}::${name}` : "";
+}
+
 function addUniqueName(target: string[], name: string) {
   const trimmed = name.trim();
   if (!trimmed || target.includes(trimmed)) return;
@@ -2230,6 +2240,16 @@ export function getScheduleAssignmentRows(
     return bigEventDuty ? { ...row, duty: bigEventDuty } : row;
   };
 
+  const addedRows = dayRows.addedRows.map((row) => ({
+    key: createCustomAssignmentRowKey(day.dateKey, row.id),
+    name: row.name,
+    duty: row.duty,
+    isCustom: true,
+  }));
+  const addedRowSignatures = new Set(
+    addedRows.map(getScheduleAssignmentRowDisplaySignature).filter(Boolean),
+  );
+
   const baseRows = Object.entries(day.assignments)
     .filter(([category, names]) => category !== "휴가" && category !== "제크" && names.length > 0)
     .flatMap(([category, names]) =>
@@ -2244,14 +2264,8 @@ export function getScheduleAssignmentRows(
         };
       }),
     )
-    .filter((row) => !dayRows.deletedRowKeys.includes(row.key));
-
-  const addedRows = dayRows.addedRows.map((row) => ({
-    key: createCustomAssignmentRowKey(day.dateKey, row.id),
-    name: row.name,
-    duty: row.duty,
-    isCustom: true,
-  }));
+    .filter((row) => !dayRows.deletedRowKeys.includes(row.key))
+    .filter((row) => !addedRowSignatures.has(getScheduleAssignmentRowDisplaySignature(row)));
 
   return [...addedRows, ...baseRows]
     .map(applyBigEventDuty)

@@ -50,6 +50,7 @@ import { readStoredScheduleState, refreshScheduleState, SCHEDULE_STATE_EVENT } f
 import { vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { DaySchedule, ScheduleAssignmentNameTag, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, VacationType } from "@/lib/schedule/types";
 import {
+  applyScheduleAssignmentDutyCategoriesToSchedule,
   applyScheduleAssignmentNameTagsToSchedule,
   formatScheduleAssignmentDisplayName,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_BACKGROUND,
@@ -71,6 +72,10 @@ const HOME_RESPONSIVE_PREVIEW_DAY_COUNT = 6;
 const HOME_RESPONSIVE_PREVIEW_START_OFFSET = -1;
 const MOBILE_THREE_DAY_ROW_SIZE = 3;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
+
+function applyScheduleAssignmentDecorations(schedule: PublishedScheduleItem["schedule"]) {
+  return applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule));
+}
 
 function isVisualViewportPinchZoomActive() {
   if (typeof window === "undefined") return false;
@@ -815,7 +820,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [items, setItems] = useState<PublishedScheduleItem[]>(() =>
     getPublishedSchedules().map((item) => ({
       ...item,
-      schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+      schedule: applyScheduleAssignmentDecorations(item.schedule),
     })),
   );
   const [itemsLoading, setItemsLoading] = useState(() => getPublishedSchedules().length === 0);
@@ -881,7 +886,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     setItems(
       getPublishedSchedules().map((item) => ({
         ...item,
-        schedule: applyScheduleAssignmentNameTagsToSchedule(item.schedule),
+        schedule: applyScheduleAssignmentDecorations(item.schedule),
       })),
     );
   };
@@ -914,7 +919,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const syncScheduleHistory = () => {
     const nextHistory = readStoredScheduleState().generatedHistory.map((schedule) => ({
       monthKey: schedule.monthKey,
-      schedule: applyScheduleAssignmentNameTagsToSchedule(schedule),
+      schedule: applyScheduleAssignmentDecorations(schedule),
     }));
     setScheduleHistory(nextHistory);
   };
