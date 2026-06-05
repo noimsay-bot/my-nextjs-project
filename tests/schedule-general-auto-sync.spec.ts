@@ -578,7 +578,7 @@ test("assembly export parser supports optional leaves without breaking duty item
   ]);
 });
 
-test("assembly leaves sync maps annual, blue annual, and other leave while preserving compensatory leave", () => {
+test("assembly leaves sync maps annual, blue annual, and other leave while preserving compensatory leave and existing jcheck", () => {
   const baseDay = {
     day: 8,
     month: 5,
@@ -623,12 +623,12 @@ test("assembly leaves sync maps annual, blue annual, and other leave while prese
 
   expect(day.assignments["휴가"]).toEqual(["연차:신승규", "대휴:보존대휴", "기타:검진자", "기타:경조자"]);
   expect(day.vacations).toEqual(["연차:신승규", "대휴:보존대휴", "기타:검진자", "기타:경조자"]);
-  expect(day.assignments["제크"]).toEqual(["김상현"]);
+  expect(day.assignments["제크"]).toEqual(["기존제크", "김상현"]);
   expect(day.assignments["야근"]).toEqual(["보존야근"]);
   expect(result.changed).toBe(true);
 });
 
-test("assembly empty leaves clear only synced vacation targets and preserve compensatory leave", () => {
+test("assembly empty leaves preserve existing vacation targets and jcheck", () => {
   const schedule = {
     year: 2026,
     month: 5,
@@ -663,13 +663,13 @@ test("assembly empty leaves clear only synced vacation targets and preserve comp
   const result = applyAssemblyLeavesToSchedule(schedule, new Set(["2026-05-08"]), new Map(), new Set());
   const day = result.schedule.days[0];
 
-  expect(day.assignments["휴가"]).toEqual(["대휴:보존대휴"]);
-  expect(day.vacations).toEqual(["대휴:보존대휴"]);
-  expect(day.assignments["제크"]).toBeUndefined();
+  expect(day.assignments["휴가"]).toEqual(["연차:삭제연차", "대휴:보존대휴", "기타:삭제기타"]);
+  expect(day.vacations).toEqual(["연차:삭제연차", "대휴:보존대휴", "기타:삭제기타"]);
+  expect(day.assignments["제크"]).toEqual(["삭제제크"]);
   expect(day.assignments["조근"]).toEqual(["보존조근"]);
 });
 
-test("assembly leave match errors hold deletion for that date and leave type", () => {
+test("assembly leave sync preserves existing vacation entries when export has no matching names", () => {
   const schedule = {
     year: 2026,
     month: 5,
@@ -703,7 +703,7 @@ test("assembly leave match errors hold deletion for that date and leave type", (
     new Set([createAssemblyLeaveMatchErrorKey("2026-05-08", "연차")]),
   );
 
-  expect(result.schedule.days[0].assignments["휴가"]).toEqual(["연차:보류연차"]);
+  expect(result.schedule.days[0].assignments["휴가"]).toEqual(["연차:보류연차", "기타:삭제기타"]);
 });
 
 test("assembly compensatory leave push items use accepted route final names", () => {

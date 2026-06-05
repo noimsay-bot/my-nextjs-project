@@ -366,18 +366,24 @@ export function applyAssemblyLeavesToSchedule(
     const desiredOtherNames = desiredByDateCategory.get(day.dateKey)?.get("기타") ?? [];
     const hasAnnualMatchError = dateCategoryWithMatchErrors.has(createAssemblyLeaveMatchErrorKey(day.dateKey, "연차"));
     const hasOtherMatchError = dateCategoryWithMatchErrors.has(createAssemblyLeaveMatchErrorKey(day.dateKey, "기타"));
-    const nextAnnualNames = hasAnnualMatchError
+    const nextAnnualNames = hasAnnualMatchError || desiredAnnualNames.length === 0
       ? Array.from(new Set([...currentAnnualNames, ...desiredAnnualNames]))
       : desiredAnnualNames;
-    const nextOtherNames = hasOtherMatchError
+    const nextOtherNames = hasOtherMatchError || desiredOtherNames.length === 0
       ? Array.from(new Set([...currentOtherNames, ...desiredOtherNames]))
       : desiredOtherNames;
     const nextVacationEntries = rebuildVacationEntries(currentVacationEntries, nextAnnualNames, nextOtherNames);
 
     (["연차", "기타"] as const).forEach((assignmentType) => {
       const currentNames = assignmentType === "연차" ? currentAnnualNames : currentOtherNames;
+      const exportedNames = assignmentType === "연차" ? desiredAnnualNames : desiredOtherNames;
       const desiredNames = assignmentType === "연차" ? nextAnnualNames : nextOtherNames;
       const hasMatchError = assignmentType === "연차" ? hasAnnualMatchError : hasOtherMatchError;
+
+      if (exportedNames.length === 0) {
+        skippedCount += 1;
+        return;
+      }
 
       if (hasMatchError) {
         if (desiredNames.length > 0 && !areSameNames(currentNames, desiredNames)) {
@@ -400,11 +406,6 @@ export function applyAssemblyLeavesToSchedule(
         return;
       }
 
-      if (currentNames.length > 0) {
-        deletedCount += 1;
-        return;
-      }
-
       skippedCount += 1;
     });
 
@@ -415,9 +416,12 @@ export function applyAssemblyLeavesToSchedule(
     const currentJcheckNames = (day.assignments[HUB_JCHECK_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
     const desiredJcheckNames = desiredByDateCategory.get(day.dateKey)?.get("제크") ?? [];
     const hasJcheckMatchError = dateCategoryWithMatchErrors.has(createAssemblyLeaveMatchErrorKey(day.dateKey, "제크"));
-    const nextJcheckNames = hasJcheckMatchError
-      ? Array.from(new Set([...currentJcheckNames, ...desiredJcheckNames]))
-      : desiredJcheckNames;
+    const nextJcheckNames = Array.from(new Set([...currentJcheckNames, ...desiredJcheckNames]));
+
+    if (desiredJcheckNames.length === 0) {
+      skippedCount += 1;
+      return;
+    }
 
     if (hasJcheckMatchError) {
       if (nextJcheckNames.length > 0 && !areSameNames(currentJcheckNames, nextJcheckNames)) {
@@ -441,13 +445,6 @@ export function applyAssemblyLeavesToSchedule(
       compactDayJcheckAssignment(day);
       if (currentJcheckNames.length > 0) updatedCount += 1;
       else insertedCount += 1;
-      return;
-    }
-
-    if (currentJcheckNames.length > 0) {
-      delete day.assignments[HUB_JCHECK_CATEGORY];
-      day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_JCHECK_CATEGORY);
-      deletedCount += 1;
       return;
     }
 
