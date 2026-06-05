@@ -136,6 +136,11 @@ async function seedWorkSchedulePage(page: Page) {
   );
 }
 
+function requireCapturedInsert(value: Record<string, unknown> | null) {
+  if (!value) throw new Error("schedule_change_requests insert payload was not captured");
+  return value;
+}
+
 test("same-day weekend night shift can request a news standby change", async ({ page }) => {
   let capturedInsert: Record<string, unknown> | null = null;
 
@@ -178,8 +183,9 @@ test("same-day weekend night shift can request a news standby change", async ({ 
   await expect(page.getByText("근무 변경 요청을 등록했습니다.")).toBeVisible();
 
   await expect.poll(() => capturedInsert).not.toBeNull();
-  expect((capturedInsert?.source_ref as { category?: string; name?: string })?.category).toBe("야근");
-  expect((capturedInsert?.source_ref as { category?: string; name?: string })?.name).toBe("관리자");
-  expect((capturedInsert?.target_ref as { category?: string; name?: string })?.category).toBe("뉴스대기");
-  expect((capturedInsert?.target_ref as { category?: string; name?: string })?.name).toBe("김진광");
+  const inserted = requireCapturedInsert(capturedInsert);
+  expect((inserted.source_ref as { category?: string; name?: string })?.category).toBe("야근");
+  expect((inserted.source_ref as { category?: string; name?: string })?.name).toBe("관리자");
+  expect((inserted.target_ref as { category?: string; name?: string })?.category).toBe("뉴스대기");
+  expect((inserted.target_ref as { category?: string; name?: string })?.name).toBe("김진광");
 });

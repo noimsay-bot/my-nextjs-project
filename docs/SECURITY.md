@@ -12,6 +12,8 @@
 - `OPENAI_API_KEY`: server-only.
 - `ASSEMBLY_EXPORT_TOKEN`: server-only.
 - `HUB_ASSEMBLY_SYNC_TOKEN`: server-only.
+- `ASSEMBLY_LEAVE_APPLY_URL`: server-only.
+- `HUB_TO_ASSEMBLY_TOKEN`: server-only.
 - `KMA_APIHUB_AUTH_KEY`: server-only.
 - `DATA_GO_KR_SERVICE_KEY`: server-only.
 - SMTP 관련 키: server-only.

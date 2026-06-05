@@ -8,6 +8,10 @@ import {
   SchedulePersonRef,
   ScheduleState,
 } from "@/lib/schedule/types";
+import {
+  hasAssemblyCompensatoryLeavePushItems,
+  type AssemblyLeavePushAction,
+} from "@/lib/schedule/assembly-leave-push-core";
 import { isAutoManagedGeneralAssignment } from "@/lib/schedule/constants";
 import {
   isDeskPriorityVacationEntry,
@@ -68,6 +72,48 @@ function emitChangeRequestEvent() {
 function emitChangeRequestStatus(detail: { ok: boolean; message: string }) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(CHANGE_REQUESTS_STATUS_EVENT, { detail }));
+}
+
+async function pushAssemblyCompensatoryLeaveChangeRequest(
+  request: ScheduleChangeRequest,
+  action: AssemblyLeavePushAction,
+) {
+  if (typeof window === "undefined" || !hasAssemblyCompensatoryLeavePushItems(request.route)) {
+    return { ok: true as const, skipped: true as const };
+  }
+
+  try {
+    const response = await fetch("/api/schedule/assembly-leave-push", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        requestId: request.id,
+        action,
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+
+    if (!response.ok || payload?.ok === false) {
+      console.warn("[assembly-leave-push] 대휴 변경요청 국회 반영에 실패했습니다.", {
+        requestId: request.id,
+        action,
+        status: response.status,
+        message: payload?.message ?? response.statusText,
+      });
+      return { ok: false as const, skipped: false as const };
+    }
+
+    return { ok: true as const, skipped: false as const };
+  } catch (error) {
+    console.warn("[assembly-leave-push] 대휴 변경요청 국회 반영 요청에 실패했습니다.", {
+      requestId: request.id,
+      action,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false as const, skipped: false as const };
+  }
 }
 
 function nowStamp() {
@@ -842,6 +888,11 @@ export async function resolveScheduleChangeRequest(
     }
     if (!data || data.length !== 1) {
       throw new Error("근무 변경 요청을 처리할 권한이 없거나 요청이 이미 변경되었습니다.");
+    }
+    if (action === "accepted") {
+      await pushAssemblyCompensatoryLeaveChangeRequest(nextItem, "upsert");
+    } else if (action === "rolledBack") {
+      await pushAssemblyCompensatoryLeaveChangeRequest(nextItem, "delete");
     }
     return { ok: true as const, applied };
   } catch (error) {
