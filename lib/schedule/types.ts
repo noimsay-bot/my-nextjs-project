@@ -67,6 +67,7 @@ export interface GeneratedSchedule {
   nextStartDate: string;
   isBlankTemplate?: boolean;
   big_events?: ScheduleBigEvent[];
+  assembly_leave_sync_state?: Record<string, Partial<Record<"연차" | "제크" | "기타", string[]>>>;
 }
 
 export interface SnapshotItem {

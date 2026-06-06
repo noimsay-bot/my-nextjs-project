@@ -621,11 +621,213 @@ test("assembly leaves sync maps annual, blue annual, and other leave while prese
   const result = applyAssemblyLeavesToSchedule(schedule, new Set(["2026-05-08"]), desired, new Set());
   const day = result.schedule.days[0];
 
-  expect(day.assignments["휴가"]).toEqual(["연차:신승규", "대휴:보존대휴", "기타:검진자", "기타:경조자"]);
-  expect(day.vacations).toEqual(["연차:신승규", "대휴:보존대휴", "기타:검진자", "기타:경조자"]);
+  expect(day.assignments["휴가"]).toEqual(["연차:기존연차", "연차:신승규", "대휴:보존대휴", "기타:기존기타", "기타:검진자", "기타:경조자"]);
+  expect(day.vacations).toEqual(["연차:기존연차", "연차:신승규", "대휴:보존대휴", "기타:기존기타", "기타:검진자", "기타:경조자"]);
   expect(day.assignments["제크"]).toEqual(["기존제크", "김상현"]);
+  expect(result.schedule.assembly_leave_sync_state).toEqual({
+    "2026-05-08": {
+      연차: ["신승규"],
+      제크: ["김상현"],
+      기타: ["검진자", "경조자"],
+    },
+  });
   expect(day.assignments["야근"]).toEqual(["보존야근"]);
   expect(result.changed).toBe(true);
+});
+
+test("assembly leaves sync removes previously synced annual leave from the old date when Assembly moves it", () => {
+  const schedule: GeneratedSchedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    assembly_leave_sync_state: {
+      "2026-06-15": { 연차: ["김상현"] },
+    },
+    days: [
+      {
+        day: 15,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["연차:김상현", "연차:수동연차", "대휴:보존대휴"],
+        assignments: { 휴가: ["연차:김상현", "연차:수동연차", "대휴:보존대휴"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+        dateKey: "2026-06-15",
+      },
+      {
+        day: 16,
+        month: 6,
+        year: 2026,
+        dow: 2,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 조근: ["보존조근"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+        dateKey: "2026-06-16",
+      },
+    ],
+  };
+  const desired = new Map<string, Map<HubAssemblyLeaveAssignment, string[]>>([
+    ["2026-06-16", new Map<HubAssemblyLeaveAssignment, string[]>([["연차", ["김상현"]]])],
+  ]);
+
+  const result = applyAssemblyLeavesToSchedule(
+    schedule,
+    new Set(["2026-06-15", "2026-06-16"]),
+    desired,
+    new Set(),
+  );
+
+  expect(result.schedule.days[0].assignments["휴가"]).toEqual(["연차:수동연차", "대휴:보존대휴"]);
+  expect(result.schedule.days[0].vacations).toEqual(["연차:수동연차", "대휴:보존대휴"]);
+  expect(result.schedule.days[1].assignments["휴가"]).toEqual(["연차:김상현"]);
+  expect(result.schedule.days[1].assignments["조근"]).toEqual(["보존조근"]);
+  expect(result.schedule.assembly_leave_sync_state).toEqual({
+    "2026-06-16": { 연차: ["김상현"] },
+  });
+  expect(result.deletedCount).toBe(1);
+});
+
+test("assembly leaves sync removes old-date leave on first tracked run when the same Assembly person appears on another date", () => {
+  const schedule: GeneratedSchedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        day: 15,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["연차:김대호", "연차:수동연차"],
+        assignments: { 휴가: ["연차:김대호", "연차:수동연차"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+        dateKey: "2026-06-15",
+      },
+      {
+        day: 16,
+        month: 6,
+        year: 2026,
+        dow: 2,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: {},
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+        dateKey: "2026-06-16",
+      },
+    ],
+  };
+  const desired = new Map<string, Map<HubAssemblyLeaveAssignment, string[]>>([
+    ["2026-06-16", new Map<HubAssemblyLeaveAssignment, string[]>([["연차", ["김대호"]]])],
+  ]);
+
+  const result = applyAssemblyLeavesToSchedule(
+    schedule,
+    new Set(["2026-06-15", "2026-06-16"]),
+    desired,
+    new Set(),
+  );
+
+  expect(result.schedule.days[0].assignments["휴가"]).toEqual(["연차:수동연차"]);
+  expect(result.schedule.days[1].assignments["휴가"]).toEqual(["연차:김대호"]);
+  expect(result.schedule.assembly_leave_sync_state).toEqual({
+    "2026-06-16": { 연차: ["김대호"] },
+  });
+});
+
+test("assembly leaves sync removes only synced jcheck names from old dates", () => {
+  const schedule: GeneratedSchedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    assembly_leave_sync_state: {
+      "2026-06-15": { 제크: ["김상현"] },
+    },
+    days: [
+      {
+        day: 15,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 제크: ["정규제크", "김상현"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+        dateKey: "2026-06-15",
+      },
+      {
+        day: 16,
+        month: 6,
+        year: 2026,
+        dow: 2,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 제크: ["기존제크"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+        dateKey: "2026-06-16",
+      },
+    ],
+  };
+  const desired = new Map<string, Map<HubAssemblyLeaveAssignment, string[]>>([
+    ["2026-06-16", new Map<HubAssemblyLeaveAssignment, string[]>([["제크", ["김상현"]]])],
+  ]);
+
+  const result = applyAssemblyLeavesToSchedule(
+    schedule,
+    new Set(["2026-06-15", "2026-06-16"]),
+    desired,
+    new Set(),
+  );
+
+  expect(result.schedule.days[0].assignments["제크"]).toEqual(["정규제크"]);
+  expect(result.schedule.days[1].assignments["제크"]).toEqual(["기존제크", "김상현"]);
+  expect(result.schedule.assembly_leave_sync_state).toEqual({
+    "2026-06-16": { 제크: ["김상현"] },
+  });
 });
 
 test("assembly empty leaves preserve existing vacation targets and jcheck", () => {
