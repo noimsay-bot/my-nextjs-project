@@ -32,6 +32,7 @@ export type AssemblySyncErrorDetail = {
 export type ParsedAssemblyExport = {
   duties: AssemblyDutyItem[];
   leaves: AssemblyLeaveItem[];
+  hasItemsField: boolean;
   hasLeavesField: boolean;
   errors: AssemblySyncErrorDetail[];
 };
@@ -54,6 +55,7 @@ type AssemblyLeaveSyncState = NonNullable<GeneratedSchedule["assembly_leave_sync
 const ASSEMBLY_DUTY_TYPES = new Set<AssemblyDutyItem["dutyType"]>(["공휴일", "주말근무"]);
 const ASSEMBLY_LEAVE_TYPES = new Set<AssemblyLeaveItem["leaveType"]>(["연차", "공가", "검진", "경조", "대휴"]);
 const ASSEMBLY_ANNUAL_LEAVE_VARIANTS = new Set<NonNullable<AssemblyLeaveItem["leaveVariant"]>>(["normal", "blue"]);
+const HUB_ASSEMBLY_CATEGORY = "국회";
 const HUB_VACATION_CATEGORY = "휴가";
 const HUB_JCHECK_CATEGORY = "제크";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -93,6 +95,64 @@ function areSameEntries(left: string[] | undefined, right: string[]) {
 function normalizeNames(value: unknown) {
   if (!Array.isArray(value)) return [] as string[];
   return Array.from(new Set(value.map((name) => normalizeName(name)).filter(Boolean)));
+}
+
+function normalizeAssignmentNames(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return value.map((name) => normalizeName(name)).filter(Boolean);
+}
+
+function cloneAssignments(assignments: Record<string, string[]> | null | undefined) {
+  return Object.fromEntries(
+    Object.entries(assignments ?? {}).map(([category, names]) => [
+      category,
+      normalizeAssignmentNames(names),
+    ]),
+  ) as Record<string, string[]>;
+}
+
+export function assertOnlyAllowedAssignmentKeysChanged(
+  beforeAssignments: Record<string, string[]> | null | undefined,
+  afterAssignments: Record<string, string[]> | null | undefined,
+  allowedKeys: readonly string[],
+) {
+  const before = cloneAssignments(beforeAssignments);
+  const after = cloneAssignments(afterAssignments);
+  const allowedKeySet = new Set(allowedKeys);
+  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+
+  allKeys.forEach((key) => {
+    if (allowedKeySet.has(key)) return;
+    if (JSON.stringify(before[key] ?? []) !== JSON.stringify(after[key] ?? [])) {
+      throw new Error(`국회 sync가 허용되지 않은 근무유형을 변경하려고 했습니다: ${key}`);
+    }
+  });
+}
+
+export function safeUpdateAssignments(
+  assignments: Record<string, string[]> | null | undefined,
+  allowedKeys: readonly string[],
+  updates: Record<string, string[] | null | undefined>,
+) {
+  const before = cloneAssignments(assignments);
+  const next = cloneAssignments(assignments);
+  const allowedKeySet = new Set(allowedKeys);
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (!allowedKeySet.has(key)) {
+      throw new Error(`국회 sync가 허용되지 않은 근무유형을 변경하려고 했습니다: ${key}`);
+    }
+
+    const names = normalizeAssignmentNames(value);
+    if (names.length > 0) {
+      next[key] = Array.from(new Set(names));
+    } else {
+      delete next[key];
+    }
+  });
+
+  assertOnlyAllowedAssignmentKeysChanged(before, next, allowedKeys);
+  return next;
 }
 
 function getRecord(value: unknown) {
@@ -239,11 +299,25 @@ function parseAssemblyLeaveItems(rawItems: unknown[], month: string, errors: Ass
 
 export function parseAssemblyExportPayload(payload: unknown, month: string): ParsedAssemblyExport {
   const record = getRecord(payload);
-  const rawDuties = Array.isArray(record.items) ? record.items : [];
+  const hasItemsProperty = Object.prototype.hasOwnProperty.call(record, "items");
+  const hasItemsField = hasItemsProperty && Array.isArray(record.items);
+  const rawDuties = hasItemsField ? record.items as unknown[] : [];
   const hasLeavesProperty = Object.prototype.hasOwnProperty.call(record, "leaves");
   const hasLeavesField = hasLeavesProperty && Array.isArray(record.leaves);
   const rawLeaves = hasLeavesField ? record.leaves as unknown[] : [];
   const errors: AssemblySyncErrorDetail[] = [];
+
+  if (!hasItemsProperty) {
+    errors.push({
+      stage: "validation",
+      message: "items 필드가 없어 국회 근무 동기화는 건너뜁니다.",
+    });
+  } else if (!Array.isArray(record.items)) {
+    errors.push({
+      stage: "validation",
+      message: "items 필드는 배열이어야 합니다. 국회 근무 동기화는 건너뜁니다.",
+    });
+  }
 
   if (hasLeavesProperty && !Array.isArray(record.leaves)) {
     errors.push({
@@ -255,6 +329,7 @@ export function parseAssemblyExportPayload(payload: unknown, month: string): Par
   return {
     duties: parseAssemblyDutyItems(rawDuties, month, errors),
     leaves: parseAssemblyLeaveItems(rawLeaves, month, errors),
+    hasItemsField,
     hasLeavesField,
     errors,
   };
@@ -360,13 +435,12 @@ function isDesiredOnDifferentDate(
 
 function compactDayJcheckAssignment(day: GeneratedSchedule["days"][number]) {
   const names = (day.assignments[HUB_JCHECK_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
-  if (names.length > 0) {
-    day.assignments[HUB_JCHECK_CATEGORY] = Array.from(new Set(names));
-    return;
+  day.assignments = safeUpdateAssignments(day.assignments, [HUB_JCHECK_CATEGORY], {
+    [HUB_JCHECK_CATEGORY]: names,
+  });
+  if (names.length === 0) {
+    day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_JCHECK_CATEGORY);
   }
-
-  delete day.assignments[HUB_JCHECK_CATEGORY];
-  day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_JCHECK_CATEGORY);
 }
 
 function parseHubVacationEntry(value: string): { type: "연차" | "대휴" | "기타"; name: string } {
@@ -466,15 +540,99 @@ function countLeaveCategoryChange(
 }
 
 function setDayVacationEntries(day: GeneratedSchedule["days"][number], entries: string[]) {
-  if (entries.length > 0) {
-    day.assignments[HUB_VACATION_CATEGORY] = entries;
-    day.vacations = entries;
-    return;
+  day.assignments = safeUpdateAssignments(day.assignments, [HUB_VACATION_CATEGORY], {
+    [HUB_VACATION_CATEGORY]: entries,
+  });
+  day.vacations = entries.length > 0 ? entries : [];
+  if (entries.length === 0) {
+    day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_VACATION_CATEGORY);
   }
+}
 
-  delete day.assignments[HUB_VACATION_CATEGORY];
-  day.vacations = [];
-  day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_VACATION_CATEGORY);
+function compactDayAssemblyAssignment(day: GeneratedSchedule["days"][number]) {
+  const names = (day.assignments[HUB_ASSEMBLY_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
+  day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
+    [HUB_ASSEMBLY_CATEGORY]: names,
+  });
+  if (names.length === 0) {
+    day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_ASSEMBLY_CATEGORY);
+  }
+}
+
+export function applyAssemblyDutiesToSchedule(
+  schedule: GeneratedSchedule,
+  targetDateKeys: Set<string>,
+  desiredByDate: Map<string, string[]>,
+  datesWithMatchErrors: Set<string>,
+) {
+  const nextSchedule = cloneSchedule(schedule);
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let deletedCount = 0;
+  let skippedCount = 0;
+
+  nextSchedule.days.forEach((day) => {
+    if (!targetDateKeys.has(day.dateKey)) return;
+
+    const beforeAssignments = cloneAssignments(day.assignments);
+    const currentNames = (day.assignments[HUB_ASSEMBLY_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
+    const desiredNames = desiredByDate.get(day.dateKey) ?? [];
+
+    if (datesWithMatchErrors.has(day.dateKey)) {
+      const safeDesiredNames = Array.from(new Set([...currentNames, ...desiredNames]));
+      if (safeDesiredNames.length > 0 && !areSameNames(currentNames, safeDesiredNames)) {
+        day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
+          [HUB_ASSEMBLY_CATEGORY]: safeDesiredNames,
+        });
+        compactDayAssemblyAssignment(day);
+        if (currentNames.length > 0) updatedCount += 1;
+        else insertedCount += 1;
+      } else {
+        skippedCount += 1;
+      }
+      assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
+      return;
+    }
+
+    if (desiredNames.length > 0) {
+      if (areSameNames(currentNames, desiredNames)) {
+        skippedCount += 1;
+        assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
+        return;
+      }
+
+      day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
+        [HUB_ASSEMBLY_CATEGORY]: desiredNames,
+      });
+      compactDayAssemblyAssignment(day);
+      if (currentNames.length > 0) updatedCount += 1;
+      else insertedCount += 1;
+      assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
+      return;
+    }
+
+    if (currentNames.length > 0) {
+      day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
+        [HUB_ASSEMBLY_CATEGORY]: [],
+      });
+      day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_ASSEMBLY_CATEGORY);
+      deletedCount += 1;
+      assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
+      return;
+    }
+
+    skippedCount += 1;
+    assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
+  });
+
+  return {
+    schedule: nextSchedule,
+    insertedCount,
+    updatedCount,
+    deletedCount,
+    skippedCount,
+    changed: JSON.stringify(schedule) !== JSON.stringify(nextSchedule),
+  };
 }
 
 export function applyAssemblyLeavesToSchedule(
@@ -496,6 +654,7 @@ export function applyAssemblyLeavesToSchedule(
   nextSchedule.days.forEach((day) => {
     if (!targetDateKeys.has(day.dateKey)) return;
 
+    const beforeAssignments = cloneAssignments(day.assignments);
     const currentVacationEntries = [
       ...(day.vacations ?? []),
       ...(day.assignments[HUB_VACATION_CATEGORY] ?? []),
@@ -588,7 +747,9 @@ export function applyAssemblyLeavesToSchedule(
 
     if (hasJcheckMatchError) {
       if (nextJcheckNames.length > 0 && !areSameNames(currentJcheckNames, nextJcheckNames)) {
-        day.assignments[HUB_JCHECK_CATEGORY] = nextJcheckNames;
+        day.assignments = safeUpdateAssignments(day.assignments, [HUB_JCHECK_CATEGORY], {
+          [HUB_JCHECK_CATEGORY]: nextJcheckNames,
+        });
         compactDayJcheckAssignment(day);
         if (currentJcheckNames.length > 0) updatedCount += 1;
         else insertedCount += 1;
@@ -596,11 +757,14 @@ export function applyAssemblyLeavesToSchedule(
         skippedCount += 1;
       }
       setAssemblyLeaveSyncNames(nextSyncState, day.dateKey, "제크", nextJcheckSyncNames);
+      assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_VACATION_CATEGORY, HUB_JCHECK_CATEGORY]);
       return;
     }
 
     if (!areSameNames(currentJcheckNames, nextJcheckNames)) {
-      day.assignments[HUB_JCHECK_CATEGORY] = nextJcheckNames;
+      day.assignments = safeUpdateAssignments(day.assignments, [HUB_JCHECK_CATEGORY], {
+        [HUB_JCHECK_CATEGORY]: nextJcheckNames,
+      });
       compactDayJcheckAssignment(day);
       const changeType = countLeaveCategoryChange(currentJcheckNames, nextJcheckNames, desiredJcheckNames, jcheckNamesToRemove);
       if (changeType === "inserted") insertedCount += 1;
@@ -611,6 +775,7 @@ export function applyAssemblyLeavesToSchedule(
       skippedCount += 1;
     }
     setAssemblyLeaveSyncNames(nextSyncState, day.dateKey, "제크", nextJcheckSyncNames);
+    assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_VACATION_CATEGORY, HUB_JCHECK_CATEGORY]);
   });
 
   if (Object.keys(nextSyncState).length > 0) {

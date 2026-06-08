@@ -6,9 +6,11 @@ import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated"
 import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule } from "@/lib/schedule/published";
 import { syncVacationTextForChangedRoute } from "@/lib/schedule/change-requests";
 import {
+  applyAssemblyDutiesToSchedule,
   applyAssemblyLeavesToSchedule,
   createAssemblyLeaveMatchErrorKey,
   parseAssemblyExportPayload,
+  safeUpdateAssignments,
   type HubAssemblyLeaveAssignment,
 } from "@/lib/schedule/assembly-sync-core";
 import { getAssemblyCompensatoryLeavePushItems } from "@/lib/schedule/assembly-leave-push-core";
@@ -596,6 +598,7 @@ test("assembly export parser supports optional leaves without breaking duty item
     "2026-05",
   );
 
+  expect(legacy.hasItemsField).toBe(true);
   expect(legacy.hasLeavesField).toBe(false);
   expect(legacy.duties).toHaveLength(1);
   expect(legacy.leaves).toHaveLength(0);
@@ -613,6 +616,7 @@ test("assembly export parser supports optional leaves without breaking duty item
     "2026-05",
   );
 
+  expect(next.hasItemsField).toBe(true);
   expect(next.hasLeavesField).toBe(true);
   expect(next.duties).toHaveLength(1);
   expect(next.leaves).toEqual([
@@ -620,6 +624,118 @@ test("assembly export parser supports optional leaves without breaking duty item
     { date: "2026-05-09", leaveType: "연차", leaveVariant: "blue", memberName: "김상현" },
     { date: "2026-05-10", leaveType: "대휴", memberName: "삭제금지" },
   ]);
+});
+
+test("assembly export parser does not treat missing items as an empty source of truth", () => {
+  const parsed = parseAssemblyExportPayload(
+    {
+      leaves: [{ date: "2026-05-08", leaveType: "연차", memberName: "신승규" }],
+    },
+    "2026-05",
+  );
+
+  expect(parsed.hasItemsField).toBe(false);
+  expect(parsed.hasLeavesField).toBe(true);
+  expect(parsed.duties).toEqual([]);
+  expect(parsed.leaves).toEqual([{ date: "2026-05-08", leaveType: "연차", leaveVariant: "normal", memberName: "신승규" }]);
+  expect(parsed.errors.some((item) => item.message.includes("items 필드가 없어"))).toBe(true);
+});
+
+test("assembly export parser rejects dates outside the requested month without timezone shifting", () => {
+  const parsed = parseAssemblyExportPayload(
+    {
+      items: [
+        { date: "2026-04-30", dutyType: "공휴일", memberName: "이전월" },
+        { date: "2026-05-01", dutyType: "공휴일", memberName: "해당월" },
+        { date: "2026-06-01", dutyType: "공휴일", memberName: "다음월" },
+      ],
+      leaves: [
+        { date: "2026-06-01", leaveType: "연차", memberName: "다음월휴가" },
+      ],
+    },
+    "2026-05",
+  );
+
+  expect(parsed.duties).toEqual([{ date: "2026-05-01", dutyType: "공휴일", memberName: "해당월", sourceId: undefined, sourceUpdatedAt: undefined }]);
+  expect(parsed.leaves).toEqual([]);
+  expect(parsed.errors).toHaveLength(3);
+});
+
+test("safe assignment updates reject protected category changes", () => {
+  expect(() =>
+    safeUpdateAssignments(
+      {
+        조근: ["A"],
+        국회: ["B"],
+      },
+      ["국회"],
+      {
+        조근: [],
+      },
+    ),
+  ).toThrow("허용되지 않은 근무유형");
+});
+
+test("assembly duty sync only changes assembly assignments", () => {
+  const schedule = {
+    year: 2026,
+    month: 5,
+    monthKey: "2026-05",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-06-01",
+    days: [
+      {
+        dateKey: "2026-05-08",
+        day: 8,
+        month: 5,
+        year: 2026,
+        dow: 5,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["연차:E", "대휴:H", "기타:G"],
+        assignments: {
+          조근: ["A"],
+          일반: ["B"],
+          야근: ["C"],
+          국회: ["D"],
+          휴가: ["연차:E", "대휴:H", "기타:G"],
+          제크: ["F"],
+          대휴: ["H"],
+        },
+        manualExtras: ["국회"],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+
+  const result = applyAssemblyDutiesToSchedule(schedule, new Set(["2026-05-08"]), new Map([["2026-05-08", ["N"]]]), new Set());
+  const assignments = result.schedule.days[0].assignments;
+
+  expect(assignments["국회"]).toEqual(["N"]);
+  expect(assignments["조근"]).toEqual(["A"]);
+  expect(assignments["일반"]).toEqual(["B"]);
+  expect(assignments["야근"]).toEqual(["C"]);
+  expect(assignments["휴가"]).toEqual(["연차:E", "대휴:H", "기타:G"]);
+  expect(assignments["제크"]).toEqual(["F"]);
+  expect(assignments["대휴"]).toEqual(["H"]);
+});
+
+test("assembly duty sync preserves current assembly names on match errors", () => {
+  const schedule = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 5,
+  }).state.generated!;
+  const day = schedule.days.find((item) => item.dateKey === "2026-05-08")!;
+  day.assignments["국회"] = ["기존국회"];
+
+  const result = applyAssemblyDutiesToSchedule(schedule, new Set(["2026-05-08"]), new Map(), new Set(["2026-05-08"]));
+
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-05-08")?.assignments["국회"]).toEqual(["기존국회"]);
 });
 
 test("assembly leaves sync maps annual, blue annual, and other leave while preserving compensatory leave and existing jcheck", () => {
@@ -677,6 +793,62 @@ test("assembly leaves sync maps annual, blue annual, and other leave while prese
   });
   expect(day.assignments["야근"]).toEqual(["보존야근"]);
   expect(result.changed).toBe(true);
+});
+
+test("assembly leaves sync empty export clears only previously synced leave targets", () => {
+  const schedule = {
+    year: 2026,
+    month: 5,
+    monthKey: "2026-05",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-06-01",
+    assembly_leave_sync_state: {
+      "2026-05-08": {
+        연차: ["신승규"],
+        제크: ["김상현"],
+        기타: ["검진자"],
+      },
+    },
+    days: [
+      {
+        dateKey: "2026-05-08",
+        day: 8,
+        month: 5,
+        year: 2026,
+        dow: 5,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["연차:신승규", "대휴:보존대휴", "기타:검진자"],
+        assignments: {
+          조근: ["보존조근"],
+          휴가: ["연차:신승규", "대휴:보존대휴", "기타:검진자"],
+          제크: ["김상현"],
+          대휴: ["별도대휴"],
+        },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+
+  const result = applyAssemblyLeavesToSchedule(
+    schedule,
+    new Set(["2026-05-08"]),
+    new Map([["2026-05-08", new Map<HubAssemblyLeaveAssignment, string[]>()]]),
+    new Set(),
+  );
+  const day = result.schedule.days[0];
+
+  expect(day.assignments["휴가"]).toEqual(["대휴:보존대휴"]);
+  expect(day.vacations).toEqual(["대휴:보존대휴"]);
+  expect(day.assignments["제크"]).toBeUndefined();
+  expect(day.assignments["조근"]).toEqual(["보존조근"]);
+  expect(day.assignments["대휴"]).toEqual(["별도대휴"]);
+  expect(result.schedule.assembly_leave_sync_state).toBeUndefined();
 });
 
 test("assembly leaves sync removes previously synced annual leave from the old date when Assembly moves it", () => {

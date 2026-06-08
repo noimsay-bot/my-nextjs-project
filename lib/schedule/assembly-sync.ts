@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import type { GeneratedSchedule } from "@/lib/schedule/types";
 import {
+  applyAssemblyDutiesToSchedule,
   applyAssemblyLeavesToSchedule,
   createAssemblyLeaveMatchErrorKey,
   mapAssemblyLeaveToHubAssignment,
@@ -44,7 +45,6 @@ type ProfileRow = {
   approved: boolean;
 };
 
-const ASSEMBLY_CATEGORY = "국회";
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -78,30 +78,6 @@ function getSourceMonthsForScheduleDateKeys(dateKeys: Set<string>) {
         .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
-}
-
-function normalizeName(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function cloneSchedule(schedule: GeneratedSchedule) {
-  return JSON.parse(JSON.stringify(schedule)) as GeneratedSchedule;
-}
-
-function areSameNames(left: string[] | undefined, right: string[]) {
-  const normalizedLeft = (left ?? []).map((name) => name.trim()).filter(Boolean);
-  return JSON.stringify(normalizedLeft) === JSON.stringify(right);
-}
-
-function compactDayAssemblyAssignment(day: GeneratedSchedule["days"][number]) {
-  const names = (day.assignments[ASSEMBLY_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
-  if (names.length > 0) {
-    day.assignments[ASSEMBLY_CATEGORY] = Array.from(new Set(names));
-    return;
-  }
-
-  delete day.assignments[ASSEMBLY_CATEGORY];
-  day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== ASSEMBLY_CATEGORY);
 }
 
 async function insertAssemblySyncLog(payload: AssemblySyncLogPayload) {
@@ -229,6 +205,7 @@ async function fetchAssemblyExports(months: string[], targetDateKeys: Set<string
     (accumulator, result) => {
       accumulator.duties.push(...result.duties.filter((item) => targetDateKeys.has(item.date)));
       accumulator.leaves.push(...result.leaves.filter((item) => targetDateKeys.has(item.date)));
+      accumulator.hasItemsField = accumulator.hasItemsField && result.hasItemsField;
       accumulator.hasLeavesField = accumulator.hasLeavesField && result.hasLeavesField;
       accumulator.errors.push(
         ...result.errors.filter((item) => !item.date || targetDateKeys.has(item.date)),
@@ -238,10 +215,51 @@ async function fetchAssemblyExports(months: string[], targetDateKeys: Set<string
     {
       duties: [] as AssemblyDutyItem[],
       leaves: [] as AssemblyLeaveItem[],
+      hasItemsField: true,
       hasLeavesField: true,
       errors: [] as AssemblySyncErrorDetail[],
     },
   );
+}
+
+function isTargetDateKey(dateKey: string | undefined, targetDateKeys: Set<string>) {
+  return Boolean(dateKey && DATE_PATTERN.test(dateKey) && targetDateKeys.has(dateKey));
+}
+
+function getDutyDateKeysWithSyncErrors(errors: AssemblySyncErrorDetail[], targetDateKeys: Set<string>) {
+  return new Set(
+    errors
+      .filter((error) => isTargetDateKey(error.date, targetDateKeys))
+      .filter((error) => Boolean(error.dutyType) || (!error.leaveType && error.stage === "profile_match"))
+      .map((error) => error.date as string),
+  );
+}
+
+function getLeaveCategoriesForError(error: AssemblySyncErrorDetail): HubAssemblyLeaveAssignment[] {
+  if (error.assignmentCategory === "연차" || error.assignmentCategory === "제크" || error.assignmentCategory === "기타") {
+    return [error.assignmentCategory];
+  }
+  if (error.leaveType === "대휴") return [];
+  if (error.leaveType === "연차") {
+    if (error.leaveVariant === "blue") return ["제크"];
+    if (error.leaveVariant === "normal") return ["연차"];
+    return ["연차", "제크"];
+  }
+  if (error.leaveType === "공가" || error.leaveType === "검진" || error.leaveType === "경조") {
+    return ["기타"];
+  }
+  return error.leaveType ? ["연차", "제크", "기타"] : [];
+}
+
+function getLeaveDateCategoryKeysWithSyncErrors(errors: AssemblySyncErrorDetail[], targetDateKeys: Set<string>) {
+  const keys = new Set<string>();
+  errors.forEach((error) => {
+    if (!isTargetDateKey(error.date, targetDateKeys)) return;
+    getLeaveCategoriesForError(error).forEach((category) => {
+      keys.add(createAssemblyLeaveMatchErrorKey(error.date as string, category));
+    });
+  });
+  return keys;
 }
 
 export async function getAssemblyHolidayAndWeekendDuties(month: string): Promise<AssemblyDutyItem[]> {
@@ -352,70 +370,6 @@ function buildDesiredAssemblyLeaveNamesByDateCategory(
   return { desiredByDateCategory, dateCategoryWithMatchErrors };
 }
 
-function applyAssemblyDutiesToSchedule(
-  schedule: GeneratedSchedule,
-  targetDateKeys: Set<string>,
-  desiredByDate: Map<string, string[]>,
-  datesWithMatchErrors: Set<string>,
-) {
-  const nextSchedule = cloneSchedule(schedule);
-  let insertedCount = 0;
-  let updatedCount = 0;
-  let deletedCount = 0;
-  let skippedCount = 0;
-
-  nextSchedule.days.forEach((day) => {
-    if (!targetDateKeys.has(day.dateKey)) return;
-
-    const currentNames = (day.assignments[ASSEMBLY_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
-    const desiredNames = desiredByDate.get(day.dateKey) ?? [];
-
-    if (datesWithMatchErrors.has(day.dateKey)) {
-      const safeDesiredNames = Array.from(new Set([...currentNames, ...desiredNames]));
-      if (safeDesiredNames.length > 0 && !areSameNames(currentNames, safeDesiredNames)) {
-        day.assignments[ASSEMBLY_CATEGORY] = safeDesiredNames;
-        compactDayAssemblyAssignment(day);
-        if (currentNames.length > 0) updatedCount += 1;
-        else insertedCount += 1;
-      } else {
-        skippedCount += 1;
-      }
-      return;
-    }
-
-    if (desiredNames.length > 0) {
-      if (areSameNames(currentNames, desiredNames)) {
-        skippedCount += 1;
-        return;
-      }
-
-      day.assignments[ASSEMBLY_CATEGORY] = desiredNames;
-      compactDayAssemblyAssignment(day);
-      if (currentNames.length > 0) updatedCount += 1;
-      else insertedCount += 1;
-      return;
-    }
-
-    if (currentNames.length > 0) {
-      delete day.assignments[ASSEMBLY_CATEGORY];
-      day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== ASSEMBLY_CATEGORY);
-      deletedCount += 1;
-      return;
-    }
-
-    skippedCount += 1;
-  });
-
-  return {
-    schedule: nextSchedule,
-    insertedCount,
-    updatedCount,
-    deletedCount,
-    skippedCount,
-    changed: JSON.stringify(schedule) !== JSON.stringify(nextSchedule),
-  };
-}
-
 type ApplyCounts = {
   insertedCount: number;
   updatedCount: number;
@@ -494,30 +448,44 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
     const parsed = await fetchAssemblyExports(sourceMonths.length > 0 ? sourceMonths : [month], targetDateKeys);
     const errors = [...parsed.errors];
     const profileMap = await getApprovedProfileNameMap();
-    const { desiredByDate, datesWithMatchErrors } = buildDesiredAssemblyNamesByDate(parsed.duties, profileMap, errors);
+    const dutySync = parsed.hasItemsField
+      ? buildDesiredAssemblyNamesByDate(parsed.duties, profileMap, errors)
+      : null;
     const leaveSync = parsed.hasLeavesField
       ? buildDesiredAssemblyLeaveNamesByDateCategory(parsed.leaves, profileMap, errors)
       : null;
+    const dutyDateKeysWithSyncErrors = new Set([
+      ...(dutySync?.datesWithMatchErrors ?? []),
+      ...getDutyDateKeysWithSyncErrors(errors, targetDateKeys),
+    ]);
+    const leaveDateCategoryKeysWithSyncErrors = new Set([
+      ...(leaveSync?.dateCategoryWithMatchErrors ?? []),
+      ...getLeaveDateCategoryKeysWithSyncErrors(errors, targetDateKeys),
+    ]);
     const draftDutyResult = row.draft_state
-      ? applyAssemblyDutiesToSchedule(row.draft_state, targetDateKeys, desiredByDate, datesWithMatchErrors)
+      && dutySync
+      ? applyAssemblyDutiesToSchedule(row.draft_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
       : null;
     const publishedDutyResult = row.published_state
-      ? applyAssemblyDutiesToSchedule(row.published_state, targetDateKeys, desiredByDate, datesWithMatchErrors)
+      && dutySync
+      ? applyAssemblyDutiesToSchedule(row.published_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
       : null;
-    const draftLeaveResult = leaveSync && draftDutyResult
+    const draftScheduleForLeaveSync = draftDutyResult?.schedule ?? row.draft_state;
+    const publishedScheduleForLeaveSync = publishedDutyResult?.schedule ?? row.published_state;
+    const draftLeaveResult = leaveSync && draftScheduleForLeaveSync
       ? applyAssemblyLeavesToSchedule(
-        draftDutyResult.schedule,
+        draftScheduleForLeaveSync,
         targetDateKeys,
         leaveSync.desiredByDateCategory,
-        leaveSync.dateCategoryWithMatchErrors,
+        leaveDateCategoryKeysWithSyncErrors,
       )
       : null;
-    const publishedLeaveResult = leaveSync && publishedDutyResult
+    const publishedLeaveResult = leaveSync && publishedScheduleForLeaveSync
       ? applyAssemblyLeavesToSchedule(
-        publishedDutyResult.schedule,
+        publishedScheduleForLeaveSync,
         targetDateKeys,
         leaveSync.desiredByDateCategory,
-        leaveSync.dateCategoryWithMatchErrors,
+        leaveDateCategoryKeysWithSyncErrors,
       )
       : null;
     const draftFinalSchedule = draftLeaveResult?.schedule ?? draftDutyResult?.schedule ?? null;
@@ -566,6 +534,7 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       triggerType,
       totalSourceCount: log.total_source_count,
       hasLeavesField: parsed.hasLeavesField,
+      hasItemsField: parsed.hasItemsField,
       insertedCount: log.inserted_count,
       updatedCount: log.updated_count,
       deletedCount: log.deleted_count,
@@ -574,7 +543,7 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       changed,
     });
 
-    return { ok: true as const, ...log, hasLeavesField: parsed.hasLeavesField, changed };
+    return { ok: true as const, ...log, hasItemsField: parsed.hasItemsField, hasLeavesField: parsed.hasLeavesField, changed };
   } catch (error) {
     const details = getErrorDetails(error);
     await insertAssemblySyncLog(
