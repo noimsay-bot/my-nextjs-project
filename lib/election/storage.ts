@@ -76,6 +76,22 @@ interface ElectionProfileRow {
   role: string;
 }
 
+export interface ElectionActivationState {
+  isActive: boolean;
+  eventId: string | null;
+  title: string;
+  electionDate: string;
+  status: ElectionStatus | null;
+  publishedAt: string | null;
+  message: string | null;
+}
+
+export interface ElectionActivationResult {
+  ok: boolean;
+  message: string;
+  state: ElectionActivationState;
+}
+
 const electionCellColorKeys = new Set<ElectionCellColorKey>([
   "place",
   "poolVideo",
@@ -356,6 +372,86 @@ async function fetchLatestEventRowByStatuses(statuses: ElectionStatus[]) {
   }
 
   return data ?? null;
+}
+
+function rowToActivationState(row: ElectionEventRow | null, message: string | null = null): ElectionActivationState {
+  return {
+    isActive: row?.status === "published",
+    eventId: row?.id ?? null,
+    title: row?.title ?? "",
+    electionDate: row?.election_date ?? "",
+    status: row?.status ?? null,
+    publishedAt: row?.published_at ?? null,
+    message,
+  };
+}
+
+export async function getElectionActivationState(): Promise<ElectionActivationState> {
+  const session = await getPortalSession();
+  if (!canManageElection(session)) {
+    return rowToActivationState(null, "선거 활성화 상태를 볼 권한이 없습니다.");
+  }
+
+  const activeRow = await fetchLatestEventRowByStatuses(["published"]);
+  const editableRow = activeRow ?? await fetchLatestEventRowByStatuses(["draft"]);
+  return rowToActivationState(editableRow, editableRow ? null : "활성화할 선거 중계표가 없습니다.");
+}
+
+export async function setElectionActivation(nextActive: boolean): Promise<ElectionActivationResult> {
+  const session = await getPortalSession();
+  if (!canManageElection(session)) {
+    const state = rowToActivationState(null, "선거 활성화 변경 권한이 없습니다.");
+    return { ok: false, message: state.message ?? "선거 활성화 변경 권한이 없습니다.", state };
+  }
+
+  const targetRow = nextActive
+    ? await fetchLatestEventRowByStatuses(["draft", "published"])
+    : await fetchLatestEventRowByStatuses(["published"]);
+
+  if (!targetRow) {
+    setElectionSidebarOpenCache(false);
+    const message = nextActive ? "활성화할 선거 중계표가 없습니다." : "이미 비활성화 상태입니다.";
+    return {
+      ok: !nextActive,
+      message,
+      state: rowToActivationState(null, message),
+    };
+  }
+
+  if (nextActive && targetRow.status === "published") {
+    setElectionSidebarOpenCache(true);
+    const state = rowToActivationState(targetRow);
+    return { ok: true, message: "선거 페이지가 이미 활성화되어 있습니다.", state };
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("election_events")
+    .update(nextActive
+      ? {
+          status: "published",
+          published_at: new Date().toISOString(),
+          published_by: session?.id,
+        }
+      : {
+          status: "draft",
+        })
+    .eq("id", targetRow.id)
+    .select("id, title, election_date, status, published_at, published_by, closed_at, closed_by, created_by, created_at, updated_at")
+    .maybeSingle<ElectionEventRow>();
+
+  if (error) {
+    throw new Error(electionStorageError(error, "election_events"));
+  }
+
+  const nextRow = data ?? await fetchLatestEventRowByStatuses(nextActive ? ["published"] : ["draft"]);
+  setElectionSidebarOpenCache(nextActive);
+  const message = nextActive ? "선거 페이지를 활성화했습니다." : "선거 페이지를 비활성화했습니다.";
+  return {
+    ok: true,
+    message,
+    state: rowToActivationState(nextRow, null),
+  };
 }
 
 export async function fetchElectionWorkspace(): Promise<ElectionWorkspace> {

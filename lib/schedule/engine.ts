@@ -588,16 +588,8 @@ function getPreviousDateKey(dateKey: string) {
   return fmtDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
 }
 
-function getPreviousNightSeedForDays(state: ScheduleState, days: DaySchedule[]) {
-  const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
-  const firstDay = orderedDays[0];
-  if (!firstDay) return [] as string[];
-
-  const previousDateKey = getPreviousDateKey(firstDay.dateKey);
-  if (orderedDays.some((day) => day.dateKey === previousDateKey)) {
-    return [] as string[];
-  }
-
+function getPreviousNightSeedForDateKey(state: ScheduleState, dateKey: string) {
+  const previousDateKey = getPreviousDateKey(dateKey);
   const relatedSchedules = [
     ...(state.generated ? [state.generated] : []),
     ...state.generatedHistory,
@@ -610,6 +602,19 @@ function getPreviousNightSeedForDays(state: ScheduleState, days: DaySchedule[]) 
   }
 
   return [] as string[];
+}
+
+function getPreviousNightSeedForDays(state: ScheduleState, days: DaySchedule[]) {
+  const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  const firstDay = orderedDays[0];
+  if (!firstDay) return [] as string[];
+
+  const previousDateKey = getPreviousDateKey(firstDay.dateKey);
+  if (orderedDays.some((day) => day.dateKey === previousDateKey)) {
+    return [] as string[];
+  }
+
+  return getPreviousNightSeedForDateKey(state, firstDay.dateKey);
 }
 
 export function syncGeneralAssignments(
@@ -1118,11 +1123,21 @@ export function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
 }
 
+const REQUIRED_SCHEDULE_RANGE_STARTS: Record<string, string> = {
+  "2026-07": "2026-07-06",
+};
+
 export function getScheduleRange(year: number, month: number) {
+  const monthKey = getMonthKey(year, month);
   const start = new Date(year, month - 1, 1);
   const startDow = start.getDay();
   const diffToMonday = startDow === 0 ? -6 : 1 - startDow;
   if (diffToMonday !== 0) start.setDate(start.getDate() + diffToMonday);
+  const requiredStart = REQUIRED_SCHEDULE_RANGE_STARTS[monthKey];
+  if (requiredStart) {
+    const [requiredYear, requiredMonth, requiredDay] = requiredStart.split("-").map(Number);
+    start.setFullYear(requiredYear, requiredMonth - 1, requiredDay);
+  }
   const last = new Date(year, month - 1, daysInMonth(year, month));
   const end = new Date(last);
   const dayOfWeek = end.getDay();
@@ -1359,7 +1374,8 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
   const pointers = { ...startPointers };
   const days: DaySchedule[] = [];
   const warnings: Array<{ date: string; category: string; name: string }> = [];
-  let previousNight: string[] = [];
+  const rangeStartDateKey = fmtDate(range.start.getFullYear(), range.start.getMonth() + 1, range.start.getDate());
+  let previousNight: string[] = getPreviousNightSeedForDateKey(nextState, rangeStartDateKey);
   let weeklyExtensionCrew: string[] = [];
   let weeklyExtensionWeekKey = "";
 

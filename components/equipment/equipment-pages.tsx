@@ -1867,6 +1867,7 @@ function RentalTvuCard({
   editName,
   disabled,
   gridPending,
+  statusText,
   onToggle,
   onTvuGridToggle,
   onStartEdit,
@@ -1883,6 +1884,7 @@ function RentalTvuCard({
   editName: string;
   disabled: boolean;
   gridPending: boolean;
+  statusText?: string;
   onToggle: () => void;
   onTvuGridToggle: () => void;
   onStartEdit: () => void;
@@ -1932,6 +1934,7 @@ function RentalTvuCard({
             <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
               임대
             </span>
+            {statusText ? <span className={styles.borrowedMeta}>{statusText}</span> : null}
           </span>
         </span>
       </button>
@@ -1976,6 +1979,7 @@ function RentalTvuCard({
 function RentalTvuSection({
   inactiveItems,
   activeItems,
+  borrowedItemIds,
   mode,
   selectedIds,
   canManage,
@@ -1996,6 +2000,7 @@ function RentalTvuSection({
 }: {
   inactiveItems: EquipmentItem[];
   activeItems: EquipmentItem[];
+  borrowedItemIds: Set<string>;
   mode: RentalTvuMode | null;
   selectedIds: string[];
   canManage: boolean;
@@ -2025,7 +2030,7 @@ function RentalTvuSection({
           {mode === "activate"
             ? "활성화할 임대 장비를 선택하세요."
             : mode === "deactivate"
-              ? "비활성화할 임대 장비는 위 TVU 섹션에서 선택하세요."
+              ? "비활성화할 임대 장비를 선택하세요. 대여중인 장비는 선택할 수 없습니다."
               : "TVU21~TVU40 임대 장비를 필요할 때 현재 TVU 목록에 추가합니다."}
         </p>
         {canManage ? (
@@ -2053,31 +2058,66 @@ function RentalTvuSection({
         ) : null}
       </div>
       {inactiveItems.length > 0 ? (
-        <div className={styles.itemGrid}>
-          {inactiveItems.map((item) => (
-            <RentalTvuCard
-              key={item.id}
-              item={item}
-              selected={selectedIds.includes(item.id)}
-              selectionMode={mode === "activate"}
-              canManage={canManage}
-              canManageTvuGrid={canManageTvuGrid}
-              editing={editingItemId === item.id}
-              editName={editName}
-              disabled={actionPending}
-              gridPending={gridPendingItemId === item.id}
-              onToggle={() => onSelectionToggle(item.id)}
-              onTvuGridToggle={() => onTvuGridToggle?.(item)}
-              onStartEdit={() => onEditStart(item)}
-              onEditNameChange={onEditNameChange}
-              onConfirmEdit={onEditConfirm}
-              onCancelEdit={onEditCancel}
-            />
-          ))}
+        <div className={styles.rentalTvuListBlock}>
+          <strong>대기 임대 장비</strong>
+          <div className={styles.itemGrid}>
+            {inactiveItems.map((item) => (
+              <RentalTvuCard
+                key={item.id}
+                item={item}
+                selected={selectedIds.includes(item.id)}
+                selectionMode={mode === "activate"}
+                canManage={canManage}
+                canManageTvuGrid={canManageTvuGrid && !mode}
+                editing={editingItemId === item.id}
+                editName={editName}
+                disabled={actionPending}
+                gridPending={gridPendingItemId === item.id}
+                statusText="비활성"
+                onToggle={() => onSelectionToggle(item.id)}
+                onTvuGridToggle={() => onTvuGridToggle?.(item)}
+                onStartEdit={() => onEditStart(item)}
+                onEditNameChange={onEditNameChange}
+                onConfirmEdit={onEditConfirm}
+                onCancelEdit={onEditCancel}
+              />
+            ))}
+          </div>
         </div>
       ) : (
         <div className="status note">모든 임대 장비가 활성화되어 있습니다.</div>
       )}
+      {activeItems.length > 0 ? (
+        <div className={styles.rentalTvuListBlock}>
+          <strong>활성 임대 장비</strong>
+          <div className={styles.itemGrid}>
+            {activeItems.map((item) => {
+              const borrowed = borrowedItemIds.has(item.id);
+              return (
+                <RentalTvuCard
+                  key={item.id}
+                  item={item}
+                  selected={selectedIds.includes(item.id)}
+                  selectionMode={mode === "deactivate"}
+                  canManage={canManage}
+                  canManageTvuGrid={canManageTvuGrid && !mode}
+                  editing={editingItemId === item.id}
+                  editName={editName}
+                  disabled={actionPending || (mode === "deactivate" && borrowed)}
+                  gridPending={gridPendingItemId === item.id}
+                  statusText={borrowed ? "대여중" : "활성"}
+                  onToggle={() => onSelectionToggle(item.id)}
+                  onTvuGridToggle={() => onTvuGridToggle?.(item)}
+                  onStartEdit={() => onEditStart(item)}
+                  onEditNameChange={onEditNameChange}
+                  onConfirmEdit={onEditConfirm}
+                  onCancelEdit={onEditCancel}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -3063,6 +3103,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
                 <RentalTvuSection
                   inactiveItems={inactiveRentalTvuItems}
                   activeItems={activeRentalTvuItems}
+                  borrowedItemIds={new Set(currentByItemId.keys())}
                   mode={rentalTvuMode}
                   selectedIds={rentalTvuSelectionIds}
                   canManage={canManageRentalTvu}

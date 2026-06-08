@@ -1,7 +1,9 @@
 import "server-only";
 
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
-import type { GeneratedSchedule } from "@/lib/schedule/types";
+import { defaultScheduleState } from "@/lib/schedule/constants";
+import { sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
+import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 import {
   applyAssemblyDutiesToSchedule,
   applyAssemblyLeavesToSchedule,
@@ -39,12 +41,18 @@ type ScheduleMonthRow = {
   published_at: string | null;
 };
 
+type ScheduleSettingsRow = {
+  key: string;
+  state: Partial<ScheduleState> | null;
+};
+
 type ProfileRow = {
   id: string;
   name: string;
   approved: boolean;
 };
 
+const SCHEDULE_SETTINGS_KEY = "global";
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -78,6 +86,10 @@ function getSourceMonthsForScheduleDateKeys(dateKeys: Set<string>) {
         .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
+}
+
+function cloneSchedule(schedule: GeneratedSchedule) {
+  return JSON.parse(JSON.stringify(schedule)) as GeneratedSchedule;
 }
 
 async function insertAssemblySyncLog(payload: AssemblySyncLogPayload) {
@@ -281,6 +293,49 @@ async function getScheduleMonthForAssemblySync(month: string) {
   return data ?? null;
 }
 
+async function getScheduleSettingsStateForAssemblySync() {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("schedule_settings")
+    .select("key, state")
+    .eq("key", SCHEDULE_SETTINGS_KEY)
+    .maybeSingle<ScheduleSettingsRow>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data?.state ?? null;
+}
+
+function syncGeneralAssignmentsForAssemblySchedule(
+  schedule: GeneratedSchedule,
+  settingsState: Partial<ScheduleState> | null,
+) {
+  const clonedSchedule = cloneSchedule(schedule);
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    ...(settingsState ?? {}),
+    year: clonedSchedule.year,
+    month: clonedSchedule.month,
+    generated: clonedSchedule,
+    generatedHistory: [clonedSchedule],
+  });
+  const targetSchedule =
+    state.generatedHistory.find((item) => item.monthKey === clonedSchedule.monthKey) ??
+    state.generated ??
+    clonedSchedule;
+
+  syncGeneralAssignments(state, targetSchedule.days, state.generalTeamPeople, {
+    bigEvents: targetSchedule.big_events,
+    previousBigEvents: targetSchedule.big_events,
+    scheduleYear: targetSchedule.year,
+    scheduleMonth: targetSchedule.month,
+  });
+
+  return targetSchedule;
+}
+
 async function getApprovedProfileNameMap() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -443,6 +498,7 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       return { ok: true as const, ...log, changed: false };
     }
 
+    const settingsState = await getScheduleSettingsStateForAssemblySync();
     const targetDateKeys = getScheduleDateKeysForAssemblySync(row);
     const sourceMonths = getSourceMonthsForScheduleDateKeys(targetDateKeys);
     const parsed = await fetchAssemblyExports(sourceMonths.length > 0 ? sourceMonths : [month], targetDateKeys);
@@ -490,24 +546,33 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       : null;
     const draftFinalSchedule = draftLeaveResult?.schedule ?? draftDutyResult?.schedule ?? null;
     const publishedFinalSchedule = publishedLeaveResult?.schedule ?? publishedDutyResult?.schedule ?? null;
+    const draftSyncedSchedule = draftFinalSchedule
+      ? syncGeneralAssignmentsForAssemblySchedule(draftFinalSchedule, settingsState)
+      : null;
+    const publishedSyncedSchedule = publishedFinalSchedule
+      ? syncGeneralAssignmentsForAssemblySchedule(publishedFinalSchedule, settingsState)
+      : null;
     const resultForLog = row.published_state
       ? sumApplyCounts(publishedDutyResult, publishedLeaveResult)
       : sumApplyCounts(draftDutyResult, draftLeaveResult);
-    const changed = Boolean(
-      draftDutyResult?.changed ||
-      draftLeaveResult?.changed ||
-      publishedDutyResult?.changed ||
-      publishedLeaveResult?.changed,
+    const draftChanged = Boolean(
+      draftSyncedSchedule && row.draft_state && JSON.stringify(row.draft_state) !== JSON.stringify(draftSyncedSchedule),
     );
+    const publishedChanged = Boolean(
+      publishedSyncedSchedule &&
+        row.published_state &&
+        JSON.stringify(row.published_state) !== JSON.stringify(publishedSyncedSchedule),
+    );
+    const changed = draftChanged || publishedChanged;
 
     if (changed) {
       const supabase = createAdminClient();
       const payload: Partial<ScheduleMonthRow> = {};
-      if ((draftDutyResult?.changed || draftLeaveResult?.changed) && draftFinalSchedule) {
-        payload.draft_state = draftFinalSchedule;
+      if (draftChanged && draftSyncedSchedule) {
+        payload.draft_state = draftSyncedSchedule;
       }
-      if ((publishedDutyResult?.changed || publishedLeaveResult?.changed) && publishedFinalSchedule) {
-        payload.published_state = publishedFinalSchedule;
+      if (publishedChanged && publishedSyncedSchedule) {
+        payload.published_state = publishedSyncedSchedule;
       }
       const { error } = await supabase
         .from("schedule_months")

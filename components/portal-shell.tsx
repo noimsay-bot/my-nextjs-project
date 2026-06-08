@@ -59,7 +59,6 @@ type SidebarNavEntry =
 
 const links: PortalNavLink[] = [
   { href: "/", label: "홈" },
-  { href: "/election", label: "선거" },
   {
     href: "/me",
     label: "마이페이지",
@@ -120,7 +119,6 @@ const links: PortalNavLink[] = [
 
 const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
   "/equipment": "/images/sidebar-icons/tvu-equipment.webp",
-  "/election": "/images/sidebar-icons/election.webp",
   "/admin": "/images/sidebar-icons/admin.webp",
   "/work-schedule": "/images/sidebar-icons/work-schedule.webp",
   "/restaurants": "/images/sidebar-icons/restaurants.webp",
@@ -140,7 +138,6 @@ const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
 };
 
 const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"; id: SidebarNavActionId }> = [
-  { kind: "link", href: "/election" },
   { kind: "link", href: "/me" },
   { kind: "link", href: "/work-schedule" },
   { kind: "link", href: "/equipment" },

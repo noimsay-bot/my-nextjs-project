@@ -2,8 +2,6 @@
 
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   getLastAuthCheckStatus,
@@ -283,32 +281,6 @@ export default function LoginPage() {
     <section className="panel" style={{ maxWidth: 760, margin: "0 auto" }}>
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         <div className="chip">로그인 / 비밀번호 찾기</div>
-        <Link
-          href="/election-public"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "48px minmax(0, 1fr) auto",
-            alignItems: "center",
-            gap: 14,
-            padding: "14px 16px",
-            border: "1px solid rgba(255, 255, 255, 0.18)",
-            borderRadius: 8,
-            background: "linear-gradient(135deg, rgba(21, 128, 61, 0.26), rgba(14, 116, 144, 0.2))",
-            color: "inherit",
-            textDecoration: "none",
-          }}
-        >
-          <Image src="/images/sidebar-icons/election.webp" width={48} height={48} alt="" aria-hidden="true" />
-          <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
-            <strong style={{ fontSize: 18, lineHeight: 1.25 }}>6.3 지선 배치표</strong>
-            <span className="muted" style={{ fontSize: 13 }}>
-              외부 열람용 선거 중계표
-            </span>
-          </span>
-          <span className="btn white" style={{ whiteSpace: "nowrap" }}>
-            보기
-          </span>
-        </Link>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {authTabs.map((item) => (
             <button

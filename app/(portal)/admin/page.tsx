@@ -9,7 +9,12 @@ import {
   getAdminWorkspace,
   updateAdminProfileAccess,
 } from "@/lib/team-lead/storage";
-import { getSession, hasTeamLeadAccess } from "@/lib/auth/storage";
+import { getSession, hasAdminAccess, hasTeamLeadAccess } from "@/lib/auth/storage";
+import {
+  getElectionActivationState,
+  setElectionActivation,
+  type ElectionActivationState,
+} from "@/lib/election/storage";
 import {
   CUSTOMER_SUPPORT_ADMIN_COUNT_EVENT,
   deleteCustomerSupportMessage,
@@ -187,6 +192,22 @@ const emptyCustomerSupportWorkspace: CustomerSupportMessageWorkspace = {
   items: [],
   schemaMissing: false,
   message: null,
+};
+
+const emptyElectionActivationState: ElectionActivationState = {
+  isActive: false,
+  eventId: null,
+  title: "",
+  electionDate: "",
+  status: null,
+  publishedAt: null,
+  message: null,
+};
+
+const electionStatusLabels: Record<NonNullable<ElectionActivationState["status"]>, string> = {
+  draft: "비활성",
+  published: "활성",
+  closed: "종료",
 };
 
 function getCustomerSupportWorkspaceWithoutHiddenItems(
@@ -496,16 +517,22 @@ function MonthlyVisitorRanking({ rows }: { rows: PageVisitVisitorRank[] }) {
 }
 
 export default function AdminPage() {
-  const canManageRoles = hasTeamLeadAccess(getSession()?.actualRole ?? getSession()?.role);
+  const session = getSession();
+  const actualRole = session?.actualRole ?? session?.role;
+  const canManageRoles = hasTeamLeadAccess(actualRole);
+  const canManageElectionActivation = hasAdminAccess(actualRole);
   const [profiles, setProfiles] = useState<AdminProfileItem[]>([]);
   const [memberLevelMap, setMemberLevelMap] = useState<Map<string, MemberLevelSnapshot>>(new Map());
   const [visitAnalytics, setVisitAnalytics] = useState<PageVisitAnalytics>(emptyPageVisitAnalytics);
   const [customerSupport, setCustomerSupport] =
     useState<CustomerSupportMessageWorkspace>(emptyCustomerSupportWorkspace);
+  const [electionActivation, setElectionActivationState] =
+    useState<ElectionActivationState>(emptyElectionActivationState);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingProfileId, setSavingProfileId] = useState<string | null>(null);
+  const [savingElectionActivation, setSavingElectionActivation] = useState(false);
   const [processingSupportId, setProcessingSupportId] = useState<string | null>(null);
   const [deletingSupportId, setDeletingSupportId] = useState<string | null>(null);
   const [expandedProcessedSupportIds, setExpandedProcessedSupportIds] = useState<Set<string>>(() => new Set());
@@ -516,10 +543,11 @@ export default function AdminPage() {
   async function refresh() {
     setLoading(true);
     try {
-      const [workspace, analytics, customerSupportWorkspace] = await Promise.all([
+      const [workspace, analytics, customerSupportWorkspace, electionActivationState] = await Promise.all([
         getAdminWorkspace(),
         getAdminPageVisitAnalytics(),
         getAdminCustomerSupportMessages(),
+        getElectionActivationState(),
       ]);
       const nextMemberLevelMap = await getMemberLevelMap(workspace.profiles.map((profile) => profile.id));
       setProfiles(workspace.profiles);
@@ -529,6 +557,7 @@ export default function AdminPage() {
         customerSupportWorkspace,
         hiddenCustomerSupportIdsRef.current,
       ));
+      setElectionActivationState(electionActivationState);
       setDraftRoles(
         Object.fromEntries(workspace.profiles.map((profile) => [profile.id, profile.role])),
       );
@@ -651,6 +680,20 @@ export default function AdminPage() {
       }
       return next;
     });
+  }
+
+  async function handleElectionActivation(nextActive: boolean) {
+    setSavingElectionActivation(true);
+    setMessage("");
+    try {
+      const result = await setElectionActivation(nextActive);
+      setElectionActivationState(result.state);
+      setMessage(result.message);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "선거 활성화 상태를 변경하지 못했습니다.");
+    } finally {
+      setSavingElectionActivation(false);
+    }
   }
 
   return (
@@ -798,6 +841,91 @@ export default function AdminPage() {
             ) : (
               <div className="status note">{loading ? "불러오는 중입니다." : "접수된 고객센터 내용이 없습니다."}</div>
             )}
+          </div>
+        </div>
+      </article>
+
+      <article className="panel">
+        <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div className="chip">선거</div>
+              <strong style={{ fontSize: 22 }}>선거 페이지 상태</strong>
+            </div>
+            <strong
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "fit-content",
+                padding: "6px 12px",
+                borderRadius: 999,
+                fontSize: 13,
+                color: electionActivation.isActive ? "#bbf7d0" : "#fecaca",
+                border: electionActivation.isActive
+                  ? "1px solid rgba(74,222,128,.42)"
+                  : "1px solid rgba(248,113,113,.42)",
+                background: electionActivation.isActive
+                  ? "rgba(34,197,94,.12)"
+                  : "rgba(239,68,68,.12)",
+              }}
+            >
+              {electionActivation.isActive ? "활성" : "비활성"}
+            </strong>
+          </div>
+          {electionActivation.message ? <div className="status note">{electionActivation.message}</div> : null}
+          <div className="subgrid-2">
+            <article
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: 16,
+                borderRadius: 18,
+                border: "1px solid rgba(255,255,255,.08)",
+                background: "rgba(255,255,255,.03)",
+              }}
+            >
+              <span className="muted">중계표</span>
+              <strong>{electionActivation.title || "등록된 선거 중계표 없음"}</strong>
+              <span className="muted">
+                {electionActivation.electionDate || "-"} · {electionActivation.status ? electionStatusLabels[electionActivation.status] : "-"}
+              </span>
+            </article>
+            <article
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: 16,
+                borderRadius: 18,
+                border: "1px solid rgba(255,255,255,.08)",
+                background: "rgba(255,255,255,.03)",
+              }}
+            >
+              <span className="muted">게시 시각</span>
+              <strong>{formatDateTime(electionActivation.publishedAt)}</strong>
+              <span className="muted">사이드바 메뉴는 숨김 상태로 유지됩니다.</span>
+            </article>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <Link href="/election" className="btn">
+              선거 페이지 열기
+            </Link>
+            <button
+              type="button"
+              className="btn"
+              disabled={!canManageElectionActivation || savingElectionActivation || !electionActivation.isActive}
+              onClick={() => void handleElectionActivation(false)}
+            >
+              {savingElectionActivation && electionActivation.isActive ? "변경 중" : "비활성화"}
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!canManageElectionActivation || savingElectionActivation || electionActivation.isActive || !electionActivation.eventId}
+              onClick={() => void handleElectionActivation(true)}
+            >
+              {savingElectionActivation && !electionActivation.isActive ? "변경 중" : "활성화"}
+            </button>
           </div>
         </div>
       </article>

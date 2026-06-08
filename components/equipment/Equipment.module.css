@@ -102,6 +102,16 @@
   line-height: 1.45;
 }
 
+.rentalTvuListBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.rentalTvuListBlock > strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
 .manageEquipmentSection {
   display: grid;
   gap: 12px;

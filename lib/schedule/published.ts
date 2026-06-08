@@ -1,9 +1,6 @@
-```ts
 import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 import {
-  getGeneralAssignmentSyncDateKeysForSchedule,
   normalizeGeneratedSchedule,
-  shouldSyncGeneralAssignmentsForSchedule,
   syncGeneralAssignments,
 } from "@/lib/schedule/engine";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
@@ -288,10 +285,9 @@ async function repairPublishedItems(items: PublishedScheduleItem[]) {
   if (items.length === 0) return { items, changed: false, changedMonthKeys: [] as string[] };
 
   await refreshScheduleState();
-
-  const state = readStoredScheduleState();
+  const scheduleState = readStoredScheduleState();
   const generatedMap = new Map(
-    state.generatedHistory.map((schedule) => [schedule.monthKey, normalizePublishedSchedule(schedule)]),
+    scheduleState.generatedHistory.map((schedule) => [schedule.monthKey, normalizePublishedSchedule(schedule)]),
   );
 
   let changed = false;
@@ -299,45 +295,24 @@ async function repairPublishedItems(items: PublishedScheduleItem[]) {
 
   const nextItems = items.map((item) => {
     const generated = generatedMap.get(item.monthKey);
+    const otherItems = items.filter((candidate) => candidate.monthKey !== item.monthKey);
+    let candidateSchedule = item.schedule;
 
-    // 게시된 근무표가 blank 템플릿이고 generated history에 정식 근무표가 있으면 대체
     if (item.schedule.isBlankTemplate && generated && !generated.isBlankTemplate) {
-      if (JSON.stringify(item.schedule) === JSON.stringify(generated)) return item;
-
-      changed = true;
-      changedMonthKeys.push(item.monthKey);
-      return { ...item, title: createPublishedTitle(generated), schedule: generated };
+      candidateSchedule = generated;
+    } else if (generated && canRepairPublishedGeneralAssignments(item.schedule, generated)) {
+      candidateSchedule = generated;
     }
 
-    if (generated && canRepairPublishedGeneralAssignments(item.schedule, generated)) {
-      if (JSON.stringify(item.schedule) === JSON.stringify(generated)) return item;
-
-      changed = true;
-      changedMonthKeys.push(item.monthKey);
-      return { ...item, title: createPublishedTitle(generated), schedule: generated };
-    }
-
-    // generated history가 없거나 일치하지 않는 경우: 일반근무를 직접 계산해서 채움
-    if (shouldSyncGeneralAssignmentsForSchedule(item.schedule) && state.generalTeamPeople.length > 0) {
-      const patchedDays = item.schedule.days.map((day) => ({ ...day, assignments: { ...day.assignments } }));
-
-      syncGeneralAssignments(state, patchedDays, state.generalTeamPeople, {
-        bigEvents: item.schedule.big_events,
-        scheduleYear: item.schedule.year,
-        scheduleMonth: item.schedule.month,
-        syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(item.schedule),
-      });
-
-      const patched = normalizePublishedSchedule({ ...item.schedule, days: patchedDays });
-
-      if (JSON.stringify(item.schedule) === JSON.stringify(patched)) return item;
-
-      changed = true;
-      changedMonthKeys.push(item.monthKey);
-      return { ...item, title: createPublishedTitle(patched), schedule: patched };
-    }
-
-    return item;
+    const repairedSchedule = prepareScheduleForPublish(candidateSchedule, otherItems, scheduleState);
+    if (JSON.stringify(item.schedule) === JSON.stringify(repairedSchedule)) return item;
+    changed = true;
+    changedMonthKeys.push(item.monthKey);
+    return {
+      ...item,
+      title: createPublishedTitle(repairedSchedule),
+      schedule: repairedSchedule,
+    };
   });
 
   return { items: nextItems, changed, changedMonthKeys };
@@ -385,7 +360,10 @@ export async function refreshPublishedSchedules(options: RefreshPublishedSchedul
       .not("published_state", "is", null)
       .order("month_key", { ascending: true });
 
-    if (monthKeys.length === 1) {
+    if (options.repair === true) {
+      // Repairs need neighboring months so a published month can be trimmed to the
+      // previous published schedule's nextStartDate.
+    } else if (monthKeys.length === 1) {
       query = query.eq("month_key", monthKeys[0]);
     } else if (monthKeys.length > 1) {
       query = query.in("month_key", monthKeys);
@@ -404,12 +382,10 @@ export async function refreshPublishedSchedules(options: RefreshPublishedSchedul
       throw new Error(error.message);
     }
 
-    const repaired =
-      options.repair === true
-        ? await repairPublishedItems(rowsToItems(data ?? []))
-        : { items: rowsToItems(data ?? []), changed: false, changedMonthKeys: [] as string[] };
-
-    applyPublishedItemsToCache(repaired.items, monthKeys);
+    const repaired = options.repair === true
+      ? await repairPublishedItems(rowsToItems(data ?? []))
+      : { items: rowsToItems(data ?? []), changed: false, changedMonthKeys: [] as string[] };
+    applyPublishedItemsToCache(repaired.items, options.repair === true ? undefined : monthKeys);
     emitPublishedSchedulesEvent();
 
     if (repaired.changed) {
@@ -638,4 +614,3 @@ export function removePublishedSchedule(monthKey: string) {
 
   return getPublishedSchedules();
 }
-```

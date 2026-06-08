@@ -799,7 +799,7 @@ export function ScheduleApp() {
       const routeMonthKey = resolveRouteMonthKey(nextState, preferredMonthKey);
       await Promise.all([
         routeMonthKey ? refreshTeamLeadAssignmentMonth(routeMonthKey) : Promise.resolve(),
-        refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: false } : { repair: false }),
+        refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: true } : { repair: true }),
         includeRequests
           ? refreshScheduleChangeRequests({
               statuses: REQUEST_VISIBLE_STATUSES,
@@ -840,7 +840,7 @@ export function ScheduleApp() {
 
   const loadPublishedItems = async () => {
     const routeMonthKey = resolveRouteMonthKey(readStoredScheduleState());
-    await refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: false } : { repair: false });
+    await refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: true } : { repair: true });
     syncPublishedItemsFromCache();
   };
 
@@ -1100,7 +1100,7 @@ export function ScheduleApp() {
   );
   const hasUnpublishedChanges = useMemo(() => {
     if (!visibleSchedule || !visiblePublishedItem) return false;
-    const publishableSchedule = prepareScheduleForPublish(visibleSchedule, publishedItems, state);
+    const publishableSchedule = prepareScheduleForPublish(visibleSchedule, getPublishedSchedules(), state);
     return JSON.stringify(publishableSchedule) !== JSON.stringify(visiblePublishedItem.schedule);
   }, [publishedItems, state, visiblePublishedItem, visibleSchedule]);
   const visibleIndex = visibleSchedule ? state.generatedHistory.findIndex((item) => item.monthKey === visibleSchedule.monthKey) : -1;

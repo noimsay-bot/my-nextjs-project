@@ -16,11 +16,11 @@ import {
 import { getAssemblyCompensatoryLeavePushItems } from "@/lib/schedule/assembly-leave-push-core";
 import type { GeneratedSchedule, SchedulePersonRef } from "@/lib/schedule/types";
 
-test("2026 schedule months use calendar month ranges", () => {
+test("2026 schedule months use configured coverage ranges", () => {
   const ranges = [
     { month: 5, first: "2026-04-27", last: "2026-05-31" },
     { month: 6, first: "2026-06-01", last: "2026-07-05" },
-    { month: 7, first: "2026-06-29", last: "2026-08-02" },
+    { month: 7, first: "2026-07-06", last: "2026-08-02" },
   ];
 
   ranges.forEach(({ month, first, last }) => {
@@ -308,7 +308,7 @@ test("published schedule preparation starts after the previous published schedul
   const july = julyState.generated!;
 
   expect(june.nextStartDate).toBe("2026-07-06");
-  expect(july.days[0].dateKey).toBe("2026-06-29");
+  expect(july.days[0].dateKey).toBe("2026-07-06");
 
   const prepared = prepareScheduleForPublish(
     july,
