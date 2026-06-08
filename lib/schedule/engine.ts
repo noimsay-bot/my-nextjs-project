@@ -204,6 +204,29 @@ function isBlankTemplateSchedule(schedule: GeneratedSchedule | null | undefined)
   return Boolean(schedule?.isBlankTemplate);
 }
 
+function hasFilledNonGeneralAssignment(day: DaySchedule) {
+    if ((day.vacations ?? []).some((entry) => entry.trim().length > 0)) {
+      return true;
+    }
+
+    return Object.entries(day.assignments ?? {}).some(([category, names]) => {
+      if (category === "일반") return false;
+      return (names ?? []).some((name) => name.trim().length > 0);
+    });
+}
+
+function getFilledNonGeneralAssignmentDateKeys(schedule: GeneratedSchedule | null | undefined) {
+  return schedule?.days.filter(hasFilledNonGeneralAssignment).map((day) => day.dateKey) ?? [];
+}
+
+export function shouldSyncGeneralAssignmentsForSchedule(schedule: GeneratedSchedule | null | undefined) {
+  return !isBlankTemplateSchedule(schedule) || getFilledNonGeneralAssignmentDateKeys(schedule).length > 0;
+}
+
+export function getGeneralAssignmentSyncDateKeysForSchedule(schedule: GeneratedSchedule | null | undefined) {
+  return isBlankTemplateSchedule(schedule) ? getFilledNonGeneralAssignmentDateKeys(schedule) : undefined;
+}
+
 export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
   const normalizedBigEvents = normalizeScheduleBigEvents(schedule.big_events);
   if (isBlankTemplateSchedule(schedule)) {
@@ -597,6 +620,7 @@ export function syncGeneralAssignments(
 ) {
   const options = normalizeSyncGeneralAssignmentsOptions(optionsOrInitialPreviousNight);
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+  const syncDateKeySet = options.syncDateKeys ? new Set(options.syncDateKeys) : null;
   syncDayVacationsFromState(state, orderedDays);
   const monthContext = getDayScheduleMonthContext(orderedDays, options.scheduleYear, options.scheduleMonth);
   const normalizedBigEvents = normalizeScheduleBigEvents(options.bigEvents);
@@ -642,6 +666,13 @@ export function syncGeneralAssignments(
     }
 
     const generalBlockedNames = getGeneralAssignmentBlockedNames(day);
+
+    if (syncDateKeySet && !syncDateKeySet.has(day.dateKey)) {
+      day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
+      day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
+      previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
+      return;
+    }
 
     while (generalTeamOffEntryIndex < datedGeneralTeamOffEntries.length) {
       const [entryDateKey, entryNames] = datedGeneralTeamOffEntries[generalTeamOffEntryIndex] ?? [];
@@ -709,6 +740,7 @@ interface SyncGeneralAssignmentsOptions {
   previousBigEvents?: ScheduleBigEvent[] | null;
   scheduleYear?: number;
   scheduleMonth?: number;
+  syncDateKeys?: string[];
 }
 
 function normalizeSyncGeneralAssignmentsOptions(
@@ -855,22 +887,24 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
   };
 
   if (nextState.generated) {
-    if (!isBlankTemplateSchedule(nextState.generated)) {
+    if (shouldSyncGeneralAssignmentsForSchedule(nextState.generated)) {
       syncGeneralAssignments(nextState, nextState.generated.days, generalTeamPeople, {
         bigEvents: nextState.generated.big_events,
         previousBigEvents: nextState.generated.big_events,
         scheduleYear: nextState.generated.year,
         scheduleMonth: nextState.generated.month,
+        syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(nextState.generated),
       });
     }
   }
   nextState.generatedHistory.forEach((item) => {
-    if (!isBlankTemplateSchedule(item)) {
+    if (shouldSyncGeneralAssignmentsForSchedule(item)) {
       syncGeneralAssignments(nextState, item.days, generalTeamPeople, {
         bigEvents: item.big_events,
         previousBigEvents: item.big_events,
         scheduleYear: item.year,
         scheduleMonth: item.month,
+        syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(item),
       });
     }
   });
@@ -2257,12 +2291,13 @@ function syncGeneratedSchedule(next: ScheduleState, generated: GeneratedSchedule
   });
 
   next.vacations = serializeVacationMap(nextVacationMap);
-  if (!isBlankTemplateSchedule(normalizedGenerated)) {
+  if (shouldSyncGeneralAssignmentsForSchedule(normalizedGenerated)) {
     syncGeneralAssignments(next, normalizedGenerated.days, next.generalTeamPeople, {
       bigEvents: normalizedGenerated.big_events,
       previousBigEvents: normalizedGenerated.big_events,
       scheduleYear: normalizedGenerated.year,
       scheduleMonth: normalizedGenerated.month,
+      syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(normalizedGenerated),
     });
   }
   const warnings: Array<{ date: string; category: string; name: string }> = [];
@@ -2294,12 +2329,13 @@ export function updateScheduleBigEvents(state: ScheduleState, monthKey: string, 
   if (!nextTarget) return state;
 
   const updatedSchedule = applyBigEventsToGeneratedSchedule(nextTarget, bigEvents, nextTarget.big_events);
-  if (!isBlankTemplateSchedule(updatedSchedule)) {
+  if (shouldSyncGeneralAssignmentsForSchedule(updatedSchedule)) {
     syncGeneralAssignments(next, updatedSchedule.days, next.generalTeamPeople, {
       bigEvents: updatedSchedule.big_events,
       previousBigEvents: nextTarget.big_events,
       scheduleYear: updatedSchedule.year,
       scheduleMonth: updatedSchedule.month,
+      syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(updatedSchedule),
     });
   }
 

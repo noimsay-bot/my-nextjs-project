@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
-import { buildBigEventBlockedByDate, generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
+import { buildBigEventBlockedByDate, generateEmptySchedule, generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule } from "@/lib/schedule/published";
 import { syncVacationTextForChangedRoute } from "@/lib/schedule/change-requests";
@@ -41,6 +41,50 @@ test("june 2026 schedule includes june 7", () => {
   }).state.generated;
 
   expect(generated?.days.some((day) => day.dateKey === "2026-06-07")).toBe(true);
+});
+
+test("empty schedule template stays blank until actual assignments are added", () => {
+  const generated = generateEmptySchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 7,
+  }).state.generated;
+
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 7,
+    generated: generated!,
+    generatedHistory: [generated!],
+  });
+  const day = state.generated?.days.find((item) => item.dateKey === "2026-07-06");
+
+  expect(day?.assignments["일반"] ?? []).toEqual([]);
+});
+
+test("blank template with actual assignments recomputes general assignments", () => {
+  const generated = JSON.parse(JSON.stringify(generateEmptySchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 7,
+  }).state.generated)) as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === "2026-07-06");
+  expect(day).toBeTruthy();
+  day!.assignments["야근"] = ["구본준"];
+
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 7,
+    generated,
+    generatedHistory: [generated],
+  });
+  const syncedDay = state.generated?.days.find((item) => item.dateKey === "2026-07-06");
+  const untouchedDay = state.generated?.days.find((item) => item.dateKey === "2026-07-07");
+
+  expect(syncedDay?.assignments["일반"]?.length).toBeGreaterThan(0);
+  expect(syncedDay?.assignments["일반"] ?? []).not.toContain("구본준");
+  expect(untouchedDay?.assignments["일반"] ?? []).toEqual([]);
 });
 
 test("big event assignments create dynamic duty columns and remove people from general auto assignments", () => {

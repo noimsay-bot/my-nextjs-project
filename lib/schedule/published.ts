@@ -1,5 +1,5 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
-import { normalizeGeneratedSchedule, syncGeneralAssignments } from "@/lib/schedule/engine";
+import { getGeneralAssignmentSyncDateKeysForSchedule, normalizeGeneratedSchedule, shouldSyncGeneralAssignmentsForSchedule, syncGeneralAssignments } from "@/lib/schedule/engine";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
@@ -241,12 +241,13 @@ async function repairPublishedItems(items: PublishedScheduleItem[]) {
     }
 
     // generated history가 없거나 일치하지 않는 경우: 일반근무를 직접 계산해서 채움
-    if (!item.schedule.isBlankTemplate && state.generalTeamPeople.length > 0) {
+    if (shouldSyncGeneralAssignmentsForSchedule(item.schedule) && state.generalTeamPeople.length > 0) {
       const patchedDays = item.schedule.days.map((day) => ({ ...day, assignments: { ...day.assignments } }));
       syncGeneralAssignments(state, patchedDays, state.generalTeamPeople, {
         bigEvents: item.schedule.big_events,
         scheduleYear: item.schedule.year,
         scheduleMonth: item.schedule.month,
+        syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(item.schedule),
       });
       const patched = normalizePublishedSchedule({ ...item.schedule, days: patchedDays });
       if (JSON.stringify(item.schedule) === JSON.stringify(patched)) return item;
