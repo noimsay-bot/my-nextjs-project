@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
 import { buildBigEventBlockedByDate, generateEmptySchedule, generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
-import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule } from "@/lib/schedule/published";
+import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule, prepareScheduleForPublish } from "@/lib/schedule/published";
 import { syncVacationTextForChangedRoute } from "@/lib/schedule/change-requests";
 import {
   applyAssemblyDutiesToSchedule,
@@ -291,6 +291,60 @@ test("published schedule normalization keeps vacation people in fixed work assig
   expect(updatedDay.assignments["연장"]).toEqual([vacationName, "근무자"]);
   expect(updatedDay.assignments["휴가"]).toContain(`연차:${vacationName}`);
   expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(true);
+});
+
+test("published schedule preparation starts after the previous published schedule coverage", () => {
+  const juneState = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state;
+  const june = juneState.generated!;
+  const julyState = generateSchedule({
+    ...juneState,
+    year: 2026,
+    month: 7,
+  }).state;
+  const july = julyState.generated!;
+
+  expect(june.nextStartDate).toBe("2026-07-06");
+  expect(july.days[0].dateKey).toBe("2026-06-29");
+
+  const prepared = prepareScheduleForPublish(
+    july,
+    [
+      {
+        monthKey: june.monthKey,
+        title: "2026년 6월 근무표",
+        publishedAt: "2026-06-01T00:00:00.000Z",
+        schedule: june,
+      },
+    ],
+    julyState,
+  );
+
+  expect(prepared.days[0].dateKey).toBe("2026-07-06");
+  expect(prepared.days.some((day) => day.dateKey === "2026-07-05")).toBe(false);
+});
+
+test("published schedule preparation recomputes general after fixed duty changes", () => {
+  const state = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 7,
+  }).state;
+  const source = JSON.parse(JSON.stringify(state.generated!)) as GeneratedSchedule;
+  const targetDay = source.days.find((day) => day.dateKey === "2026-07-06")!;
+  const assemblyName = targetDay.assignments["일반"]?.[0] ?? "";
+
+  expect(assemblyName).toBeTruthy();
+  targetDay.assignments["국회"] = [assemblyName];
+
+  const prepared = prepareScheduleForPublish(source, [], state);
+  const preparedDay = prepared.days.find((day) => day.dateKey === "2026-07-06")!;
+
+  expect(preparedDay.assignments["국회"]).toContain(assemblyName);
+  expect(preparedDay.assignments["일반"] ?? []).not.toContain(assemblyName);
 });
 
 test("schedule state normalization keeps fixed work conflicts and removes vacation people from general", () => {

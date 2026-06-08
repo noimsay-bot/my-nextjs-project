@@ -84,6 +84,7 @@ import {
 } from "@/lib/schedule/engine";
 import {
   getPublishedSchedules,
+  prepareScheduleForPublish,
   publishSchedule,
   PublishedScheduleItem,
   refreshPublishedSchedules,
@@ -1099,8 +1100,9 @@ export function ScheduleApp() {
   );
   const hasUnpublishedChanges = useMemo(() => {
     if (!visibleSchedule || !visiblePublishedItem) return false;
-    return JSON.stringify(visibleSchedule) !== JSON.stringify(visiblePublishedItem.schedule);
-  }, [visiblePublishedItem, visibleSchedule]);
+    const publishableSchedule = prepareScheduleForPublish(visibleSchedule, publishedItems, state);
+    return JSON.stringify(publishableSchedule) !== JSON.stringify(visiblePublishedItem.schedule);
+  }, [publishedItems, state, visiblePublishedItem, visibleSchedule]);
   const visibleIndex = visibleSchedule ? state.generatedHistory.findIndex((item) => item.monthKey === visibleSchedule.monthKey) : -1;
   const targetHasExistingMonth = useMemo(
     () => state.generatedHistory.some((item) => item.monthKey === targetMonthKey),
