@@ -211,6 +211,7 @@ type ScheduleDisplaySource = {
   monthKey: string;
   schedule: {
     days: DaySchedule[];
+    nextStartDate?: string;
   };
 };
 
@@ -362,10 +363,17 @@ function buildDisplayDays(
   item: PublishedScheduleItem,
   previousItem?: ScheduleDisplaySource | null,
 ) {
-  const days: DisplayDay[] = item.schedule.days.map((day) => ({
+  let days: DisplayDay[] = item.schedule.days.map((day) => ({
     ...day,
     ownerMonthKey: item.monthKey,
   }));
+
+  // 이전 근무표가 nextStartDate까지 담당하므로 그 이전 날짜는 표시하지 않음
+  const prevNextStart = previousItem?.schedule.nextStartDate ?? "";
+  if (prevNextStart) {
+    days = days.filter((day) => day.dateKey >= prevNextStart);
+  }
+
   if (days.length === 0) return days;
 
   const first = days[0];

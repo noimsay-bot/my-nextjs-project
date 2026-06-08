@@ -1,5 +1,5 @@
 import type { GeneratedSchedule } from "@/lib/schedule/types";
-import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
+import { normalizeGeneratedSchedule, syncGeneralAssignments } from "@/lib/schedule/engine";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
@@ -215,24 +215,47 @@ async function repairPublishedItems(items: PublishedScheduleItem[]) {
   if (items.length === 0) return { items, changed: false, changedMonthKeys: [] as string[] };
 
   await refreshScheduleState();
+  const state = readStoredScheduleState();
   const generatedMap = new Map(
-    readStoredScheduleState().generatedHistory.map((schedule) => [schedule.monthKey, normalizePublishedSchedule(schedule)]),
+    state.generatedHistory.map((schedule) => [schedule.monthKey, normalizePublishedSchedule(schedule)]),
   );
 
   let changed = false;
   const changedMonthKeys: string[] = [];
   const nextItems = items.map((item) => {
     const generated = generatedMap.get(item.monthKey);
-    if (!generated) return item;
-    if (!canRepairPublishedGeneralAssignments(item.schedule, generated)) return item;
-    if (JSON.stringify(item.schedule) === JSON.stringify(generated)) return item;
-    changed = true;
-    changedMonthKeys.push(item.monthKey);
-    return {
-      ...item,
-      title: createPublishedTitle(generated),
-      schedule: generated,
-    };
+
+    // 게시된 근무표가 blank 템플릿이고 generated history에 정식 근무표가 있으면 대체
+    if (item.schedule.isBlankTemplate && generated && !generated.isBlankTemplate) {
+      if (JSON.stringify(item.schedule) === JSON.stringify(generated)) return item;
+      changed = true;
+      changedMonthKeys.push(item.monthKey);
+      return { ...item, title: createPublishedTitle(generated), schedule: generated };
+    }
+
+    if (generated && canRepairPublishedGeneralAssignments(item.schedule, generated)) {
+      if (JSON.stringify(item.schedule) === JSON.stringify(generated)) return item;
+      changed = true;
+      changedMonthKeys.push(item.monthKey);
+      return { ...item, title: createPublishedTitle(generated), schedule: generated };
+    }
+
+    // generated history가 없거나 일치하지 않는 경우: 일반근무를 직접 계산해서 채움
+    if (!item.schedule.isBlankTemplate && state.generalTeamPeople.length > 0) {
+      const patchedDays = item.schedule.days.map((day) => ({ ...day, assignments: { ...day.assignments } }));
+      syncGeneralAssignments(state, patchedDays, state.generalTeamPeople, {
+        bigEvents: item.schedule.big_events,
+        scheduleYear: item.schedule.year,
+        scheduleMonth: item.schedule.month,
+      });
+      const patched = normalizePublishedSchedule({ ...item.schedule, days: patchedDays });
+      if (JSON.stringify(item.schedule) === JSON.stringify(patched)) return item;
+      changed = true;
+      changedMonthKeys.push(item.monthKey);
+      return { ...item, title: createPublishedTitle(patched), schedule: patched };
+    }
+
+    return item;
   });
 
   return { items: nextItems, changed, changedMonthKeys };
