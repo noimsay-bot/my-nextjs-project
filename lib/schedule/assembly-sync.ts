@@ -1,19 +1,13 @@
 import "server-only";
 
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
-import { defaultScheduleState } from "@/lib/schedule/constants";
-import { sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
-import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
+import type { GeneratedSchedule } from "@/lib/schedule/types";
 import {
   applyAssemblyDutiesToSchedule,
-  applyAssemblyLeavesToSchedule,
-  createAssemblyLeaveMatchErrorKey,
-  mapAssemblyLeaveToHubAssignment,
   parseAssemblyExportPayload,
   type AssemblyDutyItem,
   type AssemblyLeaveItem,
   type AssemblySyncErrorDetail,
-  type HubAssemblyLeaveAssignment,
   type ParsedAssemblyExport,
 } from "@/lib/schedule/assembly-sync-core";
 
@@ -41,18 +35,12 @@ type ScheduleMonthRow = {
   published_at: string | null;
 };
 
-type ScheduleSettingsRow = {
-  key: string;
-  state: Partial<ScheduleState> | null;
-};
-
 type ProfileRow = {
   id: string;
   name: string;
   approved: boolean;
 };
 
-const SCHEDULE_SETTINGS_KEY = "global";
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -86,10 +74,6 @@ function getSourceMonthsForScheduleDateKeys(dateKeys: Set<string>) {
         .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
-}
-
-function cloneSchedule(schedule: GeneratedSchedule) {
-  return JSON.parse(JSON.stringify(schedule)) as GeneratedSchedule;
 }
 
 async function insertAssemblySyncLog(payload: AssemblySyncLogPayload) {
@@ -247,33 +231,6 @@ function getDutyDateKeysWithSyncErrors(errors: AssemblySyncErrorDetail[], target
   );
 }
 
-function getLeaveCategoriesForError(error: AssemblySyncErrorDetail): HubAssemblyLeaveAssignment[] {
-  if (error.assignmentCategory === "연차" || error.assignmentCategory === "제크" || error.assignmentCategory === "기타") {
-    return [error.assignmentCategory];
-  }
-  if (error.leaveType === "대휴") return [];
-  if (error.leaveType === "연차") {
-    if (error.leaveVariant === "blue") return ["제크"];
-    if (error.leaveVariant === "normal") return ["연차"];
-    return ["연차", "제크"];
-  }
-  if (error.leaveType === "공가" || error.leaveType === "검진" || error.leaveType === "경조") {
-    return ["기타"];
-  }
-  return error.leaveType ? ["연차", "제크", "기타"] : [];
-}
-
-function getLeaveDateCategoryKeysWithSyncErrors(errors: AssemblySyncErrorDetail[], targetDateKeys: Set<string>) {
-  const keys = new Set<string>();
-  errors.forEach((error) => {
-    if (!isTargetDateKey(error.date, targetDateKeys)) return;
-    getLeaveCategoriesForError(error).forEach((category) => {
-      keys.add(createAssemblyLeaveMatchErrorKey(error.date as string, category));
-    });
-  });
-  return keys;
-}
-
 export async function getAssemblyHolidayAndWeekendDuties(month: string): Promise<AssemblyDutyItem[]> {
   return (await fetchAssemblyExport(month)).duties;
 }
@@ -291,50 +248,6 @@ async function getScheduleMonthForAssemblySync(month: string) {
   }
 
   return data ?? null;
-}
-
-async function getScheduleSettingsStateForAssemblySync() {
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("schedule_settings")
-    .select("key, state")
-    .eq("key", SCHEDULE_SETTINGS_KEY)
-    .maybeSingle<ScheduleSettingsRow>();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data?.state ?? null;
-}
-
-function syncGeneralAssignmentsForAssemblySchedule(
-  schedule: GeneratedSchedule,
-  settingsState: Partial<ScheduleState> | null,
-) {
-  const clonedSchedule = cloneSchedule(schedule);
-  const state = sanitizeScheduleState({
-    ...defaultScheduleState,
-    ...(settingsState ?? {}),
-    year: clonedSchedule.year,
-    month: clonedSchedule.month,
-    generated: clonedSchedule,
-    generatedHistory: [clonedSchedule],
-  });
-  const targetSchedule =
-    state.generatedHistory.find((item) => item.monthKey === clonedSchedule.monthKey) ??
-    state.generated ??
-    clonedSchedule;
-
-  syncGeneralAssignments(state, targetSchedule.days, state.generalTeamPeople, {
-    bigEvents: targetSchedule.big_events,
-    previousBigEvents: targetSchedule.big_events,
-    scheduleYear: targetSchedule.year,
-    scheduleMonth: targetSchedule.month,
-    syncVacationsFromState: false,
-  });
-
-  return targetSchedule;
 }
 
 async function getApprovedProfileNameMap() {
@@ -387,43 +300,6 @@ function buildDesiredAssemblyNamesByDate(
   });
 
   return { desiredByDate, datesWithMatchErrors };
-}
-
-function buildDesiredAssemblyLeaveNamesByDateCategory(
-  leaves: AssemblyLeaveItem[],
-  profileMap: Map<string, ProfileRow[]>,
-  errors: AssemblySyncErrorDetail[],
-) {
-  const desiredByDateCategory = new Map<string, Map<HubAssemblyLeaveAssignment, string[]>>();
-  const dateCategoryWithMatchErrors = new Set<string>();
-
-  leaves.forEach((leave) => {
-    const assignmentCategory = mapAssemblyLeaveToHubAssignment(leave);
-    if (!assignmentCategory) return;
-
-    const matches = profileMap.get(leave.memberName) ?? [];
-    if (matches.length !== 1) {
-      dateCategoryWithMatchErrors.add(createAssemblyLeaveMatchErrorKey(leave.date, assignmentCategory));
-      errors.push({
-        stage: "profile_match",
-        message: matches.length === 0 ? "허브 사용자 이름과 매칭되지 않았습니다." : "동명이인으로 인해 안전하게 매칭할 수 없습니다.",
-        date: leave.date,
-        leaveType: leave.leaveType,
-        leaveVariant: leave.leaveVariant,
-        assignmentCategory,
-        memberName: leave.memberName,
-      });
-      return;
-    }
-
-    const nextByCategory = desiredByDateCategory.get(leave.date) ?? new Map<HubAssemblyLeaveAssignment, string[]>();
-    const nextNames = nextByCategory.get(assignmentCategory) ?? [];
-    nextNames.push(matches[0].name.trim());
-    nextByCategory.set(assignmentCategory, Array.from(new Set(nextNames)));
-    desiredByDateCategory.set(leave.date, nextByCategory);
-  });
-
-  return { desiredByDateCategory, dateCategoryWithMatchErrors };
 }
 
 type ApplyCounts = {
@@ -499,25 +375,22 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       return { ok: true as const, ...log, changed: false };
     }
 
-    const settingsState = await getScheduleSettingsStateForAssemblySync();
     const targetDateKeys = getScheduleDateKeysForAssemblySync(row);
     const sourceMonths = getSourceMonthsForScheduleDateKeys(targetDateKeys);
     const parsed = await fetchAssemblyExports(sourceMonths.length > 0 ? sourceMonths : [month], targetDateKeys);
-    const errors = [...parsed.errors];
+    const errors = parsed.errors.filter(
+      (error) =>
+        !error.leaveType &&
+        !error.assignmentCategory &&
+        !error.message.includes("휴가 동기화"),
+    );
     const profileMap = await getApprovedProfileNameMap();
     const dutySync = parsed.hasItemsField
       ? buildDesiredAssemblyNamesByDate(parsed.duties, profileMap, errors)
       : null;
-    const leaveSync = parsed.hasLeavesField
-      ? buildDesiredAssemblyLeaveNamesByDateCategory(parsed.leaves, profileMap, errors)
-      : null;
     const dutyDateKeysWithSyncErrors = new Set([
       ...(dutySync?.datesWithMatchErrors ?? []),
       ...getDutyDateKeysWithSyncErrors(errors, targetDateKeys),
-    ]);
-    const leaveDateCategoryKeysWithSyncErrors = new Set([
-      ...(leaveSync?.dateCategoryWithMatchErrors ?? []),
-      ...getLeaveDateCategoryKeysWithSyncErrors(errors, targetDateKeys),
     ]);
     const draftDutyResult = row.draft_state
       && dutySync
@@ -527,53 +400,27 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       && dutySync
       ? applyAssemblyDutiesToSchedule(row.published_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
       : null;
-    const draftScheduleForLeaveSync = draftDutyResult?.schedule ?? row.draft_state;
-    const publishedScheduleForLeaveSync = publishedDutyResult?.schedule ?? row.published_state;
-    const draftLeaveResult = leaveSync && draftScheduleForLeaveSync
-      ? applyAssemblyLeavesToSchedule(
-        draftScheduleForLeaveSync,
-        targetDateKeys,
-        leaveSync.desiredByDateCategory,
-        leaveDateCategoryKeysWithSyncErrors,
-      )
-      : null;
-    const publishedLeaveResult = leaveSync && publishedScheduleForLeaveSync
-      ? applyAssemblyLeavesToSchedule(
-        publishedScheduleForLeaveSync,
-        targetDateKeys,
-        leaveSync.desiredByDateCategory,
-        leaveDateCategoryKeysWithSyncErrors,
-      )
-      : null;
-    const draftFinalSchedule = draftLeaveResult?.schedule ?? draftDutyResult?.schedule ?? null;
-    const publishedFinalSchedule = publishedLeaveResult?.schedule ?? publishedDutyResult?.schedule ?? null;
-    const draftSyncedSchedule = draftFinalSchedule
-      ? syncGeneralAssignmentsForAssemblySchedule(draftFinalSchedule, settingsState)
-      : null;
-    const publishedSyncedSchedule = publishedFinalSchedule
-      ? syncGeneralAssignmentsForAssemblySchedule(publishedFinalSchedule, settingsState)
-      : null;
     const resultForLog = row.published_state
-      ? sumApplyCounts(publishedDutyResult, publishedLeaveResult)
-      : sumApplyCounts(draftDutyResult, draftLeaveResult);
+      ? sumApplyCounts(publishedDutyResult)
+      : sumApplyCounts(draftDutyResult);
     const draftChanged = Boolean(
-      draftSyncedSchedule && row.draft_state && JSON.stringify(row.draft_state) !== JSON.stringify(draftSyncedSchedule),
+      draftDutyResult?.schedule && row.draft_state && JSON.stringify(row.draft_state) !== JSON.stringify(draftDutyResult.schedule),
     );
     const publishedChanged = Boolean(
-      publishedSyncedSchedule &&
+      publishedDutyResult?.schedule &&
         row.published_state &&
-        JSON.stringify(row.published_state) !== JSON.stringify(publishedSyncedSchedule),
+        JSON.stringify(row.published_state) !== JSON.stringify(publishedDutyResult.schedule),
     );
     const changed = draftChanged || publishedChanged;
 
     if (changed) {
       const supabase = createAdminClient();
       const payload: Partial<ScheduleMonthRow> = {};
-      if (draftChanged && draftSyncedSchedule) {
-        payload.draft_state = draftSyncedSchedule;
+      if (draftChanged && draftDutyResult?.schedule) {
+        payload.draft_state = draftDutyResult.schedule;
       }
-      if (publishedChanged && publishedSyncedSchedule) {
-        payload.published_state = publishedSyncedSchedule;
+      if (publishedChanged && publishedDutyResult?.schedule) {
+        payload.published_state = publishedDutyResult.schedule;
       }
       const { error } = await supabase
         .from("schedule_months")
@@ -586,7 +433,7 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
     }
 
     const log = createBaseLog(month, triggerType, {
-      total_source_count: parsed.duties.length + (parsed.hasLeavesField ? parsed.leaves.length : 0),
+      total_source_count: parsed.duties.length,
       inserted_count: resultForLog.insertedCount,
       updated_count: resultForLog.updatedCount,
       deleted_count: resultForLog.deletedCount,

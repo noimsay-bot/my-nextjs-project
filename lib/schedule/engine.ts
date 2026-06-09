@@ -626,9 +626,7 @@ export function syncGeneralAssignments(
   const options = normalizeSyncGeneralAssignmentsOptions(optionsOrInitialPreviousNight);
   const orderedDays = [...days].sort((left, right) => left.dateKey.localeCompare(right.dateKey));
   const syncDateKeySet = options.syncDateKeys ? new Set(options.syncDateKeys) : null;
-  if (options.syncVacationsFromState !== false) {
-    syncDayVacationsFromState(state, orderedDays);
-  }
+  syncDayVacationsFromState(state, orderedDays);
   const monthContext = getDayScheduleMonthContext(orderedDays, options.scheduleYear, options.scheduleMonth);
   const normalizedBigEvents = normalizeScheduleBigEvents(options.bigEvents);
   const categoriesToScrub = new Set([
@@ -748,7 +746,6 @@ interface SyncGeneralAssignmentsOptions {
   scheduleYear?: number;
   scheduleMonth?: number;
   syncDateKeys?: string[];
-  syncVacationsFromState?: boolean;
 }
 
 function normalizeSyncGeneralAssignmentsOptions(
