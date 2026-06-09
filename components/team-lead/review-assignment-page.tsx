@@ -34,6 +34,14 @@ function getReviewStatusLabel(item: ReviewManagementItem) {
   return "진행 중";
 }
 
+function getReviewerRoleLabel(role: ReviewerCandidate["role"]) {
+  if (role === "outlet") return "출입처";
+  if (role === "reviewer") return "평가자";
+  if (role === "desk") return "데스크";
+  if (role === "admin") return "관리자";
+  return "팀원";
+}
+
 export function ReviewAssignmentPage() {
   const [items, setItems] = useState<ReviewManagementItem[]>([]);
   const [candidates, setCandidates] = useState<ReviewerCandidate[]>([]);
@@ -196,7 +204,7 @@ export function ReviewAssignmentPage() {
                           <option value="">평가자 선택</option>
                           {candidates.map((candidate) => (
                             <option key={candidate.id} value={candidate.id}>
-                              {candidate.name} ({candidate.email})
+                              {candidate.name} · {getReviewerRoleLabel(candidate.role)} ({candidate.email})
                             </option>
                           ))}
                         </select>

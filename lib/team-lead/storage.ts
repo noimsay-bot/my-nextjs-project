@@ -2891,7 +2891,7 @@ export interface ReviewerCandidate {
   id: string;
   name: string;
   email: string;
-  role: "reviewer";
+  role: "member" | "outlet" | "reviewer" | "desk" | "admin";
   approved: boolean;
 }
 
@@ -3183,11 +3183,12 @@ function hasTeamLeadLikeAccess(role: ReviewManagementProfileRow["role"] | null |
 }
 
 function formatReviewCandidate(row: ReviewManagementProfileRow): ReviewerCandidate {
+  const role = normalizeUserRole(row.role);
   return {
     id: row.id,
     name: row.name,
     email: row.email,
-    role: "reviewer",
+    role: role === "reviewer" || role === "outlet" || role === "desk" || role === "admin" ? role : "member",
     approved: row.approved,
   };
 }

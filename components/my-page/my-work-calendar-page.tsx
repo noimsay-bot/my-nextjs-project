@@ -31,7 +31,10 @@ type MyWorkEvent = {
   dateKey: string;
   category: string;
   label: string;
+  displayLabel?: string;
   name: string;
+  nameLabel?: string;
+  nameTag?: string | null;
 };
 
 type MyWorkCalendarDaySummary = {
@@ -193,6 +196,10 @@ function normalizeMyWorkCalendarSummaryPayload(monthKey: string, payload: unknow
   };
 }
 
+function hasTaggedWorkEvent(events: MyWorkEvent[]) {
+  return events.some((event) => Boolean(event.nameTag || event.displayLabel || event.nameLabel));
+}
+
 async function fetchMyWorkCalendarSummaryDirect(monthKey: string) {
   const startedAt = Date.now();
   if (Date.now() < myWorkCalendarRpcRetryAfter) {
@@ -224,7 +231,12 @@ async function fetchMyWorkCalendarSummaryDirect(monthKey: string) {
     status: "success",
     startedAt,
   });
-  return normalizeMyWorkCalendarSummaryPayload(monthKey, data);
+  const summary = normalizeMyWorkCalendarSummaryPayload(monthKey, data);
+  if (summary.events.length > 0 && !hasTaggedWorkEvent(summary.events)) {
+    myWorkCalendarRpcRetryAfter = Date.now() + MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS;
+    throw new Error("내 일정 RPC가 근무유형 태그를 포함하지 않아 API로 다시 불러옵니다.");
+  }
+  return summary;
 }
 
 async function fetchMyWorkCalendarSummaryViaApi(monthKey: string) {
@@ -562,7 +574,7 @@ export function MyWorkCalendarPage() {
                     <span className={styles.dayNumber}>{day.date.getDate()}</span>
                     {dayWorkEvents.slice(0, 3).map((event) => (
                       <span key={event.id} className={styles.workChip}>
-                        {event.label}
+                        {event.displayLabel ?? event.label}
                       </span>
                     ))}
                     {dayWorkEvents.length > 3 ? <span className={styles.moreChip}>+{dayWorkEvents.length - 3}</span> : null}
@@ -700,8 +712,8 @@ export function MyWorkCalendarPage() {
                 <div className={styles.detailList}>
                   {selectedWorkEvents.map((event) => (
                     <div key={event.id} className={styles.detailItem}>
-                      <strong>{event.label}</strong>
-                      <span>{event.name}</span>
+                      <strong>{event.displayLabel ?? event.label}</strong>
+                      <span>{event.nameLabel ?? event.name}</span>
                     </div>
                   ))}
                 </div>

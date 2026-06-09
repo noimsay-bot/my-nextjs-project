@@ -88,6 +88,14 @@ function sortNamesByChipOrder(names: string[], order: Map<string, number>) {
   });
 }
 
+function getProfileRoleLabel(role: ReviewerRoleProfileItem["role"]) {
+  if (role === "outlet") return "출입처";
+  if (role === "reviewer") return "평가자";
+  if (role === "desk") return "데스크";
+  if (role === "admin") return "관리자";
+  return "팀원";
+}
+
 export function ReviewerRolePage() {
   const router = useRouter();
   const [profiles, setProfiles] = useState<ReviewerRoleProfileItem[]>([]);
@@ -169,14 +177,6 @@ export function ReviewerRolePage() {
   }, [nameChips]);
 
   const selectedNameSet = useMemo(() => new Set(selectedNames), [selectedNames]);
-  const summary = useMemo(
-    () => ({
-      total: nameChips.length,
-      reviewers: selectedNames.length,
-      activeReviewers: activeReviewerCount,
-    }),
-    [activeReviewerCount, nameChips.length, selectedNames.length],
-  );
 
   const selectedDisplayNames = useMemo(
     () =>
@@ -190,13 +190,25 @@ export function ReviewerRolePage() {
   );
 
   const visibleNameChips = useMemo(
-    () =>
-      nameChips.map((name) => ({
+    () => {
+      const profileNames = profiles.map((profile) => profile.name);
+      return normalizeNames([...nameChips, ...profileNames]).map((name) => ({
         name,
+        custom: nameChips.includes(name),
         selected: selectedNameSet.has(name),
-        linked: profileByName.has(name),
-      })),
-    [nameChips, profileByName, selectedNameSet],
+        profile: profileByName.get(name) ?? null,
+      }));
+    },
+    [nameChips, profileByName, profiles, selectedNameSet],
+  );
+
+  const summary = useMemo(
+    () => ({
+      total: visibleNameChips.length,
+      reviewers: selectedNames.length,
+      activeReviewers: activeReviewerCount,
+    }),
+    [activeReviewerCount, selectedNames.length, visibleNameChips.length],
   );
 
   const toggleName = (name: string) => {
@@ -492,7 +504,7 @@ export function ReviewerRolePage() {
             <div className="chip">전체 인원</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {visibleNameChips.length > 0 ? (
-                visibleNameChips.map(({ name, selected, linked }) => (
+                visibleNameChips.map(({ name, custom, selected, profile }) => (
                   <div
                     key={name}
                     style={{
@@ -508,7 +520,7 @@ export function ReviewerRolePage() {
                     <button
                       type="button"
                       className="btn"
-                      title={linked ? name : `${name} 연결된 계정 없음`}
+                      title={profile ? `${name} · ${getProfileRoleLabel(profile.role)}` : `${name} 연결된 계정 없음`}
                       onClick={() => toggleName(name)}
                       style={{
                         padding: "8px 12px",
@@ -520,8 +532,9 @@ export function ReviewerRolePage() {
                       }}
                     >
                       {name}
+                      {profile?.role === "outlet" ? " · 출입처" : null}
                     </button>
-                    {editingNames ? (
+                    {editingNames && custom ? (
                       <button
                         type="button"
                         className="btn"

@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getJsonResponseByteLength, logRouteUsageDebug } from "@/lib/server/usage-debug";
-import { getAssignmentDisplayRank, getDayCategoryDisplayLabel } from "@/lib/schedule/constants";
+import {
+  buildScheduleAssignmentNameTagKey,
+  getAssignmentDisplayRank,
+  getDayCategoryDisplayLabel,
+  scheduleAssignmentNameTagLabels,
+} from "@/lib/schedule/constants";
 import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
-import type { GeneratedSchedule } from "@/lib/schedule/types";
+import type { GeneratedSchedule, ScheduleAssignmentNameTag } from "@/lib/schedule/types";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 
@@ -23,7 +28,10 @@ type MyWorkCalendarEvent = {
   dateKey: string;
   category: string;
   label: string;
+  displayLabel: string;
   name: string;
+  nameLabel: string;
+  nameTag: ScheduleAssignmentNameTag | null;
 };
 
 type MyWorkCalendarDay = {
@@ -107,6 +115,15 @@ function isRedScheduleDay(day: { isWeekend: boolean; isHoliday: boolean; isCusto
   return day.isWeekend || day.isHoliday || day.isCustomHoliday || day.isWeekdayHoliday;
 }
 
+function getAssignmentNameTag(category: string, name: string, day: GeneratedSchedule["days"][number]) {
+  const tag = day.assignmentNameTags?.[buildScheduleAssignmentNameTagKey(category, name)] ?? null;
+  return tag === "gov" || tag === "law" || tag === "half" || tag === "city" || tag === "office" ? tag : null;
+}
+
+function withAssignmentNameTag(value: string, tag: ScheduleAssignmentNameTag | null) {
+  return tag ? `${value}${scheduleAssignmentNameTagLabels[tag]}` : value;
+}
+
 function buildMyWorkCalendarSummary(schedule: GeneratedSchedule, username: string) {
   const events: MyWorkCalendarEvent[] = [];
   const days: MyWorkCalendarDay[] = [];
@@ -129,7 +146,10 @@ function buildMyWorkCalendarSummary(schedule: GeneratedSchedule, username: strin
           dateKey: day.dateKey,
           category: "데스크",
           label: "데스크",
+          displayLabel: "데스크",
           name: day.headerName,
+          nameLabel: day.headerName,
+          nameTag: null,
         });
       }
 
@@ -139,12 +159,16 @@ function buildMyWorkCalendarSummary(schedule: GeneratedSchedule, username: strin
           if (!isSameActorName(comparableName, username)) return;
           const label = getDayCategoryDisplayLabel(day, category);
           if (label === "일반" && !isRedScheduleDay(day)) return;
+          const nameTag = getAssignmentNameTag(category, comparableName, day);
           events.push({
             id: `${day.dateKey}:${category}:${index}:${name}`,
             dateKey: day.dateKey,
             category,
             label,
+            displayLabel: withAssignmentNameTag(label, nameTag),
             name: comparableName,
+            nameLabel: withAssignmentNameTag(comparableName, nameTag),
+            nameTag,
           });
         });
       });

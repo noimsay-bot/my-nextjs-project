@@ -102,7 +102,10 @@ as $$
       'dateKey', date_key,
       'category', '데스크',
       'label', '데스크',
-      'name', day->>'headerName'
+      'displayLabel', '데스크',
+      'name', day->>'headerName',
+      'nameLabel', day->>'headerName',
+      'nameTag', null
     ) as event,
     date_key,
     0 as display_rank,
@@ -116,7 +119,10 @@ as $$
       'dateKey', day_rows.date_key,
       'category', category.key,
       'label', label.value,
-      'name', comparable.value
+      'displayLabel', label.value || coalesce(tag.label, ''),
+      'name', comparable.value,
+      'nameLabel', comparable.value || coalesce(tag.label, ''),
+      'nameTag', tag.value
     ) as event,
     day_rows.date_key,
     case
@@ -154,6 +160,25 @@ as $$
         end
       ) as value
     ) as label
+    cross join lateral (
+      select
+        case day_rows.day->'assignmentNameTags'->>(category.key || '::' || comparable.value)
+          when 'gov' then 'gov'
+          when 'law' then 'law'
+          when 'half' then 'half'
+          when 'city' then 'city'
+          when 'office' then 'office'
+          else null
+        end as value,
+        case day_rows.day->'assignmentNameTags'->>(category.key || '::' || comparable.value)
+          when 'gov' then '(국)'
+          when 'law' then '(법)'
+          when 'half' then '(반)'
+          when 'city' then '(시)'
+          when 'office' then '(청)'
+          else ''
+        end as label
+    ) as tag
     where regexp_replace(comparable.value, '\s+', '', 'g') = (select normalized_name from current_profile)
       and not (
         label.value = '일반'
