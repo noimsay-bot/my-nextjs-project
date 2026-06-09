@@ -259,6 +259,7 @@ export function prepareScheduleForPublish(
     previousBigEvents: nextSchedule.big_events,
     scheduleYear: nextSchedule.year,
     scheduleMonth: nextSchedule.month,
+    syncVacationsFromState: false,
   });
 
   return normalizePublishedSchedule(nextSchedule);

@@ -560,6 +560,29 @@ test("published repair allows general auto-sync when only vacation data changed"
   expect(canRepairPublishedGeneralAssignments(published, generated!)).toBe(true);
 });
 
+test("published preparation preserves schedule vacation entries that are not in state text", () => {
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    vacations: "",
+  });
+  const source = JSON.parse(JSON.stringify(generateSchedule(state).state.generated!)) as GeneratedSchedule;
+  const day = source.days.find((item) => item.dateKey === "2026-06-09");
+  expect(day).toBeTruthy();
+
+  day!.vacations = ["연차:정철원"];
+  day!.assignments["휴가"] = ["연차:정철원"];
+  day!.assignments["일반"] = [...(day!.assignments["일반"] ?? []), "정철원"];
+
+  const prepared = prepareScheduleForPublish(source, [], state);
+  const preparedDay = prepared.days.find((item) => item.dateKey === "2026-06-09");
+
+  expect(preparedDay?.assignments["휴가"]).toContain("연차:정철원");
+  expect(preparedDay?.vacations).toContain("연차:정철원");
+  expect(preparedDay?.assignments["일반"] ?? []).not.toContain("정철원");
+});
+
 test("accepted compensatory leave swaps update vacation source text before schedule normalization", () => {
   const baseDay = {
     day: 1,

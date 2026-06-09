@@ -331,6 +331,7 @@ function syncGeneralAssignmentsForAssemblySchedule(
     previousBigEvents: targetSchedule.big_events,
     scheduleYear: targetSchedule.year,
     scheduleMonth: targetSchedule.month,
+    syncVacationsFromState: false,
   });
 
   return targetSchedule;
