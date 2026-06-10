@@ -909,7 +909,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       const publishedItems = await refreshPublishedSchedules({ repair: true });
       const activeSession = getSession();
       if (activeSession?.approved && hasDeskAccess(activeSession.actualRole)) {
-        await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));
+        try {
+          await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));
+        } catch (error) {
+          setRequestMessage(error instanceof Error ? error.message : "일정배정 정보를 불러오지 못했습니다.");
+          setRequestMessageTone("warn");
+        }
       }
       syncItemsFromCache();
     } finally {
@@ -1439,7 +1444,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     const printTitle = `${selectedItem.schedule.month}월 근무표`;
     printHtmlDocument({
       title: printTitle,
-      pageMargin: "3mm",
+      pageMargin: "0mm",
       bodyHtml: renderSchedulePrintHtml({
         title: printTitle,
         days: visibleDisplayDays,

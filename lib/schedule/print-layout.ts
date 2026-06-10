@@ -1,5 +1,5 @@
 import { parseVacationEntry } from "@/lib/schedule/engine";
-import { getAssignmentDisplayRank, getDayCategoryDisplayLabel } from "@/lib/schedule/constants";
+import { getAssignmentDisplayRank, getDayCategoryDisplayLabel, isAutoManagedGeneralAssignment } from "@/lib/schedule/constants";
 import { DaySchedule } from "@/lib/schedule/types";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -29,20 +29,43 @@ function getPrintCategoryLabel(day: DaySchedule, category: string) {
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
+function shouldExcludePrintCategory(day: DaySchedule, category: string) {
+  const normalizedCategory = category.replace(/\s/g, "");
+  const normalizedLabel = getPrintCategoryLabel(day, category).replace(/\s/g, "");
+  return isAutoManagedGeneralAssignment(day, category) || normalizedCategory.includes("월드컵") || normalizedLabel.includes("월드컵");
+}
+
+function normalizePrintName(category: string, name: string) {
+  return (category === "휴가" ? parseVacationEntry(name).name : name).trim();
+}
+
+function getVacationNames(day: DaySchedule) {
+  return (day.assignments["휴가"] ?? [])
+    .map((name) => normalizePrintName("휴가", name))
+    .filter(Boolean);
+}
+
 function getVisibleAssignments(day: DaySchedule, highlightedName?: string | null) {
   const isWeekendLike = day.isWeekend || day.isHoliday;
   return Object.entries(day.assignments)
     .filter(([category, names]) => {
       if (!Array.isArray(names) || names.length === 0) return false;
-      if (isWeekendLike) return category !== "휴가" && category !== "제크";
+      if (category === "휴가") return false;
+      if (shouldExcludePrintCategory(day, category)) return false;
+      if (isWeekendLike) return category !== "제크" && !["국회", "청사", "청와대"].includes(category);
       return !["국회", "청사", "청와대"].includes(category);
     })
-    .sort(([leftCategory], [rightCategory]) => getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory))
+    .sort(([leftCategory], [rightCategory]) => {
+      if (isWeekendLike) {
+        if (leftCategory === "야근" && rightCategory !== "야근") return 1;
+        if (rightCategory === "야근" && leftCategory !== "야근") return -1;
+      }
+      return getAssignmentDisplayRank(leftCategory) - getAssignmentDisplayRank(rightCategory);
+    })
     .map(([category, names]) => ({
       label: getPrintCategoryLabel(day, category),
       names: names
-        .map((name) => (category === "휴가" ? parseVacationEntry(name).name : name))
-        .map((name) => name.trim())
+        .map((name) => normalizePrintName(category, name))
         .filter(Boolean)
         .map((name) => ({
           name,
@@ -71,6 +94,16 @@ function renderName(item: { name: string; highlighted: boolean }) {
     : `<span>${content}</span>`;
 }
 
+function renderVacationPanel(names: string[]) {
+  return `
+    <aside class="schedule-print-vacation">
+      <div class="schedule-print-vacation-title">휴가</div>
+      <div class="schedule-print-vacation-list">
+        ${names.map((name) => `<div class="schedule-print-vacation-name">${escapeHtml(name)}</div>`).join("")}
+      </div>
+    </aside>`;
+}
+
 function renderDayCard(day: DaySchedule | null, highlightedName?: string | null) {
   if (!day) {
     return '<article class="schedule-print-day schedule-print-day--empty" aria-hidden="true"></article>';
@@ -87,6 +120,8 @@ function renderDayCard(day: DaySchedule | null, highlightedName?: string | null)
         </section>`,
     )
     .join("");
+  const showVacationPanel = !(day.isWeekend || day.isHoliday);
+  const vacationNames = showVacationPanel ? getVacationNames(day) : [];
   const dayBadge = getPrintDayBadge(day);
   const classes = [
     "schedule-print-day",
@@ -108,8 +143,11 @@ function renderDayCard(day: DaySchedule | null, highlightedName?: string | null)
           ${day.headerName ? `<strong>${escapeHtml(day.headerName)}</strong>` : ""}
         </div>
       </header>
-      <div class="schedule-print-day-body">
-        ${assignmentsHtml || '<div class="schedule-print-empty-line">-</div>'}
+      <div class="schedule-print-day-content${showVacationPanel ? "" : " schedule-print-day-content--no-vacation"}">
+        <div class="schedule-print-day-body">
+          ${assignmentsHtml || '<div class="schedule-print-empty-line">-</div>'}
+        </div>
+        ${showVacationPanel ? renderVacationPanel(vacationNames) : ""}
       </div>
     </article>`;
 }
@@ -135,7 +173,7 @@ export function renderSchedulePrintHtml({
       <div class="schedule-print-weekdays">
         ${weekdayLabels.map((label) => `<div>${escapeHtml(label)}</div>`).join("")}
       </div>
-      <div class="schedule-print-weeks">
+      <div class="schedule-print-weeks" style="grid-template-rows: repeat(${weekCount}, minmax(0, 1fr));">
         ${weeks
           .map(
             (week) => `

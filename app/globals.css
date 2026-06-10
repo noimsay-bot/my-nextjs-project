@@ -4851,6 +4851,27 @@ html[data-theme="light"] .schedule-assignment-date-nav__button--today {
   body.election-print-mode * {
     visibility: hidden !important;
   }
+
+  [data-print-frame="true"] .schedule-name-chip {
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  [data-print-frame="true"] .schedule-name-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0 !important;
+  }
+
+  [data-print-frame="true"] .schedule-name-chip__text {
+    display: block !important;
+    width: 100% !important;
+    min-width: 3em !important;
+    line-height: 1.08 !important;
+    white-space: nowrap !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+    transform: none !important;
+  }
 }
 
 @media (max-width: 380px) {

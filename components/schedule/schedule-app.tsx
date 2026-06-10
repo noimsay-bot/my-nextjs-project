@@ -1153,7 +1153,7 @@ export function ScheduleApp() {
     const printTitle = `${visibleSchedule.month}월 근무표`;
     printHtmlDocument({
       title: printTitle,
-      pageMargin: "3mm",
+      pageMargin: "0mm",
       bodyHtml: renderSchedulePrintHtml({
         title: printTitle,
         days: visibleDays,
@@ -1171,7 +1171,7 @@ export function ScheduleApp() {
     const printTitle = `${snapshot.generated.month}월 원본`;
     printHtmlDocument({
       title: printTitle,
-      pageMargin: "3mm",
+      pageMargin: "0mm",
       bodyHtml: renderSchedulePrintHtml({
         title: printTitle,
         days: getOriginalSnapshotPrintDays(snapshot),

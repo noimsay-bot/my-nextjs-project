@@ -81,12 +81,22 @@ export function printHtmlDocument({
 
       .schedule-print-sheet {
         width: 100%;
-        display: block;
+        height: 210mm;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
         color: #111827;
         font-family: "Segoe UI", "Pretendard", sans-serif;
         text-align: left;
-        page-break-inside: auto;
-        overflow: visible;
+        page-break-after: always;
+        page-break-inside: avoid;
+        break-after: page;
+        break-inside: avoid;
+        overflow: hidden;
+      }
+
+      .schedule-print-sheet:last-child {
+        page-break-after: auto;
+        break-after: auto;
       }
 
       .schedule-print-header {
@@ -94,11 +104,11 @@ export function printHtmlDocument({
         align-items: center;
         justify-content: center;
         text-align: center;
-        margin-bottom: 2mm;
+        min-height: 6mm;
       }
 
       .schedule-print-header strong {
-        font-size: 15pt;
+        font-size: 13pt;
         font-weight: 800;
         line-height: 1.2;
       }
@@ -108,20 +118,20 @@ export function printHtmlDocument({
         width: 100%;
         display: grid;
         grid-template-columns: repeat(7, minmax(0, 1fr));
-        gap: 1.2mm;
+        gap: 0;
       }
 
       .schedule-print-weekdays {
-        margin-bottom: 1.2mm;
+        margin-bottom: 0;
       }
 
       .schedule-print-weekdays > div {
-        padding: 1.4mm 1mm;
+        padding: 0.7mm 0.6mm;
         border: 1px solid #cbd5e1;
-        border-radius: 1.6mm;
+        border-radius: 0;
         background: #eef2f7;
         color: #0f172a;
-        font-size: 10pt;
+        font-size: 8.5pt;
         font-weight: 800;
         text-align: center;
         line-height: 1.1;
@@ -129,26 +139,28 @@ export function printHtmlDocument({
 
       .schedule-print-weeks {
         display: grid;
-        gap: 1.2mm;
+        gap: 0;
+        min-height: 0;
       }
 
       .schedule-print-week {
         align-items: stretch;
+        min-height: 0;
         break-inside: avoid;
         page-break-inside: avoid;
       }
 
       .schedule-print-day {
         min-width: 0;
-        min-height: 31mm;
+        min-height: 0;
         display: grid;
         grid-template-rows: auto 1fr;
-        gap: 1mm;
-        padding: 1.4mm;
+        gap: 0.35mm;
+        padding: 0.45mm;
         border: 1px solid #cbd5e1;
-        border-radius: 1.6mm;
+        border-radius: 0;
         background: #ffffff;
-        overflow: visible;
+        overflow: hidden;
         break-inside: avoid;
         page-break-inside: avoid;
       }
@@ -167,33 +179,33 @@ export function printHtmlDocument({
       .schedule-print-day-head {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
-        gap: 1.5mm;
+        gap: 0.8mm;
         align-items: center;
         min-width: 0;
       }
 
       .schedule-print-day-date {
         display: grid;
-        gap: 0.4mm;
+        gap: 0.2mm;
         justify-items: center;
-        min-width: 9mm;
+        min-width: 7.5mm;
         color: #0f172a;
         line-height: 1;
       }
 
       .schedule-print-day-date strong {
-        font-size: 11pt;
+        font-size: 9.2pt;
         font-weight: 900;
       }
 
       .schedule-print-day-date span {
-        font-size: 8pt;
+        font-size: 6.8pt;
         font-weight: 800;
       }
 
       .schedule-print-day-title {
         display: grid;
-        gap: 0.7mm;
+        gap: 0.25mm;
         justify-items: center;
         align-content: center;
         min-width: 0;
@@ -202,7 +214,7 @@ export function printHtmlDocument({
 
       .schedule-print-day-title strong {
         max-width: 100%;
-        font-size: 11.5pt;
+        font-size: 9.5pt;
         font-weight: 900;
         line-height: 1.05;
         white-space: normal;
@@ -212,27 +224,43 @@ export function printHtmlDocument({
 
       .schedule-print-day-badge {
         color: #b91c1c;
-        font-size: 8.8pt;
+        font-size: 7pt;
         font-weight: 900;
         line-height: 1.1;
       }
 
+      .schedule-print-day-content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 14mm;
+        gap: 0.35mm;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .schedule-print-day-content--no-vacation {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       .schedule-print-day-body {
         display: grid;
-        gap: 0.9mm;
+        gap: 0;
         min-width: 0;
+        min-height: 0;
         align-content: start;
+        overflow: hidden;
       }
 
       .schedule-print-assignment {
         display: grid;
-        grid-template-columns: 10mm minmax(0, 1fr);
-        gap: 1.1mm;
+        grid-template-columns: 8.5mm minmax(0, 1fr);
+        gap: 0.4mm;
         align-items: stretch;
         min-width: 0;
-        padding: 1mm;
+        min-height: 0;
+        padding: 0.3mm;
         border: 1px solid #d6dee8;
-        border-radius: 1.4mm;
+        border-radius: 0;
         background: #ffffff;
       }
 
@@ -242,7 +270,7 @@ export function printHtmlDocument({
         justify-content: center;
         min-width: 0;
         color: #0f172a;
-        font-size: 8.8pt;
+        font-size: 6.8pt;
         font-weight: 900;
         line-height: 1.05;
         text-align: center;
@@ -251,10 +279,11 @@ export function printHtmlDocument({
 
       .schedule-print-name-list {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(7mm, 1fr));
-        gap: 0.8mm;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0;
         align-items: stretch;
         min-width: 0;
+        min-height: 0;
       }
 
       .schedule-print-name {
@@ -262,46 +291,97 @@ export function printHtmlDocument({
         align-items: center;
         justify-content: center;
         min-width: 0;
-        min-height: 16mm;
-        padding: 0.8mm 0.4mm;
+        min-height: 4.7mm;
+        padding: 0.25mm 0.2mm;
         border: 1px solid #dbe4ee;
-        border-radius: 0.9mm;
+        border-radius: 0;
         background: #f8fbff;
         color: #0f172a;
-        font-size: 10.5pt;
+        font-size: 7.8pt;
         font-weight: 800;
         line-height: 1.08;
         text-align: center;
         white-space: nowrap;
         word-break: keep-all;
-        overflow: visible;
+        overflow: hidden;
       }
 
       .schedule-print-name > span {
         display: block;
+        min-width: 3em;
+        max-width: 100%;
         text-align: center;
-        writing-mode: vertical-rl;
-        text-orientation: upright;
+        white-space: nowrap;
       }
 
       .schedule-print-name-highlight {
         display: block;
-        padding: 0.6mm 0.4mm;
-        border-radius: 0.8mm;
+        min-width: 3em;
+        max-width: 100%;
+        padding: 0.25mm 0.2mm;
+        border-radius: 0;
         background: linear-gradient(transparent 18%, #fff176 18%, #fff176 88%, transparent 88%);
         color: inherit;
         font-weight: 900;
         text-align: center;
-        writing-mode: vertical-rl;
-        text-orientation: upright;
         white-space: nowrap;
       }
 
       .schedule-print-empty-line {
         color: #94a3b8;
-        font-size: 9pt;
+        font-size: 7.2pt;
         line-height: 1.1;
         text-align: center;
+      }
+
+      .schedule-print-vacation {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+        min-height: 0;
+        border: 1px solid #d6dee8;
+        background: #ffffff;
+        overflow: hidden;
+      }
+
+      .schedule-print-vacation-title {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 4.2mm;
+        border-bottom: 1px solid #d6dee8;
+        background: #eef2f7;
+        color: #0f172a;
+        font-size: 6.8pt;
+        font-weight: 900;
+        line-height: 1;
+        text-align: center;
+      }
+
+      .schedule-print-vacation-list {
+        display: grid;
+        align-content: start;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .schedule-print-vacation-name {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 4.4mm;
+        padding: 0.25mm 0.2mm;
+        border-bottom: 1px solid #dbe4ee;
+        background: #f8fbff;
+        color: #0f172a;
+        font-size: 7.4pt;
+        font-weight: 800;
+        line-height: 1.05;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
       }
 
       @media print {
@@ -333,8 +413,12 @@ export function printHtmlDocument({
           return;
         }
         setTimeout(function () {
-          window.focus();
-          window.print();
+          try {
+            window.focus();
+            window.print();
+          } catch (error) {
+            console.warn("자동 출력 호출에 실패했습니다. 브라우저의 인쇄 메뉴를 사용해 주세요.", error);
+          }
         }, 150);
       });
       window.addEventListener("afterprint", function () {
