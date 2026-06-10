@@ -149,14 +149,6 @@ export default function VacationPage() {
     setCompensatorySelectedDateKeys((current) => current.filter((dateKey) => selectableDateSet.has(dateKey)));
   }, [calendarDateItems]);
 
-  const myRequests = useMemo(
-    () => requests.filter((request) => (
-      session?.id
-        ? request.requesterId === session.id
-        : request.requesterName === session?.username
-    )),
-    [requests, session?.id, session?.username],
-  );
   const monthRequests = useMemo(
     () => requests.filter((request) => request.year === year && request.month === month),
     [requests, year, month],
@@ -470,9 +462,9 @@ export default function VacationPage() {
       <section className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 14 }}>
           <div className="chip">내 신청 내역</div>
-          {myRequests.length > 0 ? (
+          {myMonthRequests.length > 0 ? (
             <>
-              {myRequests.map((request) => (
+              {myMonthRequests.map((request) => (
                 <article
                   key={request.id}
                   style={{
@@ -493,7 +485,9 @@ export default function VacationPage() {
               ))}
             </>
           ) : (
-            <div className="status note">아직 제출한 휴가 신청이 없습니다.</div>
+            <div className="status note">
+              {year}년 {month}월에 제출한 휴가 신청이 없습니다.
+            </div>
           )}
 
           <section style={{ display: "grid", gap: 12, marginTop: 8 }}>
