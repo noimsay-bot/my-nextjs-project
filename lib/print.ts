@@ -9,6 +9,72 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
+function getCurrentHtmlAttributes() {
+  const className = document.documentElement.getAttribute("class");
+  const theme = document.documentElement.getAttribute("data-theme");
+  return [
+    className ? `class="${escapeHtml(className)}"` : "",
+    theme ? `data-theme="${escapeHtml(theme)}"` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function copyFormState(source: Element, target: Element) {
+  const sourceFields = Array.from(source.querySelectorAll("input, textarea, select"));
+  const targetFields = Array.from(target.querySelectorAll("input, textarea, select"));
+
+  sourceFields.forEach((sourceField, index) => {
+    const targetField = targetFields[index];
+    if (!targetField) return;
+
+    if (sourceField instanceof HTMLInputElement && targetField instanceof HTMLInputElement) {
+      targetField.value = sourceField.value;
+      targetField.setAttribute("value", sourceField.value);
+      if (sourceField.type === "checkbox" || sourceField.type === "radio") {
+        targetField.checked = sourceField.checked;
+        targetField.toggleAttribute("checked", sourceField.checked);
+      }
+      return;
+    }
+
+    if (sourceField instanceof HTMLTextAreaElement && targetField instanceof HTMLTextAreaElement) {
+      targetField.value = sourceField.value;
+      targetField.textContent = sourceField.value;
+      return;
+    }
+
+    if (sourceField instanceof HTMLSelectElement && targetField instanceof HTMLSelectElement) {
+      targetField.value = sourceField.value;
+      Array.from(targetField.options).forEach((option) => {
+        option.toggleAttribute("selected", option.value === sourceField.value);
+      });
+    }
+  });
+}
+
+function getAncestorClassNames(element: HTMLElement) {
+  const classNames: string[] = [];
+  let current = element.parentElement;
+
+  while (current && current !== document.body) {
+    const className = current.getAttribute("class")?.trim();
+    if (className) {
+      classNames.unshift(className);
+    }
+    current = current.parentElement;
+  }
+
+  return classNames;
+}
+
+function wrapWithAncestorClasses(html: string, classNames: string[]) {
+  return classNames.reduceRight(
+    (current, className) => `<div class="${escapeHtml(className)}">${current}</div>`,
+    html,
+  );
+}
+
 export function printHtmlDocument({
   title,
   bodyHtml,
@@ -28,10 +94,11 @@ export function printHtmlDocument({
   const copiedStyles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
     .map((node) => node.outerHTML)
     .join("\n");
+  const htmlAttributes = getCurrentHtmlAttributes();
 
   printWindow.document.open();
   printWindow.document.write(`<!doctype html>
-<html lang="ko">
+<html lang="ko"${htmlAttributes ? ` ${htmlAttributes}` : ""}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -223,4 +290,55 @@ export function printHtmlDocument({
 </html>`);
   printWindow.document.close();
   return true;
+}
+
+export function printElementDocument({
+  title,
+  element,
+  pageSize = "A4 landscape",
+  pageMargin = "8mm",
+  extraCss = "",
+}: {
+  title: string;
+  element: HTMLElement | null;
+  pageSize?: string;
+  pageMargin?: string;
+  extraCss?: string;
+}) {
+  if (!element) return false;
+
+  const clone = element.cloneNode(true) as HTMLElement;
+  copyFormState(element, clone);
+
+  return printHtmlDocument({
+    title,
+    pageSize,
+    pageMargin,
+    bodyHtml: `<main class="screen-print-root">${wrapWithAncestorClasses(clone.outerHTML, getAncestorClassNames(element))}</main>`,
+    extraCss: `
+      html,
+      body {
+        background: var(--bg) !important;
+        color: var(--text) !important;
+      }
+
+      .screen-print-root {
+        width: 100%;
+        color: var(--text);
+      }
+
+      .screen-print-root [data-print-only="true"] {
+        display: none !important;
+      }
+
+      @media print {
+        .screen-print-root {
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+      }
+
+      ${extraCss}
+    `,
+  });
 }

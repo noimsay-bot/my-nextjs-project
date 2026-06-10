@@ -9,7 +9,7 @@ import {
   hasDeskAccess,
   subscribeToAuth,
 } from "@/lib/auth/storage";
-import { printHtmlDocument } from "@/lib/print";
+import { printElementDocument, printHtmlDocument } from "@/lib/print";
 import {
   buildScheduleAssignmentNameTagKey,
   getAssignmentDisplayRank,
@@ -1437,6 +1437,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const printSelectedSchedule = () => {
     if (!selectedItem) return;
     const printTitle = `${selectedItem.schedule.month}월 근무표`;
+    const printed = printElementDocument({
+      title: printTitle,
+      element: printableScheduleRef.current,
+    });
+    if (printed) return;
+
     printHtmlDocument({
       title: printTitle,
       bodyHtml: renderSchedulePrintHtml({

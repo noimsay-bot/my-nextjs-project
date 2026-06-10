@@ -8,7 +8,7 @@ import { ScheduleBigEventsSection, type BigEventValidationMessage } from "@/comp
 import { ScheduleManagementLinks } from "@/components/schedule/schedule-management-links";
 import { ScheduleTripTooltip } from "@/components/schedule/schedule-trip-tooltip";
 import { getSession } from "@/lib/auth/storage";
-import { printHtmlDocument } from "@/lib/print";
+import { printElementDocument, printHtmlDocument } from "@/lib/print";
 import {
   buildScheduleAssignmentNameTagKey,
   GENERAL_TEAM_DEFAULT_NAMES,
@@ -1151,6 +1151,12 @@ export function ScheduleApp() {
   const printVisibleSchedule = () => {
     if (!visibleSchedule) return;
     const printTitle = `${visibleSchedule.month}월 근무표`;
+    const printed = printElementDocument({
+      title: printTitle,
+      element: printableScheduleRef.current,
+    });
+    if (printed) return;
+
     printHtmlDocument({
       title: printTitle,
       bodyHtml: renderSchedulePrintHtml({
