@@ -90,10 +90,10 @@ function highlightStyle(active: boolean, tone: "annual" | "compensatory") {
   }
 
   return {
-    background: baseStyle.background,
-    border: `1px solid ${baseStyle.borderColor}`,
-    color: baseStyle.color,
-    boxShadow: tone === "annual" ? "0 10px 24px rgba(59,130,246,.18)" : "0 10px 24px rgba(16,185,129,.16)",
+    background: tone === "annual" ? "rgba(37,99,235,.34)" : "rgba(5,150,105,.34)",
+    border: "1px solid rgba(250,204,21,.78)",
+    color: "#ffffff",
+    boxShadow: tone === "annual" ? "0 10px 24px rgba(59,130,246,.28)" : "0 10px 24px rgba(16,185,129,.24)",
   };
 }
 
@@ -109,6 +109,31 @@ function countDaysByName(map: Record<string, string[]>) {
     });
   });
   return counts;
+}
+
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return { year, month, day };
+}
+
+function formatWinnerDateLabel(dateKey: string) {
+  const { month, day } = parseDateKey(dateKey);
+  return `${month}/${day}`;
+}
+
+function buildWinnerRows(
+  annualWinners: Record<string, string[]>,
+  compensatoryWinners: Record<string, string[]>,
+) {
+  return Array.from(new Set([...Object.keys(annualWinners), ...Object.keys(compensatoryWinners)]))
+    .sort((left, right) => left.localeCompare(right))
+    .map((dateKey) => ({
+      dateKey,
+      label: formatWinnerDateLabel(dateKey),
+      annualWinners: annualWinners[dateKey] ?? [],
+      compensatoryWinners: compensatoryWinners[dateKey] ?? [],
+    }))
+    .filter((row) => row.annualWinners.length > 0 || row.compensatoryWinners.length > 0);
 }
 
 function buildCompensatorySummary(
@@ -242,6 +267,10 @@ export default function ScheduleVacationsPage() {
         monthState?.compensatoryWinners ?? {},
       ),
     [annualApplicants, compensatoryApplicants, monthState?.annualWinners, monthState?.compensatoryWinners],
+  );
+  const winnerRows = useMemo(
+    () => buildWinnerRows(monthState?.annualWinners ?? {}, monthState?.compensatoryWinners ?? {}),
+    [monthState?.annualWinners, monthState?.compensatoryWinners],
   );
   const missingApplicants = useMemo(() => {
     const submittedIds = new Set<string>();
@@ -431,6 +460,90 @@ export default function ScheduleVacationsPage() {
 
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
 
+          {winnerRows.length > 0 ? (
+            <div className="status note" style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <strong style={{ fontSize: 16, color: "var(--text)" }}>당첨자 명단</strong>
+                <div className="muted">날짜별 연차/대휴 당첨자를 바로 확인할 수 있습니다.</div>
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {winnerRows.map((row) => (
+                  <div
+                    key={`winner-row-${row.dateKey}`}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "72px minmax(0, 1fr)",
+                      gap: 12,
+                      alignItems: "start",
+                      padding: "12px",
+                      borderRadius: 14,
+                      border: "1px solid rgba(250,204,21,.38)",
+                      background: "rgba(250,204,21,.1)",
+                    }}
+                  >
+                    <strong style={{ fontSize: 16, color: "var(--text)" }}>{row.label}</strong>
+                    <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
+                        <span style={{ minWidth: 42, color: "var(--text)", fontSize: 13, fontWeight: 900 }}>연차</span>
+                        {row.annualWinners.length > 0 ? (
+                          row.annualWinners.map((name) => (
+                            <span
+                              key={`winner-annual-${row.dateKey}-${name}`}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                maxWidth: "100%",
+                                padding: "5px 10px",
+                                borderRadius: 999,
+                                fontSize: 13,
+                                fontWeight: 900,
+                                background: "rgba(37,99,235,.28)",
+                                border: "1px solid rgba(37,99,235,.55)",
+                                color: "var(--text)",
+                              }}
+                            >
+                              {name}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="muted">없음</span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
+                        <span style={{ minWidth: 42, color: "var(--text)", fontSize: 13, fontWeight: 900 }}>대휴</span>
+                        {row.compensatoryWinners.length > 0 ? (
+                          row.compensatoryWinners.map((name) => (
+                            <span
+                              key={`winner-compensatory-${row.dateKey}-${name}`}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                maxWidth: "100%",
+                                padding: "5px 10px",
+                                borderRadius: 999,
+                                fontSize: 13,
+                                fontWeight: 900,
+                                background: "rgba(5,150,105,.28)",
+                                border: "1px solid rgba(5,150,105,.55)",
+                                color: "var(--text)",
+                              }}
+                            >
+                              {name}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="muted">없음</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {vacationLotteryDone && lotteryReport.length > 0 ? (
             <div className="status note" style={{ display: "grid", gap: 10 }}>
               <strong style={{ fontSize: 15 }}>휴가 추첨 결과보고서</strong>
@@ -592,6 +705,9 @@ export default function ScheduleVacationsPage() {
                                     display: "inline-flex",
                                     alignItems: "center",
                                     justifyContent: "center",
+                                    gap: 6,
+                                    maxWidth: "100%",
+                                    minWidth: 0,
                                     padding: "4px 9px",
                                     borderRadius: 999,
                                     fontSize: 13,
@@ -599,7 +715,24 @@ export default function ScheduleVacationsPage() {
                                     ...highlightStyle(isWinner, "annual"),
                                   }}
                                 >
-                                  {name}
+                                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {name}
+                                  </span>
+                                  {isWinner ? (
+                                    <strong
+                                      style={{
+                                        flex: "0 0 auto",
+                                        padding: "1px 6px",
+                                        borderRadius: 999,
+                                        background: "rgba(250,204,21,.22)",
+                                        color: "var(--text)",
+                                        fontSize: 11,
+                                        fontWeight: 900,
+                                      }}
+                                    >
+                                      당첨
+                                    </strong>
+                                  ) : null}
                                 </span>
                               );
                             })
@@ -624,6 +757,9 @@ export default function ScheduleVacationsPage() {
                                     display: "inline-flex",
                                     alignItems: "center",
                                     justifyContent: "center",
+                                    gap: 6,
+                                    maxWidth: "100%",
+                                    minWidth: 0,
                                     padding: "4px 9px",
                                     borderRadius: 999,
                                     fontSize: 13,
@@ -631,7 +767,24 @@ export default function ScheduleVacationsPage() {
                                     ...highlightStyle(isWinner, "compensatory"),
                                   }}
                                 >
-                                  {name}
+                                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {name}
+                                  </span>
+                                  {isWinner ? (
+                                    <strong
+                                      style={{
+                                        flex: "0 0 auto",
+                                        padding: "1px 6px",
+                                        borderRadius: 999,
+                                        background: "rgba(250,204,21,.22)",
+                                        color: "var(--text)",
+                                        fontSize: 11,
+                                        fontWeight: 900,
+                                      }}
+                                    >
+                                      당첨
+                                    </strong>
+                                  ) : null}
                                 </span>
                               );
                             })

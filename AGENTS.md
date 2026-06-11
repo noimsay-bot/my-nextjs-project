@@ -15,6 +15,7 @@
 
 ## 3. 작업 전 필수 읽기
 - 저장소 전체 규칙: 이 파일
+- AI 공통 지침: [docs/ai-instructions.md](docs/ai-instructions.md)
 - App Router 구조: [docs/architecture/nextjs-app-router.md](docs/architecture/nextjs-app-router.md)
 - 아키텍처 경계: [docs/architecture/boundaries.md](docs/architecture/boundaries.md)
 - 의존성 규칙: [docs/architecture/dependency-rules.md](docs/architecture/dependency-rules.md)
