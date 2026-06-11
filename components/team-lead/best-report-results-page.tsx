@@ -12,6 +12,7 @@ import {
   TeamLeadBestReportReviewerDetailRow,
   TeamLeadBestReportResultsRow,
   TeamLeadBestReportReviewer,
+  TeamLeadSubmissionStatusEntry,
 } from "@/lib/team-lead/storage";
 
 function formatScore(score: number | null) {
@@ -66,6 +67,7 @@ export function BestReportResultsPage() {
   const [rows, setRows] = useState<TeamLeadBestReportResultsRow[]>([]);
   const [reviewerDetails, setReviewerDetails] = useState<TeamLeadBestReportReviewerDetailRow[]>([]);
   const [savedQuarters, setSavedQuarters] = useState<TeamLeadBestReportQuarterSnapshot[]>([]);
+  const [submissionStatus, setSubmissionStatus] = useState<TeamLeadSubmissionStatusEntry[]>([]);
   const [selectedResultKey, setSelectedResultKey] = useState("current");
   const [selectedReviewerId, setSelectedReviewerId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -80,6 +82,7 @@ export function BestReportResultsPage() {
       setRows(workspace.rows);
       setReviewerDetails(workspace.reviewerDetails);
       setSavedQuarters(workspace.savedQuarters);
+      setSubmissionStatus(workspace.submissionStatus);
       setSelectedResultKey((current) =>
         current === "current" || workspace.savedQuarters.some((quarter) => quarter.key === current) ? current : "current",
       );
@@ -213,6 +216,15 @@ export function BestReportResultsPage() {
     [displayedRows],
   );
 
+  const submittedCount = useMemo(
+    () => submissionStatus.filter((entry) => entry.submissionCount > 0).length,
+    [submissionStatus],
+  );
+  const notSubmittedCount = useMemo(
+    () => submissionStatus.filter((entry) => entry.submissionCount === 0).length,
+    [submissionStatus],
+  );
+
   const handlePrint = () => {
     const ok = printTeamLeadDocument("영상평가 결과", [
       {
@@ -265,6 +277,25 @@ export function BestReportResultsPage() {
         </article>
       </section>
 
+      <section className="subgrid-3">
+        <article className="kpi">
+          <div className="kpi-label">제출 대상</div>
+          <div className="kpi-value">{submissionStatus.length > 0 ? submissionStatus.length : "-"}</div>
+        </article>
+        <article className="kpi">
+          <div className="kpi-label">제출 완료</div>
+          <div className="kpi-value" style={{ color: submittedCount > 0 ? "#86efac" : undefined }}>
+            {submissionStatus.length > 0 ? submittedCount : "-"}
+          </div>
+        </article>
+        <article className="kpi">
+          <div className="kpi-label">미제출</div>
+          <div className="kpi-value" style={{ color: notSubmittedCount > 0 ? "#fca5a5" : undefined }}>
+            {submissionStatus.length > 0 ? notSubmittedCount : "-"}
+          </div>
+        </article>
+      </section>
+
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <div className="chip">영상평가 결과</div>
@@ -298,6 +329,54 @@ export function BestReportResultsPage() {
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
         </div>
       </article>
+
+      {isCurrentEvaluationYear && selectedResultKey === "current" ? (
+        <article className="panel">
+          <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
+            <div className="chip">제출 현황</div>
+            <strong style={{ fontSize: 22 }}>베스트리포트 제출 현황</strong>
+            <div className="status note">
+              현재 평가 기간 기준입니다. 제출 건수는 최종 확정 전 임시 리포트 포함입니다.
+            </div>
+            {submissionStatus.length > 0 ? (
+              <div style={{ overflowX: "auto" }}>
+                <table className="table-like" style={{ minWidth: 400 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ minWidth: 140 }}>이름</th>
+                      <th style={{ minWidth: 80, textAlign: "center" }}>제출 건수</th>
+                      <th style={{ minWidth: 80, textAlign: "center" }}>상태</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {submissionStatus.map((entry) => (
+                      <tr key={entry.userId}>
+                        <td>
+                          <strong>{entry.userName}</strong>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <strong style={{ color: entry.submissionCount > 0 ? "#86efac" : "#fca5a5" }}>
+                            {entry.submissionCount}건
+                          </strong>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {entry.submissionCount > 0 ? (
+                            <span style={{ color: "#86efac", fontSize: 13 }}>제출</span>
+                          ) : (
+                            <span style={{ color: "#fca5a5", fontSize: 13 }}>미제출</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="status note">{loading ? "제출 현황을 불러오는 중입니다." : "제출 대상 인원을 불러올 수 없습니다."}</div>
+            )}
+          </div>
+        </article>
+      ) : null}
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>

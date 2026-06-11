@@ -1507,3 +1507,9 @@ export function hasMemberPortalAccess(role: UserRole | null | undefined) {
 export function isTeamLeadEvaluationExcludedRole(role: UserRole | string | null | undefined) {
   return role === "team_lead" || role === "desk" || role === "outlet" || role === "observer" || role === "partner";
 }
+
+// 장비/인적사고, 라이브무사고, 참고사항 등 점수 관리 페이지 전용 제외 기준.
+// outlet은 점수 관리 대상에 포함하므로 여기서 제외하지 않는다.
+export function isTeamLeadScoringExcludedRole(role: UserRole | string | null | undefined) {
+  return role === "team_lead" || role === "desk" || role === "observer" || role === "partner";
+}

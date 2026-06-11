@@ -21,6 +21,7 @@ Claude Code should also read the shared project playbook: `@docs/ai-instructions
 - `AGENTS.md`: Codex routing map and project boundaries.
 - `docs/ai-instructions.md`: shared AI playbook for Codex and Claude Code.
 - `docs/README.md`: documentation index.
+- `docs/PRODUCT_CONTEXT.md`: product context and domain background.
 - `docs/architecture/boundaries.md`: app/components/lib/API/Supabase boundaries.
 - `docs/architecture/dependency-rules.md`: allowed and forbidden dependency directions.
 - `docs/SUPABASE.md`: Supabase/RLS principles.
@@ -28,6 +29,8 @@ Claude Code should also read the shared project playbook: `@docs/ai-instructions
 - `docs/FRONTEND.md`: frontend shell and mobile rules.
 - `docs/agent-harness/review-loop.md`: validation loop.
 - `docs/generated/*.md`: generated route/env/supabase/package/dependency maps. Regenerate with harness scripts; do not edit directly.
+- `app/layout.tsx`: root layout.
+- `app/AGENTS.md`, `components/AGENTS.md`, `lib/AGENTS.md`: folder-level boundary rules. Read when modifying files in that folder.
 - `app/(public)/login/page.tsx`: public login page.
 - `app/(portal)/layout.tsx`: protected portal layout.
 - `app/api/**/route.ts`: server API routes.
@@ -50,6 +53,12 @@ Claude Code should also read the shared project playbook: `@docs/ai-instructions
 - `components/equipment/` and `lib/equipment/`: equipment pages and storage.
 - `components/weather/`, `lib/weather/`, and `app/api/weather/**`: weather and rain dispatch recommendation.
 - `components/home/` and `lib/home-news/`: home news briefing and notices.
+- `lib/auth/storage.ts`: portal session and user storage.
+- `lib/schedule/change-requests.ts`: schedule change requests.
+- `lib/schedule/desk-records.ts`: DESK record-type schedules.
+- `components/restaurants/` and `lib/restaurants/`: restaurant feature.
+- `components/my-page/` and `lib/my-page/`: my-page and my schedule.
+- `lib/print.ts`: common print helper.
 - `lib/supabase/client.ts`, `server.ts`, `portal.ts`, `admin.ts`: Supabase helpers by runtime boundary.
 - `supabase/schema.sql` and `supabase/incremental_*.sql`: schema, RLS, and incremental SQL.
 - `tests/*.spec.ts`: Playwright e2e tests.

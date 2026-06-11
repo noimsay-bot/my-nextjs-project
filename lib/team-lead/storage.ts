@@ -4,6 +4,7 @@ import {
   getUsers,
   isReadOnlyPortalRole,
   isTeamLeadEvaluationExcludedRole,
+  isTeamLeadScoringExcludedRole,
   normalizeUserRole,
   type UserRole,
 } from "@/lib/auth/storage";
@@ -3032,12 +3033,19 @@ export interface TeamLeadBestReportQuarterSnapshot extends TeamLeadBestReportQua
   reviewerDetails: TeamLeadBestReportReviewerDetailRow[];
 }
 
+export interface TeamLeadSubmissionStatusEntry {
+  userId: string;
+  userName: string;
+  submissionCount: number;
+}
+
 export interface TeamLeadBestReportResultsWorkspace {
   reviewers: TeamLeadBestReportReviewer[];
   rows: TeamLeadBestReportResultsRow[];
   reviewerDetails: TeamLeadBestReportReviewerDetailRow[];
   savedQuarters: TeamLeadBestReportQuarterSnapshot[];
   nextQuarter: TeamLeadBestReportQuarterTarget;
+  submissionStatus: TeamLeadSubmissionStatusEntry[];
 }
 
 const BEST_REPORT_2026_Q1_REVIEWER_NAMES = ["박재현", "이경", "이학진", "방극철", "정철원", "김진광", "정재우"] as const;
@@ -3734,7 +3742,7 @@ export async function getTeamLeadReferenceNotesWorkspace(
   }
 
   const noteMap = normalizeReferenceNotesState(stateRow?.state)[String(evaluationYear)] ?? {};
-  const visibleProfiles = (profiles ?? []).filter((profile) => !isTeamLeadEvaluationExcludedRole(profile.role));
+  const visibleProfiles = (profiles ?? []).filter((profile) => !isTeamLeadScoringExcludedRole(profile.role));
 
   return {
     cards: visibleProfiles.map((profile) => {
@@ -3859,6 +3867,34 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   const submissionIds = visibleSubmissionRows.map((row) => row.id);
   const visibleAuthorIds = Array.from(new Set(visibleSubmissionRows.map((row) => row.author_id)));
 
+  const { data: allEligibleProfiles, error: allEligibleError } = await supabase
+    .from("profiles")
+    .select("id, name, role, approved")
+    .eq("approved", true)
+    .order("name", { ascending: true })
+    .returns<{ id: string; name: string; role: string; approved: boolean }[]>();
+
+  if (allEligibleError) {
+    throw new Error(allEligibleError.message);
+  }
+
+  const submissionCountByAuthor = new Map<string, number>();
+  for (const row of visibleSubmissionRows) {
+    submissionCountByAuthor.set(row.author_id, (submissionCountByAuthor.get(row.author_id) ?? 0) + 1);
+  }
+
+  const submissionStatus: TeamLeadSubmissionStatusEntry[] = (allEligibleProfiles ?? [])
+    .filter((profile) => !isTeamLeadEvaluationExcludedRole(profile.role))
+    .map((profile) => ({
+      userId: profile.id,
+      userName: profile.name.trim(),
+      submissionCount: submissionCountByAuthor.get(profile.id) ?? 0,
+    }))
+    .sort((a, b) => {
+      if (b.submissionCount !== a.submissionCount) return b.submissionCount - a.submissionCount;
+      return a.userName.localeCompare(b.userName, "ko");
+    });
+
   const reviewQuery = supabase
     .from("reviews")
     .select("id, submission_id, reviewer_id, comment, total, completed_at, created_at, updated_at")
@@ -3964,6 +4000,7 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
     reviewerDetails,
     savedQuarters,
     nextQuarter: getNextBestReportQuarterTarget(savedQuarters),
+    submissionStatus,
   };
 }
 

@@ -1,4 +1,4 @@
-import { getUsers, isTeamLeadEvaluationExcludedRole } from "@/lib/auth/storage";
+import { getUsers, isTeamLeadScoringExcludedRole } from "@/lib/auth/storage";
 import {
   getPortalSession,
   getPortalSupabaseClient,
@@ -373,7 +373,7 @@ function getEligibleUsers() {
     new Set(
       getUsers()
         .filter((user) => user.status === "ACTIVE")
-        .filter((user) => !isTeamLeadEvaluationExcludedRole(user.role))
+        .filter((user) => !isTeamLeadScoringExcludedRole(user.role))
         .map((user) => user.username.trim())
         .filter(Boolean),
     ),
@@ -384,7 +384,7 @@ function isEvaluationExcludedName(name: string) {
   const trimmedName = name.trim();
   if (!trimmedName) return true;
   return getUsers().some(
-    (user) => user.status === "ACTIVE" && user.username.trim() === trimmedName && isTeamLeadEvaluationExcludedRole(user.role),
+    (user) => user.status === "ACTIVE" && user.username.trim() === trimmedName && isTeamLeadScoringExcludedRole(user.role),
   );
 }
 
