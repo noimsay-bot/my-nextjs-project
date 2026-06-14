@@ -9,6 +9,7 @@ import {
 } from "@/lib/weather/candidates";
 import {
   WEATHER_FORECAST_OFFSETS,
+  generateRainDispatchRecommendationsForRanges,
   generateRainDispatchRecommendationsFromForecasts,
   parseRainAmount,
   parseWeatherDispatchRange,
@@ -29,6 +30,7 @@ const DATA_GO_KR_BASE_URL = "https://apis.data.go.kr/1360000/VilageFcstInfoServi
 const DATA_GO_KR_ESTIMATION_NOTE = "예보 시간 단위 기반 추정";
 const DISPATCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const REFRESHING_CACHE_MESSAGE = "refreshing";
+const ALL_DISPATCH_RANGES: WeatherDispatchRangeMinutes[] = [10, 20, 30];
 
 type KmaGrid = {
   nx: number;
@@ -94,6 +96,20 @@ function createUnavailablePayload(
     note: DATA_GO_KR_ESTIMATION_NOTE,
     items: [],
   };
+}
+
+// For unavailable/empty payloads the items are empty regardless of range, so the
+// same payload can be cloned across ranges without recomputing anything.
+function withClonedAllRanges(
+  payload: RainDispatchRecommendationResponse,
+  wantAllRanges: boolean,
+): RainDispatchRecommendationResponse {
+  if (!wantAllRanges) return payload;
+  const allRanges: RainDispatchRecommendationResponse["allRanges"] = {};
+  for (const range of ALL_DISPATCH_RANGES) {
+    allRanges[range] = { ...payload, rangeMinutes: range };
+  }
+  return { ...payload, allRanges };
 }
 
 function parseCoordinate(value: string | null, min: number, max: number) {
@@ -536,6 +552,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const rangeMinutes = parseWeatherDispatchRange(url.searchParams.get("range"));
+  const wantAllRanges = url.searchParams.get("all") === "1";
   const requestBase = getRequestDispatchBase(url);
   const dispatchBase = requestBase ?? SANGAM_BASE;
   const useSharedCache = requestBase === null;
@@ -558,7 +575,7 @@ export async function GET(request: Request) {
 
   if (!serviceKey) {
     const payload = createUnavailablePayload(rangeMinutes, "공공데이터 초단기예보 서버 설정이 필요합니다.", dispatchBase);
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+    return jsonWithUsageDebug(request, startedAt, withClonedAllRanges(payload, wantAllRanges), { headers: CACHE_HEADERS });
   }
 
   try {
@@ -592,17 +609,18 @@ export async function GET(request: Request) {
           errorMessage: payload.message,
         });
       }
-      return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+      return jsonWithUsageDebug(request, startedAt, withClonedAllRanges(payload, wantAllRanges), { headers: CACHE_HEADERS });
     }
 
-    const payload = generateRainDispatchRecommendationsFromForecasts(rangeMinutes, forecastsByCandidateId, {
+    const generateOptions = {
       generatedAt: now.toISOString(),
       dataBasisAt,
       note: DATA_GO_KR_ESTIMATION_NOTE,
-      status: "available",
+      status: "available" as const,
       message: null,
       base: dispatchBase,
-    });
+    };
+    const payload = generateRainDispatchRecommendationsFromForecasts(rangeMinutes, forecastsByCandidateId, generateOptions);
     if (useSharedCache) {
       await writeDispatchCache({
         baseTimeKst,
@@ -610,7 +628,15 @@ export async function GET(request: Request) {
         payload,
       });
     }
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+    // Compute every range from the same forecast so the client never refetches
+    // data.go.kr just to switch ranges. allRanges is response-only (not cached).
+    const responsePayload = wantAllRanges
+      ? {
+          ...payload,
+          allRanges: generateRainDispatchRecommendationsForRanges(ALL_DISPATCH_RANGES, forecastsByCandidateId, generateOptions),
+        }
+      : payload;
+    return jsonWithUsageDebug(request, startedAt, responsePayload, { headers: CACHE_HEADERS });
   } catch {
     const payload = createUnavailablePayload(rangeMinutes, "공공데이터 초단기예보를 처리하지 못했습니다.", dispatchBase);
     if (useSharedCache) {
@@ -621,6 +647,6 @@ export async function GET(request: Request) {
         errorMessage: payload.message,
       });
     }
-    return jsonWithUsageDebug(request, startedAt, payload, { headers: CACHE_HEADERS });
+    return jsonWithUsageDebug(request, startedAt, withClonedAllRanges(payload, wantAllRanges), { headers: CACHE_HEADERS });
   }
 }

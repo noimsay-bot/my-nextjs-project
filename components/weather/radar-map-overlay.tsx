@@ -30,6 +30,7 @@ export function RadarMapOverlay({ frame, label, opacity, hasVisibleRadarEcho, on
   const hasFittedInitialBoundsRef = useRef(false);
   const hasUserAdjustedViewRef = useRef(false);
   const isProgrammaticViewChangeRef = useRef(false);
+  const opacityRef = useRef(opacity);
   const [mapReady, setMapReady] = useState(false);
 
   const overlayBounds = useMemo(() => getRadarOverlayBounds(frame), [frame]);
@@ -97,25 +98,34 @@ export function RadarMapOverlay({ frame, label, opacity, hasVisibleRadarEcho, on
     const map = mapRef.current;
     if (!L || !map || !frame.imageUrl || !overlayBounds) return;
 
-    if (overlayRef.current) {
-      overlayRef.current.remove();
-      overlayRef.current = null;
-    }
+    const previousOverlay = overlayRef.current;
 
     const overlay = L.imageOverlay(frame.imageUrl, overlayBounds, {
-      opacity,
+      opacity: opacityRef.current,
       interactive: false,
       crossOrigin: false,
       alt: `레이더 1H 강수예측 ${label}`,
       className: styles.radarOverlayImage,
-    }).addTo(map);
-    overlay.getElement()?.setAttribute("referrerpolicy", "no-referrer");
+    });
 
+    // Keep the previous frame visible until the new image has finished loading
+    // so continuous playback never flashes an empty map between frames. Attach
+    // the load/error handlers before addTo so a cached image can't fire first.
+    const removePrevious = () => {
+      if (previousOverlay && previousOverlay !== overlay) {
+        previousOverlay.remove();
+      }
+    };
+    overlay.once("load", removePrevious);
     overlay.once("error", () => {
+      removePrevious();
       onImageError?.();
     });
 
+    overlay.addTo(map);
+    overlay.getElement()?.setAttribute("referrerpolicy", "no-referrer");
     overlayRef.current = overlay;
+
     map.setMaxBounds(overlayBounds);
     if (!hasFittedInitialBoundsRef.current || !hasUserAdjustedViewRef.current) {
       isProgrammaticViewChangeRef.current = true;
@@ -125,16 +135,10 @@ export function RadarMapOverlay({ frame, label, opacity, hasVisibleRadarEcho, on
         isProgrammaticViewChangeRef.current = false;
       }, 0);
     }
-
-    return () => {
-      overlay.remove();
-      if (overlayRef.current === overlay) {
-        overlayRef.current = null;
-      }
-    };
-  }, [frame.imageUrl, label, onImageError, opacity, overlayBounds]);
+  }, [frame.imageUrl, label, mapReady, onImageError, overlayBounds]);
 
   useEffect(() => {
+    opacityRef.current = opacity;
     overlayRef.current?.setOpacity(opacity);
   }, [opacity]);
 

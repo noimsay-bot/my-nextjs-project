@@ -48,6 +48,9 @@ function getRecommendationUrl(range: WeatherDispatchRangeMinutes, location: Curr
     range: String(range),
     lat: location.lat.toFixed(5),
     lon: location.lon.toFixed(5),
+    // Ask the API to compute every range from one upstream forecast so switching
+    // ranges never triggers another data.go.kr fetch.
+    all: "1",
   });
   return `/api/weather/dispatch-recommendation?${params.toString()}`;
 }
@@ -128,11 +131,28 @@ export function RainDispatchRecommendation({
         return;
       }
 
-      cacheRef.current.set(cacheKey, { data, cachedAt: Date.now() });
-      setRecommendationsByRange((current) => ({
-        ...current,
-        [range]: data,
-      }));
+      const cachedAt = Date.now();
+      // When the API bundles every range, populate and cache all of them so range
+      // switches are instant and never hit the network again.
+      const allRanges = data.allRanges;
+      if (allRanges) {
+        setRecommendationsByRange((current) => {
+          const next = { ...current };
+          for (const option of RANGE_OPTIONS) {
+            const rangeData = allRanges[option];
+            if (!rangeData) continue;
+            next[option] = rangeData;
+            cacheRef.current.set(getRecommendationCacheKey(option, location), { data: rangeData, cachedAt });
+          }
+          return next;
+        });
+      } else {
+        cacheRef.current.set(cacheKey, { data, cachedAt });
+        setRecommendationsByRange((current) => ({
+          ...current,
+          [range]: data,
+        }));
+      }
       if (announce) {
         setMessage(data.status === "unavailable" ? data.message ?? "강수 출동 추천을 불러오지 못했습니다." : "강수 출동 추천을 새로 계산했습니다.");
       }

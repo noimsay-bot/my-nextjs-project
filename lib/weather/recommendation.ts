@@ -40,6 +40,9 @@ export interface RainDispatchRecommendationResponse {
   dataBasisAt?: string | null;
   note?: string | null;
   items: RainDispatchRecommendationItem[];
+  // Optional bundle of every range computed from the same upstream forecast, so
+  // a single request can populate all ranges without refetching data.go.kr.
+  allRanges?: Partial<Record<WeatherDispatchRangeMinutes, RainDispatchRecommendationResponse>>;
 }
 
 export const WEATHER_FORECAST_OFFSETS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
@@ -255,27 +258,42 @@ function scoreCandidate(
   };
 }
 
-export function generateRainDispatchRecommendationsFromForecasts(
-  rangeMinutes: WeatherDispatchRangeMinutes,
+type ScoredDispatchCandidate = NonNullable<ReturnType<typeof scoreCandidate>>;
+
+type GenerateRecommendationOptions = {
+  generatedAt?: string;
+  dataBasisAt?: string | null;
+  note?: string | null;
+  status?: "available" | "unavailable";
+  message?: string | null;
+  base?: WeatherDispatchPoint;
+};
+
+// Score is range-independent (rangeMinutes only gates which candidates qualify),
+// so candidates are scored once at the widest supported range and then filtered
+// per range. This lets a single upstream forecast feed every range.
+const WIDEST_DISPATCH_RANGE_MINUTES: WeatherDispatchRangeMinutes = 30;
+
+function scoreDispatchCandidates(
+  base: WeatherDispatchPoint,
   forecastsByCandidateId: Map<string, RainForecastFrame[]>,
-  options: {
-    generatedAt?: string;
-    dataBasisAt?: string | null;
-    note?: string | null;
-    status?: "available" | "unavailable";
-    message?: string | null;
-    base?: WeatherDispatchPoint;
-  } = {},
-): RainDispatchRecommendationResponse {
-  const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const dataBasisAt = options.dataBasisAt ?? generatedAt;
-  const estimationNote = options.note ?? "예보 시간 단위 기반 추정";
-  const base = options.base ?? SANGAM_BASE;
-  const scored = WEATHER_DISPATCH_CANDIDATES.map((candidate) => {
-    const frames = forecastsByCandidateId.get(candidate.id) ?? [];
-    return scoreCandidate(base, candidate, rangeMinutes, frames, dataBasisAt, estimationNote);
-  })
-    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+  dataBasisAt: string,
+  estimationNote: string,
+): ScoredDispatchCandidate[] {
+  return WEATHER_DISPATCH_CANDIDATES
+    .map((candidate) => {
+      const frames = forecastsByCandidateId.get(candidate.id) ?? [];
+      return scoreCandidate(base, candidate, WIDEST_DISPATCH_RANGE_MINUTES, frames, dataBasisAt, estimationNote);
+    })
+    .filter((item): item is ScoredDispatchCandidate => Boolean(item));
+}
+
+function selectTopItemsForRange(
+  scored: ScoredDispatchCandidate[],
+  rangeMinutes: WeatherDispatchRangeMinutes,
+): RainDispatchRecommendationItem[] {
+  return scored
+    .filter((item) => item.travelBandMinutes <= rangeMinutes)
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
       if (right.sortRain !== left.sortRain) return right.sortRain - left.sortRain;
@@ -287,17 +305,58 @@ export function generateRainDispatchRecommendationsFromForecasts(
       rank: index + 1,
       ...item,
     }));
+}
 
+function buildRangeResponse(
+  rangeMinutes: WeatherDispatchRangeMinutes,
+  items: RainDispatchRecommendationItem[],
+  resolved: { generatedAt: string; dataBasisAt: string; estimationNote: string; base: WeatherDispatchPoint },
+  options: GenerateRecommendationOptions,
+): RainDispatchRecommendationResponse {
   return {
     status: options.status ?? "available",
     message: options.message ?? null,
-    base,
+    base: resolved.base,
     rangeMinutes,
-    generatedAt,
-    dataBasisAt,
-    note: estimationNote,
-    items: scored,
+    generatedAt: resolved.generatedAt,
+    dataBasisAt: resolved.dataBasisAt,
+    note: resolved.estimationNote,
+    items,
   };
+}
+
+function resolveGenerateOptions(options: GenerateRecommendationOptions) {
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  return {
+    generatedAt,
+    dataBasisAt: options.dataBasisAt ?? generatedAt,
+    estimationNote: options.note ?? "예보 시간 단위 기반 추정",
+    base: options.base ?? SANGAM_BASE,
+  };
+}
+
+export function generateRainDispatchRecommendationsFromForecasts(
+  rangeMinutes: WeatherDispatchRangeMinutes,
+  forecastsByCandidateId: Map<string, RainForecastFrame[]>,
+  options: GenerateRecommendationOptions = {},
+): RainDispatchRecommendationResponse {
+  const resolved = resolveGenerateOptions(options);
+  const scored = scoreDispatchCandidates(resolved.base, forecastsByCandidateId, resolved.dataBasisAt, resolved.estimationNote);
+  return buildRangeResponse(rangeMinutes, selectTopItemsForRange(scored, rangeMinutes), resolved, options);
+}
+
+export function generateRainDispatchRecommendationsForRanges(
+  ranges: readonly WeatherDispatchRangeMinutes[],
+  forecastsByCandidateId: Map<string, RainForecastFrame[]>,
+  options: GenerateRecommendationOptions = {},
+): Partial<Record<WeatherDispatchRangeMinutes, RainDispatchRecommendationResponse>> {
+  const resolved = resolveGenerateOptions(options);
+  const scored = scoreDispatchCandidates(resolved.base, forecastsByCandidateId, resolved.dataBasisAt, resolved.estimationNote);
+  const result: Partial<Record<WeatherDispatchRangeMinutes, RainDispatchRecommendationResponse>> = {};
+  for (const rangeMinutes of ranges) {
+    result[rangeMinutes] = buildRangeResponse(rangeMinutes, selectTopItemsForRange(scored, rangeMinutes), resolved, options);
+  }
+  return result;
 }
 
 export function generateRainDispatchRecommendations(

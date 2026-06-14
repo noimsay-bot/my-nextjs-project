@@ -386,6 +386,27 @@ export function RadarForecastPanel() {
 
   const hasCompleteRadarFrames = isCompleteRadarFrameSet(frames);
 
+  // Warm the browser cache with every frame image as soon as a complete set is
+  // applied, so pressing 재생 plays the frames back-to-back without the map
+  // flashing empty while a mid-sequence image is still being fetched.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const preloaded: HTMLImageElement[] = [];
+    for (const offset of RADAR_OFFSETS) {
+      const url = frames[offset]?.imageUrl;
+      if (!url) continue;
+      const image = new window.Image();
+      image.referrerPolicy = "no-referrer";
+      image.src = url;
+      preloaded.push(image);
+    }
+    return () => {
+      for (const image of preloaded) {
+        image.src = "";
+      }
+    };
+  }, [frames]);
+
   useEffect(() => {
     if (isPlaying && !hasCompleteRadarFrames) {
       setIsPlaying(false);
