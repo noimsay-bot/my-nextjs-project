@@ -259,17 +259,26 @@ export function ReviewerRolePage() {
 
     setSaving(true);
     const saveResult = await saveTeamLeadReviewerRoles(linkedSelectedIds);
+    const openResult =
+      saveResult.ok && !submissionOpen
+        ? await closeTeamLeadSubmissionAndOpenReviewAccess()
+        : null;
     setSaving(false);
 
-    if (saveResult.ok) {
+    if (saveResult.ok && (!openResult || openResult.ok)) {
+      if (openResult) {
+        await refreshTeamLeadSubmissionAccessState();
+        setSubmissionOpen(openResult.isOpen);
+      }
       await refresh();
     }
 
+    const ok = saveResult.ok && (!openResult || openResult.ok);
     setMessage({
-      tone: saveResult.ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
-      text: saveResult.ok
-        ? `평가자 명단을 저장했습니다. 제출 마감 때 평가 페이지가 열립니다.${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 저장되지 않았습니다: ${missingNames.join(", ")}` : ""}`
-        : saveResult.message,
+      tone: ok ? (missingNames.length > 0 ? "note" : "ok") : "warn",
+      text: ok
+        ? `${openResult ? openResult.message : "평가자 명단을 저장했습니다. 제출 마감 때 평가 페이지가 열립니다."}${missingNames.length > 0 ? ` 연결된 계정이 없는 이름은 저장되지 않았습니다: ${missingNames.join(", ")}` : ""}`
+        : openResult?.message ?? saveResult.message,
     });
   };
 

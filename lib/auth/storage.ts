@@ -28,6 +28,7 @@ export interface SessionUser {
   username: string;
   role: UserRole;
   actualRole: UserRole;
+  displayRole: UserRole;
   experienceRole: UserRole | null;
   approved: boolean;
   mustChangePassword: boolean;
@@ -412,7 +413,7 @@ function hasIntrinsicReviewAccess(_role: UserRole) {
 }
 
 function buildSessionWithExperience(
-  base: Omit<SessionUser, "role" | "experienceRole" | "canReview" | "actualRole" | "actualCanReview"> & {
+  base: Omit<SessionUser, "role" | "displayRole" | "experienceRole" | "canReview" | "actualRole" | "actualCanReview"> & {
     role: UserRole;
     canReview: boolean;
     actualRole?: UserRole;
@@ -429,11 +430,13 @@ function buildSessionWithExperience(
   const effectiveExperienceRole =
     experienceRole && experienceRole !== actualRole ? experienceRole : null;
   const effectiveRole = effectiveExperienceRole ?? actualRole;
+  const displayRole = effectiveExperienceRole ?? (actualCanReview ? "reviewer" : actualRole);
 
   return {
     ...base,
     role: effectiveRole,
     actualRole,
+    displayRole,
     experienceRole: effectiveExperienceRole,
     approved: base.approved,
     mustChangePassword: base.mustChangePassword,

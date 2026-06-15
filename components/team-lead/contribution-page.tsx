@@ -60,7 +60,7 @@ function toManualDraftItem(item: ContributionManualItem): ManualDraftItem {
 }
 
 function isValidScoreText(value: string) {
-  return /^\d*(\.\d?)?$/.test(value);
+  return /^-?\d*(\.\d?)?$/.test(value);
 }
 
 function createEmptyCard(name: string): ContributionPersonCard {

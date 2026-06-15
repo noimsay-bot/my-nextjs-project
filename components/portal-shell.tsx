@@ -417,8 +417,13 @@ function formatRoleSummary(session: SessionUser | null, memberLevel: MemberLevel
   }
 
   const levelText = memberLevel ? ` Lv ${memberLevel.level}` : "";
+  const displayRole = session.displayRole ?? session.role;
   if (!session.experienceRole) {
-    return `${ROLE_EXPERIENCE_LABELS[session.role]}${levelText}`;
+    if (displayRole === "reviewer" && session.actualRole !== "reviewer") {
+      return `${ROLE_EXPERIENCE_LABELS[displayRole]}${levelText} · 기존 ${ROLE_EXPERIENCE_LABELS[session.actualRole]} 권한 유지`;
+    }
+
+    return `${ROLE_EXPERIENCE_LABELS[displayRole]}${levelText}`;
   }
 
   return `체험 ${ROLE_EXPERIENCE_LABELS[session.role]}${levelText} · 실권한 ${ROLE_EXPERIENCE_LABELS[session.actualRole]}`;
