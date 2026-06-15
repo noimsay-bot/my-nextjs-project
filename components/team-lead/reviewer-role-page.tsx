@@ -7,9 +7,11 @@ import {
   closeTeamLeadReviewAccess,
   getTeamLeadReviewerRoleWorkspace,
   isTeamLeadSubmissionAccessOpen,
+  loadTeamLeadReviewerNameChips,
   refreshTeamLeadSubmissionAccessState,
   ReviewerRoleProfileItem,
   saveCurrentBestReportResultsAsNextQuarter,
+  saveTeamLeadReviewerNameChips,
   saveTeamLeadReviewerRoles,
   setTeamLeadSubmissionAccessOpen,
   TEAM_LEAD_SUBMISSION_ACCESS_EVENT,
@@ -60,7 +62,7 @@ function normalizeNames(names: string[]) {
   );
 }
 
-function readNameChips() {
+function readLegacyNameChips() {
   if (typeof window === "undefined") return DEFAULT_REVIEWER_NAME_CHIPS;
   try {
     const raw = window.localStorage.getItem(REVIEWER_NAME_CHIP_STORAGE_KEY);
@@ -74,9 +76,16 @@ function readNameChips() {
   }
 }
 
-function writeNameChips(names: string[]) {
+function clearLegacyNameChips() {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(REVIEWER_NAME_CHIP_STORAGE_KEY, JSON.stringify(normalizeNames(names)));
+  window.localStorage.removeItem(REVIEWER_NAME_CHIP_STORAGE_KEY);
+}
+
+function hasSameNameChips(left: string[], right: string[]) {
+  const normalizedLeft = normalizeNames(left);
+  const normalizedRight = normalizeNames(right);
+  return normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((name, index) => name === normalizedRight[index]);
 }
 
 function sortNamesByChipOrder(names: string[], order: Map<string, number>) {
@@ -100,6 +109,7 @@ export function ReviewerRolePage() {
   const router = useRouter();
   const [profiles, setProfiles] = useState<ReviewerRoleProfileItem[]>([]);
   const [nameChips, setNameChips] = useState<string[]>(DEFAULT_REVIEWER_NAME_CHIPS);
+  const [nameChipsLoaded, setNameChipsLoaded] = useState(false);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [newName, setNewName] = useState("");
   const [editingNames, setEditingNames] = useState(false);
@@ -149,7 +159,46 @@ export function ReviewerRolePage() {
   }
 
   useEffect(() => {
-    setNameChips(readNameChips());
+    let cancelled = false;
+    const legacyNameChips = readLegacyNameChips();
+    setNameChips(legacyNameChips);
+    setNameChipsLoaded(false);
+
+    loadTeamLeadReviewerNameChips(DEFAULT_REVIEWER_NAME_CHIPS)
+      .then(async (remoteNameChips) => {
+        if (cancelled) return;
+        const shouldMigrateLegacy =
+          !hasSameNameChips(legacyNameChips, DEFAULT_REVIEWER_NAME_CHIPS) &&
+          hasSameNameChips(remoteNameChips, DEFAULT_REVIEWER_NAME_CHIPS);
+        const nextNameChips = shouldMigrateLegacy ? legacyNameChips : remoteNameChips;
+        setNameChips(nextNameChips);
+        setNameChipsLoaded(true);
+
+        if (shouldMigrateLegacy) {
+          const result = await saveTeamLeadReviewerNameChips(nextNameChips);
+          if (!cancelled && result.ok) {
+            clearLegacyNameChips();
+          }
+          if (!cancelled && !result.ok) {
+            setMessage({ tone: "warn", text: result.message });
+          }
+        } else {
+          clearLegacyNameChips();
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setNameChipsLoaded(true);
+          setMessage({
+            tone: "warn",
+            text: error instanceof Error ? error.message : "평가자 이름칩을 불러오지 못했습니다.",
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -173,8 +222,13 @@ export function ReviewerRolePage() {
   }, []);
 
   useEffect(() => {
-    writeNameChips(nameChips);
-  }, [nameChips]);
+    if (!nameChipsLoaded) return;
+    void saveTeamLeadReviewerNameChips(nameChips).then((result) => {
+      if (!result.ok) {
+        setMessage({ tone: "warn", text: result.message });
+      }
+    });
+  }, [nameChips, nameChipsLoaded]);
 
   const selectedNameSet = useMemo(() => new Set(selectedNames), [selectedNames]);
 

@@ -48,7 +48,29 @@ function hasCustomTexts(texts: MyWorkCalendarCustomTextMap) {
   return Object.values(texts).some((values) => values.length > 0);
 }
 
-export function readLocalMyWorkCalendarCustomTexts(sessionId?: string | null, username?: string | null) {
+function mergeCustomTextMaps(
+  legacyTexts: MyWorkCalendarCustomTextMap,
+  remoteTexts: MyWorkCalendarCustomTextMap,
+) {
+  const next: MyWorkCalendarCustomTextMap = {};
+  const dateKeys = new Set([...Object.keys(legacyTexts), ...Object.keys(remoteTexts)]);
+
+  dateKeys.forEach((dateKey) => {
+    const values = Array.from(new Set([...(remoteTexts[dateKey] ?? []), ...(legacyTexts[dateKey] ?? [])]));
+    const normalized = normalizeCustomTextList(values);
+    if (normalized.length > 0) {
+      next[dateKey] = normalized;
+    }
+  });
+
+  return next;
+}
+
+function customTextMapsEqual(left: MyWorkCalendarCustomTextMap, right: MyWorkCalendarCustomTextMap) {
+  return JSON.stringify(normalizeCustomTextMap(left)) === JSON.stringify(normalizeCustomTextMap(right));
+}
+
+function readLocalMyWorkCalendarCustomTexts(sessionId?: string | null, username?: string | null) {
   if (typeof window === "undefined") return {} as MyWorkCalendarCustomTextMap;
 
   try {
@@ -59,16 +81,9 @@ export function readLocalMyWorkCalendarCustomTexts(sessionId?: string | null, us
   }
 }
 
-export function writeLocalMyWorkCalendarCustomTexts(
-  texts: MyWorkCalendarCustomTextMap,
-  sessionId?: string | null,
-  username?: string | null,
-) {
+function clearLocalMyWorkCalendarCustomTexts(sessionId?: string | null, username?: string | null) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(
-    getCustomTextStorageKey(sessionId, username),
-    JSON.stringify(normalizeCustomTextMap(texts)),
-  );
+  window.localStorage.removeItem(getCustomTextStorageKey(sessionId, username));
 }
 
 export async function saveMyWorkCalendarCustomTexts(
@@ -77,7 +92,6 @@ export async function saveMyWorkCalendarCustomTexts(
   username?: string | null,
 ) {
   const normalized = normalizeCustomTextMap(texts);
-  writeLocalMyWorkCalendarCustomTexts(normalized, sessionId, username);
   if (!sessionId) return normalized;
 
   const supabase = await getPortalSupabaseClient();
@@ -98,8 +112,8 @@ export async function saveMyWorkCalendarCustomTexts(
 }
 
 export async function loadMyWorkCalendarCustomTexts(sessionId?: string | null, username?: string | null) {
-  const localTexts = readLocalMyWorkCalendarCustomTexts(sessionId, username);
-  if (!sessionId) return localTexts;
+  const legacyTexts = readLocalMyWorkCalendarCustomTexts(sessionId, username);
+  if (!sessionId) return legacyTexts;
 
   const supabase = await getPortalSupabaseClient();
   const { data, error } = await supabase
@@ -110,16 +124,21 @@ export async function loadMyWorkCalendarCustomTexts(sessionId?: string | null, u
     .maybeSingle<PortalUserSettingRow>();
 
   if (error) {
-    if (isSupabaseSchemaMissingError(error)) return localTexts;
+    if (isSupabaseSchemaMissingError(error)) return legacyTexts;
     throw new Error(getSupabaseStorageErrorMessage(error, "portal_user_settings"));
   }
 
-  if (!data && hasCustomTexts(localTexts)) {
-    void saveMyWorkCalendarCustomTexts(localTexts, sessionId, username).catch(() => undefined);
-    return localTexts;
+  const remoteTexts = readStateCustomTexts(data?.state);
+  const mergedTexts = mergeCustomTextMaps(legacyTexts, remoteTexts);
+  if (hasCustomTexts(legacyTexts) && !customTextMapsEqual(mergedTexts, remoteTexts)) {
+    await saveMyWorkCalendarCustomTexts(mergedTexts, sessionId, username);
+    clearLocalMyWorkCalendarCustomTexts(sessionId, username);
+    return mergedTexts;
   }
 
-  const remoteTexts = readStateCustomTexts(data?.state);
-  writeLocalMyWorkCalendarCustomTexts(remoteTexts, sessionId, username);
+  if (hasCustomTexts(legacyTexts)) {
+    clearLocalMyWorkCalendarCustomTexts(sessionId, username);
+  }
+
   return remoteTexts;
 }

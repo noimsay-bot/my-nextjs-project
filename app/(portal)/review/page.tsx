@@ -88,9 +88,9 @@ function readPersistedReviewState(storageKey: string): ReviewStateStore {
   }
 }
 
-function writePersistedReviewState(storageKey: string, state: ReviewStateStore) {
+function clearPersistedReviewState(storageKey: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(storageKey, JSON.stringify(state));
+  window.localStorage.removeItem(storageKey);
 }
 
 function hasSavedReviewState(entryState: ReturnType<typeof normalizeReviewStateEntry>) {
@@ -102,6 +102,17 @@ function hasSavedReviewState(entryState: ReturnType<typeof normalizeReviewStateE
   );
 }
 
+function shouldMigrateLocalReviewState(
+  entry: SubmissionEntry,
+  serverState: ReviewStateStore,
+  localState: ReviewStateStore,
+) {
+  const entryKey = getSubmissionEntryKey(entry);
+  const normalizedServerState = normalizeReviewStateEntry(serverState[entryKey] ?? null, entry);
+  const normalizedLocalState = normalizeReviewStateEntry(localState[entryKey] ?? null, entry);
+  return !hasSavedReviewState(normalizedServerState) && hasSavedReviewState(normalizedLocalState);
+}
+
 function mergeWorkspaceReviewState(entries: SubmissionEntry[], serverState: ReviewStateStore, localState: ReviewStateStore) {
   return Object.fromEntries(
     entries.map((entry) => {
@@ -111,7 +122,7 @@ function mergeWorkspaceReviewState(entries: SubmissionEntry[], serverState: Revi
 
       return [
         entryKey,
-        hasSavedReviewState(normalizedLocalState) ? normalizedLocalState : normalizedServerState,
+        shouldMigrateLocalReviewState(entry, serverState, localState) ? normalizedLocalState : normalizedServerState,
       ];
     }),
   ) satisfies ReviewStateStore;
@@ -129,12 +140,11 @@ export default function ReviewPage() {
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const saveTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const pendingSaveRef = useRef<Record<string, { entry: SubmissionEntry; state: ReviewStateStore[string] }>>({});
   const reviewStateRef = useRef<ReviewStateStore>({});
   const inFlightSaveRef = useRef<Record<string, boolean>>({});
-  const reviewDraftStorageKeyRef = useRef<string | null>(null);
-  const didResetWorkspaceRef = useRef(false);
   const reviewerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -152,21 +162,19 @@ export default function ReviewPage() {
         if (!active) return;
 
         const draftStorageKey = workspace.reviewerId ? getReviewDraftStorageKey(workspace.reviewerId) : null;
-        reviewDraftStorageKeyRef.current = draftStorageKey;
         reviewerIdRef.current = workspace.reviewerId;
         const localReviewState = draftStorageKey ? readPersistedReviewState(draftStorageKey) : {};
         const mergedReviewState = mergeWorkspaceReviewState(workspace.entries, workspace.reviewState, localReviewState);
-        const emptyReviewState = Object.fromEntries(
-          workspace.entries.map((entry) => [getSubmissionEntryKey(entry), createEmptyReviewStateEntry(entry)]),
-        ) satisfies ReviewStateStore;
-        const nextReviewState = didResetWorkspaceRef.current ? mergedReviewState : emptyReviewState;
         const visibleEntries = workspace.canEdit
-          ? workspace.entries.filter((entry) => !nextReviewState[getSubmissionEntryKey(entry)]?.done)
+          ? workspace.entries.filter((entry) => !mergedReviewState[getSubmissionEntryKey(entry)]?.done)
           : workspace.entries;
         const visibleEntryKeys = new Set(visibleEntries.map((entry) => getSubmissionEntryKey(entry)));
         const visibleReviewState = Object.fromEntries(
-          Object.entries(nextReviewState).filter(([entryKey]) => visibleEntryKeys.has(entryKey)),
+          Object.entries(mergedReviewState).filter(([entryKey]) => visibleEntryKeys.has(entryKey)),
         ) satisfies ReviewStateStore;
+        const legacyMigrationEntries = draftStorageKey
+          ? workspace.entries.filter((entry) => shouldMigrateLocalReviewState(entry, workspace.reviewState, localReviewState))
+          : [];
 
         setSubmissions(visibleEntries);
         reviewStateRef.current = visibleReviewState;
@@ -181,18 +189,26 @@ export default function ReviewPage() {
         setCanEdit(workspace.canEdit);
         setReadOnlyReason(workspace.readOnlyReason);
 
-        if (draftStorageKey) {
-          writePersistedReviewState(draftStorageKey, visibleReviewState);
-        }
-
-        if (!didResetWorkspaceRef.current) {
-          didResetWorkspaceRef.current = true;
-          if (workspace.canEdit && workspace.entries.length > 0) {
-            await Promise.all(
-              workspace.entries.map((entry) =>
-                saveReviewEntry(entry, createEmptyReviewStateEntry(entry)),
-              ),
-            );
+        if (workspace.canEdit && legacyMigrationEntries.length > 0) {
+          const migrationResults = await Promise.allSettled(
+            legacyMigrationEntries.map((entry) => {
+              const entryKey = getSubmissionEntryKey(entry);
+              return saveReviewEntry(entry, mergedReviewState[entryKey] ?? createEmptyReviewStateEntry(entry));
+            }),
+          );
+          if (!active) return;
+          const failedMigration = migrationResults.find(
+            (result) => result.status === "rejected" || !result.value.ok,
+          );
+          if (failedMigration) {
+            const message = failedMigration.status === "fulfilled"
+              ? failedMigration.value.message
+              : failedMigration.reason instanceof Error
+                ? failedMigration.reason.message
+                : "브라우저에 남아 있던 평가 초안을 DB로 옮기지 못했습니다.";
+            setSaveMessage(message);
+          } else if (draftStorageKey) {
+            clearPersistedReviewState(draftStorageKey);
           }
         }
       } catch (error) {
@@ -287,40 +303,61 @@ export default function ReviewPage() {
   async function persistEntry(entry: SubmissionEntry, nextEntryState: typeof currentState) {
     const result = await saveReviewEntry(entry, nextEntryState);
     setSaveMessage(result.message);
+    return result;
   }
 
-  async function flushPersist(entryKey: string) {
-    const pending = pendingSaveRef.current[entryKey];
-    if (!pending || inFlightSaveRef.current[entryKey]) return;
-
+  function clearPersistTimer(entryKey: string) {
     const existingTimer = saveTimerRef.current[entryKey];
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      delete saveTimerRef.current[entryKey];
-    }
+    if (!existingTimer) return;
 
+    clearTimeout(existingTimer);
+    delete saveTimerRef.current[entryKey];
+  }
+
+  function queueEntryPersist(entry: SubmissionEntry, nextEntryState: typeof currentState) {
+    const entryKey = getSubmissionEntryKey(entry);
+    pendingSaveRef.current[entryKey] = { entry, state: nextEntryState };
+    clearPersistTimer(entryKey);
+    return entryKey;
+  }
+
+  async function flushPersist(entryKey: string): Promise<boolean> {
+    const pending = pendingSaveRef.current[entryKey];
+    if (!pending || inFlightSaveRef.current[entryKey]) return true;
+
+    clearPersistTimer(entryKey);
     delete pendingSaveRef.current[entryKey];
     inFlightSaveRef.current[entryKey] = true;
 
+    let ok = true;
     try {
-      await persistEntry(pending.entry, pending.state);
+      const result = await persistEntry(pending.entry, pending.state);
+      ok = result.ok;
+    } catch (error) {
+      ok = false;
+      setSaveMessage(error instanceof Error ? error.message : "평가 저장에 실패했습니다.");
     } finally {
       delete inFlightSaveRef.current[entryKey];
       if (pendingSaveRef.current[entryKey]) {
-        void flushPersist(entryKey);
+        ok = (await flushPersist(entryKey)) && ok;
       }
     }
+
+    return ok;
   }
 
   async function flushPersistAndWait(entryKey: string) {
+    let ok = true;
     while (pendingSaveRef.current[entryKey] || inFlightSaveRef.current[entryKey]) {
       if (!inFlightSaveRef.current[entryKey]) {
-        await flushPersist(entryKey);
+        ok = (await flushPersist(entryKey)) && ok;
         continue;
       }
 
       await new Promise((resolve) => window.setTimeout(resolve, 20));
     }
+
+    return ok;
   }
 
   function flushAllPendingPersists() {
@@ -333,13 +370,7 @@ export default function ReviewPage() {
   function queuePersist(entry: SubmissionEntry, nextEntryState: typeof currentState, options?: { immediate?: boolean }) {
     if (!canEdit) return;
 
-    const entryKey = getSubmissionEntryKey(entry);
-    pendingSaveRef.current[entryKey] = { entry, state: nextEntryState };
-
-    const existingTimer = saveTimerRef.current[entryKey];
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
+    const entryKey = queueEntryPersist(entry, nextEntryState);
 
     if (options?.immediate) {
       void flushPersist(entryKey);
@@ -390,21 +421,24 @@ export default function ReviewPage() {
 
     reviewStateRef.current = nextState;
     setReviewState(nextState);
-    if (reviewDraftStorageKeyRef.current) {
-      writePersistedReviewState(reviewDraftStorageKeyRef.current, nextState);
-    }
     queuePersist(current, nextEntryState, { immediate: options?.immediatePersist });
   };
 
-  const updateActiveCardState = (updater: (state: ReviewCardState) => ReviewCardState) => {
+  const updateActiveCardState = (
+    updater: (state: ReviewCardState) => ReviewCardState,
+    options?: { immediatePersist?: boolean },
+  ) => {
     if (!activeCard || !canEdit) return;
-    updateCurrentState((state) => ({
-      ...state,
-      cards: {
-        ...state.cards,
-        [activeCard.id]: updater(state.cards[activeCard.id] ?? createEmptyReviewCardState()),
-      },
-    }));
+    updateCurrentState(
+      (state) => ({
+        ...state,
+        cards: {
+          ...state.cards,
+          [activeCard.id]: updater(state.cards[activeCard.id] ?? createEmptyReviewCardState()),
+        },
+      }),
+      options,
+    );
   };
 
   const updateEntryDone = (done: boolean) => {
@@ -416,6 +450,29 @@ export default function ReviewPage() {
       }),
       { immediatePersist: done },
     );
+  };
+
+  const saveDraftReviews = async () => {
+    if (!canEdit || savingDraft || submitting || submissions.length === 0) return;
+
+    setSavingDraft(true);
+    setSaveMessage("임시저장 중입니다.");
+    try {
+      const entryKeys = submissions.map((entry) => {
+        const entryKey = getSubmissionEntryKey(entry);
+        const entryState = normalizeReviewStateEntry(reviewStateRef.current[entryKey] ?? null, entry);
+        return queueEntryPersist(entry, entryState);
+      });
+
+      let saveOk = true;
+      for (const entryKey of entryKeys) {
+        saveOk = (await flushPersistAndWait(entryKey)) && saveOk;
+      }
+
+      setSaveMessage(saveOk ? "임시저장했습니다." : "일부 평가를 임시저장하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      setSavingDraft(false);
+    }
   };
 
   const submitAllReviews = async () => {
@@ -432,29 +489,24 @@ export default function ReviewPage() {
         ...normalizeReviewStateEntry(reviewStateRef.current[entryKey] ?? null, entry),
         done: true,
       };
-      pendingSaveRef.current[entryKey] = { entry, state: nextState[entryKey] };
-      const existingTimer = saveTimerRef.current[entryKey];
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-        delete saveTimerRef.current[entryKey];
-      }
+      queueEntryPersist(entry, nextState[entryKey]);
     });
 
     reviewStateRef.current = nextState;
     setReviewState(nextState);
-    if (reviewDraftStorageKeyRef.current) {
-      writePersistedReviewState(reviewDraftStorageKeyRef.current, nextState);
-    }
 
     setSubmitting(true);
     try {
+      let saveOk = true;
       for (const entryKey of entryKeys) {
-        await flushPersistAndWait(entryKey);
+        saveOk = (await flushPersistAndWait(entryKey)) && saveOk;
       }
 
-      if (reviewDraftStorageKeyRef.current && typeof window !== "undefined") {
-        window.localStorage.removeItem(reviewDraftStorageKeyRef.current);
+      if (!saveOk) {
+        setSaveMessage("일부 평가를 저장하지 못해 최종 제출을 중단했습니다. 다시 시도해 주세요.");
+        return;
       }
+
       if (reviewerIdRef.current) {
         setSubmittedReviewLock(reviewerIdRef.current, true);
       }
@@ -542,15 +594,26 @@ export default function ReviewPage() {
                   <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
                     <span className="muted">마지막 제출 업데이트: {current.updatedAt}</span>
                     {canEdit ? (
-                      <button
-                        className="btn primary"
-                        disabled={submitting || submissions.length === 0}
-                        onClick={() => {
-                          void submitAllReviews();
-                        }}
-                      >
-                        {submitting ? "제출 중..." : "모든 평가 제출"}
-                      </button>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <button
+                          className="btn"
+                          disabled={savingDraft || submitting || submissions.length === 0}
+                          onClick={() => {
+                            void saveDraftReviews();
+                          }}
+                        >
+                          {savingDraft ? "임시저장 중..." : "임시저장"}
+                        </button>
+                        <button
+                          className="btn primary"
+                          disabled={submitting || savingDraft || submissions.length === 0}
+                          onClick={() => {
+                            void submitAllReviews();
+                          }}
+                        >
+                          {submitting ? "제출 중..." : "최종 제출"}
+                        </button>
+                      </div>
                     ) : null}
                     {currentState.done ? <div className="status ok">현재 제출자의 평가가 완료 상태로 저장되었습니다.</div> : null}
                   </div>
@@ -646,7 +709,7 @@ export default function ReviewPage() {
                                       ...state,
                                       checked: nextChecked,
                                     };
-                                  });
+                                  }, { immediatePersist: true });
                                 }}
                                 style={{
                                   display: "flex",
@@ -711,7 +774,7 @@ export default function ReviewPage() {
                                 updateActiveCardState((state) => ({
                                   ...state,
                                   bonusScore: state.bonusScore === point ? 0 : point,
-                                }));
+                                }), { immediatePersist: true });
                               }}
                               style={{
                                 padding: "10px 14px",
@@ -742,6 +805,11 @@ export default function ReviewPage() {
                               ...state,
                               bonusComment: event.target.value,
                             }));
+                          }}
+                          onBlur={() => {
+                            if (currentKey) {
+                              void flushPersist(currentKey);
+                            }
                           }}
                         />
                       </label>

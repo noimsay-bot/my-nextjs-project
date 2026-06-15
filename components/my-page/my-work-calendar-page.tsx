@@ -9,7 +9,6 @@ import { formatMonthKey } from "@/lib/corporate-card/schedule";
 import { getSession, subscribeToAuth, type SessionUser } from "@/lib/auth/storage";
 import {
   loadMyWorkCalendarCustomTexts,
-  readLocalMyWorkCalendarCustomTexts,
   saveMyWorkCalendarCustomTexts,
   type MyWorkCalendarCustomTextMap,
 } from "@/lib/my-page/work-calendar-custom-texts";
@@ -289,7 +288,7 @@ export function MyWorkCalendarPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setCustomTexts(readLocalMyWorkCalendarCustomTexts(session?.id, session?.username));
+    setCustomTexts({});
     setEditingCustomTextDateKey(null);
     setEditingCustomTextIndex(null);
     setCustomTextDraft("");

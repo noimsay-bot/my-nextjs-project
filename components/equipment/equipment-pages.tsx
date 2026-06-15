@@ -47,6 +47,13 @@ import {
   type LiveEquipmentStatusSaveEntry,
   type LiveLoanDetails,
 } from "@/lib/equipment/types";
+import {
+  EQUIPMENT_BORROW_SELECTION_EVENT,
+  getEquipmentBorrowSelectionKey,
+  loadEquipmentBorrowSelections,
+  saveEquipmentBorrowSelections,
+  type EquipmentBorrowSelection,
+} from "@/lib/equipment/borrow-selections";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import styles from "./Equipment.module.css";
 
@@ -64,21 +71,7 @@ type ManagedEquipmentDraft = {
 type StandaloneInlineAccessoryEntry =
   | { type: "item"; key: string; sortOrder: number; item: EquipmentItem }
   | { type: "variant"; key: string; sortOrder: number; parentLabel: string; items: EquipmentItem[] };
-type BorrowSelection =
-  | {
-      kind: "item";
-      id: string;
-      category: EquipmentCategory;
-      label: string;
-      isTvu: boolean;
-    }
-  | {
-      kind: "eng_profile";
-      id: string;
-      category: "eng_set";
-      label: string;
-      isTvu: false;
-    };
+type BorrowSelection = EquipmentBorrowSelection;
 
 const liveDetailEmpty: LiveLoanDetails = {
   trs: "",
@@ -107,8 +100,6 @@ const LIVE_TRS_OPTIONS = [
 ] as const;
 const LIVE_TRS_OPTION_SET = new Set<string>(LIVE_TRS_OPTIONS);
 const LIVE_ACCESSORY_GROUPS: readonly LiveAccessoryGroupKey[] = ["pin_mic", "distributor"];
-const EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX = "jtbc-equipment-borrow-selection-v1";
-const EQUIPMENT_BORROW_SELECTION_EVENT = "jtbc-equipment-borrow-selection-change";
 const HIDDEN_ENG_SET_PROFILE_NAMES = new Set([
   "공영수",
   "김대호",
@@ -133,70 +124,8 @@ function isHiddenEngSetProfile(profile: EquipmentProfile) {
   return HIDDEN_ENG_SET_PROFILE_NAMES.has(profile.name.trim());
 }
 
-function getBorrowSelectionStorageKey(profileId: string | null | undefined) {
-  return `${EQUIPMENT_BORROW_SELECTION_STORAGE_PREFIX}:${profileId || "anonymous"}`;
-}
-
 function getBorrowSelectionKey(selection: Pick<BorrowSelection, "kind" | "id">) {
-  return `${selection.kind}:${selection.id}`;
-}
-
-function normalizeBorrowSelections(value: unknown): BorrowSelection[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const selections: BorrowSelection[] = [];
-
-  value.forEach((entry) => {
-    if (!entry || typeof entry !== "object") return;
-    const item = entry as Partial<BorrowSelection>;
-    if (typeof item.id !== "string" || typeof item.label !== "string" || typeof item.kind !== "string") return;
-    if (item.kind === "item") {
-      if (!["camera_lens", "light", "eng_set", "live"].includes(String(item.category))) return;
-      const selection: BorrowSelection = {
-        kind: "item",
-        id: item.id,
-        category: item.category as EquipmentCategory,
-        label: item.label,
-        isTvu: item.isTvu === true,
-      };
-      const key = getBorrowSelectionKey(selection);
-      if (seen.has(key)) return;
-      seen.add(key);
-      selections.push(selection);
-      return;
-    }
-    if (item.kind === "eng_profile" && item.category === "eng_set") {
-      const selection: BorrowSelection = {
-        kind: "eng_profile",
-        id: item.id,
-        category: "eng_set",
-        label: item.label,
-        isTvu: false,
-      };
-      const key = getBorrowSelectionKey(selection);
-      if (seen.has(key)) return;
-      seen.add(key);
-      selections.push(selection);
-    }
-  });
-
-  return selections;
-}
-
-function readBorrowSelections(profileId: string | null | undefined) {
-  if (typeof window === "undefined") return [] as BorrowSelection[];
-  try {
-    const raw = window.localStorage.getItem(getBorrowSelectionStorageKey(profileId));
-    return normalizeBorrowSelections(raw ? JSON.parse(raw) : []);
-  } catch {
-    return [];
-  }
-}
-
-function writeBorrowSelections(profileId: string | null | undefined, selections: BorrowSelection[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(getBorrowSelectionStorageKey(profileId), JSON.stringify(selections));
-  window.dispatchEvent(new CustomEvent(EQUIPMENT_BORROW_SELECTION_EVENT));
+  return getEquipmentBorrowSelectionKey(selection);
 }
 
 function itemToBorrowSelection(item: EquipmentItem): BorrowSelection {
@@ -2249,7 +2178,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [profiles, setProfiles] = useState<EquipmentProfile[]>([]);
   const [currentLoanItems, setCurrentLoanItems] = useState<EquipmentLoanItem[]>([]);
   const [liveStatusEntries, setLiveStatusEntries] = useState<LiveEquipmentStatusEntry[]>([]);
-  const [selectedEntries, setSelectedEntries] = useState<BorrowSelection[]>(() => readBorrowSelections(getSession()?.id));
+  const [selectedEntries, setSelectedEntries] = useState<BorrowSelection[]>([]);
   const [returnIds, setReturnIds] = useState<string[]>([]);
   const [engHighlights, setEngHighlights] = useState<EngScheduleHighlightMap>(() => new Map());
   const [loading, setLoading] = useState(true);
@@ -2317,14 +2246,36 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
 
   useEffect(() => subscribeToAuth(setSession), []);
 
-  useEffect(() => {
-    setSelectedEntries(readBorrowSelections(session?.id));
+  const refreshBorrowSelections = useCallback(async () => {
+    try {
+      const nextSelections = await loadEquipmentBorrowSelections(session?.id);
+      setSelectedEntries(nextSelections);
+    } catch (error) {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "장비 선택값을 불러오지 못했습니다.",
+      });
+    }
   }, [session?.id]);
+
+  const persistBorrowSelections = useCallback((nextSelections: BorrowSelection[]) => {
+    void saveEquipmentBorrowSelections(session?.id, nextSelections).catch((error) => {
+      setMessage({
+        tone: "warn",
+        text: error instanceof Error ? error.message : "장비 선택값을 저장하지 못했습니다.",
+      });
+      void refreshBorrowSelections();
+    });
+  }, [refreshBorrowSelections, session?.id]);
+
+  useEffect(() => {
+    void refreshBorrowSelections();
+  }, [refreshBorrowSelections]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const syncSelections = () => {
-      setSelectedEntries(readBorrowSelections(session?.id));
+      void refreshBorrowSelections();
     };
     window.addEventListener(EQUIPMENT_BORROW_SELECTION_EVENT, syncSelections);
     window.addEventListener("storage", syncSelections);
@@ -2332,7 +2283,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       window.removeEventListener(EQUIPMENT_BORROW_SELECTION_EVENT, syncSelections);
       window.removeEventListener("storage", syncSelections);
     };
-  }, [session?.id]);
+  }, [refreshBorrowSelections]);
 
   const currentByItemId = useMemo(
     () => new Map(currentLoanItems.map((loanItem) => [loanItem.equipmentItemId, loanItem] as const)),
@@ -2363,8 +2314,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     ));
     if (nextSelections.length === selectedEntries.length) return;
     setSelectedEntries(nextSelections);
-    writeBorrowSelections(session?.id, nextSelections);
-  }, [currentLoanItems, selectedEntries, session?.id]);
+    persistBorrowSelections(nextSelections);
+  }, [currentLoanItems, persistBorrowSelections, selectedEntries]);
 
   const selectedIds = useMemo(() => selectedEntries.map((selection) => selection.id), [selectedEntries]);
   const selectedTrsValues = useMemo(() => parseSelectedTrs(liveDetails.trs), [liveDetails.trs]);
@@ -2468,8 +2419,8 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
     });
     if (nextSelections.length === selectedEntries.length) return;
     setSelectedEntries(nextSelections);
-    writeBorrowSelections(session?.id, nextSelections);
-  }, [category, isEngSetPage, itemById, loading, profileSelectionById, selectedEntries, session?.id]);
+    persistBorrowSelections(nextSelections);
+  }, [category, isEngSetPage, itemById, loading, persistBorrowSelections, profileSelectionById, selectedEntries]);
 
   const returnableItems = useMemo(() => {
     return currentLoanItems.filter((loanItem) => canReturnLoanItem(loanItem, session));
@@ -2516,10 +2467,10 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const updateBorrowSelections = useCallback((updater: (current: BorrowSelection[]) => BorrowSelection[]) => {
     setSelectedEntries((current) => {
       const next = updater(current);
-      writeBorrowSelections(session?.id, next);
+      persistBorrowSelections(next);
       return next;
     });
-  }, [session?.id]);
+  }, [persistBorrowSelections]);
 
   const toggleSelection = (itemId: string) => {
     const selection = itemSelectionById.get(itemId) ?? (isEngSetPage ? profileSelectionById.get(itemId) : undefined);

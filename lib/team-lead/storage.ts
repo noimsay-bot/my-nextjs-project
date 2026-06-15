@@ -209,8 +209,11 @@ export const SCHEDULE_ASSIGNMENT_TAGGED_NAME_BORDER = "1px solid rgba(96,165,250
 export const SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR = "#eff6ff";
 const TEAM_LEAD_CONTRIBUTION_STATE_KEY = "contribution_manual_v1";
 const TEAM_LEAD_FINAL_CUT_STATE_KEY = "final_cut_v1";
+const TEAM_LEAD_FINAL_CUT_LEGACY_STORAGE_KEY = "j-team-lead-final-cut-v1";
+const TEAM_LEAD_FINAL_CUT_LEGACY_MIGRATION_KEY = "j-team-lead-final-cut-v1-migrated-to-db";
 const TEAM_LEAD_REVIEW_ACCESS_STATE_KEY = "review_access_v1";
 const TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY = "reviewer_selection_v1";
+const TEAM_LEAD_REVIEWER_NAME_CHIPS_STATE_KEY = "reviewer_name_chips_v1";
 const TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY = "submission_access_v1";
 const TEAM_LEAD_REFERENCE_NOTES_STATE_KEY = "reference_notes_v1";
 const TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY = "best_report_quarters_v1";
@@ -1246,6 +1249,7 @@ export async function refreshTeamLeadMetaState() {
     }
 
     applyTeamLeadMetaStateRows(data ?? []);
+    finalCutCache = await recoverLegacyFinalCutStoreIfNeeded(finalCutCache);
     emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
     emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
   })().finally(() => {
@@ -1618,6 +1622,77 @@ function normalizeFinalCutStore(store: unknown) {
   return Object.fromEntries(
     Object.entries(store as Record<string, unknown>).map(([key, value]) => [key, normalizeFinalCutDecision(value)]),
   ) as Record<string, FinalCutDecision>;
+}
+
+function getFinalCutDecisionCount(store: Record<string, FinalCutDecision>) {
+  return Object.values(store).filter(Boolean).length;
+}
+
+function readLegacyFinalCutStore() {
+  if (typeof window === "undefined") return {} as Record<string, FinalCutDecision>;
+  try {
+    const raw = window.localStorage.getItem(TEAM_LEAD_FINAL_CUT_LEGACY_STORAGE_KEY);
+    if (!raw) return {} as Record<string, FinalCutDecision>;
+    return normalizeFinalCutStore(JSON.parse(raw));
+  } catch {
+    return {} as Record<string, FinalCutDecision>;
+  }
+}
+
+function hasMigratedLegacyFinalCutStore() {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(TEAM_LEAD_FINAL_CUT_LEGACY_MIGRATION_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+function markLegacyFinalCutStoreMigrated() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TEAM_LEAD_FINAL_CUT_LEGACY_MIGRATION_KEY, "1");
+  } catch {
+    // Migration marker is best-effort; failing to write it should not block recovery.
+  }
+}
+
+function hasRecoverableLegacyFinalCutDecision(
+  legacyStore: Record<string, FinalCutDecision>,
+  currentStore: Record<string, FinalCutDecision>,
+) {
+  return Object.entries(legacyStore).some(([key, decision]) => Boolean(decision) && !currentStore[key]);
+}
+
+async function recoverLegacyFinalCutStoreIfNeeded(currentStore: Record<string, FinalCutDecision>) {
+  const normalizedCurrent = normalizeFinalCutStore(currentStore);
+  const legacyStore = readLegacyFinalCutStore();
+  if (getFinalCutDecisionCount(legacyStore) === 0) {
+    return normalizedCurrent;
+  }
+
+  const hasRecoverableDecision = hasRecoverableLegacyFinalCutDecision(legacyStore, normalizedCurrent);
+  if (hasMigratedLegacyFinalCutStore() && !hasRecoverableDecision) {
+    return normalizedCurrent;
+  }
+
+  const mergedStore = normalizeFinalCutStore({ ...legacyStore, ...normalizedCurrent });
+  if (!hasRecoverableDecision || getFinalCutDecisionCount(mergedStore) === getFinalCutDecisionCount(normalizedCurrent)) {
+    markLegacyFinalCutStoreMigrated();
+    return normalizedCurrent;
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_FINAL_CUT_STATE_KEY, mergedStore);
+    markLegacyFinalCutStoreMigrated();
+    return mergedStore;
+  } catch (error) {
+    emitTeamLeadStorageStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "브라우저 저장 정제본 복구에 실패했습니다. DB 기준 상태로 표시합니다.",
+    });
+    return normalizedCurrent;
+  }
 }
 
 export function getFinalCutStore() {
@@ -3241,6 +3316,18 @@ function normalizeReviewAccessState(raw: unknown) {
   ).sort();
 }
 
+function normalizeReviewerNameChips(names: unknown, fallbackNames: string[] = []) {
+  const source = Array.isArray(names) ? names : fallbackNames;
+  const normalized = Array.from(
+    new Set(
+      source
+        .map((name) => (typeof name === "string" ? name.trim() : ""))
+        .filter(Boolean),
+    ),
+  );
+  return normalized.length > 0 ? normalized : fallbackNames;
+}
+
 function hasSameProfileIds(left: string[], right: string[]) {
   if (left.length !== right.length) return false;
   return left.every((id, index) => id === right[index]);
@@ -3321,6 +3408,49 @@ async function getSelectedReviewerProfileIds() {
   }
 
   return getGrantedReviewerProfileIds();
+}
+
+export async function loadTeamLeadReviewerNameChips(fallbackNames: string[]) {
+  const fallback = normalizeReviewerNameChips(fallbackNames, fallbackNames);
+  const session = await getPortalSession();
+  if (!session?.approved) return fallback;
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_REVIEWER_NAME_CHIPS_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+      return fallback;
+    }
+    throw new Error(error.message);
+  }
+
+  const state = data?.state && typeof data.state === "object" ? data.state as { names?: unknown } : null;
+  return normalizeReviewerNameChips(state?.names, fallback);
+}
+
+export async function saveTeamLeadReviewerNameChips(names: string[]) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || (session.role !== "team_lead" && session.role !== "admin")) {
+    return { ok: false as const, message: "평가자 이름칩 저장 권한이 없습니다." };
+  }
+
+  try {
+    await persistTeamLeadState(TEAM_LEAD_REVIEWER_NAME_CHIPS_STATE_KEY, {
+      names: normalizeReviewerNameChips(names),
+    });
+    return { ok: true as const, message: "평가자 이름칩을 저장했습니다." };
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: error instanceof Error ? error.message : "평가자 이름칩 저장에 실패했습니다.",
+    };
+  }
 }
 
 export function isTeamLeadSubmissionAccessOpen() {

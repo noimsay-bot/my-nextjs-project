@@ -11,7 +11,7 @@ import { buildCorporateCardMemo } from "@/lib/corporate-card/memo";
 import { formatDateLabel, getCurrentMonthKey } from "@/lib/corporate-card/schedule";
 import styles from "./CorporateCard.module.css";
 
-const FINAL_CUT_STATUS_STORAGE_KEY = "corporate-card-final-cut-status-v1";
+const LEGACY_FINAL_CUT_STATUS_STORAGE_KEY = "corporate-card-final-cut-status-v1";
 
 type MessageState = {
   tone: "note" | "warn";
@@ -27,11 +27,11 @@ function groupByDate(items: MyScheduleAssignmentItem[]) {
   }, new Map<string, MyScheduleAssignmentItem[]>());
 }
 
-function readFinalCutStatus() {
+function readLegacyFinalCutStatus() {
   if (typeof window === "undefined") return {} as Record<string, boolean>;
 
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(FINAL_CUT_STATUS_STORAGE_KEY) ?? "{}");
+    const parsed = JSON.parse(window.localStorage.getItem(LEGACY_FINAL_CUT_STATUS_STORAGE_KEY) ?? "{}");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
 
     return Object.fromEntries(
@@ -42,11 +42,12 @@ function readFinalCutStatus() {
   }
 }
 
-function writeFinalCutStatus(status: Record<string, boolean>) {
+function clearLegacyFinalCutStatus() {
+  if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(FINAL_CUT_STATUS_STORAGE_KEY, JSON.stringify(status));
+    window.localStorage.removeItem(LEGACY_FINAL_CUT_STATUS_STORAGE_KEY);
   } catch {
-    // Local status is convenience-only; storage failures should not block the page.
+    // Legacy cleanup is best-effort.
   }
 }
 
@@ -63,8 +64,8 @@ function getFinalCutStatusKeys(item: MyScheduleAssignmentItem) {
   return [item.scheduleItemId, getFinalCutLogicalStatusKey(item)];
 }
 
-function isFinalCutCompleted(item: MyScheduleAssignmentItem, status: Record<string, boolean>) {
-  return item.finalCutCompleted || getFinalCutStatusKeys(item).some((key) => status[key]);
+function isFinalCutCompleted(item: MyScheduleAssignmentItem) {
+  return item.finalCutCompleted;
 }
 
 function getMissingFields(item: Pick<MyScheduleAssignmentItem, "audioManName" | "seniorName">) {
@@ -103,14 +104,9 @@ export function MyAssignmentsPage() {
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [finalCutStatus, setFinalCutStatus] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<MessageState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftItem, setDraftItem] = useState<MyScheduleAssignmentItem | null>(null);
-
-  useEffect(() => {
-    setFinalCutStatus(readFinalCutStatus());
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,21 +115,34 @@ export function MyAssignmentsPage() {
     setEditingId(null);
     setDraftItem(null);
     fetchMyScheduleAssignmentsWithPartnerInfo(monthKey)
-      .then((nextItems) => {
+      .then(async (nextItems) => {
         if (cancelled) return;
-        setItems(nextItems);
-        setFinalCutStatus((current) => {
-          const localStatus = { ...readFinalCutStatus(), ...current };
-          const nextStatus = { ...localStatus };
-          nextItems.forEach((item) => {
-            if (!item.finalCutCompleted && !getFinalCutStatusKeys(item).some((key) => localStatus[key])) return;
-            getFinalCutStatusKeys(item).forEach((key) => {
-              nextStatus[key] = true;
-            });
-          });
-          writeFinalCutStatus(nextStatus);
-          return nextStatus;
-        });
+        const legacyStatus = readLegacyFinalCutStatus();
+        const legacyItems = nextItems.filter(
+          (item) => !item.finalCutCompleted && getFinalCutStatusKeys(item).some((key) => legacyStatus[key]),
+        );
+
+        if (cancelled) return;
+        let migratedItemIds = new Set<string>();
+        if (legacyItems.length > 0) {
+          const migrationResults = await Promise.allSettled(
+            legacyItems.map((item) => saveMyScheduleFinalCutStatus(item, true)),
+          );
+          migratedItemIds = new Set(
+            legacyItems
+              .filter((_, index) => migrationResults[index]?.status === "fulfilled")
+              .map((item) => item.scheduleItemId),
+          );
+          if (cancelled) return;
+          if (migrationResults.every((result) => result.status === "fulfilled")) {
+            clearLegacyFinalCutStatus();
+          } else {
+            setMessage({ tone: "warn", text: "브라우저에 남아 있던 정제본 체크 일부를 DB로 옮기지 못했습니다. 새로고침 후 다시 확인하세요." });
+          }
+        }
+        setItems(nextItems.map((item) => (
+          migratedItemIds.has(item.scheduleItemId) ? { ...item, finalCutCompleted: true } : item
+        )));
       })
       .catch((error) => {
         if (cancelled) return;
@@ -207,21 +216,6 @@ export function MyAssignmentsPage() {
   };
 
   const toggleFinalCutStatus = (item: MyScheduleAssignmentItem, checked: boolean) => {
-    const previousStatus = finalCutStatus;
-    setFinalCutStatus((current) => {
-      const next = { ...current };
-      if (checked) {
-        getFinalCutStatusKeys(item).forEach((key) => {
-          next[key] = true;
-        });
-      } else {
-        getFinalCutStatusKeys(item).forEach((key) => {
-          delete next[key];
-        });
-      }
-      writeFinalCutStatus(next);
-      return next;
-    });
     setItems((currentItems) =>
       currentItems.map((currentItem) =>
         currentItem.scheduleItemId === item.scheduleItemId
@@ -230,8 +224,6 @@ export function MyAssignmentsPage() {
       ),
     );
     void saveMyScheduleFinalCutStatus(item, checked).catch((error) => {
-      writeFinalCutStatus(previousStatus);
-      setFinalCutStatus(previousStatus);
       setItems((currentItems) =>
         currentItems.map((currentItem) =>
           currentItem.scheduleItemId === item.scheduleItemId
@@ -284,10 +276,10 @@ export function MyAssignmentsPage() {
                         <span className={styles.itemDate}>{formatDateLabel(dateKey)}</span>
                         <strong className={styles.itemTitle}>{item.scheduleContent}</strong>
                         <label className={styles.finalCutToggle}>
-                          <span>{isFinalCutCompleted(item, finalCutStatus) ? "정제본 생성완료" : "정제본"}</span>
+                          <span>{isFinalCutCompleted(item) ? "정제본 생성완료" : "정제본"}</span>
                           <input
                             type="checkbox"
-                            checked={isFinalCutCompleted(item, finalCutStatus)}
+                            checked={isFinalCutCompleted(item)}
                             onChange={(event) => toggleFinalCutStatus(item, event.target.checked)}
                           />
                         </label>

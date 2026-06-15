@@ -11,6 +11,7 @@ import {
   getFinalCutCards,
   getTeamLeadSchedules,
   refreshTeamLeadAssignmentMonths,
+  refreshTeamLeadMetaState,
   updateFinalCutDecision,
 } from "@/lib/team-lead/storage";
 import { getTeamLeadEvaluationMonthKeys } from "@/lib/team-lead/evaluation-year";
@@ -219,7 +220,7 @@ export function FinalCutPage() {
   const lastFocusRefreshAtRef = useRef(0);
 
   const refreshCards = useCallback(async () => {
-    await refreshScheduleState();
+    await Promise.all([refreshScheduleState(), refreshTeamLeadMetaState()]);
     const evaluationMonthKeys = getTeamLeadEvaluationMonthKeys(evaluationYear);
     const initialScheduleMonthKeys = getTeamLeadSchedules().map((schedule) => schedule.monthKey);
     const generatedState = readStoredScheduleState();
