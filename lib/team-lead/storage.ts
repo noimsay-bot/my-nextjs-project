@@ -3241,6 +3241,11 @@ function normalizeReviewAccessState(raw: unknown) {
   ).sort();
 }
 
+function hasSameProfileIds(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  return left.every((id, index) => id === right[index]);
+}
+
 function normalizeReferenceNoteItems(raw: unknown) {
   if (!Array.isArray(raw)) return [] as TeamLeadReferenceNoteItem[];
   return raw
@@ -3467,6 +3472,41 @@ function normalizeSubmissionAccessState(raw: unknown) {
   };
 }
 
+async function getTeamLeadSubmissionAccessOpenState() {
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", TEAM_LEAD_SUBMISSION_ACCESS_STATE_KEY)
+    .maybeSingle<{ state: unknown }>();
+
+  if (error) {
+    if (isSupabaseSchemaMissingError(error)) {
+      console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
+      return false;
+    }
+    throw new Error(error.message);
+  }
+
+  return normalizeSubmissionAccessState(data?.state).isOpen;
+}
+
+async function syncReviewerAccessWithSelectionWhenSubmissionClosed(
+  selectedProfileIds: string[],
+  activeProfileIds: string[],
+) {
+  if (selectedProfileIds.length === 0) return activeProfileIds;
+  const isSubmissionOpen = await getTeamLeadSubmissionAccessOpenState();
+  if (isSubmissionOpen || hasSameProfileIds(selectedProfileIds, activeProfileIds)) {
+    return activeProfileIds;
+  }
+
+  await persistTeamLeadState(TEAM_LEAD_REVIEW_ACCESS_STATE_KEY, {
+    profileIds: selectedProfileIds,
+  });
+  return selectedProfileIds;
+}
+
 function getNextBestReportQuarterTarget(
   snapshots: TeamLeadBestReportQuarterSnapshot[],
 ): TeamLeadBestReportQuarterTarget {
@@ -3688,10 +3728,14 @@ export async function getTeamLeadReviewerRoleWorkspace(): Promise<ReviewerRoleWo
     throw new Error(error.message);
   }
 
-  const [selectedProfileIds, activeProfileIds] = await Promise.all([
+  const [selectedProfileIds, currentActiveProfileIds] = await Promise.all([
     getSelectedReviewerProfileIds(),
     getGrantedReviewerProfileIds(),
   ]);
+  const activeProfileIds = await syncReviewerAccessWithSelectionWhenSubmissionClosed(
+    selectedProfileIds,
+    currentActiveProfileIds,
+  );
 
   return {
     profiles: (data ?? [])
@@ -4127,18 +4171,25 @@ export async function saveTeamLeadReviewerRoles(selectedProfileIds: string[]) {
     await persistTeamLeadState(TEAM_LEAD_REVIEWER_SELECTION_STATE_KEY, {
       profileIds: selectedReviewerIds,
     });
+    const activeProfileIds = await syncReviewerAccessWithSelectionWhenSubmissionClosed(
+      selectedReviewerIds,
+      await getGrantedReviewerProfileIds(),
+    );
+
+    return {
+      ok: true as const,
+      profileIds: selectedReviewerIds,
+      activeProfileIds,
+      message: hasSameProfileIds(selectedReviewerIds, activeProfileIds)
+        ? "평가자 명단을 저장하고 평가 페이지를 오픈했습니다."
+        : "평가자 명단을 저장했습니다. 제출 마감 때 평가 페이지가 열립니다.",
+    };
   } catch (error) {
     return {
       ok: false as const,
       message: error instanceof Error ? error.message : "평가자 명단 저장에 실패했습니다.",
     };
   }
-
-  return {
-    ok: true as const,
-    profileIds: selectedReviewerIds,
-    message: "평가자 명단을 저장했습니다. 제출 마감 때 평가 페이지가 열립니다.",
-  };
 }
 
 export async function setTeamLeadSubmissionAccessOpen(nextOpen: boolean) {

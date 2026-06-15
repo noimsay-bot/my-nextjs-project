@@ -473,18 +473,7 @@ function persistExperienceRole(role: UserRole | null) {
   clearJson(ROLE_EXPERIENCE_CACHE_KEY);
 }
 
-function normalizeReviewAccessState(raw: unknown) {
-  if (!raw || typeof raw !== "object") return [] as string[];
-  const record = raw as { profileIds?: unknown };
-  if (!Array.isArray(record.profileIds)) return [] as string[];
-  return Array.from(
-    new Set(
-      record.profileIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
-    ),
-  );
-}
-
-async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean }) {
+async function fetchGrantedReviewAccessProfileIds(userId: string, options?: { force?: boolean }) {
   if (!options?.force && cachedReviewAccessProfileIds) {
     return cachedReviewAccessProfileIds;
   }
@@ -492,11 +481,7 @@ async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean })
   try {
     const supabase = getSupabaseClient();
     const result = await promiseWithTimeout(
-      supabase
-        .from("team_lead_state")
-        .select("state")
-        .eq("key", REVIEW_ACCESS_STATE_KEY)
-        .maybeSingle<{ state: unknown }>(),
+      supabase.rpc("current_profile_has_review_access"),
     );
 
     if (result === AUTH_TIMEOUT) {
@@ -505,11 +490,11 @@ async function fetchGrantedReviewAccessProfileIds(options?: { force?: boolean })
 
     const { data, error } = result;
 
-    if (error || !data) {
+    if (error) {
       return cachedReviewAccessProfileIds ?? [];
     }
 
-    cachedReviewAccessProfileIds = normalizeReviewAccessState(data.state);
+    cachedReviewAccessProfileIds = data === true ? [userId] : [];
     return cachedReviewAccessProfileIds;
   } catch {
     return cachedReviewAccessProfileIds ?? [];
@@ -758,7 +743,7 @@ async function syncSessionFromUser(user: User, options?: { force?: boolean }) {
       return null;
     }
 
-    const grantedProfileIds = await fetchGrantedReviewAccessProfileIds({ force });
+    const grantedProfileIds = await fetchGrantedReviewAccessProfileIds(user.id, { force });
     const mustChangePassword = readMustChangePassword(user);
     const nextSession = profileToSession(
       profile,

@@ -44,7 +44,7 @@ function createManualItem(): ManualDraftItem {
 }
 
 function normalizeScoreInput(value: string) {
-  const trimmed = value.trim();
+  const trimmed = value.trim().replace("−", "-").replace(",", ".");
   if (!trimmed) return 0;
   const parsed = Number(trimmed);
   if (!Number.isFinite(parsed)) return 0;
@@ -60,7 +60,7 @@ function toManualDraftItem(item: ContributionManualItem): ManualDraftItem {
 }
 
 function isValidScoreText(value: string) {
-  return /^-?\d*(\.\d?)?$/.test(value);
+  return /^[-−]?\d*([.,]\d?)?$/.test(value);
 }
 
 function createEmptyCard(name: string): ContributionPersonCard {
@@ -436,9 +436,10 @@ export function ContributionPage() {
                                 />
                                 <input
                                   className="field-input"
-                                  inputMode="decimal"
+                                  type="text"
+                                  inputMode="text"
                                   value={item.scoreText}
-                                  placeholder="점수"
+                                  placeholder="점수 예: -1"
                                   onChange={(event) =>
                                     isValidScoreText(event.target.value)
                                       ? setManualDrafts((current) => ({
