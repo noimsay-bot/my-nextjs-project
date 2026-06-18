@@ -234,6 +234,7 @@ interface TeamLeadScheduleAssignmentRow {
 interface TeamLeadStateRow {
   key: string;
   state: unknown;
+  updated_at?: string | null;
 }
 
 interface TeamLeadScheduleAssignmentBackupSummaryRow {
@@ -271,6 +272,12 @@ let assignmentLoadedMonthKeys = new Set<string>();
 let assignmentDbBackupUnavailableWarned = false;
 let finalCutPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let finalCutPersistResolvers: Array<() => void> = [];
+// 저장이 아직 DB에 확정되지 않은 로컬 편집을 보관한다. 값이 ""이면 삭제 의도를 뜻한다.
+// 디바운스 저장 도중 refreshTeamLeadMetaState가 캐시를 DB 스냅샷으로 덮어써 체크가 풀리는
+// 경쟁 조건을 막기 위한 오버레이.
+let finalCutPendingWrites: Record<string, FinalCutDecision> = {};
+// final_cut_v1 행의 마지막으로 알고 있는 updated_at. 낙관적 동시성(compare-and-set)에 사용.
+let finalCutUpdatedAt: string | null = null;
 
 interface SaveScheduleAssignmentStoreOptions {
   debounceMs?: number;
@@ -951,9 +958,14 @@ function applyAssignmentMonthToCache(monthKey: string, row: TeamLeadScheduleAssi
 }
 
 function applyTeamLeadMetaStateRows(rows: TeamLeadStateRow[]) {
-  const stateMap = new Map(rows.map((row) => [row.key, row.state] as const));
-  contributionManualCache = normalizeContributionManualStore(stateMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY));
-  finalCutCache = normalizeFinalCutStore(stateMap.get(TEAM_LEAD_FINAL_CUT_STATE_KEY));
+  const rowMap = new Map(rows.map((row) => [row.key, row] as const));
+  contributionManualCache = normalizeContributionManualStore(rowMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY)?.state);
+  const finalCutRow = rowMap.get(TEAM_LEAD_FINAL_CUT_STATE_KEY);
+  // 낙관적 동시성 기준이 되는 updated_at을 DB 기준으로 갱신.
+  finalCutUpdatedAt = finalCutRow?.updated_at ?? null;
+  // DB 스냅샷 위에 아직 저장 확정되지 않은 로컬 편집을 다시 얹어, 저장 대기 중인 체크가
+  // 새로고침으로 사라지지 않도록 한다.
+  finalCutCache = applyFinalCutPendingWrites(normalizeFinalCutStore(finalCutRow?.state));
 }
 
 export function getScheduleAssignmentStore(): ScheduleAssignmentDataStore {
@@ -1083,6 +1095,82 @@ async function persistTeamLeadState(key: string, state: unknown) {
   if (error) {
     throw new Error(error.message);
   }
+}
+
+// 정제본 전용 저장: updated_at 기반 낙관적 동시성으로, 두 평가자가 동시에 다른 항목을
+// 편집해도 서로의 체크를 덮어쓰지 않도록 충돌 시 최신 DB 상태에 로컬 편집을 다시 병합해
+// 재시도한다. resolveConflict는 충돌 시 최신 DB 상태로부터 저장할 상태를 다시 만든다.
+async function persistFinalCutState(
+  state: Record<string, FinalCutDecision>,
+  resolveConflict: (latest: Record<string, FinalCutDecision>) => Record<string, FinalCutDecision> = applyFinalCutPendingWrites,
+) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const maxAttempts = 5;
+  let desiredState = normalizeFinalCutStore(state);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const knownUpdatedAt = finalCutUpdatedAt;
+
+    if (knownUpdatedAt) {
+      const { data, error } = await supabase
+        .from("team_lead_state")
+        .update({ state: desiredState, updated_by: session.id })
+        .eq("key", TEAM_LEAD_FINAL_CUT_STATE_KEY)
+        .eq("updated_at", knownUpdatedAt)
+        .select("updated_at")
+        .maybeSingle<{ updated_at: string }>();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (data?.updated_at) {
+        finalCutUpdatedAt = data.updated_at;
+        return desiredState;
+      }
+      // updated_at 불일치 = 그 사이 다른 평가자가 저장함. 아래에서 최신 상태로 재병합 후 재시도.
+    } else {
+      const { data, error } = await supabase
+        .from("team_lead_state")
+        .insert({ key: TEAM_LEAD_FINAL_CUT_STATE_KEY, state: desiredState, updated_by: session.id })
+        .select("updated_at")
+        .maybeSingle<{ updated_at: string }>();
+
+      if (!error && data?.updated_at) {
+        finalCutUpdatedAt = data.updated_at;
+        return desiredState;
+      }
+
+      if (error && error.code !== "23505") {
+        throw new Error(error.message);
+      }
+      // 23505(이미 행 존재) = 다른 클라이언트가 먼저 만듦. 아래에서 최신 상태로 재병합 후 재시도.
+    }
+
+    const { data: latest, error: fetchError } = await supabase
+      .from("team_lead_state")
+      .select("state, updated_at")
+      .eq("key", TEAM_LEAD_FINAL_CUT_STATE_KEY)
+      .maybeSingle<{ state: unknown; updated_at: string }>();
+
+    if (fetchError) {
+      throw new Error(fetchError.message);
+    }
+
+    finalCutUpdatedAt = latest?.updated_at ?? null;
+    const latestState = normalizeFinalCutStore(latest?.state);
+    desiredState = normalizeFinalCutStore(resolveConflict(latestState));
+    // 다른 평가자의 변경을 화면에도 반영하면서, 저장 대기 중인 내 편집은 유지.
+    finalCutCache = desiredState;
+    emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+  }
+
+  throw new Error("정제본 저장 중 동시 편집 충돌이 반복되어 저장하지 못했습니다.");
 }
 
 function normalizeAssignmentPersistDelayMs(value?: number) {
@@ -1223,6 +1311,8 @@ export async function refreshTeamLeadMetaState() {
     if (!session?.approved) {
       contributionManualCache = {};
       finalCutCache = {};
+      finalCutPendingWrites = {};
+      finalCutUpdatedAt = null;
       emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
       emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
       return;
@@ -1231,7 +1321,7 @@ export async function refreshTeamLeadMetaState() {
     const supabase = await getPortalSupabaseClient();
     const { data, error } = await supabase
       .from("team_lead_state")
-      .select("key, state")
+      .select("key, state, updated_at")
       .in("key", [TEAM_LEAD_CONTRIBUTION_STATE_KEY, TEAM_LEAD_FINAL_CUT_STATE_KEY])
       .returns<TeamLeadStateRow[]>();
 
@@ -1240,6 +1330,8 @@ export async function refreshTeamLeadMetaState() {
         console.warn(getSupabaseStorageErrorMessage(error, "team_lead_state"));
         contributionManualCache = {};
         finalCutCache = {};
+        finalCutPendingWrites = {};
+        finalCutUpdatedAt = null;
         emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
         emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
         return;
@@ -1683,9 +1775,12 @@ async function recoverLegacyFinalCutStoreIfNeeded(currentStore: Record<string, F
   }
 
   try {
-    await persistTeamLeadState(TEAM_LEAD_FINAL_CUT_STATE_KEY, mergedStore);
+    // 충돌(다른 평가자가 그 사이 저장) 시에도 레거시 복구분을 최신 DB 상태에 다시 얹어 보존.
+    const persisted = await persistFinalCutState(mergedStore, (latest) =>
+      normalizeFinalCutStore({ ...legacyStore, ...latest }),
+    );
     markLegacyFinalCutStoreMigrated();
-    return mergedStore;
+    return persisted;
   } catch (error) {
     emitTeamLeadStorageStatus({
       ok: false,
@@ -1697,6 +1792,33 @@ async function recoverLegacyFinalCutStoreIfNeeded(currentStore: Record<string, F
 
 export function getFinalCutStore() {
   return normalizeFinalCutStore(finalCutCache);
+}
+
+// 저장 대기 중인 로컬 편집을 DB 스냅샷 위에 다시 얹는다. 값이 ""이면 삭제 의도.
+function applyFinalCutPendingWrites(base: Record<string, FinalCutDecision>) {
+  if (Object.keys(finalCutPendingWrites).length === 0) {
+    return normalizeFinalCutStore(base);
+  }
+  const next = normalizeFinalCutStore(base);
+  Object.entries(finalCutPendingWrites).forEach(([id, decision]) => {
+    if (decision) {
+      next[id] = decision;
+    } else {
+      delete next[id];
+    }
+  });
+  return next;
+}
+
+// 저장이 DB에 확정된 뒤, 그 사이 더 새로운 편집이 없었던 항목만 대기 목록에서 비운다.
+function reconcileFinalCutPendingAfterPersist(persisted: Record<string, FinalCutDecision>) {
+  Object.keys(finalCutPendingWrites).forEach((id) => {
+    const intended = finalCutPendingWrites[id];
+    const persistedValue = persisted[id] ?? "";
+    if (persistedValue === intended) {
+      delete finalCutPendingWrites[id];
+    }
+  });
 }
 
 export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
@@ -1713,11 +1835,17 @@ export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
     finalCutPersistResolvers.push(resolve);
     finalCutPersistTimer = setTimeout(() => {
       finalCutPersistTimer = null;
-      persistTeamLeadState(TEAM_LEAD_FINAL_CUT_STATE_KEY, finalCutCache).catch(async (error) => {
+      // 타이머 발화 시점의 가변 캐시가 아니라, 저장 의도를 담은 스냅샷을 보낸다.
+      const snapshot = normalizeFinalCutStore(finalCutCache);
+      persistFinalCutState(snapshot).then((persisted) => {
+        // 충돌 재병합으로 실제 저장된 상태가 스냅샷과 다를 수 있으므로 확정 결과 기준으로 정리.
+        reconcileFinalCutPendingAfterPersist(persisted);
+      }).catch(async (error) => {
         emitTeamLeadStorageStatus({
           ok: false,
           message: error instanceof Error ? error.message : "정제본 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
         });
+        finalCutPendingWrites = {};
         finalCutCache = previous;
         emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
         await refreshTeamLeadMetaState();
@@ -1735,6 +1863,8 @@ export function updateFinalCutDecision(itemId: string, decision: FinalCutDecisio
   if (!trimmedId) return;
   const store = getFinalCutStore();
   const normalizedDecision = normalizeFinalCutDecision(decision);
+  // 저장 확정 전까지 새로고침에 덮어쓰이지 않도록 의도한 값을 대기 목록에 기록.
+  finalCutPendingWrites[trimmedId] = normalizedDecision;
   const next = { ...store };
   if (!normalizedDecision) {
     delete next[trimmedId];
