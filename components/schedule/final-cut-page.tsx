@@ -299,9 +299,9 @@ export function FinalCutPage() {
     );
   };
 
-  const applyDecision = (itemId: string, decision: FinalCutDecision) => {
-    setDecisionDrafts((current) => ({ ...current, [itemId]: decision }));
-    void updateFinalCutDecision(itemId, decision);
+  const applyDecision = (item: FinalCutPersonCard["items"][number], decision: FinalCutDecision) => {
+    setDecisionDrafts((current) => ({ ...current, [item.id]: decision }));
+    void updateFinalCutDecision(item.id, decision, item.legacyId);
   };
 
   if (quarterGroups.length === 0) {
@@ -430,7 +430,7 @@ export function FinalCutPage() {
                                 className="btn final-cut-decision-btn"
                                 onClick={() => {
                                   const nextDecision = active ? "" : button.value;
-                                  applyDecision(item.id, nextDecision);
+                                  applyDecision(item, nextDecision);
                                 }}
                                 style={{
                                   position: "relative",

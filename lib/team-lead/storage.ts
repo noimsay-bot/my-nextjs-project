@@ -154,6 +154,7 @@ export type FinalCutDecision = "" | "circle" | "triangle" | "cross";
 
 export interface FinalCutScheduleItem {
   id: string;
+  legacyId: string;
   dateKey: string;
   duty: string;
   schedule: string;
@@ -270,14 +271,15 @@ let assignmentPersistResolvers: Array<() => void> = [];
 let assignmentPersistMonthKeys = new Set<string>();
 let assignmentLoadedMonthKeys = new Set<string>();
 let assignmentDbBackupUnavailableWarned = false;
-let finalCutPersistTimer: ReturnType<typeof setTimeout> | null = null;
-let finalCutPersistResolvers: Array<() => void> = [];
-// 저장이 아직 DB에 확정되지 않은 로컬 편집을 보관한다. 값이 ""이면 삭제 의도를 뜻한다.
-// 디바운스 저장 도중 refreshTeamLeadMetaState가 캐시를 DB 스냅샷으로 덮어써 체크가 풀리는
-// 경쟁 조건을 막기 위한 오버레이.
+// 저장이 아직 DB에 확정되지 않은 로컬 편집을 보관한다. 안정 키의 ""은 명시적 해제,
+// 레거시 키의 ""은 이전 키 제거 의도를 뜻한다.
+// 저장 도중 refreshTeamLeadMetaState가 캐시를 DB 스냅샷으로 덮어써 체크가 풀리는 경쟁
+// 조건을 막기 위한 오버레이.
 let finalCutPendingWrites: Record<string, FinalCutDecision> = {};
 // final_cut_v1 행의 마지막으로 알고 있는 updated_at. 낙관적 동시성(compare-and-set)에 사용.
 let finalCutUpdatedAt: string | null = null;
+// 같은 항목을 빠르게 연속 클릭해도 요청 도착 순서가 뒤집히지 않도록 항목별 저장을 직렬화한다.
+const finalCutDecisionQueues = new Map<string, Promise<void>>();
 
 interface SaveScheduleAssignmentStoreOptions {
   debounceMs?: number;
@@ -1173,6 +1175,32 @@ async function persistFinalCutState(
   throw new Error("정제본 저장 중 동시 편집 충돌이 반복되어 저장하지 못했습니다.");
 }
 
+async function persistFinalCutDecision(
+  itemId: string,
+  decision: FinalCutDecision,
+  legacyItemId: string,
+) {
+  const session = await getPortalSession();
+  if (!session?.approved) {
+    throw new Error("승인된 로그인 세션이 필요합니다.");
+  }
+
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase.rpc("update_team_lead_final_cut_decision", {
+    p_item_id: itemId,
+    p_decision: decision || null,
+    p_legacy_item_id: legacyItemId || null,
+  });
+
+  if (error) {
+    throw new Error(getSupabaseStorageErrorMessage(error, "정제본 체크 원자 저장 함수"));
+  }
+
+  if (typeof data === "string") {
+    finalCutUpdatedAt = data;
+  }
+}
+
 function normalizeAssignmentPersistDelayMs(value?: number) {
   if (!Number.isFinite(value)) {
     return 250;
@@ -1803,6 +1831,9 @@ function applyFinalCutPendingWrites(base: Record<string, FinalCutDecision>) {
   Object.entries(finalCutPendingWrites).forEach(([id, decision]) => {
     if (decision) {
       next[id] = decision;
+    } else if (id.startsWith("final-cut-v2::")) {
+      // 안정 키에는 명시적 해제 tombstone을 남겨 다른 브라우저의 레거시 값이 부활하지 않게 한다.
+      next[id] = "";
     } else {
       delete next[id];
     }
@@ -1811,67 +1842,73 @@ function applyFinalCutPendingWrites(base: Record<string, FinalCutDecision>) {
 }
 
 // 저장이 DB에 확정된 뒤, 그 사이 더 새로운 편집이 없었던 항목만 대기 목록에서 비운다.
-function reconcileFinalCutPendingAfterPersist(persisted: Record<string, FinalCutDecision>) {
-  Object.keys(finalCutPendingWrites).forEach((id) => {
-    const intended = finalCutPendingWrites[id];
-    const persistedValue = persisted[id] ?? "";
-    if (persistedValue === intended) {
-      delete finalCutPendingWrites[id];
-    }
-  });
+function clearFinalCutPendingWrite(itemId: string, intended: FinalCutDecision) {
+  if (finalCutPendingWrites[itemId] === intended) {
+    delete finalCutPendingWrites[itemId];
+  }
 }
 
-export function saveFinalCutStore(store: Record<string, FinalCutDecision>) {
-  const normalized = normalizeFinalCutStore(store);
-  const previous = normalizeFinalCutStore(finalCutCache);
-  finalCutCache = normalized;
-  emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+export function updateFinalCutDecision(
+  itemId: string,
+  decision: FinalCutDecision,
+  legacyItemId = "",
+) {
+  const trimmedId = itemId.trim();
+  if (!trimmedId) return;
+  const trimmedLegacyId = legacyItemId.trim();
+  const store = getFinalCutStore();
+  const normalizedDecision = normalizeFinalCutDecision(decision);
 
-  if (finalCutPersistTimer) {
-    clearTimeout(finalCutPersistTimer);
+  // 저장 확정 전까지 새로고침에 덮어쓰이지 않도록 안정 키의 의도를 대기 목록에 기록한다.
+  // 레거시 키는 같은 트랜잭션에서 제거해, 체크 해제 후 이전 값이 다시 살아나는 것을 막는다.
+  finalCutPendingWrites[trimmedId] = normalizedDecision;
+  if (trimmedLegacyId && trimmedLegacyId !== trimmedId) {
+    finalCutPendingWrites[trimmedLegacyId] = "";
   }
 
-  return new Promise<void>((resolve) => {
-    finalCutPersistResolvers.push(resolve);
-    finalCutPersistTimer = setTimeout(() => {
-      finalCutPersistTimer = null;
-      // 타이머 발화 시점의 가변 캐시가 아니라, 저장 의도를 담은 스냅샷을 보낸다.
-      const snapshot = normalizeFinalCutStore(finalCutCache);
-      persistFinalCutState(snapshot).then((persisted) => {
-        // 충돌 재병합으로 실제 저장된 상태가 스냅샷과 다를 수 있으므로 확정 결과 기준으로 정리.
-        reconcileFinalCutPendingAfterPersist(persisted);
-      }).catch(async (error) => {
+  const next = { ...store };
+  if (!normalizedDecision) {
+    // 명시적 해제 tombstone을 유지해야 레거시 브라우저가 예전 체크를 되살리지 못한다.
+    next[trimmedId] = "";
+  } else {
+    next[trimmedId] = normalizedDecision;
+  }
+  if (trimmedLegacyId && trimmedLegacyId !== trimmedId) {
+    delete next[trimmedLegacyId];
+  }
+  finalCutCache = normalizeFinalCutStore(next);
+  emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
+
+  const previousQueue = finalCutDecisionQueues.get(trimmedId) ?? Promise.resolve();
+  const queuedSave = previousQueue
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await persistFinalCutDecision(trimmedId, normalizedDecision, trimmedLegacyId);
+        clearFinalCutPendingWrite(trimmedId, normalizedDecision);
+        if (trimmedLegacyId && trimmedLegacyId !== trimmedId) {
+          clearFinalCutPendingWrite(trimmedLegacyId, "");
+        }
+      } catch (error) {
+        clearFinalCutPendingWrite(trimmedId, normalizedDecision);
+        if (trimmedLegacyId && trimmedLegacyId !== trimmedId) {
+          clearFinalCutPendingWrite(trimmedLegacyId, "");
+        }
         emitTeamLeadStorageStatus({
           ok: false,
           message: error instanceof Error ? error.message : "정제본 저장에 실패했습니다. DB 기준 상태로 복구합니다.",
         });
-        finalCutPendingWrites = {};
-        finalCutCache = previous;
-        emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
         await refreshTeamLeadMetaState();
-      }).finally(() => {
-        const resolvers = [...finalCutPersistResolvers];
-        finalCutPersistResolvers = [];
-        resolvers.forEach((item) => item());
-      });
-    }, 180);
-  });
-}
+      }
+    });
 
-export function updateFinalCutDecision(itemId: string, decision: FinalCutDecision) {
-  const trimmedId = itemId.trim();
-  if (!trimmedId) return;
-  const store = getFinalCutStore();
-  const normalizedDecision = normalizeFinalCutDecision(decision);
-  // 저장 확정 전까지 새로고침에 덮어쓰이지 않도록 의도한 값을 대기 목록에 기록.
-  finalCutPendingWrites[trimmedId] = normalizedDecision;
-  const next = { ...store };
-  if (!normalizedDecision) {
-    delete next[trimmedId];
-  } else {
-    next[trimmedId] = normalizedDecision;
-  }
-  saveFinalCutStore(next);
+  finalCutDecisionQueues.set(trimmedId, queuedSave);
+  void queuedSave.finally(() => {
+    if (finalCutDecisionQueues.get(trimmedId) === queuedSave) {
+      finalCutDecisionQueues.delete(trimmedId);
+    }
+  });
+  return queuedSave;
 }
 
 function shouldIncludeFinalCutDuty(duty: string) {
@@ -2930,6 +2967,7 @@ export function getFinalCutCards(monthKey?: string) {
       .filter(Boolean),
   );
   const personMap = new Map<string, FinalCutScheduleItem[]>();
+  const stableIdOccurrenceMap = new Map<string, number>();
 
   schedules.forEach((monthSchedule) => {
     const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
@@ -2951,13 +2989,26 @@ export function getFinalCutCards(monthKey?: string) {
             .map((schedule) => schedule.trim())
             .filter(Boolean)
             .forEach((schedule, index) => {
-              const id = `${monthSchedule.monthKey}::${row.key}::${index}`;
+              const legacyId = `${monthSchedule.monthKey}::${row.key}::${index}`;
+              const stableIdBase = [
+                "final-cut-v2",
+                day.dateKey,
+                encodeURIComponent(personName.normalize("NFC")),
+                encodeURIComponent(schedule.normalize("NFC").replace(/\s+/g, " ").trim()),
+              ].join("::");
+              const occurrence = stableIdOccurrenceMap.get(stableIdBase) ?? 0;
+              stableIdOccurrenceMap.set(stableIdBase, occurrence + 1);
+              const id = `${stableIdBase}::${occurrence}`;
+              const decision = Object.prototype.hasOwnProperty.call(finalCutStore, id)
+                ? finalCutStore[id]
+                : finalCutStore[legacyId] ?? "";
               const item: FinalCutScheduleItem = {
                 id,
+                legacyId,
                 dateKey: day.dateKey,
                 duty: row.duty,
                 schedule,
-                decision: finalCutStore[id] ?? "",
+                decision,
               };
               const current = personMap.get(personName) ?? [];
               current.push(item);
