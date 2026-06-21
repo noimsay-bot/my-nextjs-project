@@ -14,6 +14,7 @@ import {
   normalizeReviewStateEntry,
   ReviewCardState,
   ReviewStateStore,
+  ReviewWorkspaceReviewer,
   saveReviewEntry,
   setSubmittedReviewLock,
   subscribeToReviewWorkspaceChanges,
@@ -138,6 +139,8 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(true);
   const [canEdit, setCanEdit] = useState(false);
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
+  const [reviewers, setReviewers] = useState<ReviewWorkspaceReviewer[]>([]);
+  const [selectedReviewerId, setSelectedReviewerId] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -188,6 +191,14 @@ export default function ReviewPage() {
         });
         setCanEdit(workspace.canEdit);
         setReadOnlyReason(workspace.readOnlyReason);
+        setReviewers(workspace.reviewers);
+        setSelectedReviewerId((currentId) => {
+          if (workspace.canEdit) return "";
+          const completedReviewerIds = workspace.reviewers
+            .filter((reviewer) => reviewer.status === "completed")
+            .map((reviewer) => reviewer.id);
+          return completedReviewerIds.includes(currentId) ? currentId : (completedReviewerIds[0] ?? "");
+        });
 
         if (workspace.canEdit && legacyMigrationEntries.length > 0) {
           const migrationResults = await Promise.allSettled(
@@ -252,7 +263,35 @@ export default function ReviewPage() {
     };
   }, []);
 
-  const current = submissions.find((entry) => getSubmissionEntryKey(entry) === selectedEntryKey);
+  const visibleSubmissions = useMemo(
+    () =>
+      canEdit
+        ? submissions
+        : selectedReviewerId
+          ? submissions.filter((entry) => entry.reviewerId === selectedReviewerId)
+          : [],
+    [canEdit, selectedReviewerId, submissions],
+  );
+  const completedReviewerCount = useMemo(
+    () => reviewers.filter((reviewer) => reviewer.status === "completed").length,
+    [reviewers],
+  );
+  const inProgressReviewerCount = useMemo(
+    () => reviewers.filter((reviewer) => reviewer.status === "in_progress").length,
+    [reviewers],
+  );
+  const notStartedReviewerCount = reviewers.length - completedReviewerCount - inProgressReviewerCount;
+
+  useEffect(() => {
+    setSelectedEntryKey((currentKey) => {
+      if (visibleSubmissions.some((entry) => getSubmissionEntryKey(entry) === currentKey)) {
+        return currentKey;
+      }
+      return visibleSubmissions[0] ? getSubmissionEntryKey(visibleSubmissions[0]) : "";
+    });
+  }, [visibleSubmissions]);
+
+  const current = visibleSubmissions.find((entry) => getSubmissionEntryKey(entry) === selectedEntryKey);
   const currentKey = current ? getSubmissionEntryKey(current) : "";
   const currentState = normalizeReviewStateEntry(current ? reviewState[currentKey] : null, current);
 
@@ -535,40 +574,99 @@ export default function ReviewPage() {
                 : "현재 계정은 조회 전용입니다. 제출된 평가 결과를 확인할 수 있지만 수정은 할 수 없습니다."}
             </div>
             {readOnlyReason ? <div className="status note">{readOnlyReason}</div> : null}
-            {submissions.length > 0 ? (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignContent: "flex-start" }}>
-                {submissions.map((entry) => {
-                  const entryKey = getSubmissionEntryKey(entry);
-                  const selected = selectedEntryKey === entryKey;
-                  const done = reviewState[entryKey]?.done;
-                  return (
-                    <button
-                      key={entryKey}
-                      type="button"
-                      className={`btn ${selected ? "white" : ""}`}
-                      style={{
-                        display: "grid",
-                        gap: 4,
-                        padding: "9px 12px",
-                        minWidth: 140,
-                        justifyContent: "flex-start",
-                        textAlign: "left",
-                        borderColor: done && !selected ? "rgba(16,185,129,.35)" : undefined,
-                        background: done && !selected ? "rgba(16,185,129,.12)" : undefined,
-                      }}
-                      onClick={() => setSelectedEntryKey(entryKey)}
-                    >
-                      <span style={{ fontWeight: 800 }}>{entry.submitter}</span>
-                      {!canEdit && entry.reviewerName ? (
-                        <span style={{ fontSize: 12, opacity: 0.8 }}>reviewer: {entry.reviewerName}</span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+            {!canEdit && reviewers.length > 0 ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <div className="chip">평가 진행 현황</div>
+                  <strong>
+                    완료 {completedReviewerCount} · 진행 {inProgressReviewerCount} · 미시작 {notStartedReviewerCount}
+                  </strong>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {reviewers.map((reviewer) => {
+                    const completed = reviewer.status === "completed";
+                    const statusLabel =
+                      reviewer.status === "completed"
+                        ? `완료 ${reviewer.completedCount}/${reviewer.totalCount}`
+                        : reviewer.status === "in_progress"
+                          ? `진행 중 ${reviewer.completedCount}/${reviewer.totalCount}`
+                          : `미시작 0/${reviewer.totalCount}`;
+                    return (
+                      <button
+                        key={reviewer.id}
+                        type="button"
+                        className={`btn ${selectedReviewerId === reviewer.id ? "white" : ""}`}
+                        disabled={!completed}
+                        onClick={() => setSelectedReviewerId(reviewer.id)}
+                        title={completed ? `${reviewer.name}의 최종 저장 결과 보기` : "최종 저장 후 평가 내용을 확인할 수 있습니다."}
+                        style={{
+                          display: "grid",
+                          gap: 4,
+                          minWidth: 140,
+                          textAlign: "left",
+                          borderColor:
+                            reviewer.status === "completed"
+                              ? "rgba(34,197,94,.5)"
+                              : reviewer.status === "in_progress"
+                                ? "rgba(250,204,21,.45)"
+                                : undefined,
+                          opacity: completed ? 1 : 0.76,
+                        }}
+                      >
+                        <strong>{reviewer.name}</strong>
+                        <span style={{ fontSize: 12 }}>{statusLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  완료한 평가자를 선택하면 최종 저장된 평가 항목과 점수를 읽기 전용으로 확인할 수 있습니다.
+                </div>
+              </div>
+            ) : null}
+            {visibleSubmissions.length > 0 ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                {!canEdit ? <div className="chip">평가 대상 선택</div> : null}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignContent: "flex-start" }}>
+                  {visibleSubmissions.map((entry) => {
+                    const entryKey = getSubmissionEntryKey(entry);
+                    const selected = selectedEntryKey === entryKey;
+                    const done = reviewState[entryKey]?.done;
+                    return (
+                      <button
+                        key={entryKey}
+                        type="button"
+                        className={`btn ${selected ? "white" : ""}`}
+                        style={{
+                          display: "grid",
+                          gap: 4,
+                          padding: "9px 12px",
+                          minWidth: 140,
+                          justifyContent: "flex-start",
+                          textAlign: "left",
+                          borderColor: done && !selected ? "rgba(16,185,129,.35)" : undefined,
+                          background: done && !selected ? "rgba(16,185,129,.12)" : undefined,
+                        }}
+                        onClick={() => setSelectedEntryKey(entryKey)}
+                      >
+                        <span style={{ fontWeight: 800 }}>{entry.submitter}</span>
+                        {!canEdit && entry.reviewerName ? (
+                          <span style={{ fontSize: 12, opacity: 0.8 }}>평가자 {entry.reviewerName}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <div className="status note">
-                {loading ? "평가 대상을 불러오는 중입니다." : "표시할 제출 데이터가 없습니다."}
+                {loading
+                  ? "평가 대상을 불러오는 중입니다."
+                  : !canEdit && reviewers.length > 0 && completedReviewerCount === 0
+                    ? "아직 최종 저장을 마친 평가자가 없습니다."
+                    : !canEdit && reviewers.length === 0
+                      ? "현재 평가자로 지정된 인원이 없습니다."
+                      : "표시할 제출 데이터가 없습니다."}
               </div>
             )}
           </div>
@@ -649,7 +747,7 @@ export default function ReviewPage() {
                 </div>
               </div>
 
-              <div className="review-main-grid">
+              <div className={`review-main-grid ${canEdit ? "" : "review-main-grid--readonly"}`}>
                 <div className="review-criteria-panel" style={{ display: "grid", gap: 16 }}>
                   <section
                     style={{

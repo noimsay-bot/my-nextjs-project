@@ -2121,6 +2121,14 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
     order: 2;
   }
 
+  .review-main-grid--readonly .review-criteria-panel {
+    order: 1;
+  }
+
+  .review-main-grid--readonly .review-preview-panel {
+    order: 2;
+  }
+
   .brand-logo {
     min-width: 100%;
     padding: 14px 18px;

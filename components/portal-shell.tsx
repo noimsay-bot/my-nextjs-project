@@ -353,7 +353,7 @@ function getVisibleLinks(
           link.href === "/restaurants" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
-          (link.href === "/review" && session.canReview && !reviewLocked) ||
+          (link.href === "/review" && session.actualRole === "team_lead") ||
           link.href === "/equipment" ||
           link.href === "/schedule" ||
           link.href === "/team-lead" ||

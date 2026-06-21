@@ -50,7 +50,10 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/review")) {
-    return session.canReview && !hasSubmittedReviewLock(session.id);
+    return (
+      (session.role === "team_lead" && session.actualRole === "team_lead") ||
+      (session.canReview && !hasSubmittedReviewLock(session.id))
+    );
   }
 
   if (pathname.startsWith("/restaurants")) {
