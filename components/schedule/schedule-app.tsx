@@ -70,6 +70,7 @@ import {
   getScheduleRange,
   getStartPointerRawIndex,
   getUniquePeople,
+  isDeskPriorityVacationEntry,
   moveAssignmentCategory,
   parseVacationEntry,
   removeAssignmentCategory,
@@ -93,6 +94,11 @@ import {
 import { PUBLISHED_SCHEDULES_STATUS_EVENT } from "@/lib/schedule/published";
 import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
+import {
+  DESK_RECORDS_STATUS_EVENT,
+  removeDeskPriorityVacationDate,
+  restoreDeskPriorityVacationDate,
+} from "@/lib/schedule/desk-records";
 import { deskEditableVacationTypes, vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
 import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleAssignmentNameTag, ScheduleBigEvent, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
@@ -680,6 +686,7 @@ export function ScheduleApp() {
   const addPersonInputRef = useRef<HTMLInputElement | null>(null);
   const generalTeamInputRef = useRef<HTMLInputElement | null>(null);
   const editBackupRef = useRef<ScheduleState | null>(null);
+  const editDeskPriorityRemovalRef = useRef<Array<{ dateKey: string; value: string }>>([]);
   const preGenerateBackupRef = useRef<ScheduleState | null>(null);
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const isEditingDateRef = useRef(false);
@@ -759,6 +766,7 @@ export function ScheduleApp() {
         lastLoadedAssignmentMonthRef.current = routeMonthKey;
       }
       editBackupRef.current = null;
+      editDeskPriorityRemovalRef.current = [];
       preGenerateBackupRef.current = null;
       setHasPreGenerateBackup(false);
       syncAssignmentDecorationsFromCache(nextState);
@@ -768,6 +776,7 @@ export function ScheduleApp() {
       return nextState;
     } catch {
       editBackupRef.current = null;
+      editDeskPriorityRemovalRef.current = [];
       preGenerateBackupRef.current = null;
       setHasPreGenerateBackup(false);
       syncAssignmentDecorationsFromCache(readStoredScheduleState() ?? defaultScheduleState);
@@ -821,12 +830,14 @@ export function ScheduleApp() {
     window.addEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, handleStatus);
     window.addEventListener(CHANGE_REQUESTS_STATUS_EVENT, handleStatus);
     window.addEventListener(VACATION_STATUS_EVENT, handleStatus);
+    window.addEventListener(DESK_RECORDS_STATUS_EVENT, handleStatus);
 
     return () => {
       window.removeEventListener(SCHEDULE_PERSIST_STATUS_EVENT, handleStatus);
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, handleStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, handleStatus);
       window.removeEventListener(VACATION_STATUS_EVENT, handleStatus);
+      window.removeEventListener(DESK_RECORDS_STATUS_EVENT, handleStatus);
     };
   }, []);
 
@@ -1402,6 +1413,7 @@ export function ScheduleApp() {
           if (!sourceSchedule) return current;
 
           editBackupRef.current = cloneScheduleState(current);
+          editDeskPriorityRemovalRef.current = [];
           isEditingDateRef.current = true;
           const visibleScheduleClone = JSON.parse(JSON.stringify(sourceSchedule));
           return sanitizeScheduleState({
@@ -1433,6 +1445,7 @@ export function ScheduleApp() {
           if (!sourceSchedule) return current;
 
           editBackupRef.current = cloneScheduleState(current);
+          editDeskPriorityRemovalRef.current = [];
           isEditingDateRef.current = true;
           const visibleScheduleClone = JSON.parse(JSON.stringify(sourceSchedule));
           return sanitizeScheduleState({
@@ -1453,6 +1466,9 @@ export function ScheduleApp() {
 
   const cancelDayEdit = () => {
     const backup = editBackupRef.current ? cloneScheduleState(editBackupRef.current) : null;
+    editDeskPriorityRemovalRef.current.forEach(({ dateKey, value }) => {
+      restoreDeskPriorityVacationDate(dateKey, value);
+    });
     isEditingDateRef.current = false;
     flushSync(() => {
       setState((current) =>
@@ -1467,6 +1483,7 @@ export function ScheduleApp() {
       );
     });
     editBackupRef.current = null;
+    editDeskPriorityRemovalRef.current = [];
     closeAddPersonDialog();
   };
 
@@ -1485,6 +1502,7 @@ export function ScheduleApp() {
       );
     });
     editBackupRef.current = null;
+    editDeskPriorityRemovalRef.current = [];
     closeAddPersonDialog();
     setMessage({ tone: "ok", text: messageText });
   };
@@ -1635,6 +1653,7 @@ export function ScheduleApp() {
     setDeleteConfirmOpen(false);
     closeAddPersonDialog();
     editBackupRef.current = null;
+    editDeskPriorityRemovalRef.current = [];
     setMessage({ tone: "ok", text: `${visibleSchedule.year}년 ${visibleSchedule.month}월 근무표를 삭제했습니다.` });
   };
 
@@ -2743,8 +2762,29 @@ export function ScheduleApp() {
                                           }}
                                           onClick={(event) => {
                                             event.stopPropagation();
-                                            const ok = window.confirm("이 인원을 삭제하시겠습니까?");
+                                            const isDeskPriorityVacation =
+                                              category === "휴가" && isDeskPriorityVacationEntry(name);
+                                            const ok = window.confirm(
+                                              isDeskPriorityVacation
+                                                ? "이 휴가는 근속휴가/검진 원본에서 연동됩니다. 이 날짜를 원본에서도 삭제하시겠습니까?"
+                                                : "이 인원을 삭제하시겠습니까?",
+                                            );
                                             if (!ok) return;
+                                            if (isDeskPriorityVacation) {
+                                              const removed = removeDeskPriorityVacationDate(day.dateKey, name);
+                                              const removalKey = `${day.dateKey}::${name}`;
+                                              if (
+                                                removed &&
+                                                !editDeskPriorityRemovalRef.current.some(
+                                                  (item) => `${item.dateKey}::${item.value}` === removalKey,
+                                                )
+                                              ) {
+                                                editDeskPriorityRemovalRef.current.push({
+                                                  dateKey: day.dateKey,
+                                                  value: name,
+                                                });
+                                              }
+                                            }
                                             updateEditingState((current) =>
                                               removePersonFromCategory(current, day.dateKey, category, index, name),
                                             );

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { AUTH_CACHE_KEY, seedSupabaseAuthCookie } from "./e2e-auth";
 
 const SCHEDULE_SEED_KEY = "codex-e2e-schedule-state";
+const LONG_SERVICE_LEAVE_SEED_KEY = "desk-long-service-leave-records-v1";
 
 function createDay(year: number, month: number, day: number, assignments: Record<string, string[]>) {
   const date = new Date(year, month - 1, day);
@@ -67,10 +68,29 @@ function createScheduleSeed() {
   };
 }
 
-async function seedScheduleWritePage(page: Page, seedState = createScheduleSeed()) {
+async function seedScheduleWritePage(
+  page: Page,
+  seedState = createScheduleSeed(),
+  longServiceLeaveEntries?: Array<{
+    id: string;
+    name: string;
+    date: string;
+    note: string;
+    dateKeys: string[];
+  }>,
+) {
   const { supabaseAuthTokenKey, supabaseSession, supabaseCookieValue } = await seedSupabaseAuthCookie(page);
   await page.addInitScript(
-    ({ authCacheKey, supabaseAuthTokenKey, supabaseSession, supabaseCookieValue, scheduleSeedKey, seedState }) => {
+    ({
+      authCacheKey,
+      supabaseAuthTokenKey,
+      supabaseSession,
+      supabaseCookieValue,
+      scheduleSeedKey,
+      longServiceLeaveSeedKey,
+      seedState,
+      longServiceLeaveEntries,
+    }) => {
       document.cookie = `${supabaseAuthTokenKey}=${supabaseCookieValue}; path=/; max-age=3600; SameSite=Lax`;
       window.localStorage.setItem(
         authCacheKey,
@@ -87,6 +107,9 @@ async function seedScheduleWritePage(page: Page, seedState = createScheduleSeed(
       );
       window.localStorage.setItem(supabaseAuthTokenKey, JSON.stringify(supabaseSession));
       window.localStorage.setItem(scheduleSeedKey, JSON.stringify(seedState));
+      if (longServiceLeaveEntries) {
+        window.localStorage.setItem(longServiceLeaveSeedKey, JSON.stringify(longServiceLeaveEntries));
+      }
     },
     {
       authCacheKey: AUTH_CACHE_KEY,
@@ -94,7 +117,9 @@ async function seedScheduleWritePage(page: Page, seedState = createScheduleSeed(
       supabaseSession,
       supabaseCookieValue,
       scheduleSeedKey: SCHEDULE_SEED_KEY,
+      longServiceLeaveSeedKey: LONG_SERVICE_LEAVE_SEED_KEY,
       seedState,
+      longServiceLeaveEntries,
     },
   );
 }
@@ -131,13 +156,14 @@ test("dragging one name chip onto another swaps them 1:1", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("vacation deletion is preserved without running assembly sync while editing", async ({ page }) => {
+test("desk priority vacation deletion removes its source date and stays deleted", async ({ page }) => {
+  test.setTimeout(60_000);
   const year = 2026;
   const month = 6;
   const monthKey = "2026-06";
   const targetDay = createDay(year, month, 24, {
     일반: ["정상원"],
-    휴가: ["연차:김영묵"],
+    휴가: ["근속휴가:김영묵"],
     국회: ["김재식", "이지수"],
   });
   const generated = {
@@ -158,7 +184,15 @@ test("vacation deletion is preserved without running assembly sync while editing
   await page.route("**/api/schedule/assembly-sync-on-publish", async (route) => {
     await route.abort("blockedbyclient");
   });
-  await seedScheduleWritePage(page, seedState);
+  await seedScheduleWritePage(page, seedState, [
+    {
+      id: "long-service-leave-kim-youngmuk",
+      name: "김영묵",
+      date: "26.6.24",
+      note: "",
+      dateKeys: ["2026-06-24"],
+    },
+  ]);
 
   await page.goto("/schedule/write");
   await page.waitForSelector(".schedule-day-card");
@@ -193,7 +227,14 @@ test("vacation deletion is preserved without running assembly sync while editing
     (day: { dateKey: string }) => day.dateKey === "2026-06-24",
   );
 
-  expect(storedDay.assignments["휴가"]).not.toContain("연차:김영묵");
-  expect(storedDay.vacations).not.toContain("연차:김영묵");
+  expect(storedDay.assignments["휴가"] ?? []).not.toContain("근속휴가:김영묵");
+  expect(storedDay.vacations ?? []).not.toContain("근속휴가:김영묵");
   expect(storedDay.assignments["국회"]).toEqual(["김재식", "이지수"]);
+
+  const storedLongServiceLeaveEntries = await page.evaluate((storageKey) => {
+    const raw = window.localStorage.getItem(storageKey);
+    return raw ? JSON.parse(raw) : null;
+  }, LONG_SERVICE_LEAVE_SEED_KEY);
+  expect(storedLongServiceLeaveEntries[0].dateKeys).toEqual([]);
+  expect(storedLongServiceLeaveEntries[0].date).toBe("");
 });

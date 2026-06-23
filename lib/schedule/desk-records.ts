@@ -11,6 +11,7 @@ export const DESK_RECORD_YEAR = 2026;
 export const DESK_RECORDS_EVENT = "j-desk-records-updated";
 export const DESK_RECORDS_STATUS_EVENT = "j-desk-records-status";
 const DESK_RECORDS_STATE_KEY = "desk_records_v1";
+const E2E_DESK_RECORDS_ENABLED = process.env.NEXT_PUBLIC_E2E === "1";
 
 export interface DeskRecordEntry {
   id: string;
@@ -615,6 +616,10 @@ function saveDeskRecordStore(store: DeskRecordStore) {
   syncLocalStorageFromCache(store);
   emitDeskRecordEvent();
 
+  if (E2E_DESK_RECORDS_ENABLED) {
+    return Promise.resolve();
+  }
+
   if (deskRecordPersistTimer) {
     clearTimeout(deskRecordPersistTimer);
   }
@@ -658,6 +663,70 @@ export function saveDeskRecordEntries(kind: DeskRecordKind, entries: DeskRecordE
     ...store,
     [kind]: nextEntries,
   });
+}
+
+export function removeDeskPriorityVacationDate(dateKey: string, value: string) {
+  const matched = /^(근속휴가|건강검진)\s*:(.+)$/.exec(value.trim());
+  if (!matched) return false;
+
+  const kind: DeskRecordKind = matched[1] === "근속휴가" ? "long-service-leave" : "health-check";
+  const targetName = matched[2].trim();
+  if (!targetName || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return false;
+
+  const store = ensureDeskRecordCache();
+  let changed = false;
+  const nextEntries = store[kind].map((entry) => {
+    if (entry.name.trim() !== targetName || !entry.dateKeys.includes(dateKey)) {
+      return entry;
+    }
+
+    changed = true;
+    const nextDateKeys = entry.dateKeys.filter((item) => item !== dateKey);
+    return {
+      ...entry,
+      date: formatDeskRecordDateKeys(nextDateKeys),
+      dateKeys: nextDateKeys,
+    };
+  });
+
+  if (!changed) return false;
+  void saveDeskRecordStore({
+    ...store,
+    [kind]: nextEntries,
+  });
+  return true;
+}
+
+export function restoreDeskPriorityVacationDate(dateKey: string, value: string) {
+  const matched = /^(근속휴가|건강검진)\s*:(.+)$/.exec(value.trim());
+  if (!matched) return false;
+
+  const kind: DeskRecordKind = matched[1] === "근속휴가" ? "long-service-leave" : "health-check";
+  const targetName = matched[2].trim();
+  if (!targetName || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return false;
+
+  const store = ensureDeskRecordCache();
+  let changed = false;
+  const nextEntries = store[kind].map((entry) => {
+    if (entry.name.trim() !== targetName || entry.dateKeys.includes(dateKey)) {
+      return entry;
+    }
+
+    changed = true;
+    const nextDateKeys = normalizeDateKeyList([...entry.dateKeys, dateKey]);
+    return {
+      ...entry,
+      date: formatDeskRecordDateKeys(nextDateKeys),
+      dateKeys: nextDateKeys,
+    };
+  });
+
+  if (!changed) return false;
+  void saveDeskRecordStore({
+    ...store,
+    [kind]: nextEntries,
+  });
+  return true;
 }
 
 export function resetDeskRecordEntries(kind: DeskRecordKind) {
