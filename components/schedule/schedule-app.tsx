@@ -75,6 +75,7 @@ import {
   parseVacationEntry,
   removeAssignmentCategory,
   removePersonFromCategory,
+  removeVacationPersonFromDay,
   sanitizeScheduleState,
   setMonthStartPointer,
   swapPersonSlots,
@@ -2786,7 +2787,9 @@ export function ScheduleApp() {
                                               }
                                             }
                                             updateEditingState((current) =>
-                                              removePersonFromCategory(current, day.dateKey, category, index, name),
+                                              category === "휴가" && !isDeskPriorityVacation
+                                                ? removeVacationPersonFromDay(current, day.dateKey, name)
+                                                : removePersonFromCategory(current, day.dateKey, category, index, name),
                                             );
                                           }}
                                         >

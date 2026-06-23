@@ -2579,6 +2579,39 @@ export function removePersonFromCategory(
   return syncGeneratedSchedule(next, generated);
 }
 
+export function removeVacationPersonFromDay(
+  state: ScheduleState,
+  dateKey: string,
+  name: string,
+) {
+  if (!state.generated) return state;
+  const targetName = parseVacationEntry(name).name.trim();
+  if (!targetName) return state;
+  const next = cloneScheduleState(state);
+  const generated = next.generated as GeneratedSchedule;
+  const day = generated.days.find((item) => item.dateKey === dateKey);
+  if (!day) return state;
+  const current = day.assignments["휴가"] ?? day.vacations ?? [];
+  if (!current.length) return state;
+  // 같은 인원이 형식만 다르게(예: "김영묵"과 "연차:김영묵") 중복 저장돼 있어도 한 번에 지운다.
+  // 단, 근속휴가/건강검진 원본 연동 항목은 원본 삭제 경로에서만 제거하므로 여기서는 보존한다.
+  const remaining = current.filter((entry) => {
+    if (isDeskPriorityVacationEntry(entry)) return true;
+    return parseVacationEntry(entry).name.trim() !== targetName;
+  });
+  if (remaining.length === current.length) return state;
+  if (remaining.length > 0) {
+    day.assignments["휴가"] = remaining;
+  } else {
+    delete day.assignments["휴가"];
+  }
+  day.vacations = remaining;
+  if (next.selectedPerson?.dateKey === dateKey && next.selectedPerson.category === "휴가") {
+    next.selectedPerson = null;
+  }
+  return syncGeneratedSchedule(next, generated);
+}
+
 export function cycleVacationEntryType(
   state: ScheduleState,
   dateKey: string,

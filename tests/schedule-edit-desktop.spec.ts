@@ -238,3 +238,75 @@ test("desk priority vacation deletion removes its source date and stays deleted"
   expect(storedLongServiceLeaveEntries[0].dateKeys).toEqual([]);
   expect(storedLongServiceLeaveEntries[0].date).toBe("");
 });
+
+test("deleting a vacation name clears duplicate entries with different labels", async ({ page }) => {
+  test.setTimeout(60_000);
+  const year = 2026;
+  const month = 6;
+  const monthKey = "2026-06";
+  // 같은 인원이 형식만 다르게(라벨 없는 "김영묵" + "연차:김영묵") 중복 저장된 상태를 재현한다.
+  const targetDay = createDay(year, month, 24, {
+    일반: ["정상원"],
+    휴가: ["김영묵", "연차:김영묵"],
+    국회: ["김재식", "이지수"],
+  });
+  const generated = {
+    ...createScheduleSeed().generated,
+    year,
+    month,
+    monthKey,
+    days: [targetDay],
+    nextStartDate: "2026-06-25",
+  };
+  const seedState = {
+    ...createScheduleSeed(),
+    year,
+    month,
+    generated,
+    generatedHistory: [generated],
+  };
+  await page.route("**/api/schedule/assembly-sync-on-publish", async (route) => {
+    await route.abort("blockedbyclient");
+  });
+  await seedScheduleWritePage(page, seedState, []);
+
+  await page.goto("/schedule/write");
+  await page.waitForSelector(".schedule-day-card");
+  await page.getByRole("button", { name: "수정 모드" }).click();
+
+  const dayCard = page.locator('.schedule-day-card[data-date-key="2026-06-24"]').first();
+  const vacationLayer = dayCard
+    .locator('article[data-category="휴가"] .schedule-trip-tooltip-layer')
+    .filter({ hasText: "김영묵" })
+    .first();
+  await expect(vacationLayer).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    await dialog.accept();
+  });
+  await vacationLayer.locator("button").click();
+
+  // 라벨 없는 항목을 지우면 같은 이름의 "연차:김영묵"까지 함께 사라져야 한다.
+  await expect(
+    dayCard.locator('article[data-category="휴가"] .schedule-name-chip').filter({ hasText: "김영묵" }),
+  ).toHaveCount(0);
+  await expect(
+    dayCard.locator('article[data-category="국회"] .schedule-name-chip').filter({ hasText: "김재식" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "수정 완료" }).click();
+
+  const storedState = await page.evaluate((scheduleSeedKey) => {
+    const raw = window.localStorage.getItem(scheduleSeedKey);
+    return raw ? JSON.parse(raw) : null;
+  }, SCHEDULE_SEED_KEY);
+  const storedDay = storedState.generatedHistory[0].days.find(
+    (day: { dateKey: string }) => day.dateKey === "2026-06-24",
+  );
+
+  expect(storedDay.assignments["휴가"] ?? []).not.toContain("김영묵");
+  expect(storedDay.assignments["휴가"] ?? []).not.toContain("연차:김영묵");
+  expect(storedDay.vacations ?? []).not.toContain("김영묵");
+  expect(storedDay.vacations ?? []).not.toContain("연차:김영묵");
+  expect(storedDay.assignments["국회"]).toEqual(["김재식", "이지수"]);
+});
