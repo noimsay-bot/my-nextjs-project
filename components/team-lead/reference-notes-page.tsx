@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTeamLeadEvaluationYear } from "@/components/team-lead/use-team-lead-evaluation-year";
 import {
+  buildTeamLeadReferenceNotesPrintPages,
+  printTeamLeadDocument,
+} from "@/lib/team-lead/print";
+import {
   getTeamLeadReferenceNotesWorkspace,
   saveTeamLeadReferenceNotes,
   TeamLeadReferenceNoteCard,
@@ -119,11 +123,44 @@ export function ReferenceNotesPage() {
     setSavingProfileId("");
   };
 
+  const printReferenceNotes = () => {
+    if (cardsWithDrafts.length === 0) {
+      setMessage({ tone: "warn", text: "인쇄할 참고사항 카드가 없습니다." });
+      return;
+    }
+
+    const pages = buildTeamLeadReferenceNotesPrintPages(
+      evaluationYear,
+      cardsWithDrafts.map((card) => ({
+        name: card.name,
+        roleLabel: getRoleLabel(card.role),
+        items: card.draftItems.map((item) => item.text),
+      })),
+      {
+        hasUnsavedDrafts: cardsWithDrafts.some((card) => card.dirty),
+      },
+    );
+    const ok = printTeamLeadDocument("참고사항", pages);
+    if (!ok) {
+      setMessage({ tone: "warn", text: "인쇄 화면을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    }
+  };
+
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">참고사항</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div className="chip">참고사항</div>
+            <button
+              type="button"
+              className="btn"
+              disabled={loading || cardsWithDrafts.length === 0}
+              onClick={printReferenceNotes}
+            >
+              인쇄
+            </button>
+          </div>
           <strong style={{ fontSize: 24 }}>참고사항</strong>
           <span className="muted" style={{ fontSize: 13 }}>
             {evaluationYear - 1}년 12월 ~ {evaluationYear}년 11월 기준
@@ -137,7 +174,7 @@ export function ReferenceNotesPage() {
         style={{
           display: "grid",
           gap: 14,
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
           alignItems: "start",
         }}
       >
@@ -159,6 +196,7 @@ export function ReferenceNotesPage() {
                           placeholder={`항목 ${index + 1}`}
                           value={item.text}
                           onChange={(event) => updateItem(card.profileId, item.id, event.target.value)}
+                          style={{ minWidth: 0 }}
                         />
                         <button
                           type="button"

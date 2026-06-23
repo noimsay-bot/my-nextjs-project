@@ -26,6 +26,156 @@ export interface TeamLeadPrintPage {
   size?: "standard" | "dense" | "compact";
 }
 
+export interface TeamLeadReferenceNotesPrintCard {
+  name: string;
+  roleLabel: string;
+  items: string[];
+}
+
+interface TeamLeadReferenceNotesPrintCardFragment extends TeamLeadReferenceNotesPrintCard {
+  continued: boolean;
+}
+
+const REFERENCE_NOTE_CHUNK_LENGTH = 450;
+const REFERENCE_NOTE_PAGE_WEIGHT = 14;
+
+function splitReferenceNoteText(value: string) {
+  const text = value.trim();
+  if (!text) return [];
+
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > REFERENCE_NOTE_CHUNK_LENGTH) {
+    let splitIndex = remaining.lastIndexOf("\n", REFERENCE_NOTE_CHUNK_LENGTH);
+    if (splitIndex < REFERENCE_NOTE_CHUNK_LENGTH / 2) {
+      splitIndex = remaining.lastIndexOf(" ", REFERENCE_NOTE_CHUNK_LENGTH);
+    }
+    if (splitIndex < REFERENCE_NOTE_CHUNK_LENGTH / 2) {
+      splitIndex = REFERENCE_NOTE_CHUNK_LENGTH;
+    }
+    chunks.push(remaining.slice(0, splitIndex).trim());
+    remaining = remaining.slice(splitIndex).trim();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+function getReferenceNotesCardWeight(card: TeamLeadReferenceNotesPrintCard) {
+  if (card.items.length === 0) return 1;
+  return card.items.reduce((total, item) => total + Math.max(1, Math.ceil(item.trim().length / 45)), 0);
+}
+
+function expandReferenceNotesPrintCards(cards: TeamLeadReferenceNotesPrintCard[]) {
+  return cards.flatMap<TeamLeadReferenceNotesPrintCardFragment>((card) => {
+    const items = card.items.flatMap(splitReferenceNoteText);
+    if (items.length === 0) {
+      return [{ ...card, items: [], continued: false }];
+    }
+
+    const fragments: TeamLeadReferenceNotesPrintCardFragment[] = [];
+    let fragmentItems: string[] = [];
+    let fragmentWeight = 0;
+
+    items.forEach((item) => {
+      const itemWeight = Math.max(1, Math.ceil(item.length / 45));
+      if (fragmentItems.length > 0 && fragmentWeight + itemWeight > REFERENCE_NOTE_PAGE_WEIGHT) {
+        fragments.push({
+          ...card,
+          items: fragmentItems,
+          continued: fragments.length > 0,
+        });
+        fragmentItems = [];
+        fragmentWeight = 0;
+      }
+      fragmentItems.push(item);
+      fragmentWeight += itemWeight;
+    });
+
+    if (fragmentItems.length > 0) {
+      fragments.push({
+        ...card,
+        items: fragmentItems,
+        continued: fragments.length > 0,
+      });
+    }
+
+    return fragments;
+  });
+}
+
+function groupReferenceNotesPrintCards(cards: TeamLeadReferenceNotesPrintCardFragment[]) {
+  const groups: TeamLeadReferenceNotesPrintCardFragment[][] = [];
+  let current: TeamLeadReferenceNotesPrintCardFragment[] = [];
+  let currentWeight = 0;
+
+  cards.forEach((card) => {
+    const cardWeight = getReferenceNotesCardWeight(card);
+    if (current.length > 0 && (current.length >= 8 || currentWeight + cardWeight > REFERENCE_NOTE_PAGE_WEIGHT)) {
+      groups.push(current);
+      current = [];
+      currentWeight = 0;
+    }
+    current.push(card);
+    currentWeight += cardWeight;
+  });
+
+  if (current.length > 0) {
+    groups.push(current);
+  }
+
+  return groups;
+}
+
+export function buildTeamLeadReferenceNotesPrintPages(
+  evaluationYear: number,
+  cards: TeamLeadReferenceNotesPrintCard[],
+  options: { hasUnsavedDrafts?: boolean } = {},
+): TeamLeadPrintPage[] {
+  const groups = groupReferenceNotesPrintCards(expandReferenceNotesPrintCards(cards));
+  const periodLabel = `${evaluationYear - 1}년 12월 ~ ${evaluationYear}년 11월 기준`;
+  const draftLabel = options.hasUnsavedDrafts ? " · 미저장 초안 포함" : "";
+
+  return groups.map((group, pageIndex) => ({
+    title: groups.length > 1 ? `참고사항 (${pageIndex + 1}/${groups.length})` : "참고사항",
+    size: group.length >= 6 ? "dense" : "standard",
+    bodyHtml: `
+      <div class="team-lead-print-note">${escapeHtml(periodLabel)} · 현재 화면 입력값 기준${draftLabel}</div>
+      <table class="team-lead-print-table">
+        <colgroup>
+          <col style="width: 18%" />
+          <col style="width: 12%" />
+          <col style="width: 70%" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>이름</th>
+            <th>구분</th>
+            <th>참고사항</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${group
+            .map((card) => {
+              const items = card.items.map((item) => item.trim()).filter(Boolean);
+              const itemHtml =
+                items.length > 0
+                  ? `<ol class="team-lead-print-reference-list">${items
+                      .map((item) => `<li>${escapeHtml(item)}</li>`)
+                      .join("")}</ol>`
+                  : '<span class="team-lead-print-empty">추가된 항목이 없습니다.</span>';
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(card.name)}${card.continued ? " (계속)" : ""}</strong></td>
+                  <td>${escapeHtml(card.roleLabel)}</td>
+                  <td class="team-lead-print-reference-cell">${itemHtml}</td>
+                </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>`,
+  }));
+}
+
 function buildPrintDocument(title: string, pages: TeamLeadPrintPage[]) {
   const printedAt = formatPrintDate();
   const pageHtml = pages
@@ -159,6 +309,27 @@ function buildPrintDocument(title: string, pages: TeamLeadPrintPage[]) {
         .team-lead-print-note {
           font-size: 11px;
           color: #475569;
+        }
+
+        .team-lead-print-reference-cell {
+          text-align: left !important;
+          vertical-align: top !important;
+        }
+
+        .team-lead-print-reference-list {
+          display: grid;
+          gap: 3px;
+          margin: 0;
+          padding-left: 18px;
+        }
+
+        .team-lead-print-reference-list li {
+          text-align: left;
+          white-space: pre-wrap;
+        }
+
+        .team-lead-print-empty {
+          color: #64748b;
         }
       </style>
     </head>
