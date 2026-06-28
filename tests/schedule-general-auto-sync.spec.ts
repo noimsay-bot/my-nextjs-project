@@ -663,6 +663,73 @@ test("vacation deletion removes Jung even after the entry type changed to other"
   expect(next.vacations).not.toContain("정철원");
 });
 
+test("vacation deletion removes Jung from generated history even when current generated is stale", () => {
+  const staleSchedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        dateKey: "2026-06-28",
+        day: 28,
+        month: 6,
+        year: 2026,
+        dow: 0,
+        isWeekend: true,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 주말일반근무: ["정철원"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+  const visibleSchedule = {
+    ...staleSchedule,
+    days: [
+      {
+        dateKey: "2026-06-29",
+        day: 29,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["대휴:정철원"],
+        assignments: { 휴가: ["대휴:정철원"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    generated: staleSchedule,
+    generatedHistory: [visibleSchedule],
+    vacations: "2026-06-29: 대휴:정철원",
+  });
+
+  const next = removeVacationPersonFromDay(state, "2026-06-29", "대휴:정철원");
+  const nextHistoryDay = next.generatedHistory[0]?.days.find((item) => item.dateKey === "2026-06-29");
+
+  expect(nextHistoryDay?.assignments["휴가"]).toBeUndefined();
+  expect(nextHistoryDay?.vacations).toEqual([]);
+  expect(next.vacations).not.toContain("2026-06-29");
+  expect(next.vacations).not.toContain("정철원");
+});
+
 test("accepted compensatory leave swaps update vacation source text before schedule normalization", () => {
   const baseDay = {
     day: 1,

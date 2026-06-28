@@ -2600,30 +2600,54 @@ export function removeVacationPersonFromDay(
   const targetName = parseVacationEntry(name).name.trim();
   if (!targetName) return state;
   const next = cloneScheduleState(state);
-  const generated = next.generated as GeneratedSchedule;
-  const day = generated.days.find((item) => item.dateKey === dateKey);
-  if (!day) return state;
-  const current = Array.from(
-    new Set([...(day.vacations ?? []), ...(day.assignments["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
-  );
-  if (!current.length) return state;
-  // 같은 인원이 형식만 다르게(예: "김영묵"과 "연차:김영묵") 중복 저장돼 있어도 한 번에 지운다.
-  // 단, 근속휴가/건강검진 원본 연동 항목은 원본 삭제 경로에서만 제거하므로 여기서는 보존한다.
-  const remaining = current.filter((entry) => {
+  const changedMonthKeys = new Set<string>();
+
+  const removeFromSchedule = (schedule: GeneratedSchedule | null | undefined) => {
+    const day = schedule?.days.find((item) => item.dateKey === dateKey);
+    if (!schedule || !day) return false;
+    const current = Array.from(
+      new Set([...(day.vacations ?? []), ...(day.assignments["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
+    );
+    if (!current.length) return false;
+    // 같은 인원이 형식만 다르게(예: "김영묵"과 "연차:김영묵") 중복 저장돼 있어도 한 번에 지운다.
+    // 단, 근속휴가/건강검진 원본 연동 항목은 원본 삭제 경로에서만 제거하므로 여기서는 보존한다.
+    const remaining = current.filter((entry) => {
+      if (isDeskPriorityVacationEntry(entry)) return true;
+      return parseVacationEntry(entry).name.trim() !== targetName;
+    });
+    if (remaining.length === current.length) return false;
+    if (remaining.length > 0) {
+      day.assignments["휴가"] = remaining;
+    } else {
+      delete day.assignments["휴가"];
+    }
+    day.vacations = remaining;
+    changedMonthKeys.add(schedule.monthKey);
+    return true;
+  };
+
+  removeFromSchedule(next.generated);
+  next.generatedHistory.forEach((schedule) => {
+    removeFromSchedule(schedule);
+  });
+
+  if (changedMonthKeys.size === 0) return state;
+  const vacationMap = parseVacationMap(next.vacations);
+  const sourceEntries = vacationMap[dateKey] ?? [];
+  const remainingSourceEntries = sourceEntries.filter((entry) => {
     if (isDeskPriorityVacationEntry(entry)) return true;
     return parseVacationEntry(entry).name.trim() !== targetName;
   });
-  if (remaining.length === current.length) return state;
-  if (remaining.length > 0) {
-    day.assignments["휴가"] = remaining;
+  if (remainingSourceEntries.length > 0) {
+    vacationMap[dateKey] = remainingSourceEntries;
   } else {
-    delete day.assignments["휴가"];
+    delete vacationMap[dateKey];
   }
-  day.vacations = remaining;
+  next.vacations = serializeVacationMap(vacationMap);
   if (next.selectedPerson?.dateKey === dateKey && next.selectedPerson.category === "휴가") {
     next.selectedPerson = null;
   }
-  return syncGeneratedSchedule(next, generated);
+  return sanitizeScheduleState(next);
 }
 
 export function cycleVacationEntryType(
