@@ -3,6 +3,7 @@ import {
   normalizeGeneratedSchedule,
   syncGeneralAssignments,
 } from "@/lib/schedule/engine";
+import { detectScheduleMonthConflict } from "@/lib/schedule/optimistic-lock";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
@@ -22,6 +23,7 @@ interface ScheduleMonthPublishRow {
   month_key: string;
   published_state: GeneratedSchedule | null;
   published_at: string | null;
+  updated_at: string | null;
 }
 
 export const PUBLISHED_SCHEDULES_EVENT = "j-special-force-published-schedules-updated";
@@ -32,6 +34,7 @@ const E2E_PUBLISHED_SCHEDULES_SEED_ENABLED =
   process.env.NEXT_PUBLIC_E2E === "1" || process.env.NODE_ENV !== "production";
 
 let publishedSchedulesCache: PublishedScheduleItem[] = [];
+const publishedMonthUpdatedAtCache = new Map<string, string | null>();
 const publishedRefreshPromises = new Map<string, Promise<PublishedScheduleItem[]>>();
 
 interface RefreshPublishedSchedulesOptions {
@@ -146,6 +149,7 @@ function emitPublishedSchedulesStatus(detail: { ok: boolean; message: string }) 
 }
 
 function rowsToItems(rows: ScheduleMonthPublishRow[]) {
+  rows.forEach((row) => { publishedMonthUpdatedAtCache.set(row.month_key, row.updated_at ?? null); });
   return rows
     .filter((row) => row.published_state)
     .map((row) => ({
@@ -356,7 +360,7 @@ export async function refreshPublishedSchedules(options: RefreshPublishedSchedul
 
     let query = supabase
       .from("schedule_months")
-      .select("month_key, published_state, published_at")
+      .select("month_key, published_state, published_at, updated_at")
       .not("published_state", "is", null)
       .order("month_key", { ascending: true });
 
@@ -421,7 +425,30 @@ async function persistPublishedItem(
   }
 
   const supabase = await getPortalSupabaseClient();
+  const expectedUpdatedAt = publishedMonthUpdatedAtCache.get(monthKey);
 
+  if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null) {
+    const { data: updatedRows, error } = await supabase
+      .from("schedule_months")
+      .update({ ...payload, updated_by: session.id })
+      .eq("month_key", monthKey)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("month_key, updated_at");
+
+    if (error) {
+      throw new Error(getSupabaseStorageErrorMessage(error, "schedule_months"));
+    }
+
+    if (detectScheduleMonthConflict(updatedRows)) {
+      throw new Error("근무표가 다른 곳에서 변경되었습니다. 새로고침 후 다시 시도해 주세요.");
+    }
+
+    const newUpdatedAt = (updatedRows as Array<{ updated_at: string | null }>)[0]?.updated_at ?? null;
+    publishedMonthUpdatedAtCache.set(monthKey, newUpdatedAt);
+    return;
+  }
+
+  // updated_at을 모르는 경우(최초 게시 등) — 기존 동작 유지
   const { error } = await supabase.from("schedule_months").upsert({
     month_key: monthKey,
     ...payload,

@@ -13,7 +13,11 @@ import {
   safeUpdateAssignments,
   type HubAssemblyLeaveAssignment,
 } from "@/lib/schedule/assembly-sync-core";
-import { getAssemblyCompensatoryLeavePushItems } from "@/lib/schedule/assembly-leave-push-core";
+import {
+  filterAssemblyCompensatoryLeavePushOperationsForAssemblyDuties,
+  getAssemblyCompensatoryLeavePushItems,
+  getAssemblyCompensatoryLeavePushOperations,
+} from "@/lib/schedule/assembly-leave-push-core";
 import type { GeneratedSchedule, SchedulePersonRef } from "@/lib/schedule/types";
 
 test("2026 schedule months use configured coverage ranges", () => {
@@ -769,7 +773,8 @@ test("assembly duty sync only changes assembly assignments", () => {
   const result = applyAssemblyDutiesToSchedule(schedule, new Set(["2026-05-08"]), new Map([["2026-05-08", ["N"]]]), new Set());
   const assignments = result.schedule.days[0].assignments;
 
-  expect(assignments["국회"]).toEqual(["N"]);
+  expect(assignments["국회"]).toEqual(["D", "N"]);
+  expect(result.schedule.assembly_duty_sync_state).toEqual({ "2026-05-08": ["N"] });
   expect(assignments["조근"]).toEqual(["A"]);
   expect(assignments["일반"]).toEqual(["B"]);
   expect(assignments["야근"]).toEqual(["C"]);
@@ -790,6 +795,103 @@ test("assembly duty sync preserves current assembly names on match errors", () =
   const result = applyAssemblyDutiesToSchedule(schedule, new Set(["2026-05-08"]), new Map(), new Set(["2026-05-08"]));
 
   expect(result.schedule.days.find((item) => item.dateKey === "2026-05-08")?.assignments["국회"]).toEqual(["기존국회"]);
+});
+
+test("assembly duty sync removes only names previously owned by assembly sync", () => {
+  const schedule = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 5,
+  }).state.generated!;
+  schedule.assembly_duty_sync_state = { "2026-05-08": ["동기화국회"] };
+  const day = schedule.days.find((item) => item.dateKey === "2026-05-08")!;
+  day.assignments["국회"] = ["수동국회", "동기화국회"];
+
+  const result = applyAssemblyDutiesToSchedule(schedule, new Set(["2026-05-08"]), new Map(), new Set());
+
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-05-08")?.assignments["국회"]).toEqual(["수동국회"]);
+  expect(result.schedule.assembly_duty_sync_state).toBeUndefined();
+});
+
+test("P1.5-A: stale W1 read does not revive Jung compensatory leave after hub deletion before write", () => {
+  const staleSchedule = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const latestSchedule = JSON.parse(JSON.stringify(staleSchedule)) as GeneratedSchedule;
+  const staleDay = staleSchedule.days.find((item) => item.dateKey === "2026-06-29")!;
+  const latestDay = latestSchedule.days.find((item) => item.dateKey === "2026-06-29")!;
+  staleDay.assignments["휴가"] = ["대휴:정철원"];
+  staleDay.vacations = ["대휴:정철원"];
+  latestDay.assignments = {};
+  latestDay.vacations = [];
+
+  const staleResult = applyAssemblyDutiesToSchedule(
+    staleSchedule,
+    new Set(["2026-06-29"]),
+    new Map([["2026-06-29", ["황현우"]]]),
+    new Set(),
+  );
+  const result = applyAssemblyDutiesToSchedule(
+    latestSchedule,
+    new Set(["2026-06-29"]),
+    new Map([["2026-06-29", ["황현우"]]]),
+    new Set(),
+  );
+
+  expect(staleResult.schedule.days.find((item) => item.dateKey === "2026-06-29")?.assignments["휴가"]).toEqual([
+    "대휴:정철원",
+  ]);
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-06-29")?.assignments["휴가"]).toBeUndefined();
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-06-29")?.vacations).toEqual([]);
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-06-29")?.assignments["국회"]).toEqual(["황현우"]);
+});
+
+test("P1.5-B: hub deletion before W1 read remains deleted after assembly duty sync", () => {
+  const latestSchedule = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+  }).state.generated!;
+  const latestDay = latestSchedule.days.find((item) => item.dateKey === "2026-06-29")!;
+  latestDay.assignments = {};
+  latestDay.vacations = [];
+
+  const result = applyAssemblyDutiesToSchedule(
+    latestSchedule,
+    new Set(["2026-06-29"]),
+    new Map([["2026-06-29", ["황현우"]]]),
+    new Set(),
+  );
+
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-06-29")?.assignments["휴가"]).toBeUndefined();
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-06-29")?.vacations).toEqual([]);
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-06-29")?.assignments["국회"]).toEqual(["황현우"]);
+});
+
+test("P2-B: assembly duty sync removes export-missing sync name while preserving manual names", () => {
+  const schedule = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 5,
+  }).state.generated!;
+  schedule.assembly_duty_sync_state = { "2026-05-08": ["빠진국회"] };
+  const day = schedule.days.find((item) => item.dateKey === "2026-05-08")!;
+  day.assignments["국회"] = ["수동국회", "빠진국회"];
+
+  const result = applyAssemblyDutiesToSchedule(
+    schedule,
+    new Set(["2026-05-08"]),
+    new Map([["2026-05-08", ["새국회"]]]),
+    new Set(),
+  );
+
+  expect(result.schedule.days.find((item) => item.dateKey === "2026-05-08")?.assignments["국회"]).toEqual([
+    "수동국회",
+    "새국회",
+  ]);
+  expect(result.schedule.assembly_duty_sync_state).toEqual({ "2026-05-08": ["새국회"] });
 });
 
 test("assembly leaves sync maps annual, blue annual, and other leave while preserving compensatory leave and existing jcheck", () => {
@@ -1189,4 +1291,207 @@ test("assembly compensatory leave push items use accepted route final names", ()
     { date: "2026-06-12", memberName: "김재식" },
   ]);
   expect(getAssemblyCompensatoryLeavePushItems([{ ...route[0], name: "연차:김재식" }, route[1]])).toEqual([]);
+});
+
+test("assembly compensatory leave push deletes original swapped leaves before inserting final leaves", () => {
+  const route = [
+    { monthKey: "2026-06", dateKey: "2026-06-22", category: "휴가", index: 0, name: "대휴:황현우" },
+    { monthKey: "2026-06", dateKey: "2026-06-29", category: "휴가", index: 0, name: "대휴:정철원" },
+  ] satisfies SchedulePersonRef[];
+
+  expect(getAssemblyCompensatoryLeavePushOperations(route, "upsert")).toEqual([
+    { action: "delete", date: "2026-06-22", memberName: "황현우" },
+    { action: "delete", date: "2026-06-29", memberName: "정철원" },
+    { action: "upsert", date: "2026-06-22", memberName: "정철원" },
+    { action: "upsert", date: "2026-06-29", memberName: "황현우" },
+  ]);
+
+  expect(getAssemblyCompensatoryLeavePushOperations(route, "delete")).toEqual([
+    { action: "delete", date: "2026-06-22", memberName: "정철원" },
+    { action: "delete", date: "2026-06-29", memberName: "황현우" },
+    { action: "upsert", date: "2026-06-22", memberName: "황현우" },
+    { action: "upsert", date: "2026-06-29", memberName: "정철원" },
+  ]);
+});
+
+test("assembly compensatory leave push ignores names that are not on assembly duties", () => {
+  const route = [
+    { monthKey: "2026-06", dateKey: "2026-06-22", category: "휴가", index: 0, name: "대휴:황현우" },
+    { monthKey: "2026-06", dateKey: "2026-06-29", category: "휴가", index: 0, name: "대휴:정철원" },
+  ] satisfies SchedulePersonRef[];
+  const operations = getAssemblyCompensatoryLeavePushOperations(route, "upsert");
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        dateKey: "2026-06-22",
+        day: 22,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 국회: ["황현우"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+      {
+        dateKey: "2026-06-29",
+        day: 29,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 국회: ["황현우"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+
+  expect(filterAssemblyCompensatoryLeavePushOperationsForAssemblyDuties(operations, [schedule])).toEqual([
+    { action: "delete", date: "2026-06-22", memberName: "황현우" },
+    { action: "upsert", date: "2026-06-29", memberName: "황현우" },
+  ]);
+});
+
+test("assembly compensatory leave push allows swapped targets for members listed on assembly duties", () => {
+  const route = [
+    { monthKey: "2026-06", dateKey: "2026-06-22", category: "휴가", index: 0, name: "대휴:황현우" },
+    { monthKey: "2026-06", dateKey: "2026-06-29", category: "휴가", index: 0, name: "대휴:정철원" },
+  ] satisfies SchedulePersonRef[];
+  const operations = getAssemblyCompensatoryLeavePushOperations(route, "upsert");
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        dateKey: "2026-06-22",
+        day: 22,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 국회: ["황현우"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+      {
+        dateKey: "2026-06-29",
+        day: 29,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: [],
+        assignments: { 국회: ["정철원"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+
+  expect(filterAssemblyCompensatoryLeavePushOperationsForAssemblyDuties(operations, [schedule])).toEqual([
+    { action: "delete", date: "2026-06-22", memberName: "황현우" },
+    { action: "delete", date: "2026-06-29", memberName: "정철원" },
+    { action: "upsert", date: "2026-06-22", memberName: "정철원" },
+    { action: "upsert", date: "2026-06-29", memberName: "황현우" },
+  ]);
+});
+
+test("T1: actual Hwang-Jung assembly compensatory swap clears Jung from June 29", () => {
+  const route = [
+    { monthKey: "2026-06", dateKey: "2026-06-22", category: "휴가", index: 0, name: "대휴:황현우" },
+    { monthKey: "2026-06", dateKey: "2026-06-29", category: "휴가", index: 0, name: "대휴:정철원" },
+  ] satisfies SchedulePersonRef[];
+  const operations = getAssemblyCompensatoryLeavePushOperations(route, "upsert");
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        dateKey: "2026-06-22",
+        day: 22,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["대휴:정철원"],
+        assignments: { 국회: ["황현우"], 휴가: ["대휴:정철원"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+      {
+        dateKey: "2026-06-29",
+        day: 29,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["대휴:황현우"],
+        assignments: { 국회: ["정철원"], 휴가: ["대휴:황현우"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+
+  const eligibleOperations = filterAssemblyCompensatoryLeavePushOperationsForAssemblyDuties(operations, [schedule]);
+  const vacations = syncVacationTextForChangedRoute(
+    "2026-06-22: 대휴:황현우\n2026-06-29: 대휴:정철원",
+    [schedule],
+    route,
+  );
+
+  expect(eligibleOperations).toEqual([
+    { action: "delete", date: "2026-06-22", memberName: "황현우" },
+    { action: "delete", date: "2026-06-29", memberName: "정철원" },
+    { action: "upsert", date: "2026-06-22", memberName: "정철원" },
+    { action: "upsert", date: "2026-06-29", memberName: "황현우" },
+  ]);
+  expect(vacations).toContain("2026-06-22: 대휴:정철원");
+  expect(vacations).toContain("2026-06-29: 대휴:황현우");
+  expect(vacations).not.toContain("2026-06-29: 대휴:정철원");
 });

@@ -50,6 +50,7 @@ export type AssemblyLeaveApplyResult = {
 
 export const ASSEMBLY_LEAVE_SYNC_CATEGORIES = ["연차", "제크", "기타"] as const;
 type AssemblyLeaveSyncCategory = (typeof ASSEMBLY_LEAVE_SYNC_CATEGORIES)[number];
+type AssemblyDutySyncState = NonNullable<GeneratedSchedule["assembly_duty_sync_state"]>;
 type AssemblyLeaveSyncState = NonNullable<GeneratedSchedule["assembly_leave_sync_state"]>;
 
 const ASSEMBLY_DUTY_TYPES = new Set<AssemblyDutyItem["dutyType"]>(["공휴일", "주말근무"]);
@@ -400,6 +401,38 @@ function setAssemblyLeaveSyncNames(
   }
 }
 
+function getAssemblyDutySyncState(schedule: GeneratedSchedule): AssemblyDutySyncState {
+  const source = getRecord(schedule.assembly_duty_sync_state);
+  const state: AssemblyDutySyncState = {};
+
+  Object.entries(source).forEach(([dateKey, rawNames]) => {
+    if (!DATE_PATTERN.test(dateKey)) return;
+    const names = normalizeNames(rawNames);
+    if (names.length === 0) return;
+    state[dateKey] = names;
+  });
+
+  return state;
+}
+
+function getAssemblyDutySyncNames(state: AssemblyDutySyncState, dateKey: string) {
+  return normalizeNames(state[dateKey]);
+}
+
+function setAssemblyDutySyncNames(
+  state: AssemblyDutySyncState,
+  dateKey: string,
+  names: string[],
+) {
+  const nextNames = normalizeNames(names);
+  if (nextNames.length > 0) {
+    state[dateKey] = nextNames;
+    return;
+  }
+
+  delete state[dateKey];
+}
+
 function buildDesiredDateByCategoryName(
   desiredByDateCategory: Map<string, Map<HubAssemblyLeaveAssignment, string[]>>,
 ) {
@@ -566,6 +599,8 @@ export function applyAssemblyDutiesToSchedule(
   datesWithMatchErrors: Set<string>,
 ) {
   const nextSchedule = cloneSchedule(schedule);
+  const previousSyncState = getAssemblyDutySyncState(nextSchedule);
+  const nextSyncState = JSON.parse(JSON.stringify(previousSyncState)) as AssemblyDutySyncState;
   let insertedCount = 0;
   let updatedCount = 0;
   let deletedCount = 0;
@@ -577,9 +612,11 @@ export function applyAssemblyDutiesToSchedule(
     const beforeAssignments = cloneAssignments(day.assignments);
     const currentNames = (day.assignments[HUB_ASSEMBLY_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
     const desiredNames = desiredByDate.get(day.dateKey) ?? [];
+    const previousSyncNames = getAssemblyDutySyncNames(previousSyncState, day.dateKey);
 
     if (datesWithMatchErrors.has(day.dateKey)) {
       const safeDesiredNames = Array.from(new Set([...currentNames, ...desiredNames]));
+      const nextSyncNames = Array.from(new Set([...previousSyncNames, ...desiredNames]));
       if (safeDesiredNames.length > 0 && !areSameNames(currentNames, safeDesiredNames)) {
         day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
           [HUB_ASSEMBLY_CATEGORY]: safeDesiredNames,
@@ -590,40 +627,38 @@ export function applyAssemblyDutiesToSchedule(
       } else {
         skippedCount += 1;
       }
+      setAssemblyDutySyncNames(nextSyncState, day.dateKey, nextSyncNames);
       assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
       return;
     }
 
-    if (desiredNames.length > 0) {
-      if (areSameNames(currentNames, desiredNames)) {
-        skippedCount += 1;
-        assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
-        return;
-      }
+    const desiredNameSet = new Set(desiredNames.map((name) => name.trim()).filter(Boolean));
+    const syncNamesToRemove = previousSyncNames.filter((name) => !desiredNameSet.has(name));
+    const nextNames = mergeWithoutNames(currentNames, syncNamesToRemove, desiredNames);
 
+    if (!areSameNames(currentNames, nextNames)) {
       day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
-        [HUB_ASSEMBLY_CATEGORY]: desiredNames,
+        [HUB_ASSEMBLY_CATEGORY]: nextNames,
       });
       compactDayAssemblyAssignment(day);
-      if (currentNames.length > 0) updatedCount += 1;
-      else insertedCount += 1;
-      assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
-      return;
+      const changeType = countLeaveCategoryChange(currentNames, nextNames, desiredNames, syncNamesToRemove);
+      if (changeType === "inserted") insertedCount += 1;
+      else if (changeType === "updated") updatedCount += 1;
+      else if (changeType === "deleted") deletedCount += 1;
+      else skippedCount += 1;
+    } else {
+      skippedCount += 1;
     }
 
-    if (currentNames.length > 0) {
-      day.assignments = safeUpdateAssignments(day.assignments, [HUB_ASSEMBLY_CATEGORY], {
-        [HUB_ASSEMBLY_CATEGORY]: [],
-      });
-      day.manualExtras = (day.manualExtras ?? []).filter((category) => category !== HUB_ASSEMBLY_CATEGORY);
-      deletedCount += 1;
-      assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
-      return;
-    }
-
-    skippedCount += 1;
+    setAssemblyDutySyncNames(nextSyncState, day.dateKey, desiredNames);
     assertOnlyAllowedAssignmentKeysChanged(beforeAssignments, day.assignments, [HUB_ASSEMBLY_CATEGORY]);
   });
+
+  if (Object.keys(nextSyncState).length > 0) {
+    nextSchedule.assembly_duty_sync_state = nextSyncState;
+  } else {
+    delete nextSchedule.assembly_duty_sync_state;
+  }
 
   return {
     schedule: nextSchedule,

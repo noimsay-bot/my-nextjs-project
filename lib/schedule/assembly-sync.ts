@@ -10,6 +10,7 @@ import {
   type AssemblySyncErrorDetail,
   type ParsedAssemblyExport,
 } from "@/lib/schedule/assembly-sync-core";
+import { buildAssemblySyncRetryState, detectScheduleMonthConflict } from "@/lib/schedule/optimistic-lock";
 
 export type { AssemblyDutyItem, AssemblyLeaveItem } from "@/lib/schedule/assembly-sync-core";
 
@@ -33,6 +34,7 @@ type ScheduleMonthRow = {
   draft_state: GeneratedSchedule | null;
   published_state: GeneratedSchedule | null;
   published_at: string | null;
+  updated_at: string | null;
 };
 
 type ProfileRow = {
@@ -239,7 +241,7 @@ async function getScheduleMonthForAssemblySync(month: string) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("schedule_months")
-    .select("month_key, draft_state, published_state, published_at")
+    .select("month_key, draft_state, published_state, published_at, updated_at")
     .eq("month_key", month)
     .maybeSingle<ScheduleMonthRow>();
 
@@ -328,6 +330,35 @@ function sumApplyCounts(...results: Array<ApplyCounts | null | undefined>): Appl
   return total;
 }
 
+function buildAssemblyDutyWriteAttempt(
+  row: ScheduleMonthRow,
+  dutySync: ReturnType<typeof buildDesiredAssemblyNamesByDate> | null,
+  targetDateKeys: Set<string>,
+  dutyDateKeysWithSyncErrors: Set<string>,
+) {
+  const draftDutyResult = row.draft_state && dutySync
+    ? applyAssemblyDutiesToSchedule(row.draft_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
+    : null;
+  const publishedDutyResult = row.published_state && dutySync
+    ? applyAssemblyDutiesToSchedule(row.published_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
+    : null;
+  const writePayload: Partial<ScheduleMonthRow> = {};
+
+  if (draftDutyResult?.changed && draftDutyResult.schedule) {
+    writePayload.draft_state = draftDutyResult.schedule;
+  }
+  if (publishedDutyResult?.changed && publishedDutyResult.schedule) {
+    writePayload.published_state = publishedDutyResult.schedule;
+  }
+
+  return {
+    draftDutyResult,
+    publishedDutyResult,
+    writePayload,
+    changed: Object.keys(writePayload).length > 0,
+  };
+}
+
 function getErrorDetails(error: unknown): AssemblySyncErrorDetail[] {
   const details = (error as { details?: unknown } | null)?.details;
   if (Array.isArray(details)) {
@@ -392,43 +423,81 @@ export async function syncAssemblyDutiesToHub(month: string, triggerType: Assemb
       ...(dutySync?.datesWithMatchErrors ?? []),
       ...getDutyDateKeysWithSyncErrors(errors, targetDateKeys),
     ]);
-    const draftDutyResult = row.draft_state
-      && dutySync
-      ? applyAssemblyDutiesToSchedule(row.draft_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
-      : null;
-    const publishedDutyResult = row.published_state
-      && dutySync
-      ? applyAssemblyDutiesToSchedule(row.published_state, targetDateKeys, dutySync.desiredByDate, dutyDateKeysWithSyncErrors)
-      : null;
+    const initialWriteAttempt = buildAssemblyDutyWriteAttempt(
+      row,
+      dutySync,
+      targetDateKeys,
+      dutyDateKeysWithSyncErrors,
+    );
     const resultForLog = row.published_state
-      ? sumApplyCounts(publishedDutyResult)
-      : sumApplyCounts(draftDutyResult);
-    const draftChanged = Boolean(
-      draftDutyResult?.schedule && row.draft_state && JSON.stringify(row.draft_state) !== JSON.stringify(draftDutyResult.schedule),
-    );
-    const publishedChanged = Boolean(
-      publishedDutyResult?.schedule &&
-        row.published_state &&
-        JSON.stringify(row.published_state) !== JSON.stringify(publishedDutyResult.schedule),
-    );
-    const changed = draftChanged || publishedChanged;
+      ? sumApplyCounts(initialWriteAttempt.publishedDutyResult)
+      : sumApplyCounts(initialWriteAttempt.draftDutyResult);
+    let changed = initialWriteAttempt.changed;
 
     if (changed) {
-      const supabase = createAdminClient();
-      const payload: Partial<ScheduleMonthRow> = {};
-      if (draftChanged && draftDutyResult?.schedule) {
-        payload.draft_state = draftDutyResult.schedule;
-      }
-      if (publishedChanged && publishedDutyResult?.schedule) {
-        payload.published_state = publishedDutyResult.schedule;
-      }
-      const { error } = await supabase
-        .from("schedule_months")
-        .update(payload as never)
-        .eq("month_key", month);
+      const ASSEMBLY_SYNC_DELAY_BASE_MS = 100;
+      let attempt = 0;
 
-      if (error) {
-        throw new Error(error.message);
+      for (;;) {
+        const freshRow = await getScheduleMonthForAssemblySync(month);
+        if (!freshRow?.draft_state && !freshRow?.published_state) {
+          console.warn("[assembly-sync] 최신 허브 근무표가 없어 웹훅 쓰기를 중단합니다.", { month, triggerType });
+          changed = false;
+          break;
+        }
+
+        const writeAttempt = buildAssemblyDutyWriteAttempt(
+          freshRow,
+          dutySync,
+          targetDateKeys,
+          dutyDateKeysWithSyncErrors,
+        );
+        if (!writeAttempt.changed) {
+          changed = false;
+          break;
+        }
+
+        if (!freshRow.updated_at) {
+          // updated_at을 모르는 경우에도 최초 스냅샷이 아니라 최신 행에 국회 칸만 재적용한다.
+          const supabase = createAdminClient();
+          const { error } = await supabase
+            .from("schedule_months")
+            .update(writeAttempt.writePayload as never)
+            .eq("month_key", month);
+          if (error) throw new Error(error.message);
+          break;
+        }
+
+        const retryState = buildAssemblySyncRetryState(freshRow.updated_at, attempt);
+        if (retryState.exhausted) {
+          console.warn("[assembly-sync] optimistic lock: 최대 재시도 초과, 웹훅이 허브에 양보합니다.", {
+            month,
+            triggerType,
+          });
+          changed = false;
+          break;
+        }
+
+        const delayMs = retryState.delayMs(ASSEMBLY_SYNC_DELAY_BASE_MS);
+        if (delayMs > 0) {
+          await new Promise<void>((resolve) => { setTimeout(resolve, delayMs); });
+        }
+
+        const supabase = createAdminClient();
+        const { data: updatedRows, error: updateError } = await supabase
+          .from("schedule_months")
+          .update(writeAttempt.writePayload as never)
+          .eq("month_key", month)
+          .eq("updated_at", retryState.readUpdatedAt)
+          .select("month_key");
+
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+
+        if (!detectScheduleMonthConflict(updatedRows)) break;
+
+        attempt += 1;
       }
     }
 

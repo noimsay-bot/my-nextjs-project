@@ -1,6 +1,7 @@
 import { defaultScheduleState } from "@/lib/schedule/constants";
 import { refreshDeskRecordStore } from "@/lib/schedule/desk-records";
 import { getMonthKey, sanitizeScheduleState } from "@/lib/schedule/engine";
+import { detectScheduleMonthConflict } from "@/lib/schedule/optimistic-lock";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 import {
@@ -25,10 +26,12 @@ interface ScheduleSettingsRow {
 interface ScheduleMonthRow {
   month_key: string;
   draft_state: GeneratedSchedule | null;
+  updated_at: string | null;
 }
 
 let scheduleStateCache = sanitizeScheduleState(defaultScheduleState);
 let scheduleMonthKeyCache = new Set<string>();
+const scheduleMonthUpdatedAtCache = new Map<string, string | null>();
 let scheduleRefreshPromise: Promise<ScheduleState> | null = null;
 let scheduledPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let scheduledPersistState: ScheduleState | null = null;
@@ -160,7 +163,7 @@ async function loadScheduleStateFromDb() {
   const supabase = await getPortalSupabaseClient();
   const [{ data: settingsRow, error: settingsError }, { data: monthRows, error: monthError }] = await Promise.all([
     supabase.from("schedule_settings").select("key, state").eq("key", SCHEDULE_SETTINGS_KEY).maybeSingle<ScheduleSettingsRow>(),
-    supabase.from("schedule_months").select("month_key, draft_state").order("month_key", { ascending: true }).returns<ScheduleMonthRow[]>(),
+    supabase.from("schedule_months").select("month_key, draft_state, updated_at").order("month_key", { ascending: true }).returns<ScheduleMonthRow[]>(),
   ]);
 
   if (settingsError || monthError) {
@@ -178,6 +181,7 @@ async function loadScheduleStateFromDb() {
   }
 
   scheduleMonthKeyCache = new Set((monthRows ?? []).map((row) => row.month_key));
+  (monthRows ?? []).forEach((row) => { scheduleMonthUpdatedAtCache.set(row.month_key, row.updated_at ?? null); });
   return mergeScheduleRows(settingsRow ?? null, monthRows ?? [], session.username);
 }
 
@@ -211,9 +215,44 @@ async function persistScheduleStateNow(state: ScheduleState, dirtyMonthKeys: str
   }
 
   if (monthRows.length > 0) {
-    const { error: upsertError } = await supabase.from("schedule_months").upsert(monthRows);
-    if (upsertError) {
-      throw new Error(getSupabaseStorageErrorMessage(upsertError, "schedule_months"));
+    const newMonthRows = monthRows.filter((row) => !scheduleMonthKeyCache.has(row.month_key));
+    const existingMonthRows = monthRows.filter((row) => scheduleMonthKeyCache.has(row.month_key));
+
+    if (newMonthRows.length > 0) {
+      const { error: insertError } = await supabase.from("schedule_months").upsert(newMonthRows);
+      if (insertError) {
+        throw new Error(getSupabaseStorageErrorMessage(insertError, "schedule_months"));
+      }
+    }
+
+    for (const row of existingMonthRows) {
+      const expectedUpdatedAt = scheduleMonthUpdatedAtCache.get(row.month_key);
+      if (expectedUpdatedAt === undefined || expectedUpdatedAt === null) {
+        // updated_at을 모르는 경우(INSERT 직후 등) — 기존 동작 유지
+        const { error: upsertError } = await supabase.from("schedule_months").upsert(row);
+        if (upsertError) {
+          throw new Error(getSupabaseStorageErrorMessage(upsertError, "schedule_months"));
+        }
+        continue;
+      }
+
+      const { data: updatedRows, error: updateError } = await supabase
+        .from("schedule_months")
+        .update({ draft_state: row.draft_state, updated_by: row.updated_by })
+        .eq("month_key", row.month_key)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("month_key, updated_at");
+
+      if (updateError) {
+        throw new Error(getSupabaseStorageErrorMessage(updateError, "schedule_months"));
+      }
+
+      if (detectScheduleMonthConflict(updatedRows)) {
+        throw new Error("근무표가 다른 곳에서 변경되었습니다. 새로고침 후 다시 시도해 주세요.");
+      }
+
+      const newUpdatedAt = (updatedRows as Array<{ updated_at: string | null }>)[0]?.updated_at ?? null;
+      scheduleMonthUpdatedAtCache.set(row.month_key, newUpdatedAt);
     }
   }
 

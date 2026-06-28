@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import {
-  getAssemblyCompensatoryLeavePushItems,
+  filterAssemblyCompensatoryLeavePushOperationsForAssemblyDuties,
+  getAssemblyCompensatoryLeavePushOperations,
   type AssemblyLeavePushAction,
 } from "@/lib/schedule/assembly-leave-push-core";
 import { pushAssemblyCompensatoryLeaveToAssembly } from "@/lib/schedule/assembly-leave-push";
-import type { SchedulePersonRef, ScheduleChangeRequest } from "@/lib/schedule/types";
+import type { GeneratedSchedule, SchedulePersonRef, ScheduleChangeRequest } from "@/lib/schedule/types";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,12 @@ type ChangeRequestPushRow = {
   id: string;
   route: SchedulePersonRef[] | null;
   status: ScheduleChangeRequest["status"];
+};
+
+type ScheduleMonthAssemblyDutyRow = {
+  month_key: string;
+  draft_state: GeneratedSchedule | null;
+  published_state: GeneratedSchedule | null;
 };
 
 function normalizeAction(value: unknown): AssemblyLeavePushAction | null {
@@ -112,8 +119,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const items = getAssemblyCompensatoryLeavePushItems(changeRequest.route ?? []);
-  if (items.length === 0) {
+  const operations = getAssemblyCompensatoryLeavePushOperations(changeRequest.route ?? [], action);
+  if (operations.length === 0) {
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -121,16 +128,48 @@ export async function POST(request: Request) {
     });
   }
 
-  const results = await Promise.all(
-    items.map((item) =>
-      pushAssemblyCompensatoryLeaveToAssembly({
-        action,
-        date: item.date,
-        memberName: item.memberName,
+  const operationMonthKeys = Array.from(
+    new Set(operations.map((operation) => operation.date.slice(0, 7)).filter(Boolean)),
+  );
+  const { data: scheduleMonths, error: scheduleMonthsError } = await supabase
+    .from("schedule_months")
+    .select("month_key, draft_state, published_state")
+    .in("month_key", operationMonthKeys)
+    .returns<ScheduleMonthAssemblyDutyRow[]>();
+
+  if (scheduleMonthsError) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: scheduleMonthsError.message,
+      },
+      { status: 500 },
+    );
+  }
+
+  const eligibleOperations = filterAssemblyCompensatoryLeavePushOperationsForAssemblyDuties(
+    operations,
+    (scheduleMonths ?? []).flatMap((row) => [row.draft_state, row.published_state]),
+  );
+  if (eligibleOperations.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "국회근무표에 있는 대휴 대상자가 아닙니다.",
+    });
+  }
+
+  const results = [];
+  for (const operation of eligibleOperations) {
+    results.push(
+      await pushAssemblyCompensatoryLeaveToAssembly({
+        action: operation.action,
+        date: operation.date,
+        memberName: operation.memberName,
         requestId,
       }),
-    ),
-  );
+    );
+  }
   const failed = results.filter((result) => !result.ok);
 
   if (failed.length > 0) {
