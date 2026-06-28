@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
-import { buildBigEventBlockedByDate, generateEmptySchedule, generateSchedule, removePersonFromCategory, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
+import { buildBigEventBlockedByDate, generateEmptySchedule, generateSchedule, removePersonFromCategory, removeVacationPersonFromDay, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
+import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule, prepareScheduleForPublish } from "@/lib/schedule/published";
 import { syncVacationTextForChangedRoute } from "@/lib/schedule/change-requests";
@@ -212,16 +213,17 @@ test("general assignments are restored after an edit removes an eligible name", 
   const initialState = sanitizeScheduleState(generated);
   const targetDateKey = "2026-05-27";
   const targetDay = initialState.generated?.days.find((day) => day.dateKey === targetDateKey);
+  const targetName = targetDay?.assignments["일반"]?.[0] ?? "";
 
-  expect(targetDay?.assignments["일반"]).toContain("정상원");
-  const generalIndex = targetDay?.assignments["일반"]?.findIndex((name) => name === "정상원") ?? -1;
+  expect(targetName).toBeTruthy();
+  const generalIndex = targetDay?.assignments["일반"]?.findIndex((name) => name === targetName) ?? -1;
   expect(generalIndex).toBeGreaterThanOrEqual(0);
 
-  const editedState = removePersonFromCategory(initialState, targetDateKey, "일반", generalIndex, "정상원");
+  const editedState = removePersonFromCategory(initialState, targetDateKey, "일반", generalIndex, targetName);
   const editedTargetDay = editedState.generated?.days.find((day) => day.dateKey === targetDateKey);
 
-  expect(editedTargetDay?.assignments["일반"]).toContain("정상원");
-  expect(editedTargetDay?.assignments["석근"] ?? []).not.toContain("정상원");
+  expect(editedTargetDay?.assignments["일반"]).toContain(targetName);
+  expect(editedTargetDay?.assignments["석근"] ?? []).not.toContain(targetName);
 });
 
 test("vacation entries keep same-day fixed work assignments and mark conflicts", () => {
@@ -543,6 +545,13 @@ test("general assignments ignore basic off names", () => {
   expect(day21?.assignments["일반"]).toContain("정상원");
 });
 
+test("childcare leave desk note is not imported as long-service vacation", () => {
+  const deskVacationMap = getDeskPriorityVacationMap();
+  const allEntries = Object.values(deskVacationMap).flat();
+
+  expect(allEntries).not.toContain("근속휴가:이완근");
+});
+
 test("published repair allows general auto-sync when only vacation data changed", () => {
   const mayPreset = presetScheduleMonths.find((item) => item.monthKey === "2026-05");
   expect(mayPreset).toBeTruthy();
@@ -560,8 +569,55 @@ test("published repair allows general auto-sync when only vacation data changed"
 
   expect(published.days.find((day: { dateKey: string; assignments: Record<string, string[]> }) => day.dateKey === "2026-05-08")?.assignments["일반"]).toBeUndefined();
   expect(generatedDay8?.assignments["일반"]).toContain("정상원");
-  expect(generatedDay8?.assignments["휴가"]).toContain("근속휴가:이완근");
+  expect(generatedDay8?.assignments["휴가"] ?? []).not.toContain("근속휴가:이완근");
   expect(canRepairPublishedGeneralAssignments(published, generated!)).toBe(true);
+});
+
+test("vacation deletion removes Jung even when vacation fields are out of sync", () => {
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        dateKey: "2026-06-29",
+        day: 29,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["대휴:정철원"],
+        assignments: { 휴가: [] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    generated: schedule,
+    generatedHistory: [schedule],
+  });
+  const day = state.generated!.days[0];
+  day.assignments["휴가"] = [];
+  day.vacations = ["대휴:정철원"];
+
+  const next = removeVacationPersonFromDay(state, "2026-06-29", "대휴:정철원");
+  const nextDay = next.generated?.days.find((item) => item.dateKey === "2026-06-29");
+
+  expect(nextDay?.assignments["휴가"]).toBeUndefined();
+  expect(nextDay?.vacations).toEqual([]);
+  expect(next.vacations).not.toContain("2026-06-29");
+  expect(next.vacations).not.toContain("정철원");
 });
 
 test("accepted compensatory leave swaps update vacation source text before schedule normalization", () => {

@@ -227,19 +227,24 @@ export function formatDeskRecordDateKeys(dateKeys: string[]) {
 }
 
 function normalizeDeskRecordEntry(kind: DeskRecordKind, entry: Partial<DeskRecordEntry>, index: number): DeskRecordEntry {
+  const rawDate = typeof entry.date === "string" ? entry.date : "";
+  const rawNote = typeof entry.note === "string" ? entry.note : "";
+  const isNonVacationLeaveRecord = kind === "long-service-leave" && /육아휴직|휴직/.test(`${rawDate} ${rawNote}`);
   const dateKeys =
-    Array.isArray(entry.dateKeys) && entry.dateKeys.length > 0
+    isNonVacationLeaveRecord
+      ? []
+      : Array.isArray(entry.dateKeys) && entry.dateKeys.length > 0
       ? normalizeDateKeyList(entry.dateKeys)
-      : parseDeskRecordDateKeys(typeof entry.date === "string" ? entry.date : "");
+      : parseDeskRecordDateKeys(rawDate);
 
   return {
     id: typeof entry.id === "string" && entry.id ? entry.id : `${kind}-${index + 1}`,
     name: typeof entry.name === "string" ? entry.name : "",
     date:
-      typeof entry.date === "string" && entry.date.trim().length > 0
-        ? entry.date
+      rawDate.trim().length > 0
+        ? rawDate
         : formatDeskRecordDateKeys(dateKeys),
-    note: typeof entry.note === "string" ? entry.note : "",
+    note: rawNote,
     dateKeys,
   };
 }

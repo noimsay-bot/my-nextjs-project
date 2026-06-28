@@ -2553,8 +2553,13 @@ export function removePersonFromCategory(
   const next = cloneScheduleState(state);
   const generated = next.generated as GeneratedSchedule;
   const day = generated.days.find((item) => item.dateKey === dateKey);
-  const assignments = day?.assignments[category];
-  if (!day || !assignments?.length) return state;
+  if (!day) return state;
+  const assignments = category === "휴가"
+    ? Array.from(
+      new Set([...(day.vacations ?? []), ...(day.assignments["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
+    )
+    : day.assignments[category];
+  if (!assignments?.length) return state;
   let removeIndex = index;
   if (removeIndex < 0 || removeIndex >= assignments.length || (name && assignments[removeIndex] !== name)) {
     removeIndex = typeof name === "string" ? assignments.findIndex((item) => item === name) : -1;
@@ -2565,7 +2570,14 @@ export function removePersonFromCategory(
   if (isGeneralAssignmentCategory(category) && removedName) {
     day.generalManualAdditions = (day.generalManualAdditions ?? []).filter((item) => item.trim() !== removedName);
   }
-  if (category === "휴가") day.vacations = day.assignments[category];
+  if (category === "휴가") {
+    if (assignments.length > 0) {
+      day.assignments[category] = assignments;
+    } else {
+      delete day.assignments[category];
+    }
+    day.vacations = assignments;
+  }
   if (next.selectedPerson?.dateKey === dateKey && next.selectedPerson.category === category) {
     if (next.selectedPerson.index === removeIndex) {
       next.selectedPerson = null;
@@ -2591,7 +2603,9 @@ export function removeVacationPersonFromDay(
   const generated = next.generated as GeneratedSchedule;
   const day = generated.days.find((item) => item.dateKey === dateKey);
   if (!day) return state;
-  const current = day.assignments["휴가"] ?? day.vacations ?? [];
+  const current = Array.from(
+    new Set([...(day.vacations ?? []), ...(day.assignments["휴가"] ?? [])].map((entry) => entry.trim()).filter(Boolean)),
+  );
   if (!current.length) return state;
   // 같은 인원이 형식만 다르게(예: "김영묵"과 "연차:김영묵") 중복 저장돼 있어도 한 번에 지운다.
   // 단, 근속휴가/건강검진 원본 연동 항목은 원본 삭제 경로에서만 제거하므로 여기서는 보존한다.
