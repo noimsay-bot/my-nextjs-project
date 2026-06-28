@@ -57,7 +57,6 @@ import {
   addPersonToCategory,
   autoRebalance,
   cycleDayAssignmentNameTag,
-  cycleVacationEntryType,
   cloneScheduleState,
   compactGeneratedAssignments,
   formatVacationEntry,
@@ -2651,9 +2650,6 @@ export function ScheduleApp() {
                                           if (!editMode) return;
                                           if (isBigEventAssignmentCategory) return;
                                           if (category === "휴가") {
-                                            updateEditingState((current) =>
-                                              cycleVacationEntryType(current, day.dateKey, index, name),
-                                            );
                                             return;
                                           }
                                           if (isGeneralAssignmentCategory(category)) {
@@ -2746,22 +2742,26 @@ export function ScheduleApp() {
                                       </ScheduleTripTooltip>
                                       {editMode && !isBigEventAssignmentCategory ? (
                                         <button
+                                          type="button"
+                                          aria-label={`${assignmentDisplay.name} 삭제`}
                                           className="btn"
                                           style={{
                                             position: "absolute",
-                                            top: -4,
-                                            right: -4,
-                                            width: 18,
-                                            minWidth: 18,
-                                            height: 18,
+                                            top: -7,
+                                            right: -7,
+                                            width: 28,
+                                            minWidth: 28,
+                                            height: 28,
                                             padding: 0,
                                             borderRadius: 999,
                                             display: "grid",
                                             placeItems: "center",
-                                            fontSize: 12,
+                                            fontSize: 16,
                                             lineHeight: 1,
+                                            zIndex: 2,
                                           }}
                                           onClick={(event) => {
+                                            event.preventDefault();
                                             event.stopPropagation();
                                             const isDeskPriorityVacation =
                                               category === "휴가" && isDeskPriorityVacationEntry(name);

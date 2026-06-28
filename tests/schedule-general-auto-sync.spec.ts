@@ -620,6 +620,49 @@ test("vacation deletion removes Jung even when vacation fields are out of sync",
   expect(next.vacations).not.toContain("정철원");
 });
 
+test("vacation deletion removes Jung even after the entry type changed to other", () => {
+  const schedule = {
+    year: 2026,
+    month: 6,
+    monthKey: "2026-06",
+    nextPointers: { ...defaultScheduleState.pointers },
+    nextStartDate: "2026-07-01",
+    days: [
+      {
+        dateKey: "2026-06-29",
+        day: 29,
+        month: 6,
+        year: 2026,
+        dow: 1,
+        isWeekend: false,
+        isHoliday: false,
+        isCustomHoliday: false,
+        isWeekdayHoliday: false,
+        isOverflowMonth: false,
+        vacations: ["기타:정철원"],
+        assignments: { 휴가: ["기타:정철원"] },
+        manualExtras: [],
+        headerName: "",
+        conflicts: [],
+      },
+    ],
+  } satisfies GeneratedSchedule;
+  const state = sanitizeScheduleState({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 6,
+    generated: schedule,
+    generatedHistory: [schedule],
+  });
+
+  const next = removeVacationPersonFromDay(state, "2026-06-29", "기타:정철원");
+  const nextDay = next.generated?.days.find((item) => item.dateKey === "2026-06-29");
+
+  expect(nextDay?.assignments["휴가"]).toBeUndefined();
+  expect(nextDay?.vacations).toEqual([]);
+  expect(next.vacations).not.toContain("정철원");
+});
+
 test("accepted compensatory leave swaps update vacation source text before schedule normalization", () => {
   const baseDay = {
     day: 1,
