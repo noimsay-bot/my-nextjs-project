@@ -959,6 +959,56 @@ function applyAssignmentMonthToCache(monthKey: string, row: TeamLeadScheduleAssi
   };
 }
 
+function applyAssignmentDisplayRowsToCache(rows: TeamLeadScheduleAssignmentRow[], monthKeys: string[]) {
+  const nextRows = { ...assignmentStoreCache.rows };
+  const rowMap = new Map(rows.map((row) => [row.month_key, row] as const));
+
+  monthKeys.forEach((monthKey) => {
+    const row = rowMap.get(monthKey);
+    if (row) {
+      nextRows[monthKey] = normalizeMonthRows(row.rows ?? {});
+    } else {
+      delete nextRows[monthKey];
+    }
+  });
+
+  assignmentStoreCache = {
+    entries: assignmentStoreCache.entries,
+    rows: nextRows,
+  };
+}
+
+async function readJsonErrorMessage(response: Response, fallback: string) {
+  try {
+    const body = (await response.json()) as { message?: unknown };
+    return typeof body.message === "string" && body.message.trim() ? body.message : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function refreshScheduleAssignmentDisplayMonths(monthKeys: string[]) {
+  const normalizedMonthKeys = normalizeAssignmentMonthKeys(monthKeys);
+  if (normalizedMonthKeys.length === 0 || typeof window === "undefined") {
+    return;
+  }
+
+  const response = await fetch("/api/schedule/assignment-display", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ monthKeys: normalizedMonthKeys }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readJsonErrorMessage(response, "일정배정 표시 정보를 불러오지 못했습니다."));
+  }
+
+  const payload = (await response.json()) as { rows?: TeamLeadScheduleAssignmentRow[] };
+  applyAssignmentDisplayRowsToCache(Array.isArray(payload.rows) ? payload.rows : [], normalizedMonthKeys);
+}
+
 function applyTeamLeadMetaStateRows(rows: TeamLeadStateRow[]) {
   const rowMap = new Map(rows.map((row) => [row.key, row] as const));
   contributionManualCache = normalizeContributionManualStore(rowMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY)?.state);

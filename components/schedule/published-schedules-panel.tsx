@@ -58,6 +58,7 @@ import {
   getScheduleAssignmentStore,
   getScheduleAssignmentTripTooltip,
   getScheduleAssignmentVisibleTripTagMap,
+  refreshScheduleAssignmentDisplayMonths,
   refreshTeamLeadAssignmentMonths,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
@@ -857,6 +858,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const lastFocusRefreshAtRef = useRef(0);
+  const lastAssignmentSessionKeyRef = useRef("");
   const isViewportPinchZoomActiveRef = useRef(false);
   const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
@@ -908,9 +910,14 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     try {
       const publishedItems = await refreshPublishedSchedules({ repair: true });
       const activeSession = getSession();
-      if (activeSession?.approved && hasDeskAccess(activeSession.actualRole)) {
+      if (activeSession?.approved) {
         try {
-          await refreshTeamLeadAssignmentMonths(publishedItems.map((item) => item.monthKey));
+          const monthKeys = publishedItems.map((item) => item.monthKey);
+          if (hasDeskAccess(activeSession.actualRole)) {
+            await refreshTeamLeadAssignmentMonths(monthKeys);
+          } else {
+            await refreshScheduleAssignmentDisplayMonths(monthKeys);
+          }
         } catch (error) {
           setRequestMessage(error instanceof Error ? error.message : "일정배정 정보를 불러오지 못했습니다.");
           setRequestMessageTone("warn");
@@ -948,6 +955,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     await refreshTeamLeadAssignmentMonths(nextState.generatedHistory.map((schedule) => schedule.monthKey));
     syncScheduleHistory();
   };
+
+  useEffect(() => {
+    const sessionKey = session?.approved ? `${session.id}:${session.actualRole}` : "";
+    if (!sessionKey || lastAssignmentSessionKeyRef.current === sessionKey) return;
+    lastAssignmentSessionKeyRef.current = sessionKey;
+    void loadItems().finally(() => {
+      lastFocusRefreshAtRef.current = Date.now();
+    });
+  }, [session?.approved, session?.id, session?.actualRole]);
 
   useEffect(() => {
     let cancelled = false;
