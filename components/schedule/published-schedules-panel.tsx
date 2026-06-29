@@ -78,6 +78,19 @@ function applyScheduleAssignmentDecorations(schedule: PublishedScheduleItem["sch
   return applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule));
 }
 
+function getScheduleAssignmentMonthKeysForDisplayItems(items: ScheduleDisplaySource[]) {
+  return Array.from(
+    new Set(
+      items.flatMap((item) => [
+        item.monthKey,
+        ...item.schedule.days
+          .map((day) => day.dateKey.slice(0, 7))
+          .filter((monthKey) => /^\d{4}-\d{2}$/.test(monthKey)),
+      ]),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+}
+
 function isVisualViewportPinchZoomActive() {
   if (typeof window === "undefined") return false;
   const scale = window.visualViewport?.scale ?? 1;
@@ -912,7 +925,12 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       const activeSession = getSession();
       if (activeSession?.approved) {
         try {
-          const monthKeys = publishedItems.map((item) => item.monthKey);
+          const monthKeys = getScheduleAssignmentMonthKeysForDisplayItems(
+            publishedItems.map((item) => ({
+              monthKey: item.monthKey,
+              schedule: item.schedule,
+            })),
+          );
           if (hasDeskAccess(activeSession.actualRole)) {
             await refreshTeamLeadAssignmentMonths(monthKeys);
           } else {
@@ -952,7 +970,14 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     }
 
     const nextState = await refreshScheduleState();
-    await refreshTeamLeadAssignmentMonths(nextState.generatedHistory.map((schedule) => schedule.monthKey));
+    await refreshTeamLeadAssignmentMonths(
+      getScheduleAssignmentMonthKeysForDisplayItems(
+        nextState.generatedHistory.map((schedule) => ({
+          monthKey: schedule.monthKey,
+          schedule,
+        })),
+      ),
+    );
     syncScheduleHistory();
   };
 

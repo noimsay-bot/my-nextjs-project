@@ -2362,17 +2362,33 @@ export function getScheduleAssignmentBigEventDuty(
   return "";
 }
 
+function getScheduleAssignmentMonthKeyForDateKey(dateKey: string) {
+  return isScheduleAssignmentDateKey(dateKey) ? dateKey.slice(0, 7) : "";
+}
+
+function getScheduleAssignmentDayRowsForDate(
+  store: ScheduleAssignmentDataStore,
+  scheduleMonthKey: string,
+  dateKey: string,
+) {
+  const dateMonthKey = getScheduleAssignmentMonthKeyForDateKey(dateKey);
+  return (
+    (dateMonthKey ? store.rows[dateMonthKey]?.[dateKey] : null) ??
+    store.rows[scheduleMonthKey]?.[dateKey] ??
+    createDefaultScheduleAssignmentDayRows()
+  );
+}
+
 export function applyScheduleAssignmentDutyCategoriesToSchedule(
   schedule: GeneratedSchedule,
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
   bigEvents: ScheduleBigEvent[] | null | undefined = schedule.big_events,
 ) {
-  const monthRows = store.rows[schedule.monthKey] ?? {};
   const bigEventCategorySet = new Set((bigEvents ?? []).map((event) => event.name.trim()).filter(Boolean));
   let changed = false;
 
   const days = schedule.days.map((day) => {
-    const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+    const dayRows = getScheduleAssignmentDayRowsForDate(store, schedule.monthKey, day.dateKey);
     const desiredByCategory = new Map<string, string[]>();
 
     Object.values(scheduleAssignmentLinkedDutyCategoryMap).forEach((category) => {
@@ -2441,11 +2457,10 @@ export function applyScheduleAssignmentNameTagsToSchedule(
   store: ScheduleAssignmentDataStore = getScheduleAssignmentStore(),
   bigEvents: ScheduleBigEvent[] | null | undefined = schedule.big_events,
 ) {
-  const monthRows = store.rows[schedule.monthKey] ?? {};
   let changed = false;
 
   const days = schedule.days.map((day) => {
-    const dayRows = monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows();
+    const dayRows = getScheduleAssignmentDayRowsForDate(store, schedule.monthKey, day.dateKey);
     const rows = getScheduleAssignmentRows(day, dayRows, bigEvents);
     const nextTags = { ...(day.assignmentNameTags ?? {}) };
     let dayChanged = false;

@@ -47,6 +47,7 @@ import {
   getScheduleAssignmentTripTooltip,
   getScheduleAssignmentVisibleTripTagMap,
   refreshTeamLeadAssignmentMonth,
+  refreshTeamLeadAssignmentMonths,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   type ScheduleAssignmentDataStore,
   type ScheduleAssignmentVisibleTripTag,
@@ -202,6 +203,28 @@ function getAdjacentMonth(year: number, month: number, offset: number) {
     month: nextMonth,
     monthKey: getMonthKey(nextYear, nextMonth),
   };
+}
+
+function getScheduleAssignmentMonthKeysForSchedules(
+  schedules: GeneratedSchedule[],
+  fallbackMonthKey: string | null | undefined,
+) {
+  const monthKeys = new Set<string>();
+  if (fallbackMonthKey) {
+    monthKeys.add(fallbackMonthKey);
+  }
+
+  schedules.forEach((schedule) => {
+    monthKeys.add(schedule.monthKey);
+    schedule.days.forEach((day) => {
+      const monthKey = day.dateKey.slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(monthKey)) {
+        monthKeys.add(monthKey);
+      }
+    });
+  });
+
+  return Array.from(monthKeys).sort((left, right) => left.localeCompare(right));
 }
 
 function isSchedulableMonth(year: number, month: number) {
@@ -752,8 +775,16 @@ export function ScheduleApp() {
     try {
       const nextState = await refreshScheduleState();
       const routeMonthKey = resolveRouteMonthKey(nextState, preferredMonthKey);
+      const routeSchedules = [nextState.generated, ...nextState.generatedHistory].filter(
+        (schedule): schedule is GeneratedSchedule => Boolean(schedule && schedule.monthKey === routeMonthKey),
+      );
+      const assignmentMonthKeys = getScheduleAssignmentMonthKeysForSchedules(routeSchedules, routeMonthKey);
       await Promise.all([
-        routeMonthKey ? refreshTeamLeadAssignmentMonth(routeMonthKey) : Promise.resolve(),
+        assignmentMonthKeys.length > 1
+          ? refreshTeamLeadAssignmentMonths(assignmentMonthKeys)
+          : routeMonthKey
+            ? refreshTeamLeadAssignmentMonth(routeMonthKey)
+            : Promise.resolve(),
         refreshPublishedSchedules(routeMonthKey ? { monthKeys: [routeMonthKey], repair: true } : { repair: true }),
         includeRequests
           ? refreshScheduleChangeRequests({

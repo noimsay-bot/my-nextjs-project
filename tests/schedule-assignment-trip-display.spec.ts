@@ -418,6 +418,7 @@ test("added support assignments tag existing general schedule names across month
     {
       dateKey: "2026-07-01",
       day: 1,
+      sheetMonth: 6,
       month: 7,
       name: "조용희",
       duty: "법조지원",
@@ -427,6 +428,7 @@ test("added support assignments tag existing general schedule names across month
     {
       dateKey: "2026-08-04",
       day: 4,
+      sheetMonth: 8,
       month: 8,
       name: "김재식",
       duty: "국회지원",
@@ -435,7 +437,7 @@ test("added support assignments tag existing general schedule names across month
     },
   ] as const;
 
-  cases.forEach(({ dateKey, day: dayNumber, month, name, duty, expectedTag, nextStartDate }) => {
+  cases.forEach(({ dateKey, day: dayNumber, sheetMonth, month, name, duty, expectedTag, nextStartDate }) => {
     const day = {
       dateKey,
       day: dayNumber,
@@ -454,10 +456,11 @@ test("added support assignments tag existing general schedule names across month
       conflicts: [],
     } as DaySchedule;
     const monthKey = `2026-${String(month).padStart(2, "0")}`;
+    const sheetMonthKey = `2026-${String(sheetMonth).padStart(2, "0")}`;
     const schedule = {
       year: 2026,
-      month,
-      monthKey,
+      month: sheetMonth,
+      monthKey: sheetMonthKey,
       days: [day],
       nextPointers: { ...defaultPointers },
       nextStartDate,
