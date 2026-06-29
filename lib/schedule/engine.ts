@@ -1123,25 +1123,27 @@ export function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
 }
 
-const REQUIRED_SCHEDULE_RANGE_STARTS: Record<string, string> = {
-  "2026-07": "2026-07-06",
-};
-
-export function getScheduleRange(year: number, month: number) {
-  const monthKey = getMonthKey(year, month);
-  const start = new Date(year, month - 1, 1);
-  const startDow = start.getDay();
-  const diffToMonday = startDow === 0 ? -6 : 1 - startDow;
-  if (diffToMonday !== 0) start.setDate(start.getDate() + diffToMonday);
-  const requiredStart = REQUIRED_SCHEDULE_RANGE_STARTS[monthKey];
-  if (requiredStart) {
-    const [requiredYear, requiredMonth, requiredDay] = requiredStart.split("-").map(Number);
-    start.setFullYear(requiredYear, requiredMonth - 1, requiredDay);
-  }
-  const last = new Date(year, month - 1, daysInMonth(year, month));
-  const end = new Date(last);
+function getMonthEndSunday(year: number, month: number) {
+  const end = new Date(year, month - 1, daysInMonth(year, month));
   const dayOfWeek = end.getDay();
   if (dayOfWeek !== 0) end.setDate(end.getDate() + (7 - dayOfWeek));
+  return end;
+}
+
+export function getScheduleRange(year: number, month: number) {
+  // 각 달 근무표의 끝 = "말일이 속한 주의 일요일".
+  // 시작 = "전월 근무표의 끝(일요일) 다음날(월요일)".
+  // 이렇게 하면 1일이 월요일이 아닌 달에서도 인접 달 근무표가 겹치지 않고 연속된다
+  // (한 날짜는 정확히 한 달의 근무표에만 귀속). 7월 등 특정 달 하드코딩이 필요 없다.
+  const previousMonthLastDay = new Date(year, month - 1, 1);
+  previousMonthLastDay.setDate(previousMonthLastDay.getDate() - 1);
+  const previousEnd = getMonthEndSunday(
+    previousMonthLastDay.getFullYear(),
+    previousMonthLastDay.getMonth() + 1,
+  );
+  const start = new Date(previousEnd);
+  start.setDate(start.getDate() + 1);
+  const end = getMonthEndSunday(year, month);
   return { start, end };
 }
 
