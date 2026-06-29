@@ -2224,8 +2224,10 @@ function getScheduleAssignmentLinkedSourceNameTag(
 
   for (const row of dayRows.addedRows) {
     if (row.name.trim() !== normalizedName) continue;
-    if (getScheduleAssignmentLinkedDutyCategory(row.duty) !== category) continue;
     const tag = getScheduleAssignmentNameTagForDuty(row.duty);
+    const linkedCategory = getScheduleAssignmentLinkedDutyCategory(row.duty);
+    if (linkedCategory && linkedCategory !== category) continue;
+    if (!linkedCategory && !tag) continue;
     if (tag) return tag;
   }
 
@@ -2236,9 +2238,11 @@ function getScheduleAssignmentLinkedSourceNameTag(
 
     const overrideName = override.name.trim() || parsed.name;
     if (overrideName !== normalizedName) continue;
-    if (getScheduleAssignmentLinkedDutyCategory(override.duty) !== category) continue;
-
     const tag = getScheduleAssignmentNameTagForDuty(override.duty);
+    const linkedCategory = getScheduleAssignmentLinkedDutyCategory(override.duty);
+    if (linkedCategory && linkedCategory !== category) continue;
+    if (!linkedCategory && parsed.category !== category) continue;
+    if (!tag) continue;
     if (tag) return tag;
   }
 

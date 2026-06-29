@@ -413,6 +413,78 @@ test("assembly support duty adds government tag for main schedule display", () =
   expect(taggedSchedule.days[0]?.assignmentNameTags?.["일반::김재식"]).toBe("gov");
 });
 
+test("added support assignments tag existing general schedule names across months", () => {
+  const cases = [
+    {
+      dateKey: "2026-07-01",
+      day: 1,
+      month: 7,
+      name: "조용희",
+      duty: "법조지원",
+      expectedTag: "law",
+      nextStartDate: "2026-08-01",
+    },
+    {
+      dateKey: "2026-08-04",
+      day: 4,
+      month: 8,
+      name: "김재식",
+      duty: "국회지원",
+      expectedTag: "gov",
+      nextStartDate: "2026-09-01",
+    },
+  ] as const;
+
+  cases.forEach(({ dateKey, day: dayNumber, month, name, duty, expectedTag, nextStartDate }) => {
+    const day = {
+      dateKey,
+      day: dayNumber,
+      month,
+      year: 2026,
+      dow: 2,
+      isWeekend: false,
+      isHoliday: false,
+      isCustomHoliday: false,
+      isWeekdayHoliday: false,
+      isOverflowMonth: false,
+      vacations: [],
+      assignments: { 일반: [name] },
+      manualExtras: [],
+      headerName: "",
+      conflicts: [],
+    } as DaySchedule;
+    const monthKey = `2026-${String(month).padStart(2, "0")}`;
+    const schedule = {
+      year: 2026,
+      month,
+      monthKey,
+      days: [day],
+      nextPointers: { ...defaultPointers },
+      nextStartDate,
+    } as GeneratedSchedule;
+    const store: ScheduleAssignmentDataStore = {
+      entries: {},
+      rows: {
+        [monthKey]: {
+          [day.dateKey]: {
+            addedRows: [{ id: `${duty}-${name}`, name, duty }],
+            deletedRowKeys: [],
+            rowOverrides: {},
+          },
+        },
+      },
+    };
+
+    const decoratedSchedule = applyScheduleAssignmentNameTagsToSchedule(
+      applyScheduleAssignmentDutyCategoriesToSchedule(schedule, store),
+      store,
+    );
+
+    expect(decoratedSchedule.days[0]?.assignments["일반"]).toEqual([name]);
+    expect(decoratedSchedule.days[0]?.assignmentNameTags?.[`일반::${name}`]).toBe(expectedTag);
+  });
+});
+
 test("big event assignments become schedule assignment duties across month boundaries", () => {
   const maySchedule = {
     year: 2026,
