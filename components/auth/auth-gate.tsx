@@ -30,6 +30,17 @@ function authLog(stage: string, details: Record<string, unknown>) {
 
 const AUTH_GATE_PENDING_TIMEOUT_MS = 6_000;
 const MY_PAGE_ACCESS_ROLES = new Set(["member", "outlet", "partner", "desk", "team_lead", "admin"]);
+const ADMIN_SCHEDULE_MANAGEMENT_PATHS = [
+  "/schedule/write",
+  "/schedule/vacations",
+  "/schedule/long-service-leave",
+  "/schedule/health-checks",
+  "/schedule/press-support",
+];
+
+function isAdminScheduleManagementPath(pathname: string) {
+  return ADMIN_SCHEDULE_MANAGEMENT_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
 
 function hasAccess(
   pathname: string,
@@ -89,12 +100,12 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/schedule/vacations")) {
-    return session.role === "desk" || session.role === "team_lead";
+    return session.role === "desk" || session.role === "team_lead" || session.role === "admin";
   }
 
   if (pathname.startsWith("/schedule")) {
     if (session.role === "admin") {
-      return pathname.startsWith("/schedule/write");
+      return isAdminScheduleManagementPath(pathname);
     }
     return session.role === "desk" || session.role === "team_lead";
   }

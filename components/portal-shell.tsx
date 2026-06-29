@@ -360,8 +360,8 @@ function getVisibleLinks(
           link.href === "/admin",
       );
     case "admin":
-      return visibleRoleLinks.filter(
-        (link) =>
+      return visibleRoleLinks
+        .filter((link) =>
           link.href === "/community" ||
           link.href === "/election" ||
           link.href === "/work-schedule" ||
@@ -374,7 +374,8 @@ function getVisibleLinks(
           (link.href === "/review" && session.canReview && !reviewLocked) ||
           link.href === "/weather" ||
           link.href === "/admin",
-      );
+        )
+        .map((link) => (link.href === "/schedule" ? withVisibleChildren(link, ["/schedule/write"]) : link));
     default:
       return visibleRoleLinks.filter(
         (link) =>
