@@ -23,7 +23,7 @@ import type { GeneratedSchedule, SchedulePersonRef } from "@/lib/schedule/types"
 
 test("2026 schedule months use configured coverage ranges", () => {
   const ranges = [
-    { month: 5, first: "2026-04-27", last: "2026-05-31" },
+    { month: 5, first: "2026-05-04", last: "2026-05-31" },
     { month: 6, first: "2026-06-01", last: "2026-07-05" },
     { month: 7, first: "2026-07-06", last: "2026-08-02" },
   ];
@@ -395,7 +395,7 @@ test("schedule state normalization keeps fixed work conflicts and removes vacati
   expect(getDayDuplicateNameSet(updatedDay).has(vacationName)).toBe(true);
 });
 
-test("general manual additions do not re-add jcheck assignees", () => {
+test("general auto assignments do not re-add jcheck assignees", () => {
   const generated = generateSchedule({
     ...defaultScheduleState,
     year: 2026,
@@ -408,7 +408,6 @@ test("general manual additions do not re-add jcheck assignees", () => {
 
   targetDay.assignments["제크"] = [jcheckName];
   targetDay.assignments["일반"] = ["일반자", jcheckName];
-  targetDay.generalManualAdditions = [jcheckName];
 
   const state = sanitizeScheduleState({
     ...defaultScheduleState,
@@ -452,7 +451,6 @@ test("general assignments exclude every same-day non-general category", () => {
   targetDay.assignments["일반"] = [...blockedNames, "일반자"];
   targetDay.assignments["휴가"] = [`연차:${vacationName}`];
   targetDay.vacations = [`연차:${vacationName}`];
-  targetDay.generalManualAdditions = [...blockedNames, "수동일반자"];
 
   const state = sanitizeScheduleState({
     ...defaultScheduleState,
@@ -465,10 +463,7 @@ test("general assignments exclude every same-day non-general category", () => {
 
   blockedNames.forEach((name) => {
     expect(updatedDay.assignments["일반"] ?? []).not.toContain(name);
-    expect(updatedDay.generalManualAdditions ?? []).not.toContain(name);
   });
-  expect(updatedDay.assignments["일반"] ?? []).toContain("수동일반자");
-  expect(updatedDay.generalManualAdditions ?? []).toEqual(["수동일반자"]);
   expect(getDayDuplicateNameSet(updatedDay).size).toBe(0);
 });
 

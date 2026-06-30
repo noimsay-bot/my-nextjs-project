@@ -108,12 +108,6 @@ function getGeneralAssignmentBlockedNames(day: DaySchedule) {
   return blockedNames;
 }
 
-function normalizeDayGeneralManualAdditions(day: DaySchedule, blockedNames = getGeneralAssignmentBlockedNames(day)) {
-  return Array.from(new Set((day.generalManualAdditions ?? []).map((name) => name.trim()).filter(Boolean))).filter(
-    (name) => !blockedNames.has(name),
-  );
-}
-
 function normalizeDayVacationAssignments(day: DaySchedule) {
   const assignments = Object.fromEntries(
     Object.entries(day.assignments ?? {}).map(([category, names]) => [
@@ -240,7 +234,6 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
           assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
           assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
           assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
-          generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
         };
       }),
     }, normalizedBigEvents, normalizedBigEvents);
@@ -255,7 +248,6 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
         assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
         assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
         assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
-        generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
       };
     }),
   }, normalizedBigEvents, normalizedBigEvents);
@@ -398,7 +390,6 @@ function removeBigEventNamesFromGeneralAssignments(day: DaySchedule, blockedName
   return {
     ...day,
     assignments,
-    generalManualAdditions: (day.generalManualAdditions ?? []).filter((name) => !blockedNames.has(name.trim())),
   };
 }
 
@@ -440,7 +431,6 @@ function applyBigEventsToDay(
     assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
     assignmentLabelOverrides: normalizeDayAssignmentLabelOverrides(normalizedDay),
     assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
-    generalManualAdditions: normalizeDayGeneralManualAdditions(normalizedDay),
   };
 }
 
@@ -693,20 +683,9 @@ export function syncGeneralAssignments(
     const nextGeneralNames = generalTeamPeople.filter(
       (name) => !generalBlockedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
     );
-    const manualGeneralAdditions = normalizeDayGeneralManualAdditions(day, generalBlockedNames);
-    day.generalManualAdditions = manualGeneralAdditions;
-    const combinedGeneralNames = [...nextGeneralNames];
-    manualGeneralAdditions.forEach((name) => {
-      if (generalBlockedNames.has(name) || previousNight.includes(name) || generalTeamOffSet.has(name)) {
-        return;
-      }
-      if (!combinedGeneralNames.includes(name)) {
-        combinedGeneralNames.push(name);
-      }
-    });
 
-    if (combinedGeneralNames.length > 0) {
-      day.assignments["일반"] = combinedGeneralNames;
+    if (nextGeneralNames.length > 0) {
+      day.assignments["일반"] = nextGeneralNames;
     } else {
       delete day.assignments["일반"];
     }
@@ -2534,11 +2513,6 @@ export function addPersonToCategory(state: ScheduleState, dateKey: string, categ
   if (!day) return state;
   const trimmed = name.trim();
   if (!trimmed) return state;
-  if (isGeneralAssignmentCategory(category)) {
-    day.generalManualAdditions = Array.from(
-      new Set([...(day.generalManualAdditions ?? []), trimmed].map((item) => item.trim()).filter(Boolean)),
-    );
-  }
   day.assignments[category] = [...(day.assignments[category] ?? []), trimmed];
   if (category === "휴가") day.vacations = day.assignments[category];
   return syncGeneratedSchedule(next, generated);
@@ -2567,11 +2541,7 @@ export function removePersonFromCategory(
     removeIndex = typeof name === "string" ? assignments.findIndex((item) => item === name) : -1;
   }
   if (removeIndex < 0 || removeIndex >= assignments.length) return state;
-  const removedName = assignments[removeIndex]?.trim() ?? "";
   assignments.splice(removeIndex, 1);
-  if (isGeneralAssignmentCategory(category) && removedName) {
-    day.generalManualAdditions = (day.generalManualAdditions ?? []).filter((item) => item.trim() !== removedName);
-  }
   if (category === "휴가") {
     if (assignments.length > 0) {
       day.assignments[category] = assignments;
@@ -2680,15 +2650,6 @@ export function cycleVacationEntryType(
   return syncGeneratedSchedule(next, generated);
 }
 
-function replaceGeneralManualAddition(day: DaySchedule, removedName: string, addedName: string) {
-  const nextAdditions = normalizeDayGeneralManualAdditions(day).filter((item) => item !== removedName.trim());
-  const nextName = addedName.trim();
-  if (nextName && !nextAdditions.includes(nextName)) {
-    nextAdditions.push(nextName);
-  }
-  day.generalManualAdditions = nextAdditions;
-}
-
 export function movePerson(
   state: ScheduleState,
   source: { dateKey: string; category: string; index: number },
@@ -2742,12 +2703,6 @@ export function swapPersonSlots(
     const destinationName = destinationList[destination.index] ?? "";
     sourceList[source.index] = destinationName;
     destinationList[destination.index] = sourceName;
-    if (isGeneralAssignmentCategory(source.category)) {
-      replaceGeneralManualAddition(sourceDay, sourceName, destinationName);
-    }
-    if (isGeneralAssignmentCategory(destination.category)) {
-      replaceGeneralManualAddition(destinationDay, destinationName, sourceName);
-    }
   }
 
   next.selectedPerson = null;

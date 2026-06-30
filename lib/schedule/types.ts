@@ -52,7 +52,6 @@ export interface DaySchedule {
   assignmentNameTags?: Record<string, ScheduleAssignmentNameTag>;
   assignmentLabelOverrides?: Record<string, string>;
   assignmentOrderOverrides?: string[];
-  generalManualAdditions?: string[];
   manualExtras: string[];
   headerName: string;
   conflicts: Conflict[];

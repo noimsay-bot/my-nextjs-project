@@ -134,25 +134,25 @@ test("dragging one name chip onto another swaps them 1:1", async ({ page }) => {
   const dayCard = page.locator('.schedule-day-card[data-date-key="2026-05-05"]').first();
   await expect(dayCard).toBeVisible();
 
-  const generalChip = dayCard
-    .locator('article[data-category="일반"] .schedule-name-chip')
-    .filter({ hasText: "김진광" })
-    .first();
   const eveningChip = dayCard
     .locator('article[data-category="석근"] .schedule-name-chip')
     .filter({ hasText: "장후원" })
     .first();
+  const nightChip = dayCard
+    .locator('article[data-category="야근"] .schedule-name-chip')
+    .filter({ hasText: "이지수" })
+    .first();
 
-  await expect(generalChip).toBeVisible();
   await expect(eveningChip).toBeVisible();
+  await expect(nightChip).toBeVisible();
 
-  await generalChip.dragTo(eveningChip);
+  await eveningChip.dragTo(nightChip);
 
   await expect(
-    dayCard.locator('article[data-category="일반"] .schedule-name-chip').filter({ hasText: "장후원" }).first(),
+    dayCard.locator('article[data-category="석근"] .schedule-name-chip').filter({ hasText: "이지수" }).first(),
   ).toBeVisible();
   await expect(
-    dayCard.locator('article[data-category="석근"] .schedule-name-chip').filter({ hasText: "김진광" }).first(),
+    dayCard.locator('article[data-category="야근"] .schedule-name-chip').filter({ hasText: "장후원" }).first(),
   ).toBeVisible();
 });
 
