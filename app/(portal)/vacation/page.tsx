@@ -17,6 +17,15 @@ import {
   VacationRequest,
 } from "@/lib/vacation/storage";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
+import {
+  EXTRA_VACATION_EVENT,
+  EXTRA_VACATION_STATUS_EVENT,
+  getExtraRequestsForUnit,
+  getOpenExtraUnits,
+  refreshExtraStore,
+  submitExtraRequest,
+  type VacationExtraUnit,
+} from "@/lib/vacation/extra-storage";
 
 const vacationWeekdayLabels = ["월", "화", "수", "목", "금"];
 
@@ -108,6 +117,12 @@ export default function VacationPage() {
   const [calendarDateItems, setCalendarDateItems] = useState<VacationCalendarDateItem[]>([]);
   const [managedDateKeys, setManagedDateKeys] = useState<string[]>([]);
 
+  // Extra unit state
+  const [openExtraUnits, setOpenExtraUnits] = useState<VacationExtraUnit[]>([]);
+  const [extraMessage, setExtraMessage] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
+  // Per-unit selected dates and type: keyed by unitId
+  const [extraSelections, setExtraSelections] = useState<Record<string, { dates: string[]; type: "연차" | "대휴" }>>({});
+
   const syncFromCache = useCallback(() => {
     setRequests(getVacationRequests());
     setCalendarDateItems(getVacationCalendarDateItems(year, month, session?.username ?? ""));
@@ -119,9 +134,37 @@ export default function VacationPage() {
     syncFromCache();
   }, [syncFromCache]);
 
+  const syncExtraFromCache = useCallback(() => {
+    const units = getOpenExtraUnits();
+    setOpenExtraUnits(units);
+    // Pre-populate selections from existing own requests
+    setExtraSelections((prev) => {
+      const next = { ...prev };
+      units.forEach((unit) => {
+        if (next[unit.id]) return;
+        const ownReqs = getExtraRequestsForUnit(unit.id).filter(
+          (r) => r.requesterId === session?.id || r.requesterName === session?.username,
+        );
+        if (ownReqs.length > 0) {
+          const firstReq = ownReqs[0];
+          next[unit.id] = { dates: firstReq.dates, type: firstReq.type === "대휴" ? "대휴" : "연차" };
+        } else {
+          next[unit.id] = { dates: [], type: "연차" };
+        }
+      });
+      return next;
+    });
+  }, [session?.id, session?.username]);
+
+  const loadExtraUnits = useCallback(async () => {
+    await refreshExtraStore();
+    syncExtraFromCache();
+  }, [syncExtraFromCache]);
+
   useEffect(() => {
     void loadRequests();
-    const onFocusRefresh = () => void loadRequests();
+    void loadExtraUnits();
+    const onFocusRefresh = () => { void loadRequests(); void loadExtraUnits(); };
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
@@ -137,7 +180,22 @@ export default function VacationPage() {
       window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
       window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncFromCache);
     };
-  }, [loadRequests, syncFromCache]);
+  }, [loadRequests, syncFromCache, loadExtraUnits]);
+
+  useEffect(() => {
+    const onExtraChange = () => syncExtraFromCache();
+    const onExtraStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
+      if (!detail || detail.ok) return;
+      setExtraMessage({ tone: "warn", text: detail.message });
+    };
+    window.addEventListener(EXTRA_VACATION_EVENT, onExtraChange);
+    window.addEventListener(EXTRA_VACATION_STATUS_EVENT, onExtraStatus);
+    return () => {
+      window.removeEventListener(EXTRA_VACATION_EVENT, onExtraChange);
+      window.removeEventListener(EXTRA_VACATION_STATUS_EVENT, onExtraStatus);
+    };
+  }, [syncExtraFromCache]);
 
   useEffect(() => {
     const selectableDateSet = new Set(
@@ -606,6 +664,225 @@ export default function VacationPage() {
           </section>
         </div>
       </section>
+
+      {/* ── 추가 휴가 신청 ─────────────────────────────────────────────────── */}
+      {openExtraUnits.length > 0 ? (
+        <section className="panel">
+          <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div className="chip">추가 신청</div>
+              <strong style={{ fontSize: 20 }}>추가 휴가 신청</strong>
+              <span className="muted">DESK에서 지정한 날짜에 한해 별도 추첨으로 반영합니다.</span>
+            </div>
+
+            {extraMessage ? (
+              <div className={`status ${extraMessage.tone}`}>{extraMessage.text}</div>
+            ) : null}
+
+            {openExtraUnits.map((unit) => {
+              const sel = extraSelections[unit.id] ?? { dates: [], type: "연차" as const };
+              const unitDateSet = new Set(unit.dateKeys);
+              const myOwnReqs = getExtraRequestsForUnit(unit.id).filter(
+                (r) => r.requesterId === session?.id || r.requesterName === session?.username,
+              );
+              const alreadySubmitted = myOwnReqs.length > 0;
+              const hasLottery =
+                Object.values(unit.annualWinners).some((ns) => ns.length > 0) ||
+                Object.values(unit.compensatoryWinners).some((ns) => ns.length > 0);
+              const myWinners = hasLottery
+                ? myOwnReqs
+                    .flatMap((r) =>
+                      r.dates.filter((dk) => {
+                        const winners =
+                          r.type === "대휴"
+                            ? unit.compensatoryWinners[dk] ?? []
+                            : unit.annualWinners[dk] ?? [];
+                        return winners.includes(r.requesterName);
+                      }),
+                    )
+                    .sort()
+                : [];
+
+              return (
+                <article
+                  key={unit.id}
+                  style={{
+                    display: "grid",
+                    gap: 14,
+                    padding: 16,
+                    borderRadius: 16,
+                    border: "1px solid rgba(250,204,21,.25)",
+                    background: "rgba(250,204,21,.05)",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <strong style={{ fontSize: 16 }}>{unit.label}</strong>
+                      <span className="muted" style={{ fontSize: 13 }}>
+                        {unit.targetYear}년 {unit.targetMonth}월 · {unit.dateKeys.length}일 신청 가능
+                      </span>
+                    </div>
+                    {alreadySubmitted ? (
+                      <span
+                        style={{
+                          padding: "4px 12px",
+                          borderRadius: 999,
+                          fontSize: 12,
+                          fontWeight: 800,
+                          background: "rgba(74,222,128,.2)",
+                          border: "1px solid rgba(74,222,128,.4)",
+                          color: "#bbf7d0",
+                        }}
+                      >
+                        신청 완료
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {/* 당첨 결과 표시 */}
+                  {hasLottery ? (
+                    <div
+                      className="status note"
+                      style={{ display: "grid", gap: 6 }}
+                    >
+                      <strong style={{ fontSize: 14 }}>추첨 결과</strong>
+                      {myWinners.length > 0 ? (
+                        <span>
+                          당첨 날짜: {myWinners.map((dk) => {
+                            const [, m, d] = dk.split("-").map(Number);
+                            return `${m}/${d}`;
+                          }).join(", ")}
+                        </span>
+                      ) : (
+                        <span className="muted">이번 추가 추첨에서 당첨되지 않았습니다.</span>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {/* 신청 폼 (추첨 전에만 표시) */}
+                  {!hasLottery ? (
+                    <>
+                      {isReadOnlyUser ? (
+                        <div className="status note">현재 계정은 조회 전용이라 신청할 수 없습니다.</div>
+                      ) : null}
+
+                      {/* 휴가 종류 선택 */}
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>종류</span>
+                        {(["연차", "대휴"] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            disabled={isReadOnlyUser}
+                            onClick={() =>
+                              setExtraSelections((prev) => ({
+                                ...prev,
+                                [unit.id]: { ...sel, type: t },
+                              }))
+                            }
+                            style={{
+                              padding: "6px 16px",
+                              borderRadius: 999,
+                              fontSize: 13,
+                              fontWeight: 700,
+                              border:
+                                sel.type === t
+                                  ? "2px solid rgba(250,204,21,.8)"
+                                  : "1px solid rgba(255,255,255,.2)",
+                              background:
+                                sel.type === t
+                                  ? "rgba(250,204,21,.15)"
+                                  : "rgba(255,255,255,.06)",
+                              color: sel.type === t ? "#fef08a" : "var(--text)",
+                              cursor: isReadOnlyUser ? "not-allowed" : "pointer",
+                              opacity: isReadOnlyUser ? 0.5 : 1,
+                            }}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* 날짜 선택 */}
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>날짜 선택 (복수 가능)</span>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {unit.dateKeys.filter((dk) => unitDateSet.has(dk)).map((dk) => {
+                            const [, m, d] = dk.split("-").map(Number);
+                            const selected = sel.dates.includes(dk);
+                            return (
+                              <button
+                                key={dk}
+                                type="button"
+                                disabled={isReadOnlyUser}
+                                onClick={() =>
+                                  setExtraSelections((prev) => {
+                                    const cur = prev[unit.id] ?? { dates: [], type: "연차" as const };
+                                    const next = selected
+                                      ? cur.dates.filter((d2) => d2 !== dk)
+                                      : [...cur.dates, dk].sort();
+                                    return { ...prev, [unit.id]: { ...cur, dates: next } };
+                                  })
+                                }
+                                style={{
+                                  padding: "6px 13px",
+                                  borderRadius: 999,
+                                  fontSize: 13,
+                                  fontWeight: 700,
+                                  border: selected
+                                    ? "2px solid rgba(250,204,21,.8)"
+                                    : "1px solid rgba(255,255,255,.2)",
+                                  background: selected
+                                    ? "rgba(250,204,21,.15)"
+                                    : "rgba(255,255,255,.06)",
+                                  color: selected ? "#fef08a" : "var(--text)",
+                                  cursor: isReadOnlyUser ? "not-allowed" : "pointer",
+                                  opacity: isReadOnlyUser ? 0.5 : 1,
+                                }}
+                              >
+                                {m}/{d}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {sel.dates.length > 0 ? (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            선택: {sel.dates.map((dk) => {
+                              const [, m, d] = dk.split("-").map(Number);
+                              return `${m}/${d}`;
+                            }).join(", ")} ({sel.dates.length}일)
+                          </span>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 12 }}>날짜를 선택해 주세요.</span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn primary"
+                        disabled={isReadOnlyUser || sel.dates.length === 0}
+                        onClick={async () => {
+                          if (!window.confirm(`'${unit.label}'에 ${sel.type} 추가 신청하시겠습니까?`)) return;
+                          const result = await submitExtraRequest({
+                            unitId: unit.id,
+                            requesterName: session?.username ?? "",
+                            type: sel.type,
+                            dates: sel.dates,
+                          });
+                          setExtraMessage({ tone: result.ok ? "ok" : "warn", text: result.message });
+                          if (result.ok) await loadExtraUnits();
+                        }}
+                      >
+                        {alreadySubmitted ? "수정 신청" : "추가 신청"}
+                      </button>
+                    </>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
