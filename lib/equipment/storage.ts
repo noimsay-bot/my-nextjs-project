@@ -565,7 +565,7 @@ export async function setRentalTvuItemsActive(itemIds: string[], isActive: boole
   }
 
   const supabase = await getPortalSupabaseClient();
-  const { data, error } = await supabase.rpc("set_rental_tvu_items_active", {
+  const { error } = await supabase.rpc("set_rental_tvu_items_active", {
     p_equipment_item_ids: normalizedIds,
     p_is_active: isActive,
   });
@@ -574,10 +574,6 @@ export async function setRentalTvuItemsActive(itemIds: string[], isActive: boole
     throw new Error(getEquipmentStorageErrorMessage(error, "rental TVU equipment"));
   }
 
-  const updatedCount = typeof data === "number" ? data : 0;
-  if (updatedCount === 0) {
-    throw new Error("변경된 임대 장비가 없습니다.");
-  }
 }
 
 export async function renameRentalTvuItem(itemId: string, name: string) {

@@ -2196,6 +2196,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   const [managedDeactivateMode, setManagedDeactivateMode] = useState(false);
   const [showInactiveManagedItems, setShowInactiveManagedItems] = useState(false);
   const [gridPendingItemId, setGridPendingItemId] = useState<string | null>(null);
+  const rentalTvuActionPendingRef = useRef(false);
 
   const isEngSetPage = category === "eng_set";
   const hasDeskRoleAccess = hasEquipmentDeskAccess(session);
@@ -2595,6 +2596,7 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
   };
 
   const confirmRentalTvuMode = async () => {
+    if (rentalTvuActionPendingRef.current) return;
     if (!canManageRentalTvu) {
       setMessage({ tone: "warn", text: "임대 장비 관리 권한이 없습니다." });
       return;
@@ -2605,16 +2607,20 @@ export function EquipmentCategoryPage({ category }: { category: EquipmentCategor
       return;
     }
 
+    const nextIsActive = rentalTvuMode === "activate";
+    rentalTvuActionPendingRef.current = true;
     setActionPending(true);
     try {
-      await setRentalTvuItemsActive(rentalTvuSelectionIds, rentalTvuMode === "activate");
-      setMessage({ tone: "ok", text: rentalTvuMode === "activate" ? "선택한 임대 장비를 활성화했습니다." : "선택한 임대 장비를 비활성화했습니다." });
+      await setRentalTvuItemsActive(rentalTvuSelectionIds, nextIsActive);
       setRentalTvuMode(null);
       setRentalTvuSelectionIds([]);
       await load();
+      setMessage({ tone: "ok", text: nextIsActive ? "선택한 임대 장비를 활성화했습니다." : "선택한 임대 장비를 비활성화했습니다." });
     } catch (error) {
+      await load();
       setMessage({ tone: "warn", text: error instanceof Error ? error.message : "임대 장비 처리에 실패했습니다." });
     } finally {
+      rentalTvuActionPendingRef.current = false;
       setActionPending(false);
     }
   };

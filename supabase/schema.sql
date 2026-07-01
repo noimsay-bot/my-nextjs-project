@@ -3747,7 +3747,6 @@ begin
       and category = 'live'
       and group_name = 'TVU'
       and coalesce(metadata ->> 'rental', 'false') = 'true'
-      and is_active is distinct from v_is_active
     returning id
   )
   select count(*)
@@ -3755,7 +3754,7 @@ begin
   from updated_items;
 
   if v_updated_count <> v_requested_count then
-    raise exception '이미 처리되었거나 변경할 수 없는 임대 장비가 포함되어 있습니다.';
+    raise exception '변경할 수 없는 임대 장비가 포함되어 있습니다.';
   end if;
 
   if v_is_active = false then
