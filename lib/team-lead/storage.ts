@@ -3751,16 +3751,19 @@ export async function refreshTeamLeadSubmissionAccessState() {
   }
 }
 
-async function getGrantedReviewerProfiles() {
+async function getBestReportResultReviewerProfiles() {
   const supabase = await getPrivilegedSupabaseClient();
   const grantedProfileIds = await getGrantedReviewerProfileIds();
-  if (grantedProfileIds.length === 0) return [] as ReviewManagementProfileRow[];
+  const selectedProfileIds = grantedProfileIds.length > 0
+    ? grantedProfileIds
+    : await getSelectedReviewerProfileIds();
+  if (selectedProfileIds.length === 0) return [] as ReviewManagementProfileRow[];
 
   const { data, error } = await supabase
     .from("profiles")
     .select(REVIEW_MANAGEMENT_PROFILE_COLUMNS)
     .eq("approved", true)
-    .in("id", grantedProfileIds)
+    .in("id", selectedProfileIds)
     .order("name", { ascending: true })
     .returns<ReviewManagementProfileRow[]>();
 
@@ -4244,7 +4247,7 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   const supabase = await getPrivilegedSupabaseClient();
   const savedQuarters = await getSavedBestReportQuarterSnapshots();
   const currentResetAt = await getBestReportCurrentResetAt();
-  const reviewerProfiles = await getGrantedReviewerProfiles();
+  const reviewerProfiles = await getBestReportResultReviewerProfiles();
   const reviewers = reviewerProfiles.map((profile) => ({
     id: profile.id,
     name: profile.name,

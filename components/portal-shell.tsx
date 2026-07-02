@@ -28,7 +28,6 @@ import {
   getPortalCustomerSupportSummary,
   type CustomerSupportFeedbackNotification,
 } from "@/lib/portal/customer-support";
-import { hasSubmittedReviewLock, REVIEW_SUBMISSION_LOCK_EVENT } from "@/lib/portal/data";
 import {
   getMemberLevelProgressPercent,
   getMemberLevelSnapshot,
@@ -258,7 +257,6 @@ function getVisibleLinks(
   session: SessionUser | null,
   vacationRequestOpen: boolean,
   submissionAccessOpen: boolean,
-  reviewLocked: boolean,
   electionSidebarOpen: boolean,
 ) {
   const visibleRoleLinks = links
@@ -279,7 +277,7 @@ function getVisibleLinks(
           link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
-          (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
+          (link.href === "/review" && session.canReview && !isReadOnlyPortalRole(session.role)),
       );
     case "outlet":
       return visibleRoleLinks.filter(
@@ -292,7 +290,7 @@ function getVisibleLinks(
           link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
-          (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
+          (link.href === "/review" && session.canReview && !isReadOnlyPortalRole(session.role)),
       );
     case "observer":
       return visibleRoleLinks.filter(
@@ -304,7 +302,7 @@ function getVisibleLinks(
           link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
-          (link.href === "/review" && session.canReview && !reviewLocked && !isReadOnlyPortalRole(session.role)),
+          (link.href === "/review" && session.canReview && !isReadOnlyPortalRole(session.role)),
       );
     case "partner":
       return visibleRoleLinks.filter(
@@ -327,7 +325,7 @@ function getVisibleLinks(
           link.href === "/equipment" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
-          (link.href === "/review" && session.canReview && !reviewLocked),
+          (link.href === "/review" && session.canReview),
       );
     case "desk":
       return visibleRoleLinks.filter(
@@ -371,7 +369,7 @@ function getVisibleLinks(
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/schedule" ||
-          (link.href === "/review" && session.canReview && !reviewLocked) ||
+          (link.href === "/review" && session.canReview) ||
           link.href === "/weather" ||
           link.href === "/admin",
         )
@@ -912,8 +910,6 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
   const [electionSidebarOpen, setElectionSidebarOpen] = useState(() => getPortalAccessState().electionSidebarOpen);
   const [vacationRequestOpen, setVacationRequestOpen] = useState(() => getPortalAccessState().vacationRequestOpen);
   const [submissionAccessOpen, setSubmissionAccessOpen] = useState(() => getPortalAccessState().submissionAccessOpen);
-  const [reviewLocked, setReviewLocked] = useState(false);
-  const shouldTrackReviewLock = Boolean(session?.canReview);
   const mobileSidebarTriggerLongPressTimeoutRef = useRef<number | null>(null);
   const mobileSidebarTriggerPointerIdRef = useRef<number | null>(null);
   const mobileSidebarTriggerPointerOffsetRef = useRef(0);
@@ -1193,28 +1189,9 @@ function PortalChrome({ children, pathname }: { children: React.ReactNode; pathn
     setExperienceDraftRole(session.experienceRole ?? session.actualRole);
   }, [session?.actualRole, session?.experienceRole]);
 
-  useEffect(() => {
-    const syncReviewLocked = () => {
-      setReviewLocked(hasSubmittedReviewLock(getSession()?.id));
-    };
-
-    if (!shouldTrackReviewLock) {
-      setReviewLocked(false);
-      return;
-    }
-
-    syncReviewLocked();
-    window.addEventListener("focus", syncReviewLocked);
-    window.addEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
-    return () => {
-      window.removeEventListener("focus", syncReviewLocked);
-      window.removeEventListener(REVIEW_SUBMISSION_LOCK_EVENT, syncReviewLocked);
-    };
-  }, [shouldTrackReviewLock, session?.id]);
-
   const visibleLinks = useMemo(
-    () => getVisibleLinks(session, vacationRequestOpen, submissionAccessOpen, reviewLocked, electionSidebarOpen),
-    [electionSidebarOpen, reviewLocked, session, submissionAccessOpen, vacationRequestOpen],
+    () => getVisibleLinks(session, vacationRequestOpen, submissionAccessOpen, electionSidebarOpen),
+    [electionSidebarOpen, session, submissionAccessOpen, vacationRequestOpen],
   );
 
   const adminSession = hasAdminAccess(session?.actualRole) ? session : null;

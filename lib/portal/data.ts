@@ -231,7 +231,7 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     const { data: reviewStateRows, error: reviewStateError } = await supabase
       .from("team_lead_state")
       .select("key, state")
-      .in("key", ["review_access_v1", "best_report_current_v1"])
+      .in("key", ["review_access_v1", "reviewer_selection_v1", "best_report_current_v1"])
       .returns<ReviewStateRow[]>();
 
     if (reviewStateError) {
@@ -239,10 +239,15 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
     }
 
     const reviewAccessState = (reviewStateRows ?? []).find((row) => row.key === "review_access_v1")?.state;
+    const reviewerSelectionState = (reviewStateRows ?? []).find((row) => row.key === "reviewer_selection_v1")?.state;
     const currentState = (reviewStateRows ?? []).find((row) => row.key === "best_report_current_v1")?.state;
-    activeReviewerIds = Array.isArray(reviewAccessState?.profileIds)
+    const grantedReviewerIds = Array.isArray(reviewAccessState?.profileIds)
       ? reviewAccessState.profileIds.filter((profileId): profileId is string => typeof profileId === "string")
       : [];
+    const selectedReviewerIds = Array.isArray(reviewerSelectionState?.profileIds)
+      ? reviewerSelectionState.profileIds.filter((profileId): profileId is string => typeof profileId === "string")
+      : [];
+    activeReviewerIds = grantedReviewerIds.length > 0 ? grantedReviewerIds : selectedReviewerIds;
     currentResetAt = typeof currentState?.resetAt === "string" ? currentState.resetAt : "";
   }
 
