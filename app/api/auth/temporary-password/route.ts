@@ -126,7 +126,7 @@ export async function POST(request: Request) {
         {
           ok: false,
           message:
-            "임시 비밀번호 메일 발송을 쓰려면 SMTP_HOST, SMTP_PORT, SMTP_SECURE, EMAIL_FROM 환경변수를 설정해 주세요.",
+            "임시 비밀번호 메일 발송을 쓰려면 SMTP_HOST, SMTP_PORT, EMAIL_FROM 환경변수를 설정해 주세요.",
         },
         { status: 500 },
       );

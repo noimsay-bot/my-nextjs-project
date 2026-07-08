@@ -3,6 +3,7 @@ import "server-only";
 import nodemailer from "nodemailer";
 import {
   deliverTemporaryPasswordMail,
+  maskEmail,
   resolveSmtpSecure,
   type TemporaryPasswordMailInput,
   type TemporaryPasswordMailResult,
@@ -24,7 +25,7 @@ function getMailTransportConfig() {
 
   if (!host || !port || Number.isNaN(port)) {
     throw new Error(
-      "임시 비밀번호 메일 발송을 위해 SMTP_HOST, SMTP_PORT, SMTP_SECURE, EMAIL_FROM 환경변수를 설정해 주세요.",
+      "임시 비밀번호 메일 발송을 위해 SMTP_HOST, SMTP_PORT, EMAIL_FROM 환경변수를 설정해 주세요.",
     );
   }
 
@@ -48,6 +49,10 @@ function getMailTransportConfig() {
   };
 }
 
+function getRecipientAddress(recipient: string | { address: string }) {
+  return typeof recipient === "string" ? recipient : recipient.address;
+}
+
 export function hasTemporaryPasswordMailEnv() {
   if (isMailLogOnly()) {
     return true;
@@ -56,7 +61,6 @@ export function hasTemporaryPasswordMailEnv() {
   return Boolean(
     process.env.SMTP_HOST &&
       process.env.SMTP_PORT &&
-      process.env.SMTP_SECURE &&
       process.env.EMAIL_FROM,
   );
 }
@@ -79,7 +83,17 @@ export async function sendTemporaryPasswordMail(
     {
       sendMail: async (message) => {
         const transporter = nodemailer.createTransport(getMailTransportConfig());
-        await transporter.sendMail(message);
+        const info = await transporter.sendMail(message);
+        if (info.rejected.length > 0) {
+          throw new Error(
+            `SMTP rejected recipients: ${info.rejected
+              .map((recipient) => maskEmail(getRecipientAddress(recipient)))
+              .join(", ")}`,
+          );
+        }
+        console.log(
+          `[mail] 임시 비밀번호 메일 SMTP 접수 완료 to=${maskEmail(message.to)} messageId=${info.messageId ?? "unknown"}`,
+        );
       },
       warn: (message) => console.warn(message),
     },
