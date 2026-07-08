@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { AdminUserAttributes, User } from "@supabase/supabase-js";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { hasTemporaryPasswordMailEnv, sendTemporaryPasswordMail } from "@/lib/server/mail";
+import { maskEmail, type TemporaryPasswordMailResult } from "@/lib/server/mail-core";
 
 const PROFILE_COLUMNS = "id, email, login_id, name";
 const AUTH_USER_LOOKUP_PAGE_SIZE = 1000;
@@ -208,6 +209,42 @@ export async function POST(request: Request) {
       username,
     });
 
+    // 메일 발송이 확인된 뒤에만 비밀번호를 변경한다.
+    // 발송 실패/스킵 시 기존 비밀번호가 그대로 유지되어야 사용자가 잠기지 않는다.
+    const maskedEmail = maskEmail(email);
+    let mailResult: TemporaryPasswordMailResult;
+    try {
+      mailResult = await sendTemporaryPasswordMail({
+        email,
+        loginId,
+        username,
+        temporaryPassword,
+      });
+    } catch (mailError) {
+      console.error(`[temporary-password] 메일 발송 실패 to=${maskedEmail}`, mailError);
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "임시 비밀번호 메일 발송에 실패했습니다. 관리자에게 문의해 주세요.",
+        },
+        { status: 500 },
+      );
+    }
+
+    if (!mailResult.sent) {
+      console.warn(
+        `[temporary-password] 메일 미발송(reason=${mailResult.reason}) to=${maskedEmail} — 비밀번호를 변경하지 않았습니다.`,
+      );
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "메일 발송이 로그 전용 모드(MAIL_LOG_ONLY)로 설정되어 있어 임시 비밀번호를 발급하지 못했습니다. 관리자에게 문의해 주세요.",
+        },
+        { status: 500 },
+      );
+    }
+
     const nextUserMetadata = {
       ...(authUser.user_metadata ?? {}),
       login_id: loginId,
@@ -222,21 +259,20 @@ export async function POST(request: Request) {
     });
 
     if (updateError) {
+      console.error(
+        `[temporary-password] 메일 발송 후 비밀번호 적용 실패 to=${maskedEmail}: ${updateError.message}`,
+      );
       return NextResponse.json(
         {
           ok: false,
-          message: updateError.message,
+          message:
+            "임시 비밀번호 메일은 발송되었지만 적용에 실패했습니다. 잠시 후 다시 시도해 주세요.",
         },
         { status: 500 },
       );
     }
 
-    await sendTemporaryPasswordMail({
-      email,
-      loginId,
-      username,
-      temporaryPassword,
-    });
+    console.log(`[temporary-password] 임시 비밀번호 메일 발송 완료 to=${maskedEmail}`);
 
     return NextResponse.json({
       ok: true,

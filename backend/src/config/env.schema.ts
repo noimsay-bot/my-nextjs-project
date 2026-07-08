@@ -15,7 +15,12 @@ export const envSchema = z.object({
   SMTP_SECURE: z.coerce.boolean().default(false),
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASS: z.string().optional().default(""),
-  MAIL_LOG_ONLY: z.coerce.boolean().default(true),
+  // z.coerce.boolean()은 "false" 문자열도 true로 바꾸므로 문자열을 엄격하게 파싱한다.
+  // 기본값 false: 명시적으로 켜지 않는 한 실제 메일을 발송한다.
+  MAIL_LOG_ONLY: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

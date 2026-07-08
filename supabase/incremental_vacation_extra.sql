@@ -105,3 +105,6 @@ create policy "vacation_extra_requests_delete_own"
   on public.vacation_extra_requests
   for delete to authenticated
   using (requester_id = auth.uid());
+
+grant select, insert, update, delete on table public.vacation_extra_units to authenticated, service_role;
+grant select, insert, update, delete on table public.vacation_extra_requests to authenticated, service_role;
