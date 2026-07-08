@@ -10,6 +10,7 @@ type ProfileRow = {
 
 type ScheduleAssignmentDisplayRow = {
   month_key: string;
+  entries: unknown;
   rows: unknown;
 };
 
@@ -36,6 +37,38 @@ function normalizeMonthKeys(value: unknown) {
   )
     .sort((left, right) => left.localeCompare(right))
     .slice(0, MAX_MONTH_KEYS);
+}
+
+function sanitizeDisplayEntries(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+
+  const entries: Array<[string, Record<string, unknown>]> = [];
+  Object.entries(value as Record<string, unknown>).forEach(([rowKey, rawEntry]) => {
+    if (!rawEntry || typeof rawEntry !== "object") return;
+    const entry = rawEntry as Record<string, unknown>;
+    const travelType = typeof entry.travelType === "string" ? entry.travelType : "";
+    const tripTagId = typeof entry.tripTagId === "string" ? entry.tripTagId : "";
+    const tripTagLabel = typeof entry.tripTagLabel === "string" ? entry.tripTagLabel : "";
+    const tripTagPhase = typeof entry.tripTagPhase === "string" ? entry.tripTagPhase : "";
+    const schedules = Array.isArray(entry.schedules)
+      ? entry.schedules.filter((item): item is string => typeof item === "string")
+      : [];
+
+    if (!travelType && !tripTagId && !tripTagLabel && !tripTagPhase && schedules.length === 0) return;
+
+    entries.push([
+      rowKey,
+      {
+        travelType,
+        tripTagId,
+        tripTagLabel,
+        tripTagPhase,
+        schedules,
+      },
+    ]);
+  });
+
+  return Object.fromEntries(entries);
 }
 
 export async function POST(request: Request) {
@@ -75,7 +108,7 @@ export async function POST(request: Request) {
 
     const { data, error } = await admin
       .from("team_lead_schedule_assignments")
-      .select("month_key, rows")
+      .select("month_key, entries, rows")
       .in("month_key", monthKeys)
       .returns<ScheduleAssignmentDisplayRow[]>();
 
@@ -86,7 +119,7 @@ export async function POST(request: Request) {
     return jsonWithUsageDebug(request, startedAt, {
       rows: (data ?? []).map((row) => ({
         month_key: row.month_key,
-        entries: {},
+        entries: sanitizeDisplayEntries(row.entries),
         rows: row.rows ?? {},
       })),
     });

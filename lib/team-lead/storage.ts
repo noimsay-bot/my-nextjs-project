@@ -960,20 +960,23 @@ function applyAssignmentMonthToCache(monthKey: string, row: TeamLeadScheduleAssi
 }
 
 function applyAssignmentDisplayRowsToCache(rows: TeamLeadScheduleAssignmentRow[], monthKeys: string[]) {
+  const nextEntries = { ...assignmentStoreCache.entries };
   const nextRows = { ...assignmentStoreCache.rows };
   const rowMap = new Map(rows.map((row) => [row.month_key, row] as const));
 
   monthKeys.forEach((monthKey) => {
     const row = rowMap.get(monthKey);
     if (row) {
+      nextEntries[monthKey] = normalizeMonthEntries(row.entries ?? {});
       nextRows[monthKey] = normalizeMonthRows(row.rows ?? {});
     } else {
+      delete nextEntries[monthKey];
       delete nextRows[monthKey];
     }
   });
 
   assignmentStoreCache = {
-    entries: assignmentStoreCache.entries,
+    entries: nextEntries,
     rows: nextRows,
   };
 }

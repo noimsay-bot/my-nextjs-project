@@ -79,6 +79,38 @@ test("trip display follows a published trip category even when assignment duty d
   ).toBe("박재현(출)");
 });
 
+test("trip return phase from display entries marks published work schedule names", () => {
+  const rowKey = createAssignmentRowKey("2026-07-01", "뉴스대기", 0, "박재현");
+  const store: ScheduleAssignmentDataStore = {
+    entries: {
+      "2026-07": {
+        [rowKey]: {
+          ...createDefaultScheduleAssignmentEntry(),
+          travelType: "국내출장",
+          tripTagId: "trip-return-1",
+          tripTagLabel: "월드컵",
+          tripTagPhase: "return",
+        },
+      },
+    },
+    rows: {},
+  };
+
+  expect(
+    formatScheduleAssignmentDisplayName(
+      {
+        monthKey: "2026-07",
+        dateKey: "2026-07-01",
+        category: "뉴스대기",
+        index: 0,
+        name: "박재현",
+      },
+      store,
+      new Map(),
+    ),
+  ).toBe("박재현(출)");
+});
+
 test("trip display follows assignment trip category rows without travel type metadata", () => {
   const store: ScheduleAssignmentDataStore = {
     entries: {
