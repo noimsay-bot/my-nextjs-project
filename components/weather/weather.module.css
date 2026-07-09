@@ -82,6 +82,15 @@
   z-index: 0;
 }
 
+/* The 1H forecast PNGs come with an opaque white background baked in.
+   Blending on the overlay image itself is a no-op because the Leaflet
+   overlay pane (position: absolute + z-index) is an isolated stacking
+   context, so blend at the pane level to let white areas vanish against
+   the tile layer below. */
+.leafletMap :global(.leaflet-overlay-pane) {
+  mix-blend-mode: darken;
+}
+
 .mapImage {
   width: 100%;
   height: 100%;
@@ -92,7 +101,6 @@
 
 .radarOverlayImage {
   background: transparent;
-  mix-blend-mode: darken;
 }
 
 .mapLegend {

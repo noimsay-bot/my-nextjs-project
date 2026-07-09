@@ -1,4 +1,3 @@
-import Image from "next/image";
 import styles from "@/components/home/HomeNews.module.css";
 import { type HomeDdayItem } from "@/lib/home-popup/storage";
 
@@ -14,8 +13,6 @@ type HomeNewsMetaProps = {
   canManageDdays?: boolean;
   onManageDday?: (item: HomeDdayItem) => void;
 };
-
-const WORLD_CUP_PROJECT_URL = "https://wc26-ops-layout.vercel.app/";
 
 function formatKstDate(value: string) {
   const parsed = new Date(`${value}T00:00:00+09:00`);
@@ -84,30 +81,9 @@ function renderDdayItems(ddayItems: HomeDdayItem[], canManageDdays: boolean, onM
   );
 }
 
-function renderWorldCupHoverBanner() {
-  return (
-    <a
-      href={WORLD_CUP_PROJECT_URL}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={styles.metaBarHoverBanner}
-      aria-label="2026 월드컵 프로젝트 바로가기"
-    >
-      <Image
-        src="/images/worldcup-banner-jtbc.png"
-        alt="짜릿하게 대체불가 월드컵은 JTBC 배너"
-        fill
-        sizes="(max-width: 768px) 100vw, 340px"
-        className={styles.metaBarHoverBannerDefault}
-      />
-    </a>
-  );
-}
-
 function renderDdayArea(ddayItems: HomeDdayItem[], canManageDdays: boolean, onManageDday?: (item: HomeDdayItem) => void) {
   return (
     <div className={styles.metaBarDdayArea}>
-      {renderWorldCupHoverBanner()}
       {renderDdayItems(ddayItems, canManageDdays, onManageDday)}
     </div>
   );

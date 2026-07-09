@@ -18,6 +18,9 @@ const KMA_APIHUB_ORIGIN = "https://apihub.kma.go.kr";
 const HSR_ENDPOINT = "nph-rdr_cmp1_imgp";
 const FORECAST_ENDPOINT = "nph-qpf_ana_imgp";
 const HSR_PERMISSION_MESSAGE = "현재 실황 프레임을 위해 APIHub 4.1 레이더-HSR API 활용신청이 필요합니다.";
+const RADAR_BLANK_IMAGE_MESSAGE = "KMA APIHub가 강수 표시가 없는 빈 레이더 이미지를 반환했습니다.";
+const RADAR_BLANK_IMAGE_RETRY_LIMIT = 3;
+const RADAR_BLANK_IMAGE_RETRY_DELAY_MS = 1200;
 const CACHE_HEADERS = {
   "Cache-Control": "private, max-age=300",
   Vary: "Cookie",
@@ -979,7 +982,63 @@ async function withImageStats(frame: RadarForecastFrame) {
   };
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+// APIHub image CGIs sometimes generate a fully transparent PNG (no radar echo,
+// no basemap lines) even though the JSON response reports success. The file at
+// the returned URL never fills in afterwards, so the only recovery is issuing
+// a fresh CGI request. A real frame always contains basemap pixels, so zero
+// visible pixels always means a broken generation, never "no rain".
+function isBlankRadarFrameImage(frame: RadarForecastFrame) {
+  return frame.status === "available"
+    && frame.imageStats?.ok === true
+    && frame.imageStats.visiblePixels === 0;
+}
+
 async function fetchKmaRadarFrame(input: FetchRadarFrameInput): Promise<FetchRadarFrameResult> {
+  let result = await fetchKmaRadarFrameOnce(input);
+  let blankRetries = 0;
+
+  while (isBlankRadarFrameImage(result.frame) && blankRetries < RADAR_BLANK_IMAGE_RETRY_LIMIT) {
+    blankRetries += 1;
+    await sleep(RADAR_BLANK_IMAGE_RETRY_DELAY_MS);
+    result = await fetchKmaRadarFrameOnce(input);
+  }
+
+  if (isBlankRadarFrameImage(result.frame)) {
+    return {
+      frame: {
+        ...result.frame,
+        status: "nodata",
+        nodata: true,
+        errorMessage: RADAR_BLANK_IMAGE_MESSAGE,
+      },
+      requestStatus: "nodata",
+      errorMessage: RADAR_BLANK_IMAGE_MESSAGE,
+      debug: {
+        ...result.debug,
+        blankRetries,
+        blankImageAfterRetries: true,
+      },
+    };
+  }
+
+  if (blankRetries > 0) {
+    return {
+      ...result,
+      debug: {
+        ...result.debug,
+        blankRetries,
+      },
+    };
+  }
+
+  return result;
+}
+
+async function fetchKmaRadarFrameOnce(input: FetchRadarFrameInput): Promise<FetchRadarFrameResult> {
   const requestedEf = input.sourceEndpoint === FORECAST_ENDPOINT
     ? input.requestedEf ?? String(input.offsetMinutes)
     : "";

@@ -1,0 +1,6 @@
+.staff-name
+.employee-id
+.phone
+.email
+.score
+.evaluation-value

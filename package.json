@@ -10,6 +10,7 @@
     "audit:legacy-home-dataurl": "node scripts/audit-legacy-home-dataurl.mjs",
     "migrate:home-community-attachments": "node scripts/migrate-home-community-attachments.mjs",
     "test:e2e": "playwright test",
+    "capture:portfolio": "playwright test tests/portfolio-captures.spec.ts",
     "harness:routes": "node scripts/harness/generate-route-map.mjs",
     "harness:env": "node scripts/harness/generate-env-map.mjs",
     "harness:supabase": "node scripts/harness/generate-supabase-map.mjs",

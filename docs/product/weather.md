@@ -27,6 +27,8 @@
 - `현재` 프레임은 APIHub 4.1 레이더-HSR(`nph-rdr_cmp1_imgp`)에서 가져오고, `+10분`부터 `+60분`까지는 APIHub 4.4 레이더-1H예측(`nph-qpf_ana_imgp`)에서 가져온다.
 - 1H예측 `qpf`는 `M(MAPLE)`을 우선 사용하고, 완성 세트가 안 만들어지면 `B(블랜딩)`도 같은 완성 조건으로 시도한다.
 - `+40분` 프레임은 `ef=40`을 우선 요청하고, 해당 프레임만 비면 APIHub 문서의 `(+0,+1,,,)` 표기 검증을 위해 `ef=4`를 1회 추가 시도하며 이 결과를 debug에 남긴다.
+- APIHub 이미지 CGI는 JSON이 성공이어도 간헐적으로 완전 투명 빈 PNG를 생성하며, 같은 URL은 이후에도 채워지지 않는다. 서버 route는 다운로드한 이미지의 visible pixel이 0이면 새 CGI 요청으로 최대 3회 재시도하고, 끝까지 비면 해당 프레임을 nodata로 기록해 완성 세트로 승격하지 않는다.
+- 1H예측 PNG는 흰 배경이 포함되어 내려오므로, Leaflet overlay pane에 `mix-blend-mode: darken`을 적용해 지도 타일 위에서 흰 배경이 보이지 않게 한다. 오버레이 이미지 요소 자체에 blend를 걸면 pane의 stacking context 때문에 무효라서 pane 레벨에 적용한다.
 - 새로고침 결과가 불완전하면 `weather_radar_frame_sets.is_active`로 승격하지 않고, 기존 active complete set이 있으면 그대로 표시한다.
 - 불완전 세트는 `missing_frames`, `available_frames`, `debug` 상태 확인용으로만 저장하며 가까운 시간대 프레임으로 대체하지 않는다.
 - APIHub 문서상 레이더-1H예측은 `PROJ=LCC`, `STARTX/STARTY/ENDX/ENDY`, `ZOOMLVL`을 제공한다. 현재 변환 helper는 APIHub 경량 지도 좌표가 한국 도메인 bounds로 안전하게 환산될 때만 오버레이하고, 확정하지 못하면 원본 PNG fallback을 표시한다.
