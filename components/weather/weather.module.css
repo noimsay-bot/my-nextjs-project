@@ -22,6 +22,90 @@
   gap: 16px;
 }
 
+.hiddenRadarPanel {
+  display: none;
+}
+
+.panelStack :global(.wx-wrap) {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  color: #1a1a1a;
+}
+
+.panelStack :global(.wx-grid) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.panelStack :global(.wx-card) {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  width: 200px;
+  height: 72px;
+  padding: 0 16px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  text-decoration: none;
+  color: inherit;
+  background: linear-gradient(160deg, #f0f6ff, #e5edf7);
+  border: 1px solid #d7e3f2;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s;
+}
+
+.panelStack :global(.wx-card:hover) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(30, 58, 138, 0.16);
+  border-color: #5b9bf0;
+}
+
+.panelStack :global(.wx-icon) {
+  font-size: 26px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.panelStack :global(.wx-text) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.panelStack :global(.wx-title) {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.panelStack :global(.wx-desc) {
+  font-size: 11px;
+  color: #5a6b80;
+  line-height: 1.3;
+}
+
+.panelStack :global(.wx-badge) {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #dbe9ff;
+  color: #1d4ed8;
+}
+
+.panelStack :global(.wx-badge.key) {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
 .sectionHead {
   display: flex;
   align-items: flex-start;
@@ -362,6 +446,16 @@
   .sectionHead,
   .recommendationHeader {
     align-items: stretch;
+  }
+
+  .panelStack :global(.wx-wrap) {
+    width: 100%;
+    padding: 16px 0;
+  }
+
+  .panelStack :global(.wx-card) {
+    flex: 1 1 100%;
+    width: 100%;
   }
 
   .toolbar,
