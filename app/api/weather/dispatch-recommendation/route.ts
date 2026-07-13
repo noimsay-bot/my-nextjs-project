@@ -9,9 +9,10 @@ import {
 } from "@/lib/weather/candidates";
 import {
   WEATHER_FORECAST_OFFSETS,
+  WEATHER_DISPATCH_RECOMMENDATION_VERSION,
   generateRainDispatchRecommendationsForRanges,
   generateRainDispatchRecommendationsFromForecasts,
-  parseRainAmount,
+  parseRainAmountDetail,
   parseWeatherDispatchRange,
   type RainDispatchRecommendationResponse,
   type RainForecastFrame,
@@ -31,6 +32,8 @@ const DATA_GO_KR_ESTIMATION_NOTE = "예보 시간 단위 기반 추정";
 const DISPATCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const REFRESHING_CACHE_MESSAGE = "refreshing";
 const ALL_DISPATCH_RANGES: WeatherDispatchRangeMinutes[] = [10, 20, 30];
+// TODO: 초단기예보에는 POP가 없으므로, 단기예보 POP를 함께 받게 되면
+// POP 임계값 미만일 때 추천 자체를 스킵하는 상위 가드를 추가한다.
 
 type KmaGrid = {
   nx: number;
@@ -89,6 +92,7 @@ function createUnavailablePayload(
   return {
     status: "unavailable",
     message,
+    algorithmVersion: WEATHER_DISPATCH_RECOMMENDATION_VERSION,
     base,
     rangeMinutes,
     generatedAt,
@@ -139,12 +143,9 @@ function isRecommendationResponse(value: unknown): value is RainDispatchRecommen
     value &&
       typeof value === "object" &&
       Array.isArray((value as { items?: unknown }).items) &&
-      typeof (value as { rangeMinutes?: unknown }).rangeMinutes === "number",
+      typeof (value as { rangeMinutes?: unknown }).rangeMinutes === "number" &&
+      (value as { algorithmVersion?: unknown }).algorithmVersion === WEATHER_DISPATCH_RECOMMENDATION_VERSION,
   );
-}
-
-function isUsableRecommendationResponse(value: unknown): value is RainDispatchRecommendationResponse {
-  return isRecommendationResponse(value) && value.status !== "unavailable" && value.items.length > 0;
 }
 
 function normalizeServiceKey(value: string) {
@@ -273,9 +274,17 @@ function getPrecipitationTypeLabel(value: string) {
   }
 }
 
-function adjustRainByPrecipitationType(rainMmPerHour: number, precipitationType: string) {
-  if (rainMmPerHour > 0) return rainMmPerHour;
-  return precipitationType !== "0" && precipitationType !== "" ? 0.2 : 0;
+function normalizeRainAmount(rn1: string | number | null | undefined, precipitationType: string) {
+  const parsed = parseRainAmountDetail(rn1);
+  if (parsed.adjustedRainMmPerHour > 0) return parsed;
+  if (precipitationType !== "0" && precipitationType !== "") {
+    return {
+      rawRainMmPerHour: 0,
+      adjustedRainMmPerHour: 0.2,
+      adjustment: "pty-only" as const,
+    };
+  }
+  return parsed;
 }
 
 async function fetchDataGoKrItems(
@@ -365,10 +374,12 @@ function buildObservedFrame(items: DataGoKrItem[], now: Date): RainForecastFrame
   }
 
   if (!rn1 && !pty) return null;
-  const rainMmPerHour = adjustRainByPrecipitationType(parseRainAmount(rn1), pty);
+  const rain = normalizeRainAmount(rn1, pty);
   return {
     afterMinutes: 0,
-    rainMmPerHour,
+    rainMmPerHour: rain.adjustedRainMmPerHour,
+    rawRainMmPerHour: rain.rawRainMmPerHour,
+    rainAdjustment: rain.adjustment,
     forecastAt: baseDate && baseTime ? kstDateTimeToIso(baseDate, baseTime) : now.toISOString(),
     precipitationType: getPrecipitationTypeLabel(pty),
   };
@@ -395,9 +406,12 @@ function buildForecastFrames(items: DataGoKrItem[], now: Date): RainForecastFram
       const forecastAt = kstDateTimeToIso(entry.date, entry.time);
       const afterMinutes = Math.max(0, Math.round((new Date(forecastAt).getTime() - now.getTime()) / 600000) * 10);
       const pty = entry.pty ?? "";
+      const rain = normalizeRainAmount(entry.rn1, pty);
       return {
         afterMinutes,
-        rainMmPerHour: adjustRainByPrecipitationType(parseRainAmount(entry.rn1), pty),
+        rainMmPerHour: rain.adjustedRainMmPerHour,
+        rawRainMmPerHour: rain.rawRainMmPerHour,
+        rainAdjustment: rain.adjustment,
         forecastAt,
         precipitationType: getPrecipitationTypeLabel(pty),
       };
@@ -416,6 +430,8 @@ function expandNearestForecastFrames(frames: RainForecastFrame[]) {
     return {
       afterMinutes,
       rainMmPerHour: nearest.rainMmPerHour,
+      rawRainMmPerHour: nearest.rawRainMmPerHour,
+      rainAdjustment: nearest.rainAdjustment,
       forecastAt: nearest.forecastAt,
       precipitationType: nearest.precipitationType,
     };
@@ -494,7 +510,7 @@ async function readFreshDispatchCache(baseTimeKst: string, rangeMinutes: Weather
     .gt("expires_at", new Date().toISOString())
     .maybeSingle<DispatchCacheRow>();
 
-  if (error || !data || !isUsableRecommendationResponse(data.payload)) return null;
+  if (error || !data || data.error_message || !isRecommendationResponse(data.payload)) return null;
   return data;
 }
 
@@ -594,6 +610,7 @@ export async function GET(request: Request) {
         message: errorMessage
           ? `현재 강수 출동 추천이 없습니다. (${errorMessage})`
           : "현재 강수 출동 추천이 없습니다.",
+        algorithmVersion: WEATHER_DISPATCH_RECOMMENDATION_VERSION,
         base: dispatchBase,
         rangeMinutes,
         generatedAt: now.toISOString(),

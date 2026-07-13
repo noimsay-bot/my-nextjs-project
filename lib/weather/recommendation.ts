@@ -11,6 +11,8 @@ export type WeatherDispatchRangeMinutes = 10 | 20 | 30;
 export interface RainForecastFrame {
   afterMinutes: number;
   rainMmPerHour: number;
+  rawRainMmPerHour: number;
+  rainAdjustment?: "none" | "trace" | "pty-only";
   forecastAt?: string;
   precipitationType?: string | null;
 }
@@ -34,6 +36,7 @@ export interface RainDispatchRecommendationItem {
 export interface RainDispatchRecommendationResponse {
   status?: "available" | "unavailable";
   message?: string | null;
+  algorithmVersion?: string;
   base: WeatherDispatchPoint;
   rangeMinutes: WeatherDispatchRangeMinutes;
   generatedAt: string;
@@ -46,8 +49,15 @@ export interface RainDispatchRecommendationResponse {
 }
 
 export const WEATHER_FORECAST_OFFSETS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
-const EVALUATION_SETUP_MINUTES = 10;
+export const WEATHER_DISPATCH_RECOMMENDATION_VERSION = "significant-rain-v3";
+// 카메라에 명확히 포착되는 보통 비(기상청 기준) 이상만 출동 후보로 인정한다.
+export const SIGNIFICANT_RAIN_PEAK_MM_PER_HOUR = 4;
+export const SIGNIFICANT_RAIN_SUSTAINED_MINUTES = 10;
+// 지속 강수도 같은 강도 기준으로 계산해 부슬비와 빗방울을 제외한다.
+export const SUSTAINED_RAIN_MM_PER_HOUR = 4;
+const EVALUATION_SETUP_MINUTES = 5;
 const EVALUATION_WINDOW_MINUTES = 40;
+const NO_SIGNIFICANT_RAIN_MESSAGE = "현재 유의미한 강수 출동 추천이 없습니다.";
 
 const MOCK_RAIN_FORECASTS: Record<string, number[]> = {
   "sangam-dmc": [0.2, 0.8, 2.5, 4.8, 6.4, 5.2, 3.1, 1.2, 0.2, 0, 0],
@@ -89,12 +99,18 @@ function getMockForecast(candidateId: string): RainForecastFrame[] {
   return WEATHER_FORECAST_OFFSETS.map((afterMinutes, index) => ({
     afterMinutes,
     rainMmPerHour: Math.max(0, values[index] ?? 0),
+    rawRainMmPerHour: Math.max(0, values[index] ?? 0),
+    rainAdjustment: "none",
   }));
 }
 
-function maxRain(frames: RainForecastFrame[]) {
+function getDecisionRainMmPerHour(frame: RainForecastFrame) {
+  return frame.rawRainMmPerHour;
+}
+
+function maxRain(frames: RainForecastFrame[], readRain: (frame: RainForecastFrame) => number = getDecisionRainMmPerHour) {
   return frames.reduce<RainForecastFrame | null>((best, frame) => {
-    if (!best || frame.rainMmPerHour > best.rainMmPerHour) return frame;
+    if (!best || readRain(frame) > readRain(best)) return frame;
     return best;
   }, null);
 }
@@ -104,22 +120,62 @@ function formatRain(value: number) {
 }
 
 export function parseRainAmount(value: string | number | null | undefined) {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  return parseRainAmountDetail(value).adjustedRainMmPerHour;
+}
+
+export function parseRainAmountDetail(value: string | number | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const rainMmPerHour = Math.max(0, value);
+    return {
+      rawRainMmPerHour: rainMmPerHour,
+      adjustedRainMmPerHour: rainMmPerHour,
+      adjustment: "none" as const,
+    };
+  }
+
   const text = String(value ?? "").trim();
-  if (!text || text === "강수없음") return 0;
-  if (text.includes("1mm 미만")) return 0.5;
+  if (!text || text === "강수없음") {
+    return {
+      rawRainMmPerHour: 0,
+      adjustedRainMmPerHour: 0,
+      adjustment: "none" as const,
+    };
+  }
+  if (text.includes("1mm 미만")) {
+    return {
+      rawRainMmPerHour: 0,
+      adjustedRainMmPerHour: 0.5,
+      adjustment: "trace" as const,
+    };
+  }
 
   const rangeMatch = text.match(/(\d+(?:\.\d+)?)\s*~\s*(\d+(?:\.\d+)?)/);
   if (rangeMatch) {
     const left = Number(rangeMatch[1]);
     const right = Number(rangeMatch[2]);
-    if (Number.isFinite(left) && Number.isFinite(right)) return Math.max(left, right);
+    const rainMmPerHour = Number.isFinite(left) && Number.isFinite(right) ? Math.max(left, right) : 0;
+    return {
+      rawRainMmPerHour: rainMmPerHour,
+      adjustedRainMmPerHour: rainMmPerHour,
+      adjustment: "none" as const,
+    };
   }
 
   const numericMatch = text.match(/(\d+(?:\.\d+)?)/);
-  if (!numericMatch) return 0;
+  if (!numericMatch) {
+    return {
+      rawRainMmPerHour: 0,
+      adjustedRainMmPerHour: 0,
+      adjustment: "none" as const,
+    };
+  }
   const numeric = Number(numericMatch[1]);
-  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+  const rainMmPerHour = Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+  return {
+    rawRainMmPerHour: rainMmPerHour,
+    adjustedRainMmPerHour: rainMmPerHour,
+    adjustment: "none" as const,
+  };
 }
 
 function buildReason(input: {
@@ -127,7 +183,7 @@ function buildReason(input: {
   peakAfterArrivalMinutes: number;
   peakRainMmPerHour: number;
   sustainedMinutes: number;
-  trend: "rising" | "steady" | "passing";
+  trend: "rising" | "steady";
 }) {
   const timing =
     input.peakAfterArrivalMinutes <= 20
@@ -135,16 +191,16 @@ function buildReason(input: {
       : `도착 ${input.peakAfterArrivalMinutes}분 뒤 강수 피크가 예상됩니다`;
   const sustain =
     input.sustainedMinutes >= 40
-      ? "평가 구간 대부분에서 1mm/h 이상이 유지됩니다"
+      ? `평가 구간 대부분에서 ${SUSTAINED_RAIN_MM_PER_HOUR}mm/h 이상이 유지됩니다`
       : input.sustainedMinutes >= 30
         ? "촬영 가능한 비가 30분 안팎 이어집니다"
-        : "촬영 가능한 비가 20분 이상 유지됩니다";
+        : input.sustainedMinutes >= 20
+          ? "촬영 가능한 비가 20분 이상 유지됩니다"
+          : `촬영 가능한 비가 최소 ${SIGNIFICANT_RAIN_SUSTAINED_MINUTES}분 유지됩니다`;
   const trend =
     input.trend === "rising"
       ? "도착 시점보다 도착 후 10~20분 강수가 강해지는 흐름입니다"
-      : input.trend === "passing"
-        ? "피크가 지나가는 흐름이라 현장 도착 지연에 주의가 필요합니다"
-        : "강수 흐름이 비교적 안정적입니다";
+      : "강수 흐름이 비교적 안정적입니다";
 
   return `${timing}. ${sustain}. ${trend}. ${input.candidate.name}은 촬영 적합도 ${Math.round(
     input.candidate.shootingSuitability * 100,
@@ -177,38 +233,37 @@ function scoreCandidate(
     return null;
   }
 
+  // 이동과 세팅을 마친 뒤부터 이동 시간 + 40분까지를 촬영 가능한 평가창으로 고정한다.
   const evaluationStart = travelBandMinutes + EVALUATION_SETUP_MINUTES;
   const evaluationEnd = travelBandMinutes + EVALUATION_WINDOW_MINUTES;
   const evaluationFrames = frames.filter(
     (frame) => frame.afterMinutes >= evaluationStart && frame.afterMinutes <= evaluationEnd,
   );
   const peakFrame = maxRain(evaluationFrames);
+  const peakDecisionRainMmPerHour = peakFrame ? getDecisionRainMmPerHour(peakFrame) : 0;
 
-  if (!peakFrame || peakFrame.rainMmPerHour <= 0) {
+  if (!peakFrame || peakDecisionRainMmPerHour < SIGNIFICANT_RAIN_PEAK_MM_PER_HOUR) {
     return null;
   }
 
-  const sustainedMinutes = evaluationFrames.filter((frame) => frame.rainMmPerHour >= 1).length * 10;
-  if (sustainedMinutes === 0) {
+  const sustainedMinutes = evaluationFrames.filter(
+    (frame) => getDecisionRainMmPerHour(frame) >= SUSTAINED_RAIN_MM_PER_HOUR,
+  ).length * 10;
+  if (sustainedMinutes < SIGNIFICANT_RAIN_SUSTAINED_MINUTES) {
     return null;
   }
 
-  const arrivalFrame =
-    frames.find((frame) => frame.afterMinutes >= travelBandMinutes) ??
-    frames[frames.length - 1] ??
-    peakFrame;
-  const earlyAfterArrivalFrame =
-    frames.find((frame) => frame.afterMinutes >= travelBandMinutes + 20) ??
-    peakFrame;
-  const peakBeforeEvaluation = maxRain(frames.filter((frame) => frame.afterMinutes < evaluationStart));
+  const evaluationStartFrame = evaluationFrames[0] ?? peakFrame;
+  const laterEvaluationFrame =
+    evaluationFrames.find((frame) => frame.afterMinutes >= evaluationStart + 20) ?? peakFrame;
+  // 도착 전 강수 피크만 별도로 봐서, 현장에 도착하기 전에 지나간 비는 감점한다.
+  const peakBeforeArrival = maxRain(frames.filter((frame) => frame.afterMinutes < travelBandMinutes));
   const peakAfterArrivalMinutes = peakFrame.afterMinutes - travelBandMinutes;
   const trend =
-    earlyAfterArrivalFrame.rainMmPerHour > arrivalFrame.rainMmPerHour + 1
+    getDecisionRainMmPerHour(laterEvaluationFrame) > getDecisionRainMmPerHour(evaluationStartFrame) + 1
       ? "rising"
-      : peakBeforeEvaluation && peakBeforeEvaluation.rainMmPerHour > peakFrame.rainMmPerHour
-        ? "passing"
-        : "steady";
-  const intensityScore = clamp(peakFrame.rainMmPerHour / 15, 0, 1);
+      : "steady";
+  const intensityScore = clamp(peakDecisionRainMmPerHour / 15, 0, 1);
   const sustainedScore = clamp(sustainedMinutes / 40, 0, 1);
   const peakTimingScore =
     peakAfterArrivalMinutes >= 10 && peakAfterArrivalMinutes <= 20
@@ -218,9 +273,9 @@ function scoreCandidate(
         : 0.72;
   const distanceScore = clamp(1 - distanceKm / 35, 0, 1);
   const passingPenalty =
-    peakBeforeEvaluation && peakBeforeEvaluation.rainMmPerHour > peakFrame.rainMmPerHour * 1.15
+    peakBeforeArrival && getDecisionRainMmPerHour(peakBeforeArrival) > peakDecisionRainMmPerHour * 1.15
       ? 0.76
-      : peakBeforeEvaluation && peakBeforeEvaluation.rainMmPerHour > peakFrame.rainMmPerHour
+      : peakBeforeArrival && getDecisionRainMmPerHour(peakBeforeArrival) > peakDecisionRainMmPerHour
         ? 0.9
         : 1;
   const suitabilityFactor = 0.85 + candidate.shootingSuitability * 0.3;
@@ -232,7 +287,7 @@ function scoreCandidate(
       suitabilityFactor +
     risingBonus;
   const score = clamp(weightedScore, 0, 100);
-  const peakRainMmPerHour = Number(peakFrame.rainMmPerHour.toFixed(1));
+  const peakRainMmPerHour = Number(peakDecisionRainMmPerHour.toFixed(1));
 
   return {
     placeName: candidate.name,
@@ -314,8 +369,9 @@ function buildRangeResponse(
   options: GenerateRecommendationOptions,
 ): RainDispatchRecommendationResponse {
   return {
-    status: options.status ?? "available",
-    message: options.message ?? null,
+    algorithmVersion: WEATHER_DISPATCH_RECOMMENDATION_VERSION,
+    status: options.status ?? (items.length > 0 ? "available" : "unavailable"),
+    message: options.message ?? (items.length > 0 ? null : NO_SIGNIFICANT_RAIN_MESSAGE),
     base: resolved.base,
     rangeMinutes,
     generatedAt: resolved.generatedAt,
