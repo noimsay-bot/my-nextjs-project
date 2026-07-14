@@ -37,7 +37,7 @@
 .panelStack :global(.wx-grid) {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 24px;
 }
 
 .panelStack :global(.wx-card) {
@@ -45,10 +45,10 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 12px;
-  width: 200px;
-  height: 72px;
-  padding: 0 16px;
+  gap: 20px;
+  width: 400px;
+  height: 144px;
+  padding: 0 32px;
   box-sizing: border-box;
   border-radius: 12px;
   text-decoration: none;
@@ -65,7 +65,7 @@
 }
 
 .panelStack :global(.wx-icon) {
-  font-size: 26px;
+  font-size: 40px;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -78,24 +78,24 @@
 }
 
 .panelStack :global(.wx-title) {
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
 .panelStack :global(.wx-desc) {
-  font-size: 11px;
+  font-size: 14px;
   color: #5a6b80;
   line-height: 1.3;
 }
 
 .panelStack :global(.wx-badge) {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  font-size: 10px;
+  top: 12px;
+  right: 12px;
+  font-size: 12px;
   font-weight: 700;
-  padding: 1px 7px;
+  padding: 3px 10px;
   border-radius: 999px;
   background: #dbe9ff;
   color: #1d4ed8;

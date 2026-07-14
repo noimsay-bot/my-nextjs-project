@@ -41,7 +41,6 @@ export function WeatherDashboard({
       <article className="panel">
         <div className="panel-pad">
           <div className={styles.header}>
-            <div className="chip">관리자 도구</div>
             <h1 className="page-title">날씨</h1>
             <p>상암동 기준 강수예측과 출동 추천을 확인합니다.</p>
           </div>
