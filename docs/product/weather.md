@@ -1,20 +1,19 @@
 # weather
 
 ## 현재 범위
-- `/weather`는 관리자(`role === "admin"`) 전용 포털 페이지다.
+- `/weather`는 승인된 팀원 포털 역할(`member`, `outlet`, `reviewer`, `observer`, `desk`, `team_lead`, `admin`)이 사용하는 페이지다. 외부 파트너 역할은 접근하지 않는다.
 - 레이더 1H 강수예측 영역은 기상청 APIHub 활용신청 승인 후 HSR 현재 실황 1개와 1H예측 6개를 하나의 완성 세트로 표시한다.
 - 강수 출동 추천은 브라우저 현재 위치 기준 직선거리 이동권과 공공데이터포털 초단기예보 강수 흐름으로 추천을 만든다.
 
 ## 권한
-- 사이드바 메뉴는 admin 역할에만 노출한다.
-- 직접 URL 접근은 `AuthGate`에서 admin 역할만 허용한다.
-- `app/api/weather/**`는 Route Handler 내부에서 서버 세션과 profile role을 다시 확인한다.
+- 사이드바 메뉴와 직접 URL 접근은 승인된 팀원 포털 역할에 허용한다.
+- `app/api/weather/**`는 Route Handler 내부에서 서버 세션, 승인 상태, 팀원 포털 role을 다시 확인한다.
 
 ## 비용/보안
 - `KMA_APIHUB_AUTH_KEY`는 server-only 환경변수다.
 - `DATA_GO_KR_SERVICE_KEY`는 server-only 환경변수다.
 - `SUPABASE_SERVICE_ROLE_KEY`는 서버 route가 `weather_radar_frame_sets`, `weather_radar_frames`, `weather_dispatch_cache`에 캐시를 upsert할 때만 사용한다.
-- 운영 반영 전 Supabase SQL Editor에서 `supabase/incremental_weather_cache_tables.sql`, `supabase/incremental_weather_radar_frame_sets.sql`을 적용하고, Vercel 환경변수 추가 후 redeploy한다.
+- 운영 반영 전 Supabase SQL Editor에서 `supabase/incremental_weather_cache_tables.sql`, `supabase/incremental_weather_radar_frame_sets.sql`, `supabase/incremental_weather_member_access.sql` 순서로 적용하고, Vercel 환경변수 추가 후 redeploy한다.
 - 카카오모빌리티, TMAP, 네이버 길찾기 같은 유료 이동시간 API는 사용하지 않는다.
 - 이동시간은 실제 길찾기가 아니라 현재 위치 기준 Haversine 직선거리 이동권으로 계산한다.
 - 추천 영역은 브라우저 위치 권한 허용 후 현재 위치 좌표를 서버 route에 전달해 계산한다.

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { inflateSync } from "node:zlib";
 import { getJsonResponseByteLength, logRouteUsageDebug } from "@/lib/server/usage-debug";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
-import { requireWeatherAdmin } from "@/lib/weather/server-auth";
+import { requireWeatherAccess } from "@/lib/weather/server-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1351,7 +1351,7 @@ function payload(input: {
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
-  const auth = await requireWeatherAdmin();
+  const auth = await requireWeatherAccess();
   if (auth.response) return auth.response;
   const url = new URL(request.url);
   const shouldRefresh = url.searchParams.get("refresh") === "1";

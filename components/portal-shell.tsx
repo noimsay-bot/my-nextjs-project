@@ -128,6 +128,7 @@ const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
   "/community": "/images/sidebar-icons/community.webp",
   "/vacation": "/images/sidebar-icons/vacation.webp",
   "/team-lead": "/images/sidebar-icons/team-lead.webp",
+  "/weather": "/images/sidebar-icons/weather.webp",
 };
 
 const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
@@ -275,6 +276,7 @@ function getVisibleLinks(
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
+          link.href === "/weather" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !isReadOnlyPortalRole(session.role)),
@@ -288,6 +290,7 @@ function getVisibleLinks(
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
+          link.href === "/weather" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !isReadOnlyPortalRole(session.role)),
@@ -300,6 +303,7 @@ function getVisibleLinks(
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
+          link.href === "/weather" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview && !isReadOnlyPortalRole(session.role)),
@@ -323,6 +327,7 @@ function getVisibleLinks(
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
+          link.href === "/weather" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.canReview),
@@ -338,6 +343,7 @@ function getVisibleLinks(
           (link.href === "/vacation" && vacationRequestOpen) ||
           (link.href === "/submissions" && submissionAccessOpen) ||
           link.href === "/equipment" ||
+          link.href === "/weather" ||
           link.href === "/schedule" ||
           (link.href === "/review" && session.canReview),
       );
@@ -353,6 +359,7 @@ function getVisibleLinks(
           (link.href === "/submissions" && submissionAccessOpen) ||
           (link.href === "/review" && session.actualRole === "team_lead") ||
           link.href === "/equipment" ||
+          link.href === "/weather" ||
           link.href === "/schedule" ||
           link.href === "/team-lead" ||
           link.href === "/admin",

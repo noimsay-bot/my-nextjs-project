@@ -52,7 +52,7 @@ function hasAccess(
   }
 
   if (pathname.startsWith("/weather")) {
-    return session.role === "admin";
+    return hasMemberPortalAccess(session.role);
   }
 
   if (pathname.startsWith("/team-lead")) {

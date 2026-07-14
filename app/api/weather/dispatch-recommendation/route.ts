@@ -18,7 +18,7 @@ import {
   type RainForecastFrame,
   type WeatherDispatchRangeMinutes,
 } from "@/lib/weather/recommendation";
-import { requireWeatherAdmin } from "@/lib/weather/server-auth";
+import { requireWeatherAccess } from "@/lib/weather/server-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -563,7 +563,7 @@ async function writeDispatchCache(input: {
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
-  const auth = await requireWeatherAdmin();
+  const auth = await requireWeatherAccess();
   if (auth.response) return auth.response;
 
   const url = new URL(request.url);

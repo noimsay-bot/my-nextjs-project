@@ -10,7 +10,9 @@ interface WeatherAuthProfile {
   approved: boolean;
 }
 
-export async function requireWeatherAdmin() {
+const WEATHER_ACCESS_ROLES = new Set(["member", "outlet", "reviewer", "observer", "desk", "team_lead", "admin"]);
+
+export async function requireWeatherAccess() {
   try {
     if (!(await hasSupabaseAuthCookie())) {
       return {
@@ -37,9 +39,9 @@ export async function requireWeatherAdmin() {
       : supabase.from("profiles").select("id, role, approved").eq("id", user.id);
     const { data: profile, error: profileError } = await profileQuery.maybeSingle<WeatherAuthProfile>();
 
-    if (profileError || !profile || !profile.approved || profile.role !== "admin") {
+    if (profileError || !profile || !profile.approved || !WEATHER_ACCESS_ROLES.has(profile.role)) {
       return {
-        response: NextResponse.json({ message: "날씨 페이지 관리자 권한이 없습니다." }, { status: 403 }),
+        response: NextResponse.json({ message: "날씨 페이지 접근 권한이 없습니다." }, { status: 403 }),
         profile: null,
       };
     }
