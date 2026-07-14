@@ -35,8 +35,8 @@
 }
 
 .panelStack :global(.wx-grid) {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px;
 }
 
@@ -46,9 +46,9 @@
   flex-direction: row;
   align-items: center;
   gap: 20px;
-  width: 400px;
+  width: 100%;
   height: 144px;
-  padding: 0 32px;
+  padding: 0 24px;
   box-sizing: border-box;
   border-radius: 12px;
   text-decoration: none;
@@ -87,23 +87,6 @@
   font-size: 14px;
   color: #5a6b80;
   line-height: 1.3;
-}
-
-.panelStack :global(.wx-badge) {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #dbe9ff;
-  color: #1d4ed8;
-}
-
-.panelStack :global(.wx-badge.key) {
-  background: #fee2e2;
-  color: #dc2626;
 }
 
 .sectionHead {
@@ -453,8 +436,11 @@
     padding: 16px 0;
   }
 
+  .panelStack :global(.wx-grid) {
+    grid-template-columns: 1fr;
+  }
+
   .panelStack :global(.wx-card) {
-    flex: 1 1 100%;
     width: 100%;
   }
 

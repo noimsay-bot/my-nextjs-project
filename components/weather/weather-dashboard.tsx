@@ -9,21 +9,18 @@ export type InitialWeatherRecommendations = Record<WeatherDispatchRangeMinutes, 
 
 const WEATHER_LINKS = [
   {
-    badge: "필수",
     icon: "🌧️",
     title: "초단기 강수예측",
     desc: "6시간 내 강수 예측",
     url: "https://www.weather.go.kr/w/weather/radar/rain.do",
   },
   {
-    badge: "경보",
     icon: "🚨",
     title: "기상특보",
     desc: "폭염·한파·호우·대설",
     url: "https://www.weather.go.kr/w/special-report/overall.do",
   },
   {
-    badge: "",
     icon: "🌀",
     title: "태풍",
     desc: "경로·강도·진로",
@@ -52,9 +49,6 @@ export function WeatherDashboard({
           <div className="wx-grid" id="wxGrid">
             {WEATHER_LINKS.map((link) => (
               <a key={link.title} className="wx-card" href={link.url} target="_blank" rel="noopener">
-                {link.badge ? (
-                  <span className={`wx-badge${link.badge === "필수" ? " key" : ""}`}>{link.badge}</span>
-                ) : null}
                 <span className="wx-icon">{link.icon}</span>
                 <span className="wx-text">
                   <span className="wx-title">{link.title}</span>
