@@ -1465,6 +1465,10 @@ html:not([data-theme="light"]) .portal-header-shell .brand-logo {
   visibility: visible;
 }
 
+.schedule-swap-recommendation-portal {
+  z-index: 5001 !important;
+}
+
 .schedule-trip-tooltip__head {
   display: flex;
   gap: 6px;
@@ -1527,6 +1531,19 @@ html[data-theme="light"] .schedule-trip-tooltip__body {
   .schedule-trip-tooltip-anchor[data-tooltip-open="true"] .schedule-trip-tooltip {
     transform: translateY(0);
   }
+}
+
+.schedule-trip-tooltip.schedule-trip-tooltip--portal {
+  position: fixed;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  z-index: 5000;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  visibility: visible;
 }
 
 .schedule-name-chip--empty {
@@ -2512,6 +2529,31 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   justify-content: flex-end;
 }
 
+.schedule-pan-zoom-shell {
+  position: relative;
+  min-width: 0;
+  padding-top: 64px;
+}
+
+.schedule-pan-zoom-shell .schedule-published-zoom-controls {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  z-index: 40;
+  padding: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.schedule-pan-zoom-shell .schedule-published-zoom-controls > .btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
 .schedule-published-zoom-controls--hidden {
   display: none;
 }
@@ -2834,6 +2876,27 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-inline: contain;
   touch-action: pan-x pan-y pinch-zoom;
+}
+
+.schedule-published-panel--fit .schedule-calendar-scroll--daily.schedule-pan-zoom-viewport {
+  position: relative;
+  overflow: hidden !important;
+  padding-bottom: 0;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.schedule-pan-zoom-stage {
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.schedule-pan-zoom-viewport .schedule-calendar-zoom--daily {
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 .schedule-published-panel--fit .schedule-calendar-zoom--daily,

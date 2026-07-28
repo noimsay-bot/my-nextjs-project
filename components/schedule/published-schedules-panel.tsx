@@ -1,7 +1,8 @@
 ﻿﻿﻿﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { FittedNameText } from "@/components/schedule/fitted-name-text";
 import { ScheduleTripTooltip } from "@/components/schedule/schedule-trip-tooltip";
 import {
@@ -67,12 +68,91 @@ import {
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const MAX_ROUTE_SIZE = 3;
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
-const VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON = 0.01;
 const HOME_PREVIEW_DAY_COUNT = 7;
 const HOME_RESPONSIVE_PREVIEW_DAY_COUNT = 6;
 const HOME_RESPONSIVE_PREVIEW_START_OFFSET = -1;
 const MOBILE_THREE_DAY_ROW_SIZE = 3;
+const MIN_FIT_SCALE = 0.12;
+const MAX_PAN_ZOOM_SCALE = 3;
+const PAN_ZOOM_STEP = 1.25;
+const TAP_MOVE_THRESHOLD = 8;
+const TAP_MAX_DURATION_MS = 300;
 type PublishedScheduleLayoutMode = "desktop" | "tablet" | "mobile";
+
+type PanZoomState = {
+  x: number;
+  y: number;
+  scale: number;
+  fitScale: number;
+  contentWidth: number;
+  contentHeight: number;
+  viewportWidth: number;
+  viewportHeight: number;
+};
+
+type ActivePanZoomPointer = {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  startedAt: number;
+};
+
+type PanZoomGesture =
+  | { type: "idle" }
+  | {
+      type: "pan";
+      pointerId: number;
+      startClientX: number;
+      startClientY: number;
+      startX: number;
+      startY: number;
+    }
+  | {
+      type: "pinch";
+      startDistance: number;
+      startScale: number;
+      anchorContentX: number;
+      anchorContentY: number;
+    };
+
+const initialPanZoomState: PanZoomState = {
+  x: 0,
+  y: 0,
+  scale: 1,
+  fitScale: 1,
+  contentWidth: 0,
+  contentHeight: 0,
+  viewportWidth: 0,
+  viewportHeight: 0,
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getCenteredOrClampedOffset(viewportSize: number, contentSize: number, offset: number) {
+  if (contentSize <= viewportSize) return (viewportSize - contentSize) / 2;
+  return clamp(offset, viewportSize - contentSize, 0);
+}
+
+function clampPanZoomPosition(state: PanZoomState, scale: number, x: number, y: number) {
+  return {
+    x: getCenteredOrClampedOffset(state.viewportWidth, state.contentWidth * scale, x),
+    y: getCenteredOrClampedOffset(state.viewportHeight, state.contentHeight * scale, y),
+  };
+}
+
+function getPointerDistance(left: ActivePanZoomPointer, right: ActivePanZoomPointer) {
+  return Math.hypot(right.currentX - left.currentX, right.currentY - left.currentY);
+}
+
+function getPointerMidpoint(left: ActivePanZoomPointer, right: ActivePanZoomPointer) {
+  return {
+    x: (left.currentX + right.currentX) / 2,
+    y: (left.currentY + right.currentY) / 2,
+  };
+}
 
 function applyScheduleAssignmentDecorations(schedule: PublishedScheduleItem["schedule"]) {
   return applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule));
@@ -89,12 +169,6 @@ function getScheduleAssignmentMonthKeysForDisplayItems(items: ScheduleDisplaySou
       ]),
     ),
   ).sort((left, right) => left.localeCompare(right));
-}
-
-function isVisualViewportPinchZoomActive() {
-  if (typeof window === "undefined") return false;
-  const scale = window.visualViewport?.scale ?? 1;
-  return scale > 1 + VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON;
 }
 
 function getWeekdayLabel(dow: number) {
@@ -235,6 +309,200 @@ type MobileSchedulePageViewMode = "full" | "three-day";
 type PublishedSchedulesPanelProps = {
   mode?: PublishedSchedulesPanelMode;
 };
+
+type PublishedScheduleTripTooltipProps = {
+  tooltip: ReturnType<typeof getScheduleAssignmentTripTooltip>;
+  clickEnabled: boolean;
+  portalEnabled: boolean;
+  positionKey: string;
+  children: ReactNode;
+};
+
+function PublishedScheduleTripTooltip({
+  tooltip,
+  clickEnabled,
+  portalEnabled,
+  positionKey,
+  children,
+}: PublishedScheduleTripTooltipProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [portalStyle, setPortalStyle] = useState<CSSProperties>({});
+  const [isPortalPositioned, setIsPortalPositioned] = useState(false);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const portalRef = useRef<HTMLSpanElement | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!portalEnabled || !isOpen) return;
+
+    let frameId = 0;
+
+    const syncPosition = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const maxWidth = Math.min(280, Math.max(180, window.innerWidth - 24));
+      const maxHeight = Math.max(120, window.innerHeight - 24);
+      const tooltipRect = portalRef.current?.getBoundingClientRect();
+      const tooltipWidth = Math.min(tooltipRect?.width ?? maxWidth, maxWidth);
+      const tooltipHeight = Math.min(tooltipRect?.height ?? 180, maxHeight);
+      const left = clamp(rect.left, 12, Math.max(12, window.innerWidth - tooltipWidth - 12));
+      let top = rect.bottom + 8;
+      if (top + tooltipHeight > window.innerHeight - 12 && rect.top > tooltipHeight + 20) {
+        top = rect.top - tooltipHeight - 8;
+      }
+      top = clamp(top, 12, Math.max(12, window.innerHeight - tooltipHeight - 12));
+      setPortalStyle((current) => {
+        if (
+          current.left === left &&
+          current.top === top &&
+          current.maxWidth === maxWidth &&
+          current.maxHeight === maxHeight
+        ) {
+          return current;
+        }
+        return { left, top, maxWidth, maxHeight, overflowY: "auto" };
+      });
+      setIsPortalPositioned(true);
+      frameId = window.requestAnimationFrame(syncPosition);
+    };
+
+    syncPosition();
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isOpen, portalEnabled, positionKey]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (anchorRef.current?.contains(target) || portalRef.current?.contains(target)) return;
+      if (closeTimeoutRef.current !== null) window.clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+      setIsOpen(false);
+      setIsPortalPositioned(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [isOpen]);
+
+  useEffect(() => () => {
+    if (closeTimeoutRef.current !== null) window.clearTimeout(closeTimeoutRef.current);
+  }, []);
+
+  const cancelScheduledClose = () => {
+    if (closeTimeoutRef.current === null) return;
+    window.clearTimeout(closeTimeoutRef.current);
+    closeTimeoutRef.current = null;
+  };
+
+  const openTooltip = () => {
+    cancelScheduledClose();
+    setIsPortalPositioned(false);
+    setIsOpen(true);
+  };
+
+  const closeTooltip = () => {
+    cancelScheduledClose();
+    setIsOpen(false);
+    setIsPortalPositioned(false);
+  };
+
+  const keepTooltipOpen = () => {
+    cancelScheduledClose();
+    setIsOpen(true);
+  };
+
+  const scheduleTooltipClose = () => {
+    cancelScheduledClose();
+    closeTimeoutRef.current = window.setTimeout(closeTooltip, 100);
+  };
+
+  if (!portalEnabled) {
+    return (
+      <ScheduleTripTooltip tooltip={tooltip} clickEnabled={clickEnabled}>
+        {children}
+      </ScheduleTripTooltip>
+    );
+  }
+
+  if (!tooltip) return <>{children}</>;
+
+  const travelTypeLabel =
+    tooltip.travelType === "국내출장" || tooltip.travelType === "해외출장" || tooltip.travelType === "당일출장"
+      ? tooltip.travelType
+      : "";
+
+  return (
+    <div
+      ref={anchorRef}
+      className="schedule-trip-tooltip-anchor"
+      data-tooltip-open={isOpen ? "true" : undefined}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") openTooltip();
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "touch") return;
+        const nextTarget = event.relatedTarget as Node | null;
+        if (nextTarget && portalRef.current?.contains(nextTarget)) return;
+        scheduleTooltipClose();
+      }}
+      onFocusCapture={(event) => {
+        if ((event.target as HTMLElement).matches(":focus-visible")) openTooltip();
+      }}
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget as Node | null;
+        if (nextTarget && (anchorRef.current?.contains(nextTarget) || portalRef.current?.contains(nextTarget))) return;
+        closeTooltip();
+      }}
+      onClickCapture={() => {
+        if (!clickEnabled) return;
+        if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+        setIsPortalPositioned(false);
+        setIsOpen((current) => !current);
+      }}
+      onKeyDownCapture={(event) => {
+        if (!clickEnabled || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        openTooltip();
+      }}
+    >
+      {children}
+      {isOpen
+        ? createPortal(
+            <span
+              ref={portalRef}
+              className="schedule-trip-tooltip schedule-trip-tooltip--portal"
+              role="tooltip"
+              style={{ ...portalStyle, visibility: isPortalPositioned ? "visible" : "hidden" }}
+              onPointerEnter={keepTooltipOpen}
+              onPointerLeave={(event) => {
+                const nextTarget = event.relatedTarget as Node | null;
+                if (nextTarget && anchorRef.current?.contains(nextTarget)) return;
+                scheduleTooltipClose();
+              }}
+            >
+              <span className="schedule-trip-tooltip__head">
+                <strong>{tooltip.tripTagLabel}</strong>
+                {travelTypeLabel ? <span>{travelTypeLabel}</span> : null}
+              </span>
+              <span className="schedule-trip-tooltip__body">
+                {tooltip.schedules.length > 0
+                  ? tooltip.schedules.map((schedule, index) => (
+                      <span key={`${schedule}-${index}`}>{schedule}</span>
+                    ))
+                  : <span>일정 내용 없음</span>}
+              </span>
+            </span>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
 
 function getAssignmentDisplay(category: string, value: string) {
   if (category !== "휴가") {
@@ -863,16 +1131,21 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [requestMessage, setRequestMessage] = useState("");
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
-  const [scheduleScale, setScheduleScale] = useState(1);
-  const [scheduleContentSize, setScheduleContentSize] = useState({ width: 0, height: 0 });
+  const [panZoomState, setPanZoomState] = useState<PanZoomState>(initialPanZoomState);
+  const [recommendationPortalStyle, setRecommendationPortalStyle] = useState<CSSProperties | null>(null);
   const [session, setSession] = useState(() => getSession());
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
+  const scheduleNameChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const compactMonthCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const lastFocusRefreshAtRef = useRef(0);
   const lastAssignmentSessionKeyRef = useRef("");
-  const isViewportPinchZoomActiveRef = useRef(false);
+  const panZoomStateRef = useRef<PanZoomState>(initialPanZoomState);
+  const activePanZoomPointersRef = useRef(new Map<number, ActivePanZoomPointer>());
+  const panZoomGestureRef = useRef<PanZoomGesture>({ type: "idle" });
+  const suppressPanZoomClickRef = useRef(false);
+  const suppressPanZoomClickTimeoutRef = useRef<number | null>(null);
   const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
   const username = session?.username ?? "";
   const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [items, scheduleHistory]);
@@ -1094,12 +1367,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   useEffect(() => {
     if (typeof window === "undefined") return;
     const coarsePointerMediaQuery = window.matchMedia("(any-pointer: coarse)");
-    const visualViewport = window.visualViewport;
     let frameId = 0;
     let settleTimeoutId = 0;
     const syncViewport = () => {
-      isViewportPinchZoomActiveRef.current = isVisualViewportPinchZoomActive();
-      if (isViewportPinchZoomActiveRef.current) return;
       const viewportWidth = Math.round(window.innerWidth);
       const viewportHeight = Math.round(window.innerHeight);
       setScheduleLayoutMode(
@@ -1109,14 +1379,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     const syncViewportByOrientation = () => {
       syncViewport();
     };
-    const handleVisualViewportChange = () => {
-      const wasPinching = isViewportPinchZoomActiveRef.current;
-      const isPinching = isVisualViewportPinchZoomActive();
-      isViewportPinchZoomActiveRef.current = isPinching;
-      if (wasPinching && !isPinching) {
-        syncViewport();
-      }
-    };
     syncViewport();
     frameId = window.requestAnimationFrame(syncViewport);
     settleTimeoutId = window.setTimeout(syncViewport, 150);
@@ -1124,8 +1386,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     coarsePointerMediaQuery.addListener?.(syncViewport);
     window.addEventListener("resize", syncViewport);
     window.addEventListener("orientationchange", syncViewportByOrientation);
-    visualViewport?.addEventListener("resize", handleVisualViewportChange);
-    visualViewport?.addEventListener("scroll", handleVisualViewportChange);
     return () => {
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(settleTimeoutId);
@@ -1133,8 +1393,6 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       coarsePointerMediaQuery.removeListener?.(syncViewport);
       window.removeEventListener("resize", syncViewport);
       window.removeEventListener("orientationchange", syncViewportByOrientation);
-      visualViewport?.removeEventListener("resize", handleVisualViewportChange);
-      visualViewport?.removeEventListener("scroll", handleVisualViewportChange);
     };
   }, []);
 
@@ -1356,7 +1614,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const isCompactMonthlyView = false;
   const isCompactDailyView = false;
   const isCompactDailyLandscapeView = false;
-  const shouldAutoFitSchedule = isPageMobileFullScheduleView;
+  const shouldAutoFitSchedule = !isHomePreview && !isMobileThreeDayView && scheduleLayoutMode !== "desktop";
   const schedulePanelLayoutBaseClassName =
     scheduleLayoutMode === "mobile"
       ? "schedule-published-panel--mobile schedule-published-panel--fit schedule-published-panel--mobile-layout"
@@ -1364,86 +1622,288 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
         ? "schedule-published-panel--tablet schedule-published-panel--fit schedule-published-panel--mobile-layout"
         : "schedule-published-panel--desktop schedule-published-panel--desktop-layout";
   const schedulePanelLayoutClassName = `${schedulePanelLayoutBaseClassName}${isMobileThreeDayView ? " schedule-published-panel--three-day" : ""}${isHomeThreeDayPreviewView ? " schedule-published-panel--home-three-day" : ""}${isPageMobileThreeDayView ? " schedule-published-panel--page-three-day" : ""}${isPageMobileFullScheduleView ? " schedule-published-panel--mobile-full-fit schedule-published-panel--fit" : ""}`;
-  const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
-  const scaledScheduleWidth = scheduleContentSize.width > 0 ? scheduleContentSize.width * appliedScheduleScale : 0;
-  const scaledScheduleHeight = scheduleContentSize.height > 0 ? scheduleContentSize.height * appliedScheduleScale : 0;
   const toggleMobilePageViewMode = () => {
     setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"));
+  };
+
+  const applyPanZoomState = (nextState: PanZoomState, syncReactState = true) => {
+    panZoomStateRef.current = nextState;
+    const zoomNode = scheduleZoomRef.current;
+    const viewportNode = scheduleScrollRef.current;
+    if (zoomNode) {
+      zoomNode.style.transform = `translate3d(${nextState.x}px, ${nextState.y}px, 0) scale(${nextState.scale})`;
+    }
+    if (viewportNode) {
+      viewportNode.dataset.scale = String(nextState.scale);
+      viewportNode.dataset.fitScale = String(nextState.fitScale);
+      viewportNode.dataset.panX = String(nextState.x);
+      viewportNode.dataset.panY = String(nextState.y);
+    }
+    if (syncReactState) setPanZoomState(nextState);
+  };
+
+  const resetPanZoomView = () => {
+    const current = panZoomStateRef.current;
+    if (!shouldAutoFitSchedule || current.contentWidth <= 0) return;
+    const position = clampPanZoomPosition(current, current.fitScale, 0, 0);
+    applyPanZoomState({ ...current, ...position, scale: current.fitScale });
+  };
+
+  const zoomPanZoomView = (factor: number) => {
+    const current = panZoomStateRef.current;
+    if (!shouldAutoFitSchedule || current.contentWidth <= 0) return;
+    const nextScale = clamp(current.scale * factor, current.fitScale, MAX_PAN_ZOOM_SCALE);
+    const centerX = current.viewportWidth / 2;
+    const centerY = current.viewportHeight / 2;
+    const contentX = (centerX - current.x) / current.scale;
+    const contentY = (centerY - current.y) / current.scale;
+    const position = clampPanZoomPosition(
+      current,
+      nextScale,
+      centerX - contentX * nextScale,
+      centerY - contentY * nextScale,
+    );
+    applyPanZoomState({ ...current, ...position, scale: nextScale });
   };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!selectedItem) return;
     if (!shouldAutoFitSchedule) {
-      setScheduleScale(1);
-      setScheduleContentSize((current) => (
-        current.width === 0 && current.height === 0 ? current : { width: 0, height: 0 }
-      ));
+      panZoomStateRef.current = initialPanZoomState;
+      setPanZoomState(initialPanZoomState);
+      if (scheduleZoomRef.current) scheduleZoomRef.current.style.transform = "";
       return;
     }
 
     let frameId = 0;
-    const visualViewport = window.visualViewport;
     const measureSchedule = () => {
-      if (isViewportPinchZoomActiveRef.current) return;
       const scrollNode = scheduleScrollRef.current;
       const zoomNode = scheduleZoomRef.current;
       if (!scrollNode || !zoomNode) return;
-      const nextWidth = Math.ceil(zoomNode.offsetWidth);
-      const nextHeight = Math.ceil(zoomNode.offsetHeight);
-      if (nextWidth <= 0 || nextHeight <= 0) return;
-      setScheduleContentSize((current) =>
-        current.width === nextWidth && current.height === nextHeight ? current : { width: nextWidth, height: nextHeight },
-      );
+      const contentWidth = Math.ceil(zoomNode.offsetWidth);
+      const contentHeight = Math.ceil(zoomNode.offsetHeight);
+      const viewportWidth = scrollNode.clientWidth;
+      if (contentWidth <= 0 || contentHeight <= 0 || viewportWidth <= 0) return;
 
-      const containerWidth = scrollNode.clientWidth;
-      const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
-      const nextFitScale = shouldAutoFitSchedule ? Math.min(1, Math.max(0.12, widthFitScale)) : 1;
-      setScheduleScale((current) => (Math.abs(current - nextFitScale) < 0.01 ? current : nextFitScale));
+      const widthFitScale = viewportWidth / contentWidth;
+      const fitScale = clamp(widthFitScale, MIN_FIT_SCALE, 1);
+      const viewportHeight = contentHeight * fitScale;
+      const measuredState: PanZoomState = {
+        x: 0,
+        y: 0,
+        scale: fitScale,
+        fitScale,
+        contentWidth,
+        contentHeight,
+        viewportWidth,
+        viewportHeight,
+      };
+      const position = clampPanZoomPosition(measuredState, fitScale, 0, 0);
+      applyPanZoomState({ ...measuredState, ...position });
     };
 
     const queueMeasure = () => {
       cancelAnimationFrame(frameId);
-      if (isViewportPinchZoomActiveRef.current) return;
       frameId = window.requestAnimationFrame(measureSchedule);
     };
 
-    const handleVisualViewportChange = () => {
-      const wasPinching = isViewportPinchZoomActiveRef.current;
-      const isPinching = isVisualViewportPinchZoomActive();
-      isViewportPinchZoomActiveRef.current = isPinching;
-      if (wasPinching && !isPinching) {
-        queueMeasure();
-      }
-    };
-
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(queueMeasure);
+    if (scheduleZoomRef.current) resizeObserver?.observe(scheduleZoomRef.current);
     queueMeasure();
     window.addEventListener("resize", queueMeasure);
     window.addEventListener("orientationchange", queueMeasure);
-    visualViewport?.addEventListener("resize", handleVisualViewportChange);
-    visualViewport?.addEventListener("scroll", handleVisualViewportChange);
     return () => {
       cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", queueMeasure);
       window.removeEventListener("orientationchange", queueMeasure);
-      visualViewport?.removeEventListener("resize", handleVisualViewportChange);
-      visualViewport?.removeEventListener("scroll", handleVisualViewportChange);
     };
   }, [
-    compactMonthCardHeight,
     visibleDisplayDays,
-    editMode,
-    requests,
     selectedItem,
-    selectedRoute,
     shouldAutoFitSchedule,
-    showMine,
-    username,
-    isCompactMonthlyView,
-    isHomePreview,
-    isMobileThreeDayView,
-    mobileThreeDayRows.length,
   ]);
+
+  useEffect(() => () => {
+    if (suppressPanZoomClickTimeoutRef.current !== null) {
+      window.clearTimeout(suppressPanZoomClickTimeoutRef.current);
+    }
+  }, []);
+
+  const markPanZoomGestureConsumed = () => {
+    suppressPanZoomClickRef.current = true;
+    if (suppressPanZoomClickTimeoutRef.current !== null) {
+      window.clearTimeout(suppressPanZoomClickTimeoutRef.current);
+    }
+    suppressPanZoomClickTimeoutRef.current = window.setTimeout(() => {
+      suppressPanZoomClickRef.current = false;
+      suppressPanZoomClickTimeoutRef.current = null;
+    }, TAP_MAX_DURATION_MS + 100);
+  };
+
+  const handlePanZoomPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!shouldAutoFitSchedule || (event.pointerType === "mouse" && event.button !== 0)) return;
+    if (activePanZoomPointersRef.current.size === 0 && suppressPanZoomClickRef.current) {
+      suppressPanZoomClickRef.current = false;
+      if (suppressPanZoomClickTimeoutRef.current !== null) {
+        window.clearTimeout(suppressPanZoomClickTimeoutRef.current);
+        suppressPanZoomClickTimeoutRef.current = null;
+      }
+    }
+    if (!event.currentTarget.contains(event.target as Node)) return;
+    activePanZoomPointersRef.current.set(event.pointerId, {
+      startX: event.clientX,
+      startY: event.clientY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      startedAt: performance.now(),
+    });
+
+    const pointers = Array.from(activePanZoomPointersRef.current.values());
+    if (pointers.length !== 2) return;
+    const [left, right] = pointers;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const midpoint = getPointerMidpoint(left, right);
+    const current = panZoomStateRef.current;
+    panZoomGestureRef.current = {
+      type: "pinch",
+      startDistance: Math.max(1, getPointerDistance(left, right)),
+      startScale: current.scale,
+      anchorContentX: (midpoint.x - rect.left - current.x) / current.scale,
+      anchorContentY: (midpoint.y - rect.top - current.y) / current.scale,
+    };
+    activePanZoomPointersRef.current.forEach((_, pointerId) => {
+      try {
+        event.currentTarget.setPointerCapture(pointerId);
+      } catch {
+        // The pointer may already have left the viewport.
+      }
+    });
+    event.preventDefault();
+  };
+
+  const handlePanZoomPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!shouldAutoFitSchedule) return;
+    const pointer = activePanZoomPointersRef.current.get(event.pointerId);
+    if (!pointer) return;
+    pointer.currentX = event.clientX;
+    pointer.currentY = event.clientY;
+
+    const pointers = Array.from(activePanZoomPointersRef.current.values());
+    const current = panZoomStateRef.current;
+    if (pointers.length >= 2) {
+      const [left, right] = pointers;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const midpoint = getPointerMidpoint(left, right);
+      let gesture = panZoomGestureRef.current;
+      if (gesture.type !== "pinch") {
+        gesture = {
+          type: "pinch",
+          startDistance: Math.max(1, getPointerDistance(left, right)),
+          startScale: current.scale,
+          anchorContentX: (midpoint.x - rect.left - current.x) / current.scale,
+          anchorContentY: (midpoint.y - rect.top - current.y) / current.scale,
+        };
+        panZoomGestureRef.current = gesture;
+      }
+      const nextScale = clamp(
+        gesture.startScale * (getPointerDistance(left, right) / gesture.startDistance),
+        current.fitScale,
+        MAX_PAN_ZOOM_SCALE,
+      );
+      const localMidpointX = midpoint.x - rect.left;
+      const localMidpointY = midpoint.y - rect.top;
+      const position = clampPanZoomPosition(
+        current,
+        nextScale,
+        localMidpointX - gesture.anchorContentX * nextScale,
+        localMidpointY - gesture.anchorContentY * nextScale,
+      );
+      applyPanZoomState({ ...current, ...position, scale: nextScale }, false);
+      event.preventDefault();
+      return;
+    }
+
+    const distanceFromStart = Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY);
+    let gesture = panZoomGestureRef.current;
+    if (gesture.type === "idle" && distanceFromStart > TAP_MOVE_THRESHOLD) {
+      gesture = {
+        type: "pan",
+        pointerId: event.pointerId,
+        startClientX: pointer.startX,
+        startClientY: pointer.startY,
+        startX: current.x,
+        startY: current.y,
+      };
+      panZoomGestureRef.current = gesture;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // The pointer may already have left the viewport.
+      }
+    }
+    if (gesture.type !== "pan" || gesture.pointerId !== event.pointerId) return;
+
+    const position = clampPanZoomPosition(
+      current,
+      current.scale,
+      gesture.startX + event.clientX - gesture.startClientX,
+      gesture.startY + event.clientY - gesture.startClientY,
+    );
+    applyPanZoomState({ ...current, ...position }, false);
+    event.preventDefault();
+  };
+
+  const finishPanZoomPointer = (event: ReactPointerEvent<HTMLDivElement>, cancelled = false) => {
+    const pointer = activePanZoomPointersRef.current.get(event.pointerId);
+    if (!pointer) return;
+    const gesture = panZoomGestureRef.current;
+    const movement = Math.hypot(pointer.currentX - pointer.startX, pointer.currentY - pointer.startY);
+    const elapsed = performance.now() - pointer.startedAt;
+    const isTap = !cancelled && gesture.type === "idle" && movement <= TAP_MOVE_THRESHOLD && elapsed < TAP_MAX_DURATION_MS;
+
+    activePanZoomPointersRef.current.delete(event.pointerId);
+    try {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+
+    if (!isTap) {
+      markPanZoomGestureConsumed();
+      event.preventDefault();
+    }
+
+    const remainingPointers = Array.from(activePanZoomPointersRef.current.entries());
+    if (remainingPointers.length === 1 && gesture.type === "pinch") {
+      const [pointerId, remaining] = remainingPointers[0];
+      remaining.startX = remaining.currentX;
+      remaining.startY = remaining.currentY;
+      remaining.startedAt = performance.now();
+      const current = panZoomStateRef.current;
+      panZoomGestureRef.current = {
+        type: "pan",
+        pointerId,
+        startClientX: remaining.currentX,
+        startClientY: remaining.currentY,
+        startX: current.x,
+        startY: current.y,
+      };
+    } else if (remainingPointers.length === 0) {
+      panZoomGestureRef.current = { type: "idle" };
+      setPanZoomState(panZoomStateRef.current);
+    }
+  };
+
+  const handlePanZoomClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!suppressPanZoomClickRef.current) return;
+    suppressPanZoomClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   useEffect(() => {
     if (!isCompactMonthlyView) {
@@ -1618,6 +2078,58 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     setRequestMessageTone("ok");
   };
 
+  useEffect(() => {
+    const floatingVisible =
+      shouldAutoFitSchedule &&
+      Boolean(firstSelectedRef) &&
+      (isRecommendationPopoverOpen || Boolean(inlineRecommendationConfirmRef));
+    if (!floatingVisible || !firstSelectedRef) {
+      setRecommendationPortalStyle(null);
+      return;
+    }
+
+    let frameId = 0;
+    const syncPosition = () => {
+      const anchor = scheduleNameChipRefs.current[getRefKey(firstSelectedRef)];
+      if (anchor) {
+        const rect = anchor.getBoundingClientRect();
+        const popoverWidth = Math.min(280, Math.max(180, window.innerWidth - 24));
+        const popoverHeight = 240;
+        let left: number;
+        let top: number;
+
+        if (scheduleLayoutMode === "mobile") {
+          left = clamp(rect.left, 12, Math.max(12, window.innerWidth - popoverWidth - 12));
+          top = rect.bottom + 8;
+          if (top + popoverHeight > window.innerHeight - 12) {
+            top = Math.max(12, rect.top - popoverHeight - 8);
+          }
+        } else {
+          left = rect.right + 8;
+          if (left + popoverWidth > window.innerWidth - 12) {
+            left = Math.max(12, rect.left - popoverWidth - 8);
+          }
+          top = clamp(rect.top + rect.height / 2 - popoverHeight / 2, 12, Math.max(12, window.innerHeight - popoverHeight - 12));
+        }
+
+        setRecommendationPortalStyle((current) => {
+          if (current?.left === left && current?.top === top && current?.width === popoverWidth) return current;
+          return { left, top, width: popoverWidth };
+        });
+      }
+      frameId = window.requestAnimationFrame(syncPosition);
+    };
+
+    syncPosition();
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    firstSelectedRef,
+    inlineRecommendationConfirmRef,
+    isRecommendationPopoverOpen,
+    scheduleLayoutMode,
+    shouldAutoFitSchedule,
+  ]);
+
   const renderInlineRecommendedCandidates = (anchorRef: SchedulePersonRef) => {
     if (!sameRef(firstSelectedRef, anchorRef)) return null;
 
@@ -1629,13 +2141,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
 
     if (!isRecommendationPopoverOpen && !inlineConfirmVisible) return null;
 
-    return (
+    const popover = (
       <div
+        data-swap-recommendation-root="true"
+        className={shouldAutoFitSchedule ? "schedule-swap-recommendation-portal" : undefined}
         style={{
-          position: "absolute",
-          top: openToRight ? "50%" : "calc(100% + 8px)",
-          left: openToRight ? "calc(100% + 8px)" : 0,
-          transform: openToRight ? "translateY(-50%)" : undefined,
+          position: shouldAutoFitSchedule ? "fixed" : "absolute",
+          top: shouldAutoFitSchedule ? recommendationPortalStyle?.top : openToRight ? "50%" : "calc(100% + 8px)",
+          left: shouldAutoFitSchedule ? recommendationPortalStyle?.left : openToRight ? "calc(100% + 8px)" : 0,
+          width: shouldAutoFitSchedule ? recommendationPortalStyle?.width : undefined,
+          transform: shouldAutoFitSchedule ? undefined : openToRight ? "translateY(-50%)" : undefined,
           zIndex: 60,
           minWidth: openToRight ? 220 : 180,
           maxWidth: openToRight ? 280 : "min(280px, calc(100vw - 48px))",
@@ -1701,6 +2216,9 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
         )}
       </div>
     );
+    if (!shouldAutoFitSchedule) return popover;
+    if (!recommendationPortalStyle) return null;
+    return createPortal(popover, document.body);
   };
 
   const handleSchedulePanelClickCapture = (event: React.MouseEvent<HTMLElement>) => {
@@ -2009,29 +2527,82 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
               ) : null}
 
               <div
+                className={shouldAutoFitSchedule ? "schedule-pan-zoom-shell" : undefined}
+                style={!shouldAutoFitSchedule ? { display: "contents" } : undefined}
+              >
+
+              {shouldAutoFitSchedule ? (
+                <div
+                  className="schedule-published-zoom-controls"
+                  role="group"
+                  aria-label="근무표 확대 및 이동"
+                  data-swap-recommendation-root="true"
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    aria-label="근무표 축소"
+                    disabled={panZoomState.scale <= panZoomState.fitScale + 0.001}
+                    onClick={() => zoomPanZoomView(1 / PAN_ZOOM_STEP)}
+                  >
+                    −
+                  </button>
+                  <button type="button" className="btn" onClick={resetPanZoomView}>
+                    전체 맞춤
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    aria-label="근무표 확대"
+                    disabled={panZoomState.scale >= MAX_PAN_ZOOM_SCALE - 0.001}
+                    onClick={() => zoomPanZoomView(PAN_ZOOM_STEP)}
+                  >
+                    +
+                  </button>
+                  <span className="sr-only" aria-live="polite">
+                    근무표 배율 {Math.round(panZoomState.scale * 100)}%
+                  </span>
+                </div>
+              ) : null}
+
+              <div
                 ref={scheduleScrollRef}
-                className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
+                className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"} ${shouldAutoFitSchedule ? "schedule-pan-zoom-viewport" : ""}`}
+                data-testid={shouldAutoFitSchedule ? "schedule-pan-zoom-surface" : undefined}
+                data-pan-zoom-enabled={shouldAutoFitSchedule ? "true" : undefined}
+                data-layout-mode={scheduleLayoutMode}
+                data-scale={shouldAutoFitSchedule ? panZoomState.scale : undefined}
+                data-fit-scale={shouldAutoFitSchedule ? panZoomState.fitScale : undefined}
+                data-pan-x={shouldAutoFitSchedule ? panZoomState.x : undefined}
+                data-pan-y={shouldAutoFitSchedule ? panZoomState.y : undefined}
+                data-content-width={shouldAutoFitSchedule ? panZoomState.contentWidth : undefined}
+                data-content-height={shouldAutoFitSchedule ? panZoomState.contentHeight : undefined}
+                aria-label={shouldAutoFitSchedule ? "확대 및 이동 가능한 월간 근무표" : undefined}
+                onPointerDown={handlePanZoomPointerDown}
+                onPointerMove={handlePanZoomPointerMove}
+                onPointerUp={(event) => finishPanZoomPointer(event)}
+                onPointerCancel={(event) => finishPanZoomPointer(event, true)}
+                onLostPointerCapture={(event) => finishPanZoomPointer(event, true)}
+                onClickCapture={handlePanZoomClickCapture}
                 style={{
-                  overflowX: shouldAutoFitSchedule ? "auto" : undefined,
-                  overflowY: shouldAutoFitSchedule ? "visible" : undefined,
-                  WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
+                  height: shouldAutoFitSchedule && panZoomState.viewportHeight > 0 ? panZoomState.viewportHeight : undefined,
                 }}
               >
               <div
+                className={shouldAutoFitSchedule ? "schedule-pan-zoom-stage" : undefined}
                 style={{
                   minWidth: shouldAutoFitSchedule ? "100%" : undefined,
-                  width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
-                  height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
-                  margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,
+                  height: shouldAutoFitSchedule ? "100%" : undefined,
                   position: shouldAutoFitSchedule ? "relative" : undefined,
                 }}
               >
               <div
                 ref={scheduleZoomRef}
                 className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
+                data-testid={shouldAutoFitSchedule ? "schedule-pan-zoom-content" : undefined}
                 style={{
-                  transform: shouldAutoFitSchedule ? `scale(${appliedScheduleScale})` : undefined,
-                  transformOrigin: shouldAutoFitSchedule ? "top left" : undefined,
+                  transform: shouldAutoFitSchedule ? `translate3d(${panZoomState.x}px, ${panZoomState.y}px, 0) scale(${panZoomState.scale})` : undefined,
+                  transformOrigin: shouldAutoFitSchedule ? "0 0" : undefined,
                   position: shouldAutoFitSchedule ? "absolute" : undefined,
                   top: shouldAutoFitSchedule ? 0 : undefined,
                   left: shouldAutoFitSchedule ? 0 : undefined,
@@ -2330,8 +2901,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                 zIndex: tripTooltip ? 20 : firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
                                               }}
                                             >
-                                              <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!isInteractiveChip}>
+                                              <PublishedScheduleTripTooltip
+                                                tooltip={tripTooltip}
+                                                clickEnabled={!isInteractiveChip}
+                                                portalEnabled={shouldAutoFitSchedule}
+                                                positionKey={`${panZoomState.x}:${panZoomState.y}:${panZoomState.scale}`}
+                                              >
                                                 <button
+                                                  ref={(node) => {
+                                                    scheduleNameChipRefs.current[getRefKey(ref)] = node;
+                                                  }}
                                                   type="button"
                                                   data-schedule-change-name-chip="true"
                                                   className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
@@ -2443,7 +3022,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                                   />
                                                   {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
                                                 </button>
-                                              </ScheduleTripTooltip>
+                                              </PublishedScheduleTripTooltip>
                                               {renderInlineRecommendedCandidates(ref)}
                                             </div>
                                           );
@@ -2730,8 +3309,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                         zIndex: tripTooltip ? 20 : firstSelected ? 40 : routeSelected ? 10 : editModeMineHighlighted ? 8 : 1,
                                       }}
                                     >
-                                      <ScheduleTripTooltip tooltip={tripTooltip} clickEnabled={!isInteractiveChip}>
+                                      <PublishedScheduleTripTooltip
+                                        tooltip={tripTooltip}
+                                        clickEnabled={!isInteractiveChip}
+                                        portalEnabled={shouldAutoFitSchedule}
+                                        positionKey={`${panZoomState.x}:${panZoomState.y}:${panZoomState.scale}`}
+                                      >
                                         <button
+                                          ref={(node) => {
+                                            scheduleNameChipRefs.current[getRefKey(ref)] = node;
+                                          }}
                                           type="button"
                                           data-schedule-change-name-chip="true"
                                           className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
@@ -2843,7 +3430,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           />
                                           {personObject.pending ? <span style={{ fontSize: isCompactMonthlyView ? 8 : 9, marginTop: -2, lineHeight: 1 }}>요청중</span> : null}
                                         </button>
-                                      </ScheduleTripTooltip>
+                                      </PublishedScheduleTripTooltip>
                                       {renderInlineRecommendedCandidates(ref)}
                                     </div>
                                   );
@@ -2875,6 +3462,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
               </div>
               </div>
               </div>
+            </div>
             </div>
             </div>
           </>
