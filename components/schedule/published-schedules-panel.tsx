@@ -1716,7 +1716,10 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
 
       const widthFitScale = viewportWidth / contentWidth;
       const fitScale = clamp(widthFitScale, MIN_FIT_SCALE, 1);
-      const viewportHeight = contentHeight * fitScale;
+      const measuredViewportHeight = scrollNode.clientHeight;
+      const viewportHeight = measuredViewportHeight > 0
+        ? measuredViewportHeight
+        : Math.ceil(contentHeight * fitScale);
       const measuredState: PanZoomState = {
         x: 0,
         y: 0,
@@ -1729,6 +1732,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       };
       const position = clampPanZoomPosition(measuredState, fitScale, 0, 0);
       applyPanZoomState({ ...measuredState, ...position });
+      if (measuredViewportHeight <= 0) queueMeasure();
     };
 
     const queueMeasure = () => {
@@ -1738,6 +1742,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
 
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(queueMeasure);
     if (scheduleZoomRef.current) resizeObserver?.observe(scheduleZoomRef.current);
+    if (scheduleScrollRef.current) resizeObserver?.observe(scheduleScrollRef.current);
     queueMeasure();
     window.addEventListener("resize", queueMeasure);
     window.addEventListener("orientationchange", queueMeasure);
@@ -2621,7 +2626,9 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                 onLostPointerCapture={(event) => finishPanZoomPointer(event, true)}
                 onClickCapture={handlePanZoomClickCapture}
                 style={{
-                  height: shouldAutoFitSchedule && panZoomState.viewportHeight > 0 ? panZoomState.viewportHeight : undefined,
+                  height: shouldAutoFitSchedule && panZoomState.contentHeight > 0
+                    ? Math.ceil(panZoomState.contentHeight * panZoomState.fitScale)
+                    : undefined,
                 }}
               >
               <div
