@@ -39,3 +39,11 @@
 - `app/api`에서 UI component import.
 - admin client import 경로가 서버 전용인지 정적 분석만으로 확정하기 어려운 경우.
 - client component의 transitive import graph는 현재 정적 검사로 완전 증명하지 못한다.
+
+## Preview 읽기 전용 데모
+- 실제 사용자 세션, Supabase Auth 토큰, 운영 UUID/이메일을 Preview 데모에 복사하지 않는다.
+- 데모는 합성 데이터만 사용하고 Supabase/Auth 네트워크 요청, Storage 쓰기, 변경 요청 API를 호출하지 않는다. 공유 근무표 컴포넌트의 기존 모듈 초기화 과정에서 브라우저 로컬 캐시를 읽을 수는 있다.
+- 서버에서 `VERCEL_ENV`, 대상 브랜치, 서버 전용 기능 플래그를 함께 검사하고 조건이 다르면 404를 반환한다.
+- `NEXT_PUBLIC_E2E`나 클라이언트 플래그만으로 인증 또는 접근 제어를 우회하지 않는다.
+- 수정, 숨김, 교환 요청 등 저장 동작을 노출하지 않고 화면에 합성 데이터·미저장 상태를 명시한다.
+- Preview 배포 자체는 Vercel Deployment Protection 적용 여부를 별도로 확인한다.

@@ -63,6 +63,7 @@ import {
   refreshTeamLeadAssignmentMonths,
   SCHEDULE_ASSIGNMENT_TAGGED_NAME_COLOR,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
+  type ScheduleAssignmentDataStore,
 } from "@/lib/team-lead/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
@@ -308,6 +309,10 @@ type MobileSchedulePageViewMode = "full" | "three-day";
 
 type PublishedSchedulesPanelProps = {
   mode?: PublishedSchedulesPanelMode;
+  readOnlyPreview?: {
+    displayName: string;
+    items: PublishedScheduleItem[];
+  };
 };
 
 type PublishedScheduleTripTooltipProps = {
@@ -1105,15 +1110,18 @@ function isSwapCandidateValid(
   return true;
 }
 
-export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPanelProps) {
+export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: PublishedSchedulesPanelProps) {
   const isHomePreview = mode === "home";
+  const isReadOnlyPreview = Boolean(readOnlyPreview);
   const [items, setItems] = useState<PublishedScheduleItem[]>(() =>
-    getPublishedSchedules().map((item) => ({
+    (readOnlyPreview?.items ?? getPublishedSchedules()).map((item) => ({
       ...item,
-      schedule: applyScheduleAssignmentDecorations(item.schedule),
+      schedule: readOnlyPreview ? item.schedule : applyScheduleAssignmentDecorations(item.schedule),
     })),
   );
-  const [itemsLoading, setItemsLoading] = useState(() => getPublishedSchedules().length === 0);
+  const [itemsLoading, setItemsLoading] = useState(() => (
+    readOnlyPreview ? false : getPublishedSchedules().length === 0
+  ));
   const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>([]);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
@@ -1133,7 +1141,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [panZoomState, setPanZoomState] = useState<PanZoomState>(initialPanZoomState);
   const [recommendationPortalStyle, setRecommendationPortalStyle] = useState<CSSProperties | null>(null);
-  const [session, setSession] = useState(() => getSession());
+  const [session, setSession] = useState(() => (readOnlyPreview ? null : getSession()));
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
   const scheduleZoomRef = useRef<HTMLDivElement | null>(null);
@@ -1146,18 +1154,30 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   const panZoomGestureRef = useRef<PanZoomGesture>({ type: "idle" });
   const suppressPanZoomClickRef = useRef(false);
   const suppressPanZoomClickTimeoutRef = useRef<number | null>(null);
-  const canHidePublishedSchedules = Boolean(session?.approved && session?.id);
-  const username = session?.username ?? "";
-  const scheduleAssignmentStore = useMemo(() => getScheduleAssignmentStore(), [items, scheduleHistory]);
-  const visibleTripTagMap = useMemo(() => getScheduleAssignmentVisibleTripTagMap(), [items, scheduleHistory]);
+  const canHidePublishedSchedules = Boolean(!isReadOnlyPreview && session?.approved && session?.id);
+  const username = readOnlyPreview?.displayName ?? session?.username ?? "";
+  const scheduleAssignmentStore = useMemo<ScheduleAssignmentDataStore>(
+    () => (isReadOnlyPreview ? { entries: {}, rows: {} } : getScheduleAssignmentStore()),
+    [isReadOnlyPreview, items, scheduleHistory],
+  );
+  const visibleTripTagMap = useMemo(
+    () => (
+      isReadOnlyPreview
+        ? getScheduleAssignmentVisibleTripTagMap(items.map((item) => item.schedule), scheduleAssignmentStore)
+        : getScheduleAssignmentVisibleTripTagMap()
+    ),
+    [isReadOnlyPreview, items, scheduleAssignmentStore, scheduleHistory],
+  );
 
   useEffect(() => {
+    if (isReadOnlyPreview) return;
     return subscribeToAuth((nextSession) => {
       setSession(nextSession);
     });
-  }, []);
+  }, [isReadOnlyPreview]);
 
   useEffect(() => {
+    if (isReadOnlyPreview) return;
     let cancelled = false;
     const localHidden = readLocalHiddenPublishedMonthKeys(session?.id, session?.username);
     setHiddenPublishedMonthKeys(localHidden);
@@ -1176,7 +1196,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
     return () => {
       cancelled = true;
     };
-  }, [session?.id, session?.username]);
+  }, [isReadOnlyPreview, session?.id, session?.username]);
 
   const syncItemsFromCache = () => {
     setItems(
@@ -1192,6 +1212,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   };
 
   const loadItems = async () => {
+    if (isReadOnlyPreview) return;
     setItemsLoading(true);
     try {
       const publishedItems = await refreshPublishedSchedules({ repair: true });
@@ -1221,6 +1242,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   };
 
   const loadRequests = async () => {
+    if (isReadOnlyPreview) return;
     await refreshScheduleChangeRequests({
       statuses: ["pending"],
     });
@@ -1236,6 +1258,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   };
 
   const loadScheduleHistory = async () => {
+    if (isReadOnlyPreview) return;
     const activeSession = getSession();
     if (!activeSession?.approved || !hasDeskAccess(activeSession.actualRole)) {
       setScheduleHistory([]);
@@ -1255,15 +1278,17 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   };
 
   useEffect(() => {
+    if (isReadOnlyPreview) return;
     const sessionKey = session?.approved ? `${session.id}:${session.actualRole}` : "";
     if (!sessionKey || lastAssignmentSessionKeyRef.current === sessionKey) return;
     lastAssignmentSessionKeyRef.current = sessionKey;
     void loadItems().finally(() => {
       lastFocusRefreshAtRef.current = Date.now();
     });
-  }, [session?.approved, session?.id, session?.actualRole]);
+  }, [isReadOnlyPreview, session?.approved, session?.id, session?.actualRole]);
 
   useEffect(() => {
+    if (isReadOnlyPreview) return;
     let cancelled = false;
     let deferredHandle = 0;
 
@@ -1292,14 +1317,16 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       cancelled = true;
       window.clearTimeout(deferredHandle);
     };
-  }, []);
+  }, [isReadOnlyPreview]);
 
   useEffect(() => {
+    if (isReadOnlyPreview) return;
     if (!editMode) return;
     void loadRequests();
-  }, [editMode]);
+  }, [editMode, isReadOnlyPreview]);
 
   useEffect(() => {
+    if (isReadOnlyPreview) return;
     const refreshVisibleData = () => {
       void loadItems();
       if (editMode) {
@@ -1350,7 +1377,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
       window.removeEventListener(PUBLISHED_SCHEDULES_STATUS_EVENT, onStatus);
       window.removeEventListener(CHANGE_REQUESTS_STATUS_EVENT, onStatus);
     };
-  }, [editMode]);
+  }, [editMode, isReadOnlyPreview]);
 
   useEffect(() => {
     setSelectedRoute([]);
@@ -1567,6 +1594,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   }, [activeItems]);
 
   const toggleEditMode = () => {
+    if (isReadOnlyPreview) return;
     setEditMode((current) => !current);
     setHideMode(false);
     setConfirmConflictRequest(false);
@@ -2354,9 +2382,15 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
   return (
     <section
       className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}
-      onClickCapture={handleSchedulePanelClickCapture}
+      data-read-only-preview={isReadOnlyPreview ? "true" : undefined}
+      onClickCapture={isReadOnlyPreview ? undefined : handleSchedulePanelClickCapture}
     >
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
+        {isReadOnlyPreview ? (
+          <div className="status note" role="status">
+            {username} (프리뷰) · 읽기 전용 데모 · 합성 데이터 · 저장되지 않음
+          </div>
+        ) : null}
         {!isHomePreview && editMode && username ? (
           <div
             style={{
@@ -2486,9 +2520,11 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                         <button className={`btn ${showMine ? "white" : ""}`} disabled={!username} onClick={() => setShowMine((current) => !current)}>
                           {showMine ? "전체 보기" : "내 근무 보기"}
                         </button>
-                        <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
-                          {editMode ? "근무 수정 완료" : "근무 수정"}
-                        </button>
+                        {!isReadOnlyPreview ? (
+                          <button className={`btn ${editMode ? "white" : ""}`} disabled={!username} onClick={toggleEditMode}>
+                            {editMode ? "근무 수정 완료" : "근무 수정"}
+                          </button>
+                        ) : null}
                         {scheduleLayoutMode !== "mobile" ? (
                           <button className="btn" onClick={printSelectedSchedule}>
                             출력
@@ -2887,7 +2923,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                           const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                           const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
                                           const isInteractiveChip =
-                                            !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
+                                            !isReadOnlyPreview && !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
                                           return (
                                             <div
                                               key={personObject.key}
@@ -3295,7 +3331,7 @@ export function PublishedSchedulesPanel({ mode = "page" }: PublishedSchedulesPan
                                   const duplicated = duplicateNameSet.has(assignmentDisplay.name.trim());
                                   const dimOtherNames = Boolean(username) && showMine && !isMine && !personObject.pending && !routeSelected;
                                   const isInteractiveChip =
-                                    !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
+                                    !isReadOnlyPreview && !isHomePreview && editMode && (!personObject.pending || Boolean(ownPendingRequest));
                                   return (
                                     <div
                                       key={personObject.key}
