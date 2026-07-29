@@ -1716,10 +1716,17 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
 
       const widthFitScale = viewportWidth / contentWidth;
       const fitScale = clamp(widthFitScale, MIN_FIT_SCALE, 1);
-      const measuredViewportHeight = scrollNode.clientHeight;
-      const viewportHeight = measuredViewportHeight > 0
-        ? measuredViewportHeight
-        : Math.ceil(contentHeight * fitScale);
+      const visualViewportTop = window.visualViewport?.offsetTop ?? 0;
+      const visualViewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const visualViewportBottom = visualViewportTop + visualViewportHeight;
+      const viewportElementTop = Math.max(visualViewportTop, scrollNode.getBoundingClientRect().top);
+      const remainingViewportHeight = visualViewportBottom - viewportElementTop;
+      const allocatedViewportHeight = Math.round(
+        Math.max(remainingViewportHeight, visualViewportHeight * 0.6),
+      );
+      scrollNode.style.height = `${allocatedViewportHeight}px`;
+      const viewportHeight = scrollNode.clientHeight;
+      if (viewportHeight <= 0) return;
       const measuredState: PanZoomState = {
         x: 0,
         y: 0,
@@ -1732,7 +1739,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       };
       const position = clampPanZoomPosition(measuredState, fitScale, 0, 0);
       applyPanZoomState({ ...measuredState, ...position });
-      if (measuredViewportHeight <= 0) queueMeasure();
     };
 
     const queueMeasure = () => {
@@ -1744,13 +1750,19 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     if (scheduleZoomRef.current) resizeObserver?.observe(scheduleZoomRef.current);
     if (scheduleScrollRef.current) resizeObserver?.observe(scheduleScrollRef.current);
     queueMeasure();
+    window.visualViewport?.addEventListener("resize", queueMeasure);
+    window.visualViewport?.addEventListener("scroll", queueMeasure);
     window.addEventListener("resize", queueMeasure);
     window.addEventListener("orientationchange", queueMeasure);
+    window.addEventListener("scroll", queueMeasure, { passive: true });
     return () => {
       cancelAnimationFrame(frameId);
       resizeObserver?.disconnect();
+      window.visualViewport?.removeEventListener("resize", queueMeasure);
+      window.visualViewport?.removeEventListener("scroll", queueMeasure);
       window.removeEventListener("resize", queueMeasure);
       window.removeEventListener("orientationchange", queueMeasure);
+      window.removeEventListener("scroll", queueMeasure);
     };
   }, [
     visibleDisplayDays,
@@ -2626,8 +2638,8 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                 onLostPointerCapture={(event) => finishPanZoomPointer(event, true)}
                 onClickCapture={handlePanZoomClickCapture}
                 style={{
-                  height: shouldAutoFitSchedule && panZoomState.contentHeight > 0
-                    ? Math.ceil(panZoomState.contentHeight * panZoomState.fitScale)
+                  height: shouldAutoFitSchedule
+                    ? panZoomState.viewportHeight || "60dvh"
                     : undefined,
                 }}
               >
