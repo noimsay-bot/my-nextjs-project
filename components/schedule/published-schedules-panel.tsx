@@ -117,6 +117,16 @@ type PanZoomGesture =
       anchorContentY: number;
     };
 
+type PanZoomGestureDebugState = {
+  gesture: PanZoomGesture["type"];
+  moveCount: number;
+  lastDX: number;
+  lastDY: number;
+  totalDX: number;
+  totalDY: number;
+  activePointers: number;
+};
+
 const initialPanZoomState: PanZoomState = {
   x: 0,
   y: 0,
@@ -127,6 +137,20 @@ const initialPanZoomState: PanZoomState = {
   viewportWidth: 0,
   viewportHeight: 0,
 };
+
+const initialPanZoomGestureDebugState: PanZoomGestureDebugState = {
+  gesture: "idle",
+  moveCount: 0,
+  lastDX: 0,
+  lastDY: 0,
+  totalDX: 0,
+  totalDY: 0,
+  activePointers: 0,
+};
+
+function formatPanZoomGestureDebugState(state: PanZoomGestureDebugState) {
+  return `\ngesture: ${state.gesture}\nmoveCount: ${state.moveCount}\nlastDX: ${state.lastDX}\nlastDY: ${state.lastDY}\ntotalDX: ${state.totalDX}\ntotalDY: ${state.totalDY}\nactivePointers: ${state.activePointers}`;
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -1159,6 +1183,9 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const panZoomStateRef = useRef<PanZoomState>(initialPanZoomState);
   const activePanZoomPointersRef = useRef(new Map<number, ActivePanZoomPointer>());
   const panZoomGestureRef = useRef<PanZoomGesture>({ type: "idle" });
+  const debugPanZoomGestureStateRef = useRef<PanZoomGestureDebugState>(initialPanZoomGestureDebugState);
+  const debugPanZoomGestureFrameRef = useRef<number | null>(null);
+  const debugPanZoomGestureTextRef = useRef<HTMLSpanElement | null>(null);
   const suppressPanZoomClickRef = useRef(false);
   const suppressPanZoomClickTimeoutRef = useRef<number | null>(null);
   const canHidePublishedSchedules = Boolean(!isReadOnlyPreview && session?.approved && session?.id);
@@ -1815,7 +1842,32 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     if (suppressPanZoomClickTimeoutRef.current !== null) {
       window.clearTimeout(suppressPanZoomClickTimeoutRef.current);
     }
+    if (debugPanZoomGestureFrameRef.current !== null) {
+      window.cancelAnimationFrame(debugPanZoomGestureFrameRef.current);
+    }
   }, []);
+
+  const queueDebugPanZoomGestureState = (patch: Partial<PanZoomGestureDebugState> = {}) => {
+    debugPanZoomGestureStateRef.current = {
+      ...debugPanZoomGestureStateRef.current,
+      ...patch,
+      gesture: panZoomGestureRef.current.type,
+      activePointers: activePanZoomPointersRef.current.size,
+    };
+    if (debugPanZoomGestureFrameRef.current !== null) return;
+    debugPanZoomGestureFrameRef.current = window.requestAnimationFrame(() => {
+      debugPanZoomGestureFrameRef.current = null;
+      const nextState = {
+        ...debugPanZoomGestureStateRef.current,
+        gesture: panZoomGestureRef.current.type,
+        activePointers: activePanZoomPointersRef.current.size,
+      };
+      debugPanZoomGestureStateRef.current = nextState;
+      if (debugPanZoomGestureTextRef.current) {
+        debugPanZoomGestureTextRef.current.textContent = formatPanZoomGestureDebugState(nextState);
+      }
+    });
+  };
 
   const markPanZoomGestureConsumed = () => {
     suppressPanZoomClickRef.current = true;
@@ -1838,6 +1890,9 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       }
     }
     if (!event.currentTarget.contains(event.target as Node)) return;
+    if (activePanZoomPointersRef.current.size === 0) {
+      debugPanZoomGestureStateRef.current = initialPanZoomGestureDebugState;
+    }
     activePanZoomPointersRef.current.set(event.pointerId, {
       startX: event.clientX,
       startY: event.clientY,
@@ -1847,7 +1902,10 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     });
 
     const pointers = Array.from(activePanZoomPointersRef.current.values());
-    if (pointers.length !== 2) return;
+    if (pointers.length !== 2) {
+      queueDebugPanZoomGestureState();
+      return;
+    }
     const [left, right] = pointers;
     const rect = event.currentTarget.getBoundingClientRect();
     const midpoint = getPointerMidpoint(left, right);
@@ -1866,6 +1924,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
         // The pointer may already have left the viewport.
       }
     });
+    queueDebugPanZoomGestureState();
     event.preventDefault();
   };
 
@@ -1873,6 +1932,10 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     if (!shouldAutoFitSchedule) return;
     const pointer = activePanZoomPointersRef.current.get(event.pointerId);
     if (!pointer) return;
+    const rawDeltaX = event.clientX - pointer.currentX;
+    const rawDeltaY = event.clientY - pointer.currentY;
+    const totalDeltaX = event.clientX - pointer.startX;
+    const totalDeltaY = event.clientY - pointer.startY;
     pointer.currentX = event.clientX;
     pointer.currentY = event.clientY;
 
@@ -1907,6 +1970,12 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
         localMidpointY - gesture.anchorContentY * nextScale,
       );
       applyPanZoomState({ ...current, ...position, scale: nextScale }, false);
+      queueDebugPanZoomGestureState({
+        lastDX: rawDeltaX,
+        lastDY: rawDeltaY,
+        totalDX: totalDeltaX,
+        totalDY: totalDeltaY,
+      });
       event.preventDefault();
       return;
     }
@@ -1938,6 +2007,13 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       gesture.startY + event.clientY - gesture.startClientY,
     );
     applyPanZoomState({ ...current, ...position }, false);
+    queueDebugPanZoomGestureState({
+      moveCount: debugPanZoomGestureStateRef.current.moveCount + 1,
+      lastDX: rawDeltaX,
+      lastDY: rawDeltaY,
+      totalDX: totalDeltaX,
+      totalDY: totalDeltaY,
+    });
     event.preventDefault();
   };
 
@@ -1982,6 +2058,13 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       panZoomGestureRef.current = { type: "idle" };
       setPanZoomState(panZoomStateRef.current);
     }
+    queueDebugPanZoomGestureState({
+      moveCount: 0,
+      lastDX: 0,
+      lastDY: 0,
+      totalDX: 0,
+      totalDY: 0,
+    });
   };
 
   const handlePanZoomClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -2388,7 +2471,11 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
         maxWidth: "60vw",
       }}
     >
-      {`autofit: ${shouldAutoFitSchedule}\nlayout: ${scheduleLayoutMode}\nviewMode: ${mobilePageViewMode}\n3day: ${isMobileThreeDayView}\nscale: ${panZoomState.scale}\nfit: ${panZoomState.fitScale}\ncontentW: ${panZoomState.contentWidth}\ncontentH: ${panZoomState.contentHeight}\nscaledContentW: ${Math.round(panZoomState.contentWidth * panZoomState.scale)}\nscaledContentH: ${Math.round(panZoomState.contentHeight * panZoomState.scale)}\nviewportW(clientWidth): ${debugViewportMetrics.viewportWidth}\nviewportH(clientHeight): ${debugViewportMetrics.viewportHeight}\npanX: ${panZoomState.x}\npanY: ${panZoomState.y}\ninnerW: ${debugViewportMetrics.innerWidth}\ninnerH: ${debugViewportMetrics.innerHeight}\nvvW: ${debugViewportMetrics.visualViewportWidth}`}
+      {`autofit: ${shouldAutoFitSchedule}\nlayout: ${scheduleLayoutMode}\nviewMode: ${mobilePageViewMode}\n3day: ${isMobileThreeDayView}\nscale: ${panZoomState.scale}\nfit: ${panZoomState.fitScale}\ncontentW: ${panZoomState.contentWidth}\ncontentH: ${panZoomState.contentHeight}\nscaledContentW: ${Math.round(panZoomState.contentWidth * panZoomState.scale)}\nscaledContentH: ${Math.round(panZoomState.contentHeight * panZoomState.scale)}\nviewportW(clientWidth): ${debugViewportMetrics.viewportWidth}\nviewportH(clientHeight): ${debugViewportMetrics.viewportHeight}\npanX: ${panZoomState.x}\npanY: ${panZoomState.y}`}
+      <span ref={debugPanZoomGestureTextRef}>
+        {formatPanZoomGestureDebugState(debugPanZoomGestureStateRef.current)}
+      </span>
+      {`\ninnerW: ${debugViewportMetrics.innerWidth}\ninnerH: ${debugViewportMetrics.innerHeight}\nvvW: ${debugViewportMetrics.visualViewportWidth}`}
     </div>
   );
 
