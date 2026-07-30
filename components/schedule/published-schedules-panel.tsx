@@ -1142,7 +1142,9 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const [panZoomState, setPanZoomState] = useState<PanZoomState>(initialPanZoomState);
   const [debugViewportMetrics, setDebugViewportMetrics] = useState({
     viewportWidth: 0,
+    viewportHeight: 0,
     innerWidth: 0,
+    innerHeight: 0,
     visualViewportWidth: 0,
   });
   const [recommendationPortalStyle, setRecommendationPortalStyle] = useState<CSSProperties | null>(null);
@@ -1664,12 +1666,16 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     const syncDebugViewportMetrics = () => {
       const nextMetrics = {
         viewportWidth: scheduleScrollRef.current?.clientWidth ?? panZoomStateRef.current.viewportWidth,
+        viewportHeight: scheduleScrollRef.current?.clientHeight ?? panZoomStateRef.current.viewportHeight,
         innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
         visualViewportWidth: Math.round(window.visualViewport?.width ?? 0),
       };
       setDebugViewportMetrics((current) => (
         current.viewportWidth === nextMetrics.viewportWidth &&
+        current.viewportHeight === nextMetrics.viewportHeight &&
         current.innerWidth === nextMetrics.innerWidth &&
+        current.innerHeight === nextMetrics.innerHeight &&
         current.visualViewportWidth === nextMetrics.visualViewportWidth
           ? current
           : nextMetrics
@@ -2382,7 +2388,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
         maxWidth: "60vw",
       }}
     >
-      {`autofit: ${shouldAutoFitSchedule}\nlayout: ${scheduleLayoutMode}\nviewMode: ${mobilePageViewMode}\n3day: ${isMobileThreeDayView}\nscale: ${panZoomState.scale}\nfit: ${panZoomState.fitScale}\ncontentW: ${panZoomState.contentWidth}\nviewportW(clientWidth): ${debugViewportMetrics.viewportWidth}\ninnerW: ${debugViewportMetrics.innerWidth}\nvvW: ${debugViewportMetrics.visualViewportWidth}`}
+      {`autofit: ${shouldAutoFitSchedule}\nlayout: ${scheduleLayoutMode}\nviewMode: ${mobilePageViewMode}\n3day: ${isMobileThreeDayView}\nscale: ${panZoomState.scale}\nfit: ${panZoomState.fitScale}\ncontentW: ${panZoomState.contentWidth}\ncontentH: ${panZoomState.contentHeight}\nscaledContentW: ${Math.round(panZoomState.contentWidth * panZoomState.scale)}\nscaledContentH: ${Math.round(panZoomState.contentHeight * panZoomState.scale)}\nviewportW(clientWidth): ${debugViewportMetrics.viewportWidth}\nviewportH(clientHeight): ${debugViewportMetrics.viewportHeight}\npanX: ${panZoomState.x}\npanY: ${panZoomState.y}\ninnerW: ${debugViewportMetrics.innerWidth}\ninnerH: ${debugViewportMetrics.innerHeight}\nvvW: ${debugViewportMetrics.visualViewportWidth}`}
     </div>
   );
 
