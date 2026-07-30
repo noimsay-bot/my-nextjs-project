@@ -2892,6 +2892,16 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   -webkit-user-select: none;
 }
 
+.schedule-pan-zoom-viewport,
+.schedule-pan-zoom-viewport .schedule-pan-zoom-stage,
+.schedule-pan-zoom-viewport .schedule-calendar-zoom,
+.schedule-pan-zoom-viewport .schedule-calendar-grid,
+.schedule-pan-zoom-viewport .schedule-day-card,
+.schedule-pan-zoom-viewport .schedule-name-grid,
+.schedule-pan-zoom-viewport .schedule-name-chip {
+  touch-action: none !important;
+}
+
 .schedule-pan-zoom-stage {
   width: 100%;
   max-width: 100%;

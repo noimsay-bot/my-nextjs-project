@@ -2788,12 +2788,16 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                 onPointerMove={handlePanZoomPointerMove}
                 onPointerUp={(event) => finishPanZoomPointer(event)}
                 onPointerCancel={(event) => finishPanZoomPointer(event, true)}
-                onLostPointerCapture={(event) => finishPanZoomPointer(event, true)}
+                onLostPointerCapture={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  finishPanZoomPointer(event, true);
+                }}
                 onClickCapture={handlePanZoomClickCapture}
                 style={{
                   height: shouldAutoFitSchedule
                     ? panZoomState.viewportHeight || "60dvh"
                     : undefined,
+                  touchAction: shouldAutoFitSchedule ? "none" : undefined,
                 }}
               >
               <div
