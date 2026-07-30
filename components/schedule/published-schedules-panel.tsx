@@ -2706,7 +2706,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
               <div
                 className={shouldAutoFitSchedule ? "schedule-pan-zoom-stage" : undefined}
                 style={{
-                  minWidth: shouldAutoFitSchedule ? "100%" : undefined,
+                  minWidth: shouldAutoFitSchedule ? 0 : undefined,
                   height: shouldAutoFitSchedule ? "100%" : undefined,
                   position: shouldAutoFitSchedule ? "relative" : undefined,
                 }}

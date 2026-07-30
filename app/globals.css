@@ -2531,6 +2531,8 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 
 .schedule-pan-zoom-shell {
   position: relative;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   padding-top: 64px;
 }
@@ -2880,6 +2882,8 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 
 .schedule-published-panel--fit .schedule-calendar-scroll--daily.schedule-pan-zoom-viewport {
   position: relative;
+  width: 100%;
+  max-width: 100%;
   overflow: hidden !important;
   padding-bottom: 0;
   overscroll-behavior: contain;
@@ -2890,8 +2894,9 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 
 .schedule-pan-zoom-stage {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .schedule-pan-zoom-viewport .schedule-calendar-zoom--daily {
@@ -3148,12 +3153,22 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
 
 .schedule-published-panel {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
 }
 
 .schedule-published-panel > .panel-pad {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
+}
+
+.schedule-published-panel--mobile-layout [data-print-frame="true"] {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .schedule-published-panel .schedule-calendar-scroll--daily {
