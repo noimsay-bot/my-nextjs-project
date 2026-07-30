@@ -1140,6 +1140,11 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [panZoomState, setPanZoomState] = useState<PanZoomState>(initialPanZoomState);
+  const [debugViewportMetrics, setDebugViewportMetrics] = useState({
+    viewportWidth: 0,
+    innerWidth: 0,
+    visualViewportWidth: 0,
+  });
   const [recommendationPortalStyle, setRecommendationPortalStyle] = useState<CSSProperties | null>(null);
   const [session, setSession] = useState(() => (readOnlyPreview ? null : getSession()));
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
@@ -1653,6 +1658,36 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const toggleMobilePageViewMode = () => {
     setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"));
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncDebugViewportMetrics = () => {
+      const nextMetrics = {
+        viewportWidth: scheduleScrollRef.current?.clientWidth ?? panZoomStateRef.current.viewportWidth,
+        innerWidth: window.innerWidth,
+        visualViewportWidth: Math.round(window.visualViewport?.width ?? 0),
+      };
+      setDebugViewportMetrics((current) => (
+        current.viewportWidth === nextMetrics.viewportWidth &&
+        current.innerWidth === nextMetrics.innerWidth &&
+        current.visualViewportWidth === nextMetrics.visualViewportWidth
+          ? current
+          : nextMetrics
+      ));
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(syncDebugViewportMetrics);
+    if (scheduleScrollRef.current) resizeObserver?.observe(scheduleScrollRef.current);
+    syncDebugViewportMetrics();
+    window.addEventListener("resize", syncDebugViewportMetrics);
+    window.addEventListener("orientationchange", syncDebugViewportMetrics);
+    window.visualViewport?.addEventListener("resize", syncDebugViewportMetrics);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", syncDebugViewportMetrics);
+      window.removeEventListener("orientationchange", syncDebugViewportMetrics);
+      window.visualViewport?.removeEventListener("resize", syncDebugViewportMetrics);
+    };
+  }, [items.length, itemsLoading, scheduleLayoutMode, selectedItem, shouldAutoFitSchedule]);
 
   const applyPanZoomState = (nextState: PanZoomState, syncReactState = true) => {
     panZoomStateRef.current = nextState;
@@ -2330,9 +2365,31 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     selectedRoute.length === 2 &&
     sameRef(selectedRoute[selectedRoute.length - 1] ?? null, inlineRecommendationConfirmRef);
 
+  const debugPanZoomOverlay = (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        top: 0,
+        right: 0,
+        zIndex: 99999,
+        background: "rgba(220,0,0,0.85)",
+        color: "#fff",
+        font: "11px/1.4 monospace",
+        padding: "6px 8px",
+        whiteSpace: "pre",
+        pointerEvents: "none",
+        maxWidth: "60vw",
+      }}
+    >
+      {`autofit: ${shouldAutoFitSchedule}\nlayout: ${scheduleLayoutMode}\nviewMode: ${mobilePageViewMode}\n3day: ${isMobileThreeDayView}\nscale: ${panZoomState.scale}\nfit: ${panZoomState.fitScale}\ncontentW: ${panZoomState.contentWidth}\nviewportW(clientWidth): ${debugViewportMetrics.viewportWidth}\ninnerW: ${debugViewportMetrics.innerWidth}\nvvW: ${debugViewportMetrics.visualViewportWidth}`}
+    </div>
+  );
+
   if (itemsLoading && items.length === 0) {
     return (
       <section className="panel">
+        {debugPanZoomOverlay}
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="status note">게시 근무표를 불러오는 중입니다.</div>
         </div>
@@ -2343,6 +2400,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   if (items.length === 0) {
     return (
       <section className="panel">
+        {debugPanZoomOverlay}
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="status note">게시된 근무표가 없습니다.</div>
         </div>
@@ -2353,6 +2411,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   if (activeItems.length === 0 && !hideMode) {
     return (
       <section className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}>
+        {debugPanZoomOverlay}
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           {!isHomePreview ? (
             <div className="schedule-published-hero">
@@ -2402,6 +2461,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       data-read-only-preview={isReadOnlyPreview ? "true" : undefined}
       onClickCapture={isReadOnlyPreview ? undefined : handleSchedulePanelClickCapture}
     >
+      {debugPanZoomOverlay}
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {isReadOnlyPreview ? (
           <div className="status note" role="status">
