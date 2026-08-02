@@ -117,16 +117,6 @@ type PanZoomGesture =
       anchorContentY: number;
     };
 
-type PanZoomGestureDebugState = {
-  gesture: PanZoomGesture["type"];
-  moveCount: number;
-  lastDX: number;
-  lastDY: number;
-  totalDX: number;
-  totalDY: number;
-  activePointers: number;
-};
-
 const initialPanZoomState: PanZoomState = {
   x: 0,
   y: 0,
@@ -137,20 +127,6 @@ const initialPanZoomState: PanZoomState = {
   viewportWidth: 0,
   viewportHeight: 0,
 };
-
-const initialPanZoomGestureDebugState: PanZoomGestureDebugState = {
-  gesture: "idle",
-  moveCount: 0,
-  lastDX: 0,
-  lastDY: 0,
-  totalDX: 0,
-  totalDY: 0,
-  activePointers: 0,
-};
-
-function formatPanZoomGestureDebugState(state: PanZoomGestureDebugState) {
-  return `\ngesture: ${state.gesture}\nmoveCount: ${state.moveCount}\nlastDX: ${state.lastDX}\nlastDY: ${state.lastDY}\ntotalDX: ${state.totalDX}\ntotalDY: ${state.totalDY}\nactivePointers: ${state.activePointers}`;
-}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -1164,13 +1140,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const [requestMessageTone, setRequestMessageTone] = useState<"ok" | "warn" | "note">("ok");
   const [compactMonthCardHeight, setCompactMonthCardHeight] = useState<number | null>(null);
   const [panZoomState, setPanZoomState] = useState<PanZoomState>(initialPanZoomState);
-  const [debugViewportMetrics, setDebugViewportMetrics] = useState({
-    viewportWidth: 0,
-    viewportHeight: 0,
-    innerWidth: 0,
-    innerHeight: 0,
-    visualViewportWidth: 0,
-  });
   const [recommendationPortalStyle, setRecommendationPortalStyle] = useState<CSSProperties | null>(null);
   const [session, setSession] = useState(() => (readOnlyPreview ? null : getSession()));
   const printableScheduleRef = useRef<HTMLDivElement | null>(null);
@@ -1183,9 +1152,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const panZoomStateRef = useRef<PanZoomState>(initialPanZoomState);
   const activePanZoomPointersRef = useRef(new Map<number, ActivePanZoomPointer>());
   const panZoomGestureRef = useRef<PanZoomGesture>({ type: "idle" });
-  const debugPanZoomGestureStateRef = useRef<PanZoomGestureDebugState>(initialPanZoomGestureDebugState);
-  const debugPanZoomGestureFrameRef = useRef<number | null>(null);
-  const debugPanZoomGestureTextRef = useRef<HTMLSpanElement | null>(null);
   const suppressPanZoomClickRef = useRef(false);
   const suppressPanZoomClickTimeoutRef = useRef<number | null>(null);
   const canHidePublishedSchedules = Boolean(!isReadOnlyPreview && session?.approved && session?.id);
@@ -1688,40 +1654,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     setMobilePageViewMode((current) => (current === "full" ? "three-day" : "full"));
   };
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const syncDebugViewportMetrics = () => {
-      const nextMetrics = {
-        viewportWidth: scheduleScrollRef.current?.clientWidth ?? panZoomStateRef.current.viewportWidth,
-        viewportHeight: scheduleScrollRef.current?.clientHeight ?? panZoomStateRef.current.viewportHeight,
-        innerWidth: window.innerWidth,
-        innerHeight: window.innerHeight,
-        visualViewportWidth: Math.round(window.visualViewport?.width ?? 0),
-      };
-      setDebugViewportMetrics((current) => (
-        current.viewportWidth === nextMetrics.viewportWidth &&
-        current.viewportHeight === nextMetrics.viewportHeight &&
-        current.innerWidth === nextMetrics.innerWidth &&
-        current.innerHeight === nextMetrics.innerHeight &&
-        current.visualViewportWidth === nextMetrics.visualViewportWidth
-          ? current
-          : nextMetrics
-      ));
-    };
-    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(syncDebugViewportMetrics);
-    if (scheduleScrollRef.current) resizeObserver?.observe(scheduleScrollRef.current);
-    syncDebugViewportMetrics();
-    window.addEventListener("resize", syncDebugViewportMetrics);
-    window.addEventListener("orientationchange", syncDebugViewportMetrics);
-    window.visualViewport?.addEventListener("resize", syncDebugViewportMetrics);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", syncDebugViewportMetrics);
-      window.removeEventListener("orientationchange", syncDebugViewportMetrics);
-      window.visualViewport?.removeEventListener("resize", syncDebugViewportMetrics);
-    };
-  }, [items.length, itemsLoading, scheduleLayoutMode, selectedItem, shouldAutoFitSchedule]);
-
   const applyPanZoomState = (nextState: PanZoomState, syncReactState = true) => {
     panZoomStateRef.current = nextState;
     const zoomNode = scheduleZoomRef.current;
@@ -1842,32 +1774,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     if (suppressPanZoomClickTimeoutRef.current !== null) {
       window.clearTimeout(suppressPanZoomClickTimeoutRef.current);
     }
-    if (debugPanZoomGestureFrameRef.current !== null) {
-      window.cancelAnimationFrame(debugPanZoomGestureFrameRef.current);
-    }
   }, []);
-
-  const queueDebugPanZoomGestureState = (patch: Partial<PanZoomGestureDebugState> = {}) => {
-    debugPanZoomGestureStateRef.current = {
-      ...debugPanZoomGestureStateRef.current,
-      ...patch,
-      gesture: panZoomGestureRef.current.type,
-      activePointers: activePanZoomPointersRef.current.size,
-    };
-    if (debugPanZoomGestureFrameRef.current !== null) return;
-    debugPanZoomGestureFrameRef.current = window.requestAnimationFrame(() => {
-      debugPanZoomGestureFrameRef.current = null;
-      const nextState = {
-        ...debugPanZoomGestureStateRef.current,
-        gesture: panZoomGestureRef.current.type,
-        activePointers: activePanZoomPointersRef.current.size,
-      };
-      debugPanZoomGestureStateRef.current = nextState;
-      if (debugPanZoomGestureTextRef.current) {
-        debugPanZoomGestureTextRef.current.textContent = formatPanZoomGestureDebugState(nextState);
-      }
-    });
-  };
 
   const markPanZoomGestureConsumed = () => {
     suppressPanZoomClickRef.current = true;
@@ -1890,9 +1797,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       }
     }
     if (!event.currentTarget.contains(event.target as Node)) return;
-    if (activePanZoomPointersRef.current.size === 0) {
-      debugPanZoomGestureStateRef.current = initialPanZoomGestureDebugState;
-    }
     activePanZoomPointersRef.current.set(event.pointerId, {
       startX: event.clientX,
       startY: event.clientY,
@@ -1902,10 +1806,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     });
 
     const pointers = Array.from(activePanZoomPointersRef.current.values());
-    if (pointers.length !== 2) {
-      queueDebugPanZoomGestureState();
-      return;
-    }
+    if (pointers.length !== 2) return;
     const [left, right] = pointers;
     const rect = event.currentTarget.getBoundingClientRect();
     const midpoint = getPointerMidpoint(left, right);
@@ -1924,7 +1825,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
         // The pointer may already have left the viewport.
       }
     });
-    queueDebugPanZoomGestureState();
     event.preventDefault();
   };
 
@@ -1932,10 +1832,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     if (!shouldAutoFitSchedule) return;
     const pointer = activePanZoomPointersRef.current.get(event.pointerId);
     if (!pointer) return;
-    const rawDeltaX = event.clientX - pointer.currentX;
-    const rawDeltaY = event.clientY - pointer.currentY;
-    const totalDeltaX = event.clientX - pointer.startX;
-    const totalDeltaY = event.clientY - pointer.startY;
     pointer.currentX = event.clientX;
     pointer.currentY = event.clientY;
 
@@ -1970,12 +1866,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
         localMidpointY - gesture.anchorContentY * nextScale,
       );
       applyPanZoomState({ ...current, ...position, scale: nextScale }, false);
-      queueDebugPanZoomGestureState({
-        lastDX: rawDeltaX,
-        lastDY: rawDeltaY,
-        totalDX: totalDeltaX,
-        totalDY: totalDeltaY,
-      });
       event.preventDefault();
       return;
     }
@@ -2007,13 +1897,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       gesture.startY + event.clientY - gesture.startClientY,
     );
     applyPanZoomState({ ...current, ...position }, false);
-    queueDebugPanZoomGestureState({
-      moveCount: debugPanZoomGestureStateRef.current.moveCount + 1,
-      lastDX: rawDeltaX,
-      lastDY: rawDeltaY,
-      totalDX: totalDeltaX,
-      totalDY: totalDeltaY,
-    });
     event.preventDefault();
   };
 
@@ -2058,13 +1941,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       panZoomGestureRef.current = { type: "idle" };
       setPanZoomState(panZoomStateRef.current);
     }
-    queueDebugPanZoomGestureState({
-      moveCount: 0,
-      lastDX: 0,
-      lastDY: 0,
-      totalDX: 0,
-      totalDY: 0,
-    });
   };
 
   const handlePanZoomClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -2454,35 +2330,9 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     selectedRoute.length === 2 &&
     sameRef(selectedRoute[selectedRoute.length - 1] ?? null, inlineRecommendationConfirmRef);
 
-  const debugPanZoomOverlay = (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "fixed",
-        top: 0,
-        right: 0,
-        zIndex: 99999,
-        background: "rgba(220,0,0,0.85)",
-        color: "#fff",
-        font: "11px/1.4 monospace",
-        padding: "6px 8px",
-        whiteSpace: "pre",
-        pointerEvents: "none",
-        maxWidth: "60vw",
-      }}
-    >
-      {`autofit: ${shouldAutoFitSchedule}\nlayout: ${scheduleLayoutMode}\nviewMode: ${mobilePageViewMode}\n3day: ${isMobileThreeDayView}\nscale: ${panZoomState.scale}\nfit: ${panZoomState.fitScale}\ncontentW: ${panZoomState.contentWidth}\ncontentH: ${panZoomState.contentHeight}\nscaledContentW: ${Math.round(panZoomState.contentWidth * panZoomState.scale)}\nscaledContentH: ${Math.round(panZoomState.contentHeight * panZoomState.scale)}\nviewportW(clientWidth): ${debugViewportMetrics.viewportWidth}\nviewportH(clientHeight): ${debugViewportMetrics.viewportHeight}\npanX: ${panZoomState.x}\npanY: ${panZoomState.y}`}
-      <span ref={debugPanZoomGestureTextRef}>
-        {formatPanZoomGestureDebugState(debugPanZoomGestureStateRef.current)}
-      </span>
-      {`\ninnerW: ${debugViewportMetrics.innerWidth}\ninnerH: ${debugViewportMetrics.innerHeight}\nvvW: ${debugViewportMetrics.visualViewportWidth}`}
-    </div>
-  );
-
   if (itemsLoading && items.length === 0) {
     return (
       <section className="panel">
-        {debugPanZoomOverlay}
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="status note">게시 근무표를 불러오는 중입니다.</div>
         </div>
@@ -2493,7 +2343,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   if (items.length === 0) {
     return (
       <section className="panel">
-        {debugPanZoomOverlay}
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           <div className="status note">게시된 근무표가 없습니다.</div>
         </div>
@@ -2504,7 +2353,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   if (activeItems.length === 0 && !hideMode) {
     return (
       <section className={`panel schedule-published-panel ${schedulePanelLayoutClassName}`}>
-        {debugPanZoomOverlay}
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
           {!isHomePreview ? (
             <div className="schedule-published-hero">
@@ -2554,7 +2402,6 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
       data-read-only-preview={isReadOnlyPreview ? "true" : undefined}
       onClickCapture={isReadOnlyPreview ? undefined : handleSchedulePanelClickCapture}
     >
-      {debugPanZoomOverlay}
       <div className="panel-pad" style={{ display: "grid", gap: 16 }}>
         {isReadOnlyPreview ? (
           <div className="status note" role="status">
@@ -2739,7 +2586,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
 
               {shouldAutoFitSchedule ? (
                 <div
-                  className="schedule-published-zoom-controls"
+                  className="schedule-published-zoom-controls schedule-published-zoom-controls--hidden"
                   role="group"
                   aria-label="근무표 확대 및 이동"
                   data-swap-recommendation-root="true"

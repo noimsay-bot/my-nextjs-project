@@ -2560,6 +2560,10 @@ html[data-theme="light"] .schedule-name-grid > [aria-hidden="true"] {
   display: none;
 }
 
+.schedule-pan-zoom-shell:has(> .schedule-published-zoom-controls--hidden) {
+  padding-top: 0;
+}
+
 .schedule-published-panel--mobile-layout .schedule-published-zoom-controls {
   justify-content: center;
 }
