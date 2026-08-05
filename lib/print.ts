@@ -258,7 +258,7 @@ export function printHtmlDocument({
         align-items: stretch;
         min-width: 0;
         min-height: 0;
-        padding: 0.3mm;
+        padding: 0.15mm;
         border: 1px solid #d6dee8;
         border-radius: 0;
         background: #ffffff;
@@ -291,7 +291,7 @@ export function printHtmlDocument({
         align-items: center;
         justify-content: center;
         min-width: 0;
-        min-height: 4.7mm;
+        min-height: 3.7mm;
         padding: 0.25mm 0.2mm;
         border: 1px solid #dbe4ee;
         border-radius: 0;

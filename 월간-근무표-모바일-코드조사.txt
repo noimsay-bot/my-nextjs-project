@@ -1,0 +1,679 @@
+월간 근무표 모바일 확대/반응형 재설계 코드 조사
+=================================================
+
+현재 브랜치와 HEAD: chore/mobile-maintenance-agents 231933f
+조사 방식: 읽기 전용 검색 및 파일 출력
+
+
+1. 월간 근무표 렌더링 컴포넌트
+--------------------------------
+
+[라우트]
+파일: app/(portal)/work-schedule/page.tsx
+
+import { PublishedSchedulesPanel } from "@/components/schedule/published-schedules-panel";
+
+export default function WorkSchedulePage() {
+  return <PublishedSchedulesPanel />;
+}
+
+
+[주요 컴포넌트]
+파일: components/schedule/published-schedules-panel.tsx
+전체 길이: 2,885줄
+
+이 컴포넌트는 CSS 파일을 직접 import하지 않는다.
+루트 레이아웃이 import한 app/globals.css의 전역 클래스와 JSX 인라인 스타일을 사용한다.
+
+
+1-1. 월 단위 7열 그리드 구성 (94~158행)
+
+function isVisualViewportPinchZoomActive() {
+  if (typeof window === "undefined") return false;
+  const scale = window.visualViewport?.scale ?? 1;
+  return scale > 1 + VISUAL_VIEWPORT_PINCH_ZOOM_EPSILON;
+}
+
+function renderPublishedWeekdayCards(keyPrefix: string, isCompactMonthlyView: boolean) {
+  return weekdayLabels.map((label) => {
+    const isWeekendLabel = label === "토" || label === "일";
+    return (
+      <div
+        key={`${keyPrefix}-${label}`}
+        className={`schedule-weekday ${isCompactMonthlyView ? "schedule-weekday--monthly" : ""}`}
+        style={{
+          textAlign: "center",
+          padding: "6px 4px",
+          borderRadius: 12,
+          border: isWeekendLabel ? "1px solid rgba(239,68,68,.4)" : "1px solid var(--line)",
+          background: isWeekendLabel ? "rgba(239,68,68,.16)" : "rgba(255,255,255,.03)",
+          color: isWeekendLabel ? "#ffffff" : undefined,
+          fontWeight: 900,
+          fontSize: 14,
+        }}
+      >
+        {label}
+      </div>
+    );
+  });
+}
+
+function buildPublishedWeeklyCalendarItems<T>(
+  days: T[],
+  keyPrefix: string,
+  isCompactMonthlyView: boolean,
+  renderDay: (day: T) => ReactNode,
+) {
+  const items: ReactNode[] = [];
+  if (days.length === 0) return items;
+
+  for (let weekStart = 0; weekStart < days.length; weekStart += 7) {
+    const weekIndex = Math.floor(weekStart / 7);
+    const weekDays = days.slice(weekStart, weekStart + 7);
+    items.push(...renderPublishedWeekdayCards(`${keyPrefix}-weekdays-${weekIndex}`, isCompactMonthlyView));
+
+    for (let weekdayIndex = 0; weekdayIndex < 7; weekdayIndex += 1) {
+      const day = weekDays[weekdayIndex];
+      if (!day) {
+        items.push(
+          <div
+            key={`${keyPrefix}-trailing-placeholder-${weekIndex}-${weekdayIndex}`}
+            aria-hidden="true"
+            style={{ minHeight: 1 }}
+          />,
+        );
+        continue;
+      }
+      items.push(renderDay(day));
+    }
+  }
+
+  return items;
+}
+
+
+1-2. 반응형 판정 (170~178행)
+
+function getPublishedScheduleLayoutMode(
+  viewportWidth: number,
+  viewportHeight: number,
+  hasCoarsePointer: boolean,
+): PublishedScheduleLayoutMode {
+  const shortSide = Math.min(viewportWidth, viewportHeight);
+  if (viewportWidth <= 480 || shortSide <= 420) return "mobile";
+  if (viewportWidth <= 1180 || shortSide <= 900 || (hasCoarsePointer && viewportWidth <= 1400)) return "tablet";
+  return "desktop";
+}
+
+1094~1139행에서는 다음 입력을 구독한다.
+
+- window.matchMedia("(any-pointer: coarse)")
+- window.innerWidth / window.innerHeight
+- window resize
+- orientationchange
+- visualViewport resize / scroll
+
+visualViewport.scale이 1보다 큰 핀치 확대 중에는 레이아웃 모드를 다시 판정하지 않는다.
+확대가 끝난 시점에 syncViewport()를 다시 실행한다.
+
+
+1-3. 내부 auto-fit/transform 확대 처리 (1356~1446행)
+
+const shouldAutoFitSchedule = isPageMobileFullScheduleView;
+const appliedScheduleScale = shouldAutoFitSchedule ? scheduleScale : 1;
+const scaledScheduleWidth = scheduleContentSize.width > 0
+  ? scheduleContentSize.width * appliedScheduleScale
+  : 0;
+const scaledScheduleHeight = scheduleContentSize.height > 0
+  ? scheduleContentSize.height * appliedScheduleScale
+  : 0;
+
+measureSchedule()의 핵심 계산:
+
+const nextWidth = Math.ceil(zoomNode.offsetWidth);
+const nextHeight = Math.ceil(zoomNode.offsetHeight);
+const containerWidth = scrollNode.clientWidth;
+const widthFitScale = containerWidth > 0 ? containerWidth / nextWidth : 1;
+const nextFitScale = shouldAutoFitSchedule
+  ? Math.min(1, Math.max(0.12, widthFitScale))
+  : 1;
+
+즉 모바일 전체 보기에서는 7열의 원본 폭을 측정한 뒤 최소 0.12, 최대 1 범위의 scale로 폭을 맞춘다.
+핀치 확대 중에는 재측정을 건너뛴다.
+
+
+1-4. 이름 선택 -> 교환 경로 구성 (1526~1619행)
+
+const handleNameClick = async (person: ScheduleNameObject) => {
+  if (!editMode || !username) return;
+
+  if (isAutoManagedGeneralRef(person.ref, publishedDayIndex)) {
+    setRequestMessage("일반 근무는 교환 후보가 아닙니다. 실제 근무가 변경되면 일반 근무는 그 날짜 기준으로 자동 다시 계산됩니다.");
+    setRequestMessageTone("warn");
+    return;
+  }
+
+  if (person.pending) {
+    const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, person.ref, session?.id);
+    if (!ownPendingRequest) return;
+
+    const confirmed = window.confirm("변경요청을 취소하시겠습니까?");
+    if (!confirmed) return;
+
+    const result = await deleteScheduleChangeRequest(ownPendingRequest.id);
+    if (!result.ok) {
+      setRequestMessage("근무 변경 요청을 취소하지 못했습니다.");
+      setRequestMessageTone("warn");
+      return;
+    }
+
+    clearRoute();
+    await loadRequests();
+    setRequestMessage("근무 변경 요청을 취소했습니다.");
+    setRequestMessageTone("ok");
+    return;
+  }
+
+  const existingIndex = selectedRoute.findIndex((ref) => sameRef(ref, person.ref));
+  if (existingIndex >= 0) {
+    if (existingIndex === 0 && selectedRoute.length === 1 && !isRecommendationPopoverOpen) {
+      setIsRecommendationPopoverOpen(true);
+      setConfirmConflictRequest(false);
+      setRequestMessage("");
+      setRequestMessageTone("ok");
+      return;
+    }
+    removeRouteEntry(existingIndex);
+    return;
+  }
+
+  if (person.ref.dateKey <= todayKey) {
+    setRequestMessage("오늘 이후 근무만 변경 요청할 수 있습니다.");
+    setRequestMessageTone("warn");
+    return;
+  }
+
+  if (selectedRoute.length === 0) {
+    if (!isSameScheduleActorName(person.name, username)) {
+      setRequestMessage("먼저 내 근무를 선택해 주세요. 계정 이름과 근무표 이름이 다르면 교환 요청을 시작할 수 없습니다.");
+      setRequestMessageTone("warn");
+      return;
+    }
+    setSelectedRoute([person.ref]);
+    setIsRecommendationPopoverOpen(true);
+    setInlineRecommendationConfirmRef(null);
+    setConfirmConflictRequest(false);
+    setRequestMessage("");
+    setRequestMessageTone("ok");
+    return;
+  }
+
+  if (isSameScheduleActorName(person.name, username)) {
+    setSelectedRoute([person.ref]);
+    setIsRecommendationPopoverOpen(true);
+    setInlineRecommendationConfirmRef(null);
+    setConfirmConflictRequest(false);
+    setRequestMessage("");
+    setRequestMessageTone("ok");
+    return;
+  }
+
+  if (selectedRoute.length >= MAX_ROUTE_SIZE) {
+    setRequestMessage("게시 근무표 요청은 최대 3명 경로까지 등록할 수 있습니다.");
+    setRequestMessageTone("warn");
+    return;
+  }
+
+  const lastSelectedRef = selectedRoute[selectedRoute.length - 1];
+  if (lastSelectedRef && !hasCompatibleVacationType(lastSelectedRef, person.ref)) {
+    setRequestMessage("휴가 교환은 같은 유형끼리만 가능합니다. 연차, 대휴, 기타는 서로 다른 유형끼리 바꿀 수 없습니다.");
+    setRequestMessageTone("warn");
+    return;
+  }
+
+  setSelectedRoute([...selectedRoute, person.ref]);
+  setIsRecommendationPopoverOpen(false);
+  setInlineRecommendationConfirmRef(null);
+  setConfirmConflictRequest(false);
+  setRequestMessage("");
+  setRequestMessageTone("ok");
+};
+
+
+1-5. 변경요청 저장 (1729~1763행)
+
+const submitRequest = async () => {
+  if (!session || !selectedItem || selectedRoute.length < 2) return;
+
+  try {
+    await createScheduleChangeRequest({
+      monthKey: selectedItem.monthKey,
+      requesterId: session.id,
+      requesterName: session.username,
+      source: selectedRoute[0],
+      target: selectedRoute[selectedRoute.length - 1],
+      route: selectedRoute,
+      hasConflictWarning,
+    });
+
+    await loadRequests();
+    setRequestMessage(
+      selectedRoute.length === 2
+        ? "근무 변경 요청을 등록했습니다."
+        : "삼각 트레이드 요청을 등록했습니다.",
+    );
+    setRequestMessageTone("ok");
+    setConfirmConflictRequest(false);
+    setSelectedRoute([]);
+    setInlineRecommendationConfirmRef(null);
+  } catch (error) {
+    setRequestMessage(error instanceof Error ? error.message : "근무 변경 요청을 저장하지 못했습니다.");
+    setRequestMessageTone("warn");
+  }
+};
+
+const onConfirmRequest = () => {
+  if (hasConflictWarning) {
+    setConfirmConflictRequest(true);
+    return;
+  }
+  void submitRequest();
+};
+
+
+1-6. 스크롤/transform 컨테이너 (2011~2044행)
+
+<div
+  ref={scheduleScrollRef}
+  className={`schedule-calendar-scroll ${isCompactMonthlyView ? "schedule-calendar-scroll--monthly" : "schedule-calendar-scroll--daily"}`}
+  style={{
+    overflowX: shouldAutoFitSchedule ? "auto" : undefined,
+    overflowY: shouldAutoFitSchedule ? "visible" : undefined,
+    WebkitOverflowScrolling: shouldAutoFitSchedule ? "touch" : undefined,
+  }}
+>
+  <div
+    style={{
+      minWidth: shouldAutoFitSchedule ? "100%" : undefined,
+      width: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? scaledScheduleWidth : undefined,
+      height: shouldAutoFitSchedule && scaledScheduleHeight > 0 ? scaledScheduleHeight : undefined,
+      margin: shouldAutoFitSchedule && scaledScheduleWidth > 0 ? "0 auto" : undefined,
+      position: shouldAutoFitSchedule ? "relative" : undefined,
+    }}
+  >
+    <div
+      ref={scheduleZoomRef}
+      className={`schedule-calendar-zoom ${isCompactMonthlyView ? "schedule-calendar-zoom--monthly" : "schedule-calendar-zoom--daily"}`}
+      style={{
+        transform: shouldAutoFitSchedule ? `scale(${appliedScheduleScale})` : undefined,
+        transformOrigin: shouldAutoFitSchedule ? "top left" : undefined,
+        position: shouldAutoFitSchedule ? "absolute" : undefined,
+        top: shouldAutoFitSchedule ? 0 : undefined,
+        left: shouldAutoFitSchedule ? 0 : undefined,
+        willChange: shouldAutoFitSchedule ? "transform" : undefined,
+        backfaceVisibility: shouldAutoFitSchedule ? "hidden" : undefined,
+      }}
+    >
+      <div
+        className={`schedule-calendar-grid ${isCompactMonthlyView ? "schedule-calendar-grid--monthly" : "schedule-calendar-grid--daily"} ${isMobileThreeDayView ? "schedule-calendar-grid--home-mobile-three-day" : ""}`}
+      >
+
+
+1-7. 날짜 셀과 이름 버튼
+
+파일 위치:
+- 날짜 카드 시작: 2485~2539행
+- 이름 2열 grid: 2620~2676행
+- 이름 버튼 클릭: 2717~2742행
+
+날짜 카드 주요 스타일:
+
+<article
+  key={`${day.ownerMonthKey}-${day.dateKey}`}
+  className={`panel schedule-day-card ${isCompactMonthlyView ? "schedule-day-card--monthly" : ""}`}
+  style={{
+    position: "relative",
+    padding: 6,
+    minHeight: isMobileThreeDayView ? 160 : isCompactMonthlyView ? 148 : 216,
+    height: isCompactMonthlyView && compactMonthCardHeight ? compactMonthCardHeight : undefined,
+    opacity: day.isOverflowMonth && !isCurrentSheetDay ? 0.55 : 1,
+    background: dayCardStyle.background,
+    border: isToday ? "3px solid rgba(56,189,248,.92)" : dayCardStyle.border,
+    overflow: "visible",
+    zIndex: dayHasInlineRecommendations ? 80 : dayHasRouteSelection ? 12 : 1,
+  }}
+>
+  <div className="schedule-day-date" style={{ fontSize: 21, fontWeight: 900 }}>
+    <span>{day.month}/{day.day}</span>
+  </div>
+
+이름 grid:
+
+<div
+  className={`schedule-name-grid ${isCompactMonthlyView ? "schedule-name-grid--monthly" : ""}`}
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    justifyContent: "stretch",
+    justifyItems: "stretch",
+    alignItems: "center",
+    gap: 0,
+    minHeight: 38,
+    width: "100%",
+  }}
+>
+
+이름 탭/클릭:
+
+<button
+  type="button"
+  data-schedule-change-name-chip="true"
+  className={`schedule-name-chip ${mineHighlighted ? "schedule-name-chip--featured" : ""} ${isCompactMonthlyView ? "schedule-name-chip--compact" : ""}`}
+  disabled={!isInteractiveChip && !tripTooltip}
+  onClick={() => {
+    if (!isInteractiveChip) return;
+    void handleNameClick(personObject);
+  }}
+>
+
+
+1-8. Sticky 여부
+
+PublishedSchedulesPanel 내부의 sticky 헤더 또는 sticky 날짜 열: 미발견
+
+검색:
+rg -n "sticky" components/schedule/published-schedules-panel.tsx
+결과: 일치 없음
+
+
+1-9. 나머지 주요 함수 목록
+
+[레이아웃/날짜]
+applyScheduleAssignmentDecorations
+getScheduleAssignmentMonthKeysForDisplayItems
+getWeekdayLabel
+renderPublishedWeekdayCards
+buildPublishedWeeklyCalendarItems
+getPublishedScheduleLayoutMode
+buildDisplayDays
+buildActualDisplayDays
+getHomePreviewDays
+getWeeklyPreviewDays
+buildDayIndex
+
+[교환/충돌 계산]
+sameRef
+getRefKey
+isAutoManagedGeneralRef
+findOwnPendingRequestForRef
+hasCompatibleVacationType
+buildScheduleMap
+findRefSlot
+rotateRoutePreview
+applyGeneralAssistPreview
+routeWouldCreateConflict
+isSwapCandidateValid
+
+[컴포넌트 내부]
+syncItemsFromCache
+syncRequestsFromCache
+loadItems
+loadRequests
+syncScheduleHistory
+loadScheduleHistory
+toggleEditMode
+toggleHideTarget
+toggleHideMode
+toggleMobilePageViewMode
+printSelectedSchedule
+removeRouteEntry
+appendRouteCandidate
+handleNameClick
+renderInlineRecommendedCandidates
+handleSchedulePanelClickCapture
+clearRoute
+submitRequest
+onConfirmRequest
+
+
+2. 그리드/overflow/zoom 스타일 정의
+------------------------------------
+
+파일: app/globals.css
+
+
+2-1. 기본 7열과 스크롤 (896~942행)
+
+.schedule-calendar-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.schedule-calendar-scroll--daily {
+  overflow-x: visible;
+}
+
+.schedule-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.schedule-calendar-zoom {
+  width: max-content;
+}
+
+.schedule-calendar-zoom--daily {
+  width: 100%;
+}
+
+.schedule-calendar-grid--daily {
+  width: 100%;
+}
+
+.schedule-published-panel--desktop .schedule-calendar-scroll--daily {
+  overflow-x: hidden;
+}
+
+.schedule-published-panel--desktop .schedule-day-card {
+  min-width: 170px;
+}
+
+
+2-2. Mobile 원본 셀 크기 (995~1019행)
+
+.schedule-published-panel--mobile .schedule-calendar-scroll--daily {
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.schedule-published-panel--mobile .schedule-calendar-zoom--daily,
+.schedule-published-panel--mobile .schedule-calendar-grid--daily {
+  width: max-content;
+}
+
+.schedule-published-panel--mobile .schedule-calendar-grid--daily {
+  grid-template-columns: repeat(7, 164px);
+  gap: 6px;
+  align-items: start;
+}
+
+.schedule-published-panel--mobile .schedule-day-card {
+  width: 164px !important;
+  min-width: 164px;
+  min-height: 204px !important;
+  padding: 6px !important;
+}
+
+
+2-3. Tablet 원본 셀 크기 (1055~1077행)
+
+.schedule-published-panel--tablet .schedule-calendar-scroll--daily {
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.schedule-published-panel--tablet .schedule-calendar-grid--daily {
+  width: max-content;
+  min-width: 0;
+  grid-template-columns: repeat(7, 176px);
+  gap: 6px;
+  align-items: start;
+}
+
+.schedule-published-panel--tablet .schedule-day-card {
+  width: 176px !important;
+  min-width: 176px;
+  min-height: 208px !important;
+  padding: 6px !important;
+}
+
+
+2-4. Mobile/Tablet에 함께 적용되는 --fit 후순위 규칙 (2831~2859행)
+
+.schedule-published-panel--fit .schedule-calendar-scroll--daily {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
+.schedule-published-panel--fit .schedule-calendar-zoom--daily,
+.schedule-published-panel--fit .schedule-calendar-grid--daily {
+  width: max-content;
+  min-width: 0;
+}
+
+.schedule-published-panel--fit .schedule-calendar-grid--daily {
+  grid-template-columns: repeat(7, 170px);
+  gap: 6px;
+  align-items: start;
+}
+
+.schedule-published-panel--fit .schedule-day-card {
+  width: 170px !important;
+  min-width: 170px;
+  min-height: 216px !important;
+  padding: 6px !important;
+}
+
+현재 class 조합상 mobile/tablet 모두 schedule-published-panel--fit도 가진다.
+따라서 후순위인 170px 셀 규칙을 적용한 뒤 JSX transform: scale(...)로 컨테이너 폭에 맞춘다.
+
+
+2-5. 데스크톱 최종 규칙 (3399~3439행)
+
+@media (min-width: 961px) {
+  .schedule-published-panel--desktop-layout:not(.schedule-published-panel--mobile-layout)
+    .schedule-calendar-scroll--daily {
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .schedule-published-panel--desktop-layout:not(.schedule-published-panel--mobile-layout)
+    .schedule-calendar-grid--daily {
+    width: 100% !important;
+    min-width: 0 !important;
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    justify-items: stretch;
+    align-items: start;
+  }
+
+  .schedule-published-panel--desktop-layout:not(.schedule-published-panel--mobile-layout)
+    .schedule-day-card {
+    width: 100% !important;
+    min-width: 0;
+    min-height: 216px !important;
+    padding: 6px !important;
+    justify-self: stretch;
+  }
+}
+
+
+2-6. Sticky 검색 결과
+
+대상 월간 게시 근무표에는 sticky가 없다.
+app/globals.css에서 검색된 schedule 관련 sticky는 다른 화면용이다.
+
+[DESK 근무표 order sheet - 대상 컴포넌트 아님]
+.schedule-order-sheet__sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--panel) !important;
+}
+
+[팀장 일정배정 페이지 - 대상 컴포넌트 아님]
+.schedule-assignment-page-rail {
+  position: sticky;
+  top: calc(50vh - 16px);
+}
+
+.schedule-assignment-date-nav {
+  position: sticky;
+  top: calc(12px + var(--desk-header-offset, 0px));
+}
+
+별도 styles/ 디렉터리: 미발견
+
+검색:
+rg -n "grid-template-columns|position: *sticky|overflow-x|overflow-y|transform:|zoom" app components
+
+
+3. Viewport 설정
+----------------
+
+파일: app/layout.tsx
+
+import type { Metadata, Viewport } from "next";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  userScalable: true,
+};
+
+명시적 viewport 설정이 있다.
+maximumScale은 지정하지 않았고 userScalable: true이므로 사용자 확대를 명시적으로 허용한다.
+
+
+4. 반응형 분기 위치 요약
+------------------------
+
+- components/schedule/published-schedules-panel.tsx:170
+  폭, 높이, coarse pointer로 mobile/tablet/desktop 결정
+
+- components/schedule/published-schedules-panel.tsx:1094
+  matchMedia("(any-pointer: coarse)"), window.innerWidth, window.innerHeight 사용
+
+- components/schedule/published-schedules-panel.tsx:1112
+  visualViewport 확대 중에는 레이아웃 재분류 보류
+
+- components/schedule/published-schedules-panel.tsx:1359
+  모바일 전체 보기에서만 내부 auto-fit 활성화
+
+- app/globals.css:3399
+  데스크톱 min-width: 961px
+
+- app/globals.css:2819 등
+  보조 모바일 max-width: 720px 규칙
+
+
+5. 조사 결과 요약
+-----------------
+
+- 수정한 서비스 코드: 없음
+- 생성한 조사 문서: 월간-근무표-모바일-코드조사.txt
+- 기존 기능 영향: 없음
+- Git 상태 변경 명령: 실행하지 않음
+- npm install/build/lint/test: 실행하지 않음
+- 비밀값 및 환경변수 값: 읽거나 출력하지 않음
+- 배포 전 확인사항: 코드 변경이 없으므로 없음
+
