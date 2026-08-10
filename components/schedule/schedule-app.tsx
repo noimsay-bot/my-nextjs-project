@@ -16,10 +16,10 @@ import {
   SCHEDULE_YEARS,
   categories,
   defaultScheduleState,
+  getDayVisibleAssignmentDisplayRank,
   getDayCategoryDisplayLabel,
   getDayDuplicateNameSet,
   getScheduleCategoryLabel,
-  getVisibleAssignmentDisplayRank,
   isGeneralAssignmentCategory,
   orderCategories,
   scheduleAssignmentNameTagColors,
@@ -385,29 +385,15 @@ function getCategoryDisplayLabel(day: DaySchedule, category: string) {
   return label === "뉴스대기" ? "뉴스\n대기" : label;
 }
 
-const weekdayHolidayVisibleAssignmentOrder = ["조근", "일반", "석근", "야근"] as const;
-const weekendVisibleAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
 const weekendPersistentCategories = ["청와대", "국회", "청사"] as const;
 const weekdayEditPersistentCategories = ["조근", "연장", "석근", "일반", "야근", "제크", "휴가", "국회", "청사", "청와대"] as const;
 const weekendEditPersistentCategories = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "청사", "야근", "휴가"] as const;
 
 function getDayAssignmentSortRank(day: DaySchedule, category: string) {
-  const isWeekendLike = day.isWeekend || day.isHoliday;
   if (day.dateKey === "2026-05-01" && category === "야근") {
     return 999;
   }
-  if (day.isWeekend) {
-    const weekendIndex = weekendVisibleAssignmentOrder.indexOf(category as (typeof weekendVisibleAssignmentOrder)[number]);
-    if (weekendIndex >= 0) return weekendIndex;
-  }
-  if (!day.isWeekend && day.isHoliday) {
-    const normalized = getScheduleCategoryLabel(category);
-    const holidayIndex = weekdayHolidayVisibleAssignmentOrder.indexOf(
-      normalized as (typeof weekdayHolidayVisibleAssignmentOrder)[number],
-    );
-    if (holidayIndex >= 0) return holidayIndex;
-  }
-  return getVisibleAssignmentDisplayRank(category, isWeekendLike);
+  return getDayVisibleAssignmentDisplayRank(day, category);
 }
 
 function getVisibleDayAssignments(
@@ -1689,16 +1675,16 @@ export function ScheduleApp() {
   };
 
   const confirmPublish = async () => {
-    const latestState = await refreshScheduleState().catch(() => null);
-    const target =
-      latestState?.generatedHistory.find((item) => item.monthKey === publishMonthKey) ??
-      state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
-    if (!target) return;
-    if (getBigEventValidationMessages(target).some((item) => item.tone === "error")) {
+    const currentTarget = state.generatedHistory.find((item) => item.monthKey === publishMonthKey);
+    if (!currentTarget) return;
+    if (getBigEventValidationMessages(currentTarget).some((item) => item.tone === "error")) {
       setMessage({ tone: "warn", text: "게시 전 빅이벤트 입력값을 먼저 확인해 주세요." });
       return;
     }
     try {
+      const savedState = await saveScheduleState(state);
+      const target = savedState.generatedHistory.find((item) => item.monthKey === publishMonthKey);
+      if (!target) return;
       const published = await publishSchedule(target);
       await refreshRouteData({ includeRequests: false, preferredMonthKey: published.monthKey });
       setPublishOpen(false);

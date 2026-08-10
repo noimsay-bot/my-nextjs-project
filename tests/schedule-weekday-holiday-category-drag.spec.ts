@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { defaultScheduleState, isAutoManagedGeneralAssignment } from "@/lib/schedule/constants";
+import {
+  compareDayAssignmentDisplayOrder,
+  defaultScheduleState,
+  isAutoManagedGeneralAssignment,
+} from "@/lib/schedule/constants";
 import { moveAssignmentCategory, sanitizeScheduleState, syncGeneralAssignments } from "@/lib/schedule/engine";
 import type { DaySchedule, GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 
@@ -85,4 +89,25 @@ test("weekday holiday general assignments survive general sync", () => {
   expect(day?.assignments["일반"]).toEqual(["구본준"]);
   syncGeneralAssignments(state, state.generated?.days ?? [], state.generalTeamPeople);
   expect(day?.assignments["일반"]).toEqual(["구본준"]);
+});
+
+test("weekday holiday display keeps evening duty above night duty", () => {
+  const day = createHolidayDay();
+  const categories = Object.keys(day.assignments).sort((left, right) =>
+    compareDayAssignmentDisplayOrder(day, left, right),
+  );
+
+  expect(categories).toEqual(["조근", "일반", "석근", "야근"]);
+});
+
+test("published display respects weekday holiday assignment order overrides", () => {
+  const day = {
+    ...createHolidayDay(),
+    assignmentOrderOverrides: ["야근", "석근"],
+  };
+  const categories = Object.keys(day.assignments).sort((left, right) =>
+    compareDayAssignmentDisplayOrder(day, left, right),
+  );
+
+  expect(categories).toEqual(["야근", "석근", "조근", "일반"]);
 });
