@@ -340,8 +340,9 @@ test("mobile work schedule defaults to full fit and toggles to three-day rows", 
   await expect(page.locator(".schedule-calendar-grid--daily .schedule-day-card")).toHaveCount(33);
 
   await page.waitForFunction(() => {
-    const zoom = document.querySelector<HTMLElement>(".schedule-published-panel--mobile-full-fit .schedule-calendar-zoom--daily");
-    return Boolean(zoom?.style.transform?.startsWith("scale("));
+    const surface = document.querySelector<HTMLElement>("[data-testid='schedule-pan-zoom-surface']");
+    const zoom = document.querySelector<HTMLElement>("[data-testid='schedule-pan-zoom-content']");
+    return surface?.dataset.panZoomEnabled === "true" && Boolean(zoom?.style.transform?.includes("scale("));
   });
   await expect(page.locator(".schedule-published-mobile-view-controls")).toBeVisible();
 
