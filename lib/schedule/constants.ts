@@ -124,6 +124,7 @@ export function getNextScheduleAssignmentNameTag(tag?: ScheduleAssignmentNameTag
 }
 
 export const weekendScheduleAssignmentOrder = ["조근", "일반", "뉴스대기", "청와대", "국회", "청사", "야근"] as const;
+export const weekdayHolidayScheduleAssignmentOrder = ["조근", "일반", "석근", "야근"] as const;
 export const weekdayStoredAssignmentOrder = ["조근", "일반", "연장", "석근", "야근", "제크", "휴가", "청와대", "국회", "청사"] as const;
 export const weekendStoredAssignmentOrder = ["주말조근", "주말일반근무", "뉴스대기", "청와대", "국회", "야근", "휴가", "청사"] as const;
 
@@ -163,6 +164,32 @@ export function getVisibleAssignmentDisplayRank(category: string, isWeekendLike:
   );
   if (weekendIndex >= 0) return weekendIndex;
   return weekendScheduleAssignmentOrder.length + getAssignmentDisplayRank(category);
+}
+
+export function getDayVisibleAssignmentDisplayRank(day: DaySchedule, category: string) {
+  const isWeekendLike = day.isWeekend || day.isHoliday;
+  if (!day.isWeekend && day.isHoliday) {
+    const normalized = getScheduleCategoryLabel(category);
+    const weekdayHolidayIndex = weekdayHolidayScheduleAssignmentOrder.indexOf(
+      normalized as (typeof weekdayHolidayScheduleAssignmentOrder)[number],
+    );
+    if (weekdayHolidayIndex >= 0) return weekdayHolidayIndex;
+  }
+  return getVisibleAssignmentDisplayRank(category, isWeekendLike);
+}
+
+export function compareDayAssignmentDisplayOrder(day: DaySchedule, leftCategory: string, rightCategory: string) {
+  const overrideOrder = (day.assignmentOrderOverrides ?? []).filter(
+    (category, index, array) => array.indexOf(category) === index,
+  );
+  const leftOverrideIndex = overrideOrder.indexOf(leftCategory);
+  const rightOverrideIndex = overrideOrder.indexOf(rightCategory);
+  if (leftOverrideIndex >= 0 || rightOverrideIndex >= 0) {
+    if (leftOverrideIndex < 0) return 1;
+    if (rightOverrideIndex < 0) return -1;
+    return leftOverrideIndex - rightOverrideIndex;
+  }
+  return getDayVisibleAssignmentDisplayRank(day, leftCategory) - getDayVisibleAssignmentDisplayRank(day, rightCategory);
 }
 
 export function getStoredAssignmentDisplayRank(category: string, isWeekendLike: boolean) {

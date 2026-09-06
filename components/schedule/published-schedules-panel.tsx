@@ -13,11 +13,11 @@ import {
 import { printHtmlDocument } from "@/lib/print";
 import {
   buildScheduleAssignmentNameTagKey,
+  compareDayAssignmentDisplayOrder,
   getAssignmentDisplayRank,
   getDayCategoryDisplayLabel,
   getDayDuplicateNameSet,
   getScheduleCategoryLabel,
-  getVisibleAssignmentDisplayRank,
   isAutoManagedGeneralAssignment,
   isGeneralAssignmentCategory,
   scheduleAssignmentNameTagColors,
@@ -2744,10 +2744,8 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                               if (isWeekendLike) return category !== "휴가" && category !== "제크";
                               return !["국회", "청사", "청와대"].includes(category);
                             })
-                            .sort(
-                              ([leftCategory], [rightCategory]) =>
-                                getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
-                                getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                            .sort(([leftCategory], [rightCategory]) =>
+                              compareDayAssignmentDisplayOrder(day, leftCategory, rightCategory),
                             );
                           return (
                             <article
@@ -3151,10 +3149,8 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                       if (isWeekendLike) return category !== "휴가" && category !== "제크";
                       return !["국회", "청사", "청와대"].includes(category);
                     })
-                    .sort(
-                      ([leftCategory], [rightCategory]) =>
-                        getVisibleAssignmentDisplayRank(leftCategory, isWeekendLike) -
-                        getVisibleAssignmentDisplayRank(rightCategory, isWeekendLike),
+                    .sort(([leftCategory], [rightCategory]) =>
+                      compareDayAssignmentDisplayOrder(day, leftCategory, rightCategory),
                     );
                   return (
                     <article

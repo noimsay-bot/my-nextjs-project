@@ -39,6 +39,7 @@ let scheduledPersistMonthKeys = new Set<string>();
 let scheduledPersistPromise: Promise<ScheduleState> | null = null;
 let scheduledPersistResolve: ((state: ScheduleState) => void) | null = null;
 let scheduledPersistReject: ((error: unknown) => void) | null = null;
+let scheduledPersistInFlight = false;
 
 export function emitScheduleStateEvent() {
   if (typeof window === "undefined") return;
@@ -267,6 +268,47 @@ async function persistScheduleStateNow(state: ScheduleState, dirtyMonthKeys: str
   return nextState;
 }
 
+async function drainScheduledPersistQueue() {
+  if (scheduledPersistInFlight || !scheduledPersistPromise) return;
+  scheduledPersistInFlight = true;
+
+  try {
+    while (scheduledPersistState) {
+      const nextState = scheduledPersistState ? cloneScheduleStateValue(scheduledPersistState) : cloneScheduleStateValue(scheduleStateCache);
+      const nextDirtyMonthKeys = Array.from(scheduledPersistMonthKeys);
+      scheduledPersistState = null;
+      scheduledPersistMonthKeys.clear();
+
+      // Persist only months that actually changed so draft_state JSONB is not rewritten on every keystroke.
+      const persisted = await persistScheduleStateNow(nextState, nextDirtyMonthKeys);
+      if (!scheduledPersistState) {
+        scheduleStateCache = cloneScheduleStateValue(persisted);
+        emitScheduleStateEvent();
+      }
+    }
+
+    scheduledPersistResolve?.(scheduleStateCache);
+  } catch (error) {
+    scheduledPersistState = null;
+    scheduledPersistMonthKeys.clear();
+    await refreshScheduleState().catch(() => undefined);
+    scheduledPersistState = null;
+    scheduledPersistMonthKeys.clear();
+    emitSchedulePersistStatus({
+      ok: false,
+      message: error instanceof Error ? error.message : "근무표 저장에 실패했습니다. DB 기준 상태로 복구했습니다.",
+    });
+    scheduledPersistReject?.(
+      error instanceof Error ? new Error(`${error.message} (DB 기준 상태로 복구했습니다.)`) : error,
+    );
+  } finally {
+    scheduledPersistInFlight = false;
+    scheduledPersistPromise = null;
+    scheduledPersistResolve = null;
+    scheduledPersistReject = null;
+  }
+}
+
 function schedulePersist(state: ScheduleState, dirtyMonthKeys: string[] = []) {
   scheduledPersistState = cloneScheduleStateValue(state);
   dirtyMonthKeys.filter(Boolean).forEach((monthKey) => scheduledPersistMonthKeys.add(monthKey));
@@ -278,49 +320,16 @@ function schedulePersist(state: ScheduleState, dirtyMonthKeys: string[] = []) {
     });
   }
 
-  if (scheduledPersistTimer) {
-    clearTimeout(scheduledPersistTimer);
+  if (!scheduledPersistInFlight) {
+    if (scheduledPersistTimer) {
+      clearTimeout(scheduledPersistTimer);
+    }
+
+    scheduledPersistTimer = setTimeout(() => {
+      scheduledPersistTimer = null;
+      void drainScheduledPersistQueue();
+    }, 300);
   }
-
-  scheduledPersistTimer = setTimeout(() => {
-    const nextState = scheduledPersistState ? cloneScheduleStateValue(scheduledPersistState) : cloneScheduleStateValue(scheduleStateCache);
-    const nextDirtyMonthKeys = Array.from(scheduledPersistMonthKeys);
-    scheduledPersistTimer = null;
-    scheduledPersistState = null;
-    scheduledPersistMonthKeys.clear();
-
-    // Persist only months that actually changed so draft_state JSONB is not rewritten on every keystroke.
-    void persistScheduleStateNow(nextState, nextDirtyMonthKeys)
-      .then((persisted) => {
-        scheduleStateCache = cloneScheduleStateValue(persisted);
-        emitScheduleStateEvent();
-        scheduledPersistResolve?.(scheduleStateCache);
-      })
-      .catch(async (error) => {
-        try {
-          const restored = await refreshScheduleState();
-          emitSchedulePersistStatus({
-            ok: false,
-            message: error instanceof Error ? error.message : "근무표 저장에 실패했습니다. DB 기준 상태로 복구했습니다.",
-          });
-          scheduledPersistReject?.(
-            error instanceof Error ? new Error(`${error.message} (DB 기준 상태로 복구했습니다.)`) : error,
-          );
-          return restored;
-        } finally {
-          scheduledPersistPromise = null;
-          scheduledPersistResolve = null;
-          scheduledPersistReject = null;
-        }
-      })
-      .finally(() => {
-        if (scheduledPersistPromise) {
-          scheduledPersistPromise = null;
-          scheduledPersistResolve = null;
-          scheduledPersistReject = null;
-        }
-      });
-  }, 300);
 
   return scheduledPersistPromise;
 }
