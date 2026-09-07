@@ -29,7 +29,16 @@ export const VACATION_STORAGE_KEY = "j-special-force-vacations-v1";
 export const VACATION_EVENT = "j-special-force-vacations-changed";
 export const VACATION_STATUS_EVENT = "j-special-force-vacations-status";
 export const DEFAULT_VACATION_CAPACITY = 5;
+export const MIN_VACATION_CAPACITY = 0;
+export const MAX_VACATION_CAPACITY = 10;
 const VACATION_SETTINGS_ROW_ID = "vacation_request_access";
+
+function normalizeVacationCapacity(value: unknown) {
+  if (value === null || value === undefined || value === "") return DEFAULT_VACATION_CAPACITY;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_VACATION_CAPACITY;
+  return Math.max(MIN_VACATION_CAPACITY, Math.min(MAX_VACATION_CAPACITY, Math.trunc(parsed)));
+}
 
 export interface VacationRequest {
   id: string;
@@ -160,7 +169,7 @@ function sanitizeMonthState(input: Partial<VacationMonthState> | undefined, year
     limits: Object.fromEntries(
       Object.entries(input?.limits ?? {})
         .filter(([dateKey]) => !isWeekendDateKey(dateKey))
-        .map(([dateKey, value]) => [dateKey, Math.max(1, Math.min(10, Number(value) || DEFAULT_VACATION_CAPACITY))]),
+        .map(([dateKey, value]) => [dateKey, normalizeVacationCapacity(value)]),
     ),
     annualWinners: Object.fromEntries(
       Object.entries(input?.annualWinners ?? {})
@@ -1424,7 +1433,7 @@ export function setVacationCapacity(year: number, month: number, dateKey: string
   const synced = syncMonthStateToPublishedSchedule(store, year, month);
   const monthState = synced.monthState;
   if (!monthState || !monthState.managedDateKeys.includes(dateKey)) return null;
-  monthState.limits[dateKey] = Math.max(1, Math.min(10, Math.trunc(limit) || DEFAULT_VACATION_CAPACITY));
+  monthState.limits[dateKey] = normalizeVacationCapacity(limit);
   monthState.updatedAt = nowLabel();
   writeStore(store);
   return monthState;

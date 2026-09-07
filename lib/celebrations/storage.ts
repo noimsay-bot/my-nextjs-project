@@ -35,7 +35,23 @@ export interface CelebrationEventDraft {
 
 const CELEBRATION_COLUMNS =
   "id, title, message, button_label, effect, intensity, is_active, starts_at, ends_at, recurrence, created_by, created_at, updated_at";
+const LEGACY_CELEBRATION_COLUMNS =
+  "id, title, message, button_label, effect, intensity, is_active, starts_at, ends_at, created_by, created_at, updated_at";
+type CelebrationEventRow = Omit<CelebrationEvent, "recurrence"> & {
+  recurrence?: CelebrationRecurrence;
+};
 export const CELEBRATION_EVENT_CHANGED_EVENT = "portal-celebration-event-changed";
+
+function isMissingRecurrenceColumn(error: { code?: string; message?: string } | null) {
+  if (!error?.message) return false;
+  const message = error.message.replace(/["']/g, "");
+  if (error.code === "42703") {
+    return /\bcolumn (?:public\.)?portal_celebration_events\.recurrence does not exist\b/i.test(message)
+      || /\bcolumn recurrence of relation portal_celebration_events does not exist\b/i.test(message);
+  }
+  return error.code === "PGRST204"
+    && /\bcould not find the recurrence column of portal_celebration_events in the schema cache\b/i.test(message);
+}
 
 function emitCelebrationEventChanged() {
   if (typeof window === "undefined") return;
@@ -106,7 +122,7 @@ export function isCelebrationEventCurrentlyVisible(event: CelebrationEvent, now 
   return true;
 }
 
-function normalizeRow(row: CelebrationEvent): CelebrationEvent {
+function normalizeRow(row: CelebrationEventRow): CelebrationEvent {
   return {
     ...row,
     intensity: normalizeIntensity(row.intensity),
@@ -135,13 +151,17 @@ export async function getActiveCelebrationEvent() {
 
   const now = new Date().toISOString();
   const supabase = createClient();
-  const { data, error } = await supabase
+  const query = (columns: string) => supabase
     .from("portal_celebration_events")
-    .select(CELEBRATION_COLUMNS)
+    .select(columns)
     .eq("is_active", true)
     .order("created_at", { ascending: false })
     .limit(100)
-    .returns<CelebrationEvent[]>();
+    .returns<CelebrationEventRow[]>();
+  let { data, error } = await query(CELEBRATION_COLUMNS);
+  if (isMissingRecurrenceColumn(error)) {
+    ({ data, error } = await query(LEGACY_CELEBRATION_COLUMNS));
+  }
 
   if (error) {
     console.warn("축하 현수막 이벤트를 불러오지 못했습니다.", error);
@@ -158,12 +178,16 @@ export async function getRecentCelebrationEvents() {
   }
 
   const supabase = createClient();
-  const { data, error } = await supabase
+  const query = (columns: string) => supabase
     .from("portal_celebration_events")
-    .select(CELEBRATION_COLUMNS)
+    .select(columns)
     .order("created_at", { ascending: false })
     .limit(20)
-    .returns<CelebrationEvent[]>();
+    .returns<CelebrationEventRow[]>();
+  let { data, error } = await query(CELEBRATION_COLUMNS);
+  if (isMissingRecurrenceColumn(error)) {
+    ({ data, error } = await query(LEGACY_CELEBRATION_COLUMNS));
+  }
 
   if (error) {
     throw new Error(error.message || "축하 현수막 목록을 불러오지 못했습니다.");
@@ -199,14 +223,28 @@ export async function createCelebrationEvent(
     throw new Error("제목을 입력해 주세요.");
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("portal_celebration_events")
     .insert(payload)
     .select(CELEBRATION_COLUMNS)
-    .single<CelebrationEvent>();
+    .single<CelebrationEventRow>();
 
-  if (error) {
-    throw new Error(error.message || "축하 현수막 게시에 실패했습니다.");
+  if (isMissingRecurrenceColumn(error)) {
+    const { recurrence, ...legacyPayload } = payload;
+    if (recurrence !== "none") {
+      throw new Error(
+        "매년 반복 이벤트를 게시하려면 DB 업데이트가 필요합니다. 관리자에게 supabase/incremental_portal_celebration_events_recurrence.sql 적용을 요청해 주세요.",
+      );
+    }
+    ({ data, error } = await supabase
+      .from("portal_celebration_events")
+      .insert(legacyPayload)
+      .select(LEGACY_CELEBRATION_COLUMNS)
+      .single<CelebrationEventRow>());
+  }
+
+  if (error || !data) {
+    throw new Error(error?.message || "축하 현수막 게시에 실패했습니다.");
   }
 
   if (options.deactivateExisting && data?.id) {

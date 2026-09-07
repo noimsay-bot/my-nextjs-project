@@ -66,6 +66,7 @@ export default function AdminCelebrationsPage() {
   const [events, setEvents] = useState<CelebrationEvent[]>([]);
   const [previewEvent, setPreviewEvent] = useState<CelebrationEvent | null>(null);
   const [message, setMessage] = useState("");
+  const [listError, setListError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
@@ -82,10 +83,11 @@ export default function AdminCelebrationsPage() {
     }
 
     setLoading(true);
+    setListError("");
     try {
       setEvents(await getRecentCelebrationEvents());
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "축하 현수막 목록을 불러오지 못했습니다.");
+      setListError(error instanceof Error ? error.message : "축하 현수막 목록을 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
@@ -332,7 +334,11 @@ export default function AdminCelebrationsPage() {
             ))}
           </div>
 
-          {!events.length ? (
+          {listError ? (
+            <div className="status warn" role="alert">
+              이벤트 목록을 불러오지 못해 예약 여부를 확인할 수 없습니다. {listError}
+            </div>
+          ) : !events.length ? (
             <div className="status note">{loading ? "불러오는 중입니다." : "표시할 이벤트가 없습니다."}</div>
           ) : null}
         </div>

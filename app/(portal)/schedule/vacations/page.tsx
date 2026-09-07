@@ -774,7 +774,7 @@ export default function ScheduleVacationsPage() {
                             void loadMonth();
                           }}
                         >
-                          {Array.from({ length: 10 }, (_, optionIndex) => optionIndex + 1).map((option) => (
+                          {Array.from({ length: 11 }, (_, optionIndex) => optionIndex).map((option) => (
                             <option key={option} value={option}>
                               {option}
                             </option>
