@@ -3982,11 +3982,14 @@ async function getReviewManagementWorkspaceInternal(): Promise<ReviewManagementW
   }
   const visibleCandidates = (candidates ?? []).filter((candidate) => !isReadOnlyPortalRole(candidate.role));
 
-  const { data: submissionRows, error: submissionError } = await supabase
+  const currentResetAt = await getBestReportCurrentResetAt();
+  const submissionQuery = supabase
     .from("submissions")
     .select("id, author_id, type, title, link, date, notes, status, created_at, updated_at")
-    .order("updated_at", { ascending: false })
-    .returns<ReviewManagementSubmissionRow[]>();
+    .order("updated_at", { ascending: false });
+  const { data: submissionRows, error: submissionError } = currentResetAt
+    ? await submissionQuery.gt("created_at", currentResetAt).returns<ReviewManagementSubmissionRow[]>()
+    : await submissionQuery.returns<ReviewManagementSubmissionRow[]>();
 
   if (submissionError) {
     throw new Error(submissionError.message);
@@ -4268,7 +4271,7 @@ export async function getTeamLeadBestReportResultsWorkspace(): Promise<TeamLeadB
   }
 
   const currentSubmissionRows = (submissionRows ?? []).filter((row) =>
-    currentResetAt ? row.updated_at > currentResetAt : true,
+    currentResetAt ? row.created_at > currentResetAt : true,
   );
   const authorIds = Array.from(new Set(currentSubmissionRows.map((row) => row.author_id)));
 
@@ -4512,13 +4515,24 @@ export async function saveCurrentBestReportResultsAsNextQuarter() {
     };
   }
 
+  // 마감한 분기의 평가자 배정이 다음 분기까지 활성 상태로 남지 않도록 정리한다.
+  // 상태 저장이 모두 끝난 뒤 마지막에 처리하며, 실패해도 분기 저장 자체는 되돌리지 않는다.
+  const { error: assignmentResetError } = await supabase
+    .from("review_assignments")
+    .update({ reset_at: resetAt })
+    .is("reset_at", null);
+
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(TEAM_LEAD_BEST_REPORT_EVENT));
   }
 
+  const baseMessage = `${workspace.nextQuarter.label} 결과를 저장하고 현재 결과를 초기화했습니다.`;
+
   return {
     ok: true as const,
-    message: `${workspace.nextQuarter.label} 결과를 저장하고 현재 결과를 초기화했습니다.`,
+    message: assignmentResetError
+      ? `${baseMessage} 다만 평가자 배정 초기화에 실패했습니다: ${assignmentResetError.message}`
+      : baseMessage,
     savedQuarter: nextSnapshot,
   };
 }
