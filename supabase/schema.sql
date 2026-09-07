@@ -1908,7 +1908,7 @@ on public.team_lead_state
 for select
 to authenticated
 using (
-  key = 'submission_access_v1'
+  key in ('submission_access_v1', 'best_report_current_v1')
   and public.current_profile_approved() = true
 );
 

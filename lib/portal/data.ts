@@ -249,16 +249,17 @@ export async function getReviewWorkspace(): Promise<ReviewWorkspaceResult> {
       : [];
     activeReviewerIds = grantedReviewerIds.length > 0 ? grantedReviewerIds : selectedReviewerIds;
     currentResetAt = typeof currentState?.resetAt === "string" ? currentState.resetAt : "";
+  } else {
+    currentResetAt = await getBestReportCurrentResetAt();
   }
 
   const submissionQuery = supabase
     .from("submissions")
     .select(SUBMISSION_COLUMNS)
     .order("updated_at", { ascending: false });
-  const { data: submissionRows, error: submissionError } =
-    canViewCompletedReviewerResults && currentResetAt
-      ? await submissionQuery.gt("updated_at", currentResetAt).returns<SubmissionRow[]>()
-      : await submissionQuery.returns<SubmissionRow[]>();
+  const { data: submissionRows, error: submissionError } = currentResetAt
+    ? await submissionQuery.gt("created_at", currentResetAt).returns<SubmissionRow[]>()
+    : await submissionQuery.returns<SubmissionRow[]>();
 
   if (submissionError) {
     throw new Error(submissionError.message);
@@ -932,17 +933,36 @@ function formatSubmissionUpdatedAt(value: string | null | undefined) {
   return date.toLocaleString("ko-KR");
 }
 
+async function getBestReportCurrentResetAt() {
+  const supabase = await getPortalSupabaseClient();
+  const { data, error } = await supabase
+    .from("team_lead_state")
+    .select("state")
+    .eq("key", "best_report_current_v1")
+    .maybeSingle<{ state: { resetAt?: unknown } | null }>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const resetAt = data?.state?.resetAt;
+  return typeof resetAt === "string" ? resetAt : "";
+}
+
 export async function getMySubmissionEntry() {
   const session = await getPortalSession();
   if (!session) return null;
 
   const supabase = await getPortalSupabaseClient();
-  const { data, error } = await supabase
+  const currentResetAt = await getBestReportCurrentResetAt();
+  const submissionQuery = supabase
     .from("submissions")
     .select(SUBMISSION_COLUMNS)
     .eq("author_id", session.id)
-    .order("updated_at", { ascending: false })
-    .returns<SubmissionRow[]>();
+    .order("updated_at", { ascending: false });
+  const { data, error } = currentResetAt
+    ? await submissionQuery.gt("created_at", currentResetAt).returns<SubmissionRow[]>()
+    : await submissionQuery.returns<SubmissionRow[]>();
 
   if (error) {
     throw new Error(error.message);
@@ -987,16 +1007,20 @@ export async function saveMySubmissionEntry(cards: SubmissionCard[]) {
     .filter((card) => card.title || card.link || card.comment || card.date);
 
   const supabase = await getPortalSupabaseClient();
-  const { data: existingRows, error: existingError } = await supabase
+  const currentResetAt = await getBestReportCurrentResetAt();
+  const existingQuery = supabase
     .from("submissions")
     .select("id")
-    .eq("author_id", session.id)
-    .returns<Array<{ id: string }>>();
+    .eq("author_id", session.id);
+  const { data: existingRows, error: existingError } = currentResetAt
+    ? await existingQuery.gt("created_at", currentResetAt).returns<Array<{ id: string }>>()
+    : await existingQuery.returns<Array<{ id: string }>>();
 
   if (existingError) {
     return { ok: false as const, message: existingError.message };
   }
 
+  // 이전 분기 제출은 화면에 표시하지 않으므로 stale 판정 대상에서도 제외한다.
   const currentIds = sanitizedCards.map((card) => card.id);
   const staleIds = (existingRows ?? []).map((row) => row.id).filter((id) => !currentIds.includes(id));
 
