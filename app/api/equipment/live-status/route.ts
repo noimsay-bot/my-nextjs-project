@@ -29,21 +29,6 @@ interface NormalizedLiveStatusEntry {
   live_note: string | null;
 }
 
-interface ActiveLiveLoanItemRow {
-  loan_id: string;
-  equipment_item_id: string;
-  equipment_loans: {
-    id: string;
-    status: string;
-  } | null;
-}
-
-interface EquipmentItemRow {
-  id: string;
-  is_active: boolean | null;
-  metadata: unknown;
-}
-
 function normalizeText(value: unknown, maxLength: number) {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, maxLength);
@@ -92,32 +77,6 @@ function assertUniqueTrs(entries: NormalizedLiveStatusEntry[]) {
       ownerByTrs.set(trs, entry.equipment_item_id);
     });
   });
-}
-
-function normalizeMetadata(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
-
-function hasLiveStatusContent(entry: NormalizedLiveStatusEntry) {
-  return Boolean(
-    entry.live_trs ||
-      entry.live_camera_reporter ||
-      entry.live_audio_man ||
-      entry.live_location ||
-      entry.live_note,
-  );
-}
-
-function isBorrowableItem(row: EquipmentItemRow | undefined) {
-  if (!row?.is_active) return false;
-  const metadata = normalizeMetadata(row.metadata);
-  return (
-    metadata.is_under_repair !== true &&
-    metadata.is_under_repair !== "true" &&
-    metadata.borrowable !== false &&
-    metadata.borrowable !== "false"
-  );
 }
 
 async function requireLiveStatusManager() {
@@ -180,182 +139,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "저장할 라이브장비 현황이 없습니다." }, { status: 400 });
     }
 
+    if (entries.length > 1000 || entries.length !== (body?.entries as unknown[]).length ||
+        entries.some((entry) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.equipment_item_id)) ||
+        new Set(entries.map((entry) => entry.equipment_item_id.toLowerCase())).size !== entries.length) {
+      return NextResponse.json({ message: "장비 목록이 올바르지 않거나 중복된 장비가 있습니다." }, { status: 400 });
+    }
+
     assertUniqueTrs(entries);
 
-    const itemIds = entries.map((entry) => entry.equipment_item_id);
-    const { data: itemRows, error: itemRowsError } = await auth.admin
-      .from("equipment_items")
-      .select("id, is_active, metadata")
-      .in("id", itemIds)
-      .returns<EquipmentItemRow[]>();
-
-    if (itemRowsError) {
-      throw new Error(itemRowsError.message);
-    }
-
-    const itemById = new Map((itemRows ?? []).map((row) => [row.id, row] as const));
-    const { data: activeRows, error: activeRowsError } = await auth.admin
-      .from("equipment_loan_items")
-      .select(`
-        loan_id,
-        equipment_item_id,
-        equipment_loans!inner (
-          id,
-          status
-        )
-      `)
-      .in("equipment_item_id", itemIds)
-      .eq("status", "borrowed")
-      .eq("equipment_loans.status", "borrowed")
-      .returns<ActiveLiveLoanItemRow[]>();
-
-    if (activeRowsError) {
-      throw new Error(activeRowsError.message);
-    }
-
-    const activeLoanByItemId = new Map(
-      (activeRows ?? [])
-        .filter((row) => row.equipment_loans?.status === "borrowed")
-        .map((row) => [row.equipment_item_id, row.loan_id] as const),
-    );
-
-    const updatedLoanIds = new Set<string>();
-    const returnedLoanIds = new Set<string>();
-    const boardDeleteIds = new Set<string>();
-    const boardPayload: Array<NormalizedLiveStatusEntry & { updated_by: string }> = [];
-
-    for (const entry of entries) {
-      const activeLoanId = activeLoanByItemId.get(entry.equipment_item_id);
-      const shouldBeBorrowed = hasLiveStatusContent(entry);
-      const canBorrowItem = isBorrowableItem(itemById.get(entry.equipment_item_id));
-
-      if (!canBorrowItem) {
-        if (shouldBeBorrowed) {
-          boardPayload.push({
-            ...entry,
-            updated_by: auth.profile.id,
-          });
-        } else {
-          boardDeleteIds.add(entry.equipment_item_id);
-        }
-        continue;
-      }
-
-      if (!shouldBeBorrowed) {
-        boardDeleteIds.add(entry.equipment_item_id);
-        if (!activeLoanId || returnedLoanIds.has(activeLoanId)) continue;
-
-        const { error: returnError } = await auth.admin
-          .from("equipment_loan_items")
-          .update({
-            status: "returned",
-            returned_at: new Date().toISOString(),
-          } as never)
-          .eq("loan_id", activeLoanId)
-          .eq("status", "borrowed");
-
-        if (returnError) {
-          throw new Error(returnError.message);
-        }
-
-        const { error: loanReturnError } = await auth.admin
-          .from("equipment_loans")
-          .update({
-            status: "returned",
-            returned_at: new Date().toISOString(),
-          } as never)
-          .eq("id", activeLoanId);
-
-        if (loanReturnError) {
-          throw new Error(loanReturnError.message);
-        }
-
-        returnedLoanIds.add(activeLoanId);
-        continue;
-      }
-
-      if (!activeLoanId) {
-        const now = new Date().toISOString();
-        const { data: loan, error: loanInsertError } = await auth.admin
-          .from("equipment_loans")
-          .insert({
-            borrower_profile_id: auth.profile.id,
-            borrowed_at: now,
-            status: "borrowed",
-            loan_type: "live",
-            live_trs: entry.live_trs,
-            live_camera_reporter: entry.live_camera_reporter,
-            live_audio_man: entry.live_audio_man,
-            live_location: entry.live_location,
-            live_note: entry.live_note,
-          } as never)
-          .select("id")
-          .single<{ id: string }>();
-
-        if (loanInsertError || !loan?.id) {
-          throw new Error(loanInsertError?.message ?? "라이브장비 대여 기록을 생성하지 못했습니다.");
-        }
-
-        const { error: loanItemInsertError } = await auth.admin
-          .from("equipment_loan_items")
-          .insert({
-            loan_id: loan.id,
-            equipment_item_id: entry.equipment_item_id,
-            borrowed_at: now,
-            status: "borrowed",
-          } as never);
-
-        if (loanItemInsertError) {
-          await auth.admin.from("equipment_loans").delete().eq("id", loan.id);
-          throw new Error(loanItemInsertError.message);
-        }
-
-        updatedLoanIds.add(loan.id);
-        boardDeleteIds.add(entry.equipment_item_id);
-        continue;
-      }
-
-      if (updatedLoanIds.has(activeLoanId)) continue;
-
-      const { error: loanUpdateError } = await auth.admin
-        .from("equipment_loans")
-        .update({
-          live_trs: entry.live_trs,
-          live_camera_reporter: entry.live_camera_reporter,
-          live_audio_man: entry.live_audio_man,
-          live_location: entry.live_location,
-          live_note: entry.live_note,
-        } as never)
-        .eq("id", activeLoanId)
-        .eq("status", "borrowed");
-
-      if (loanUpdateError) {
-        throw new Error(loanUpdateError.message);
-      }
-      updatedLoanIds.add(activeLoanId);
-      boardDeleteIds.add(entry.equipment_item_id);
-    }
-
-    if (boardPayload.length > 0) {
-      const { error: boardUpsertError } = await auth.admin
-        .from("live_equipment_status_board")
-        .upsert(boardPayload as never, { onConflict: "equipment_item_id" });
-
-      if (boardUpsertError) {
-        throw new Error(boardUpsertError.message);
-      }
-    }
-
-    const normalizedBoardDeleteIds = Array.from(boardDeleteIds);
-    if (normalizedBoardDeleteIds.length > 0) {
-      const { error: boardDeleteError } = await auth.admin
-        .from("live_equipment_status_board")
-        .delete()
-        .in("equipment_item_id", normalizedBoardDeleteIds);
-
-      if (boardDeleteError) {
-        throw new Error(boardDeleteError.message);
-      }
+    const { error } = await auth.admin.rpc("save_live_equipment_status_atomic", {
+      p_actor_id: auth.profile.id,
+      p_entries: entries,
+    });
+    if (error) {
+      const message = error.code === "PGRST202" || error.code === "42883"
+        ? "라이브장비 안전 저장 기능이 아직 적용되지 않았습니다. Supabase SQL Editor에서 supabase/incremental_atomic_news_and_live_status.sql을 적용해 주세요."
+        : error.message;
+      throw new Error(message);
     }
 
     return NextResponse.json({ ok: true });

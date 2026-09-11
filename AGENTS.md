@@ -54,7 +54,7 @@
 - Supabase map: [docs/generated/supabase-map.md](docs/generated/supabase-map.md)
 - package scripts: [docs/generated/package-scripts.md](docs/generated/package-scripts.md)
 - dependency/quality map: [docs/generated/dependency-map.md](docs/generated/dependency-map.md)
-- generated 문서는 상단의 생성 시각과 스크립트명을 확인한다.
+- generated 문서는 상단의 생성 스크립트명을 확인한다. 실행 시각은 넣지 않으며 freshness는 파일 mtime이 아닌 재생성 내용 비교로 검사한다.
 - route/env/supabase/package generated 문서는 `npm run harness:generate`로 재생성한다.
 - `dependency-map.md`와 품질 점수는 `npm run harness:quality` 또는 `npm run harness:all`로 재생성한다.
 
@@ -67,6 +67,8 @@
 - lint: `npm run lint`
 - build: `npm run build`
 - e2e: `npm run test:e2e`
+- 운영 연결 없는 회귀 테스트: `npm run test:regression`
+- 격리된 데스크톱/모바일 smoke: `npm run test:e2e:offline`
 
 ## 8. 에이전트 호출 규칙
 - 작업 전 `.codex/agents/*.toml`의 실제 에이전트 이름과 역할을 확인한다.

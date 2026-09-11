@@ -15,11 +15,7 @@ select
     split_part(coalesce(auth_user.email, ''), '@', 1),
     'User'
   ),
-  case
-    when nullif(lower(trim(coalesce(auth_user.raw_user_meta_data ->> 'login_id', ''))), '') = 'noimsay'
-      then 'admin'::public.app_role
-    else 'member'::public.app_role
-  end,
+  'member'::public.app_role,
   true
 from auth.users as auth_user
 left join public.profiles as profile

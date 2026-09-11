@@ -31,5 +31,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Node regression tests
+        run: npm run test:regression
+
+      - name: Install Chromium for offline smoke tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Offline desktop and mobile smoke tests
+        run: npm run test:e2e:offline
+
       - name: Build
         run: npm run build

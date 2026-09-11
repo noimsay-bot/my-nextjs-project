@@ -1029,7 +1029,11 @@ function writeHomeWorkspaceLocalCache(
     communityPosts: sortCommunityPosts(communityPosts),
     communityComments: sortCommunityComments(communityComments),
   };
-  window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  } catch {
+    // Browser storage is optional: quota/security errors must not fail a successful remote operation.
+  }
 }
 
 function buildStorePayload(
@@ -1371,7 +1375,7 @@ async function fetchHomePublicWorkspaceFallback(
 async function fetchHomePublicWorkspace(options: RefreshHomePopupNoticeWorkspaceOptions = {}) {
   const session = await getPortalSession();
 
-  if (session?.approved && options.includeTrips === false) {
+  if (session?.approved && options.includeTrips === false && options.includeCommunity !== false) {
     const startedAt = Date.now();
     try {
       const payload = await fetchHomePublicWorkspaceFallback(session, options);
@@ -1629,6 +1633,9 @@ export async function refreshHomePopupNoticeWorkspace(options: RefreshHomePopupN
   refreshRequestId = requestId;
   refreshPromise = (async () => {
     if (homeWorkspaceSessionKey && homeWorkspaceSessionKey !== sessionKey) {
+      syncCaches([], [], [], [], [], false, [], false);
+      homeWorkspaceLoaded = false;
+      homeWorkspaceLastFailureAt = 0;
       homeWorkspaceTripCardsLoaded = false;
       homeWorkspaceCommunityLoaded = false;
       resetSessionScopedWorkspaceState();

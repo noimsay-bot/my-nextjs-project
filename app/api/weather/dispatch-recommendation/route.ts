@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchTextWithTimeout } from "@/lib/server/fetch-text-with-timeout";
 import { getJsonResponseByteLength, logRouteUsageDebug } from "@/lib/server/usage-debug";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import {
@@ -304,7 +305,7 @@ async function fetchDataGoKrItems(
   url.searchParams.set("nx", String(grid.nx));
   url.searchParams.set("ny", String(grid.ny));
 
-  const response = await fetch(url, {
+  const { response, text } = await fetchTextWithTimeout(url, {
     cache: "no-store",
     headers: {
       Accept: "application/json",
@@ -314,7 +315,6 @@ async function fetchDataGoKrItems(
     throw new Error(`공공데이터포털 응답 오류(${response.status})`);
   }
 
-  const text = await response.text();
   const data = (() => {
     try {
       return JSON.parse(text) as DataGoKrResponse;

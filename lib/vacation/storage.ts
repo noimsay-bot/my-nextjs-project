@@ -1598,6 +1598,14 @@ export async function applyVacationMonthToSchedule(year: number, month: number) 
   monthState.updatedAt = nowLabel();
   writeStore(vacationStore);
 
+  const persistResult = await waitForVacationStoreWrite();
+  if (!persistResult.ok) {
+    return {
+      ok: false as const,
+      message: `근무표에는 반영했지만 휴가 반영 기록을 저장하지 못했습니다. ${persistResult.message}`,
+    };
+  }
+
   return { ok: true as const, message: `${year}년 ${month}월 휴가 결과를 근무표에 반영했습니다.` };
 }
 

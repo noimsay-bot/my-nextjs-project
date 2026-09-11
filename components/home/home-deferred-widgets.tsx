@@ -24,7 +24,7 @@ const PublishedSchedulesPanel = dynamic(
 );
 
 const LiveEquipmentStatusHomePanel = dynamic(
-  () => import("@/components/equipment/equipment-pages").then((module) => module.LiveEquipmentStatusHomePanel),
+  () => import("@/components/equipment/live-equipment-status-home-panel").then((module) => module.LiveEquipmentStatusHomePanel),
   { ssr: false },
 );
 

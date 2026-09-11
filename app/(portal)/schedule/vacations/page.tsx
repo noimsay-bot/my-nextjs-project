@@ -36,7 +36,7 @@ import {
   type VacationExtraUnit,
 } from "@/lib/vacation/extra-storage";
 import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
-import { refreshScheduleState } from "@/lib/schedule/storage";
+import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const VACATION_MANAGEMENT_SELECTION_KEY = "desk-vacation-management-selection-v1";
@@ -281,13 +281,7 @@ export default function ScheduleVacationsPage() {
     setExtraUnits(getExtraUnits());
   }, []);
 
-  const loadMonth = async () => {
-    const [, , , loadedUsers] = await Promise.all([
-      refreshScheduleState(),
-      refreshPublishedSchedules({ repair: false }),
-      refreshVacationStore(),
-      refreshUsers(),
-    ]);
+  const syncMonthFromCache = useCallback(() => {
     const overview = getVacationApplicantsOverview(year, month);
     setMonthState(overview.monthState);
     setManagedDateKeys(overview.managedDateKeys);
@@ -301,36 +295,60 @@ export default function ScheduleVacationsPage() {
         requesterName: request.requesterName,
       })),
     );
-    setUsers(Array.isArray(loadedUsers) ? loadedUsers : getUsers());
+    setUsers(getUsers());
     setVacationRequestOpenState(isVacationRequestOpen());
-  };
+  }, [year, month]);
+
+  const loadMonth = useCallback(async () => {
+    try {
+      await Promise.all([
+        refreshScheduleState(),
+        refreshPublishedSchedules({ repair: false }),
+        refreshVacationStore(),
+        refreshUsers(),
+      ]);
+    } catch (error) {
+      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "휴가 정보를 불러오지 못했습니다." });
+    }
+  }, []);
 
   useEffect(() => {
-    void loadMonth();
-  }, [year, month]);
+    if (!selectionLoaded) return;
+    let active = true;
+    void loadMonth().then(() => {
+      if (active) syncMonthFromCache();
+    });
+    return () => { active = false; };
+  }, [selectionLoaded, loadMonth, syncMonthFromCache]);
 
   useEffect(() => {
     void loadExtraUnits();
   }, [loadExtraUnits]);
 
   useEffect(() => {
-    const onRefresh = () => void loadMonth();
+    let active = true;
+    const onRefresh = () => void loadMonth().then(() => {
+      if (active) syncMonthFromCache();
+    });
     const onStatus = (event: Event) => {
       const detail = (event as CustomEvent<{ ok: boolean; message: string }>).detail;
       if (!detail || detail.ok) return;
       setMessage({ tone: "warn", text: detail.message });
     };
     window.addEventListener("focus", onRefresh);
-    window.addEventListener(VACATION_EVENT, onRefresh);
+    window.addEventListener(VACATION_EVENT, syncMonthFromCache);
     window.addEventListener(VACATION_STATUS_EVENT, onStatus);
-    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, syncMonthFromCache);
+    window.addEventListener(SCHEDULE_STATE_EVENT, syncMonthFromCache);
     return () => {
+      active = false;
       window.removeEventListener("focus", onRefresh);
-      window.removeEventListener(VACATION_EVENT, onRefresh);
+      window.removeEventListener(VACATION_EVENT, syncMonthFromCache);
       window.removeEventListener(VACATION_STATUS_EVENT, onStatus);
-      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, onRefresh);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, syncMonthFromCache);
+      window.removeEventListener(SCHEDULE_STATE_EVENT, syncMonthFromCache);
     };
-  }, [year, month]);
+  }, [loadMonth, syncMonthFromCache]);
 
   useEffect(() => {
     const onExtraChange = () => setExtraUnits(getExtraUnits());
@@ -771,7 +789,6 @@ export default function ScheduleVacationsPage() {
                           value={capacity}
                           onChange={(event) => {
                             setVacationCapacity(year, month, dateKey, Number(event.target.value));
-                            void loadMonth();
                           }}
                         >
                           {Array.from({ length: 11 }, (_, optionIndex) => optionIndex).map((option) => (

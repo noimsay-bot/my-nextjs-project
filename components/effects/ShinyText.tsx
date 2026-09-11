@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { motion, useAnimationFrame, useMotionValue, useTransform } from "motion/react";
+import type { CSSProperties } from "react";
 import styles from "./ShinyText.module.css";
 
 interface ShinyTextProps {
@@ -31,90 +30,31 @@ export function ShinyText({
   direction = "left",
   delay = 0,
 }: ShinyTextProps) {
-  const [isPaused, setIsPaused] = useState(false);
-  const progress = useMotionValue(0);
-  const elapsedRef = useRef(0);
-  const lastTimeRef = useRef<number | null>(null);
-  const directionRef = useRef(direction === "left" ? 1 : -1);
-
-  const animationDuration = speed * 1000;
-  const delayDuration = delay * 1000;
-
-  useAnimationFrame((time) => {
-    if (disabled || isPaused) {
-      lastTimeRef.current = null;
-      return;
-    }
-
-    if (lastTimeRef.current === null) {
-      lastTimeRef.current = time;
-      return;
-    }
-
-    const deltaTime = time - lastTimeRef.current;
-    lastTimeRef.current = time;
-    elapsedRef.current += deltaTime;
-
-    if (yoyo) {
-      const cycleDuration = animationDuration + delayDuration;
-      const fullCycle = cycleDuration * 2;
-      const cycleTime = elapsedRef.current % fullCycle;
-
-      if (cycleTime < animationDuration) {
-        const p = (cycleTime / animationDuration) * 100;
-        progress.set(directionRef.current === 1 ? p : 100 - p);
-      } else if (cycleTime < cycleDuration) {
-        progress.set(directionRef.current === 1 ? 100 : 0);
-      } else if (cycleTime < cycleDuration + animationDuration) {
-        const reverseTime = cycleTime - cycleDuration;
-        const p = 100 - (reverseTime / animationDuration) * 100;
-        progress.set(directionRef.current === 1 ? p : 100 - p);
-      } else {
-        progress.set(directionRef.current === 1 ? 0 : 100);
-      }
-      return;
-    }
-
-    const cycleDuration = animationDuration + delayDuration;
-    const cycleTime = elapsedRef.current % cycleDuration;
-
-    if (cycleTime < animationDuration) {
-      const p = (cycleTime / animationDuration) * 100;
-      progress.set(directionRef.current === 1 ? p : 100 - p);
-    } else {
-      progress.set(directionRef.current === 1 ? 100 : 0);
-    }
-  });
-
-  useEffect(() => {
-    directionRef.current = direction === "left" ? 1 : -1;
-    elapsedRef.current = 0;
-    progress.set(0);
-  }, [direction, progress]);
-
-  const backgroundPosition = useTransform(progress, (p) => `${150 - p * 2}% center`);
-
-  const gradientStyle: CSSProperties = {
+  const duration = Number.isFinite(speed) ? Math.max(speed, 0.001) : 2;
+  const wait = Number.isFinite(delay) ? Math.max(delay, 0) : 0;
+  const cycle = duration + wait;
+  const gradientStyle = {
     backgroundImage: `linear-gradient(${spread}deg, ${color} 0%, ${color} 35%, ${shineColor} 50%, ${color} 65%, ${color} 100%)`,
     backgroundSize: "200% auto",
     WebkitBackgroundClip: "text",
     backgroundClip: "text",
     WebkitTextFillColor: "transparent",
-  };
+    "--shine-start": direction === "left" ? "150%" : "-50%",
+    "--shine-end": direction === "left" ? "-50%" : "150%",
+    animationDuration: `${cycle * (yoyo ? 2 : 1)}s`,
+    // Each pass moves for speed seconds, then holds for delay seconds.
+    animationTimingFunction: `linear(0, 1 ${(duration / cycle) * 100}%, 1)`,
+    animationPlayState: disabled ? "paused" : undefined,
+  } as CSSProperties;
 
   return (
-    <motion.span
-      className={[styles.shinyText, className].filter(Boolean).join(" ")}
-      style={{ ...gradientStyle, backgroundPosition }}
-      onMouseEnter={() => {
-        if (pauseOnHover) setIsPaused(true);
-      }}
-      onMouseLeave={() => {
-        if (pauseOnHover) setIsPaused(false);
-      }}
+    <span
+      key={direction}
+      className={[styles.shinyText, yoyo ? styles.yoyo : "", pauseOnHover ? styles.pauseOnHover : "", className].filter(Boolean).join(" ")}
+      style={gradientStyle}
     >
       {text}
-    </motion.span>
+    </span>
   );
 }
 

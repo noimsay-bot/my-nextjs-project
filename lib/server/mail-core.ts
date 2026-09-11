@@ -75,7 +75,7 @@ export async function deliverTemporaryPasswordMail(
 ): Promise<TemporaryPasswordMailResult> {
   if (env.mailLogOnly) {
     deps.warn(
-      `[mail] MAIL_LOG_ONLY 모드라 임시 비밀번호 메일을 실제로 보내지 않습니다. to=${input.email} loginId=${input.loginId} temporaryPassword=${input.temporaryPassword}`,
+      `[mail] 임시 비밀번호 메일 미발송 reason=log_only to=${maskEmail(input.email)}`,
     );
     return { sent: false, reason: "log_only" };
   }

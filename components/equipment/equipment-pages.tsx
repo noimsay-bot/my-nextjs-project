@@ -31,7 +31,6 @@ import {
 } from "@/lib/equipment/storage";
 import {
   fetchTodayElectionTvuOverlays,
-  normalizeTvuEquipmentName,
 } from "@/lib/election/storage";
 import type { ElectionTvuOverlay } from "@/lib/election/types";
 import {
@@ -56,6 +55,24 @@ import {
 } from "@/lib/equipment/borrow-selections";
 import { vacationStyleTones } from "@/lib/schedule/vacation-styles";
 import styles from "./Equipment.module.css";
+import {
+  isTvuItem,
+  getEquipmentDisplayName,
+  isGlobalTvuItem,
+  isGridTvuItem,
+  isRentalTvuItem,
+  isRegionalTransmissionTvuItem,
+  normalizeLiveStatusDraft,
+  liveStatusDraftsEqual,
+  hasLiveStatusDraftContent,
+  createLiveStatusDraftByItemId,
+  resolveLiveStatusDraft,
+  buildElectionTvuOverlayMap,
+  getElectionOverlayForItem,
+  applyElectionOverlayToLiveDraft,
+  LoadingBlocks,
+  StatusPill,
+} from "./live-status-shared";
 
 type Message = { tone: "ok" | "warn" | "note"; text: string };
 type ConfirmMode = "borrow" | "return";
@@ -214,58 +231,6 @@ function formatDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
-function isTvuItem(item: EquipmentItem) {
-  return item.category === "live" && item.groupName.trim().toUpperCase() === "TVU";
-}
-
-function getTvuNumber(item: EquipmentItem) {
-  if (!isTvuItem(item)) return null;
-  const metadataRegionalNumber = item.metadata.regional_number;
-  if (typeof metadataRegionalNumber === "number" && Number.isFinite(metadataRegionalNumber)) return metadataRegionalNumber;
-  if (typeof metadataRegionalNumber === "string" && /^\d+$/.test(metadataRegionalNumber.trim())) return Number(metadataRegionalNumber);
-  const metadataNumber = item.metadata.rental_number;
-  if (typeof metadataNumber === "number" && Number.isFinite(metadataNumber)) return metadataNumber;
-  if (typeof metadataNumber === "string" && /^\d+$/.test(metadataNumber.trim())) return Number(metadataNumber);
-  const codeMatched = /^live-(?:rental-|regional-)?tvu-(\d+)$/i.exec(item.code.trim());
-  if (codeMatched) return Number(codeMatched[1]);
-  const matched = /^TVU\s*-?\s*(\d+)$/i.exec(item.name.trim());
-  if (!matched) return null;
-  return Number(matched[1]);
-}
-
-function formatTvuDisplayName(name: string) {
-  const matched = /^TVU\s*-?\s*(\d+)$/i.exec(name.trim());
-  if (!matched) return name;
-  return `TVU-${Number(matched[1])}`;
-}
-
-function getEquipmentDisplayName(item: EquipmentItem) {
-  return isTvuItem(item) ? formatTvuDisplayName(item.name) : item.name;
-}
-
-function isGlobalTvuItem(item: EquipmentItem) {
-  const metadataNetwork = typeof item.metadata.network === "string" ? item.metadata.network.trim().toLowerCase() : "";
-  if (metadataNetwork === "global") return true;
-  const tvuNumber = getTvuNumber(item);
-  return tvuNumber !== null && tvuNumber >= 15 && tvuNumber <= 19;
-}
-
-function isGridTvuItem(item: EquipmentItem) {
-  return isTvuItem(item) && (item.metadata.grid === true || item.metadata.grid === "true");
-}
-
-function isRentalTvuItem(item: EquipmentItem) {
-  if (!isTvuItem(item)) return false;
-  if (item.metadata.rental === true || item.metadata.rental === "true") return true;
-  return /^live-rental-tvu-\d+$/i.test(item.code.trim());
-}
-
-function isRegionalTransmissionTvuItem(item: EquipmentItem) {
-  if (!isTvuItem(item)) return false;
-  if (item.metadata.regional_transmission === true || item.metadata.regional_transmission === "true") return true;
-  return /^live-regional-tvu-\d+$/i.test(item.code.trim());
-}
-
 function isDeskManagedEquipmentCategory(category: EquipmentCategory) {
   return category === "camera_lens" || category === "light" || category === "live";
 }
@@ -363,104 +328,6 @@ function getEngTargetProfileId(loanItem: EquipmentLoanItem) {
 
 function isSharedEngSetItem(item: EquipmentItem) {
   return item.category === "eng_set" && getMetadataString(item, "kind") === "shared_eng_set";
-}
-
-function normalizeLiveStatusDraft(value?: Partial<LiveLoanDetails> | null): LiveLoanDetails {
-  return {
-    trs: value?.trs?.trim() ?? "",
-    cameraReporter: value?.cameraReporter?.trim() ?? "",
-    audioMan: value?.audioMan?.trim() ?? "",
-    location: value?.location?.trim() ?? "",
-    note: value?.note?.trim() ?? "",
-  };
-}
-
-function liveStatusDraftsEqual(left?: LiveLoanDetails, right?: LiveLoanDetails) {
-  const normalizedLeft = normalizeLiveStatusDraft(left);
-  const normalizedRight = normalizeLiveStatusDraft(right);
-  return (
-    normalizedLeft.trs === normalizedRight.trs &&
-    normalizedLeft.cameraReporter === normalizedRight.cameraReporter &&
-    normalizedLeft.audioMan === normalizedRight.audioMan &&
-    normalizedLeft.location === normalizedRight.location &&
-    normalizedLeft.note === normalizedRight.note
-  );
-}
-
-function hasLiveStatusDraftContent(value?: LiveLoanDetails) {
-  const normalized = normalizeLiveStatusDraft(value);
-  return Boolean(normalized.trs || normalized.cameraReporter || normalized.audioMan || normalized.location || normalized.note);
-}
-
-function createLiveStatusDraftByItemId(entries: LiveEquipmentStatusEntry[]) {
-  return entries.reduce<LiveStatusDraftByItemId>((map, entry) => {
-    map[entry.equipmentItemId] = normalizeLiveStatusDraft(entry);
-    return map;
-  }, {});
-}
-
-function getLoanLiveStatusDraft(loanItem?: EquipmentLoanItem): LiveLoanDetails {
-  return {
-    trs: loanItem?.loan.liveTrs?.trim() ?? "",
-    cameraReporter: loanItem?.loan.liveCameraReporter?.trim() ?? "",
-    audioMan: loanItem?.loan.liveAudioMan?.trim() ?? "",
-    location: loanItem?.loan.liveLocation?.trim() ?? "",
-    note: loanItem?.loan.liveNote?.trim() ?? "",
-  };
-}
-
-function resolveLiveStatusDraft(manualDraft: LiveLoanDetails | undefined, loanItem?: EquipmentLoanItem): LiveLoanDetails {
-  const manual = normalizeLiveStatusDraft(manualDraft);
-  const linked = getLoanLiveStatusDraft(loanItem);
-  return {
-    trs: manual.trs || linked.trs,
-    cameraReporter: manual.cameraReporter || linked.cameraReporter,
-    audioMan: manual.audioMan || linked.audioMan,
-    location: manual.location || linked.location,
-    note: manual.note || linked.note,
-  };
-}
-
-function mergeElectionOverlayText(left: string, right: string) {
-  const values = new Set(
-    [left, right]
-      .flatMap((value) => value.split("/"))
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
-  return Array.from(values).join(" / ");
-}
-
-function buildElectionTvuOverlayMap(overlays: ElectionTvuOverlay[]) {
-  return overlays.reduce<Map<string, ElectionTvuOverlay>>((map, overlay) => {
-    const key = overlay.normalizedEquipmentName;
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, overlay);
-      return map;
-    }
-
-    map.set(key, {
-      ...existing,
-      place: mergeElectionOverlayText(existing.place, overlay.place),
-      cameraStaffName: mergeElectionOverlayText(existing.cameraStaffName, overlay.cameraStaffName),
-      equipmentType: existing.equipmentType === "rental" || overlay.equipmentType === "rental" ? "rental" : existing.equipmentType,
-    });
-    return map;
-  }, new Map());
-}
-
-function getElectionOverlayForItem(item: EquipmentItem, overlaysByTvuName: Map<string, ElectionTvuOverlay>) {
-  return overlaysByTvuName.get(normalizeTvuEquipmentName(getEquipmentDisplayName(item))) ?? null;
-}
-
-function applyElectionOverlayToLiveDraft(draft: LiveLoanDetails, overlay: ElectionTvuOverlay | null): LiveLoanDetails {
-  if (!overlay) return draft;
-  return {
-    ...draft,
-    cameraReporter: overlay.cameraStaffName || draft.cameraReporter,
-    location: overlay.place || draft.location,
-  };
 }
 
 function groupLoanItemsByBorrower(loanItems: EquipmentLoanItem[]) {
@@ -585,40 +452,6 @@ function PageHeader({
         <EquipmentNav activeHref={activeHref} showStatusLink={showStatusLink} />
       </div>
     </article>
-  );
-}
-
-function LoadingBlocks() {
-  return (
-    <div className={styles.skeletonGrid} aria-hidden="true">
-      {Array.from({ length: 8 }, (_, index) => (
-        <span key={index} className={styles.skeletonCard} />
-      ))}
-    </div>
-  );
-}
-
-function StatusPill({
-  borrowed,
-  repairing = false,
-  availableLabel = "대여가능",
-  borrowedLabel = "대여중",
-}: {
-  borrowed: boolean;
-  repairing?: boolean;
-  availableLabel?: string;
-  borrowedLabel?: string;
-}) {
-  const statusClassName = borrowed
-    ? styles.statusBorrowed
-    : repairing
-      ? styles.statusRepairing
-      : styles.statusAvailable;
-  const label = borrowed ? borrowedLabel : repairing ? "수리중" : availableLabel;
-  return (
-    <span className={`${styles.statusPill} ${statusClassName}`.trim()}>
-      {label}
-    </span>
   );
 }
 
@@ -3207,153 +3040,6 @@ export function EquipmentStatusPage() {
           <DailyRecords dateKey={dateKey} onDateChange={setDateKey} records={dailyRecords} />
         </>
       ) : null}
-    </section>
-  );
-}
-
-export function LiveEquipmentStatusHomePanel() {
-  const [items, setItems] = useState<EquipmentItem[]>([]);
-  const [currentLoanItems, setCurrentLoanItems] = useState<EquipmentLoanItem[]>([]);
-  const [savedDrafts, setSavedDrafts] = useState<LiveStatusDraftByItemId>({});
-  const [electionOverlays, setElectionOverlays] = useState<ElectionTvuOverlay[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<Message | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [nextItems, nextCurrent, nextStatusEntries, nextElectionOverlays] = await Promise.all([
-        fetchEquipmentItems(["live"]),
-        fetchEquipmentLoanItems({ categories: ["live"], status: "borrowed" }),
-        fetchLiveEquipmentStatusEntries(),
-        fetchTodayElectionTvuOverlays(),
-      ]);
-      setItems(nextItems);
-      setCurrentLoanItems(nextCurrent);
-      setSavedDrafts(createLiveStatusDraftByItemId(nextStatusEntries));
-      setElectionOverlays(nextElectionOverlays);
-      setMessage(null);
-    } catch (error) {
-      setMessage({ tone: "warn", text: error instanceof Error ? error.message : "라이브장비현황을 불러오지 못했습니다." });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const currentByItemId = useMemo(
-    () => new Map(currentLoanItems.map((loanItem) => [loanItem.equipmentItemId, loanItem] as const)),
-    [currentLoanItems],
-  );
-  const electionOverlayByTvuName = useMemo(() => buildElectionTvuOverlayMap(electionOverlays), [electionOverlays]);
-  const tvuItems = useMemo(() => items.filter((item) => isTvuItem(item) && !isRegionalTransmissionTvuItem(item)), [items]);
-
-  return (
-    <section className={`${styles.page} ${styles.liveStatusPage}`}>
-      <article className={`${styles.liveStatusBoard} ${styles.liveStatusHomeBoard}`}>
-        <div className={styles.liveStatusTop}>
-          <div className={styles.liveStatusHeading}>
-            <span className={styles.liveStatusBadge}>라이브장비 상황판</span>
-          </div>
-        </div>
-        {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
-        {loading ? (
-          <LoadingBlocks />
-        ) : (
-          <div className={styles.liveStatusTableStack}>
-            <section className={styles.liveStatusTableSection}>
-              <div className={styles.groupHead}>
-                <h3>라이브장비</h3>
-                <span>{tvuItems.length}개</span>
-              </div>
-              {tvuItems.length > 0 ? (
-                <div className={styles.liveStatusTableWrap}>
-                  <table className={styles.liveStatusTable}>
-                    <thead>
-                      <tr>
-                        <th>장비명</th>
-                        <th>TRS</th>
-                        <th>촬영기자</th>
-                        <th>오디오맨</th>
-                        <th>장소</th>
-                        <th>비고</th>
-                        <th>상태</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tvuItems.map((item) => {
-                        const loanItem = currentByItemId.get(item.id);
-                        const electionOverlay = getElectionOverlayForItem(item, electionOverlayByTvuName);
-                        const draft = applyElectionOverlayToLiveDraft(resolveLiveStatusDraft(savedDrafts[item.id], loanItem), electionOverlay);
-                        const hasStatusDraft = hasLiveStatusDraftContent(draft);
-                        const borrowedLabel = electionOverlay ? "선거중계" : loanItem ? "대여중" : "사용중";
-                        return (
-                          <tr key={item.id}>
-                            <td>
-                              <span className={styles.itemNameStack}>
-                                <strong>{getEquipmentDisplayName(item)}</strong>
-                                {electionOverlay ? (
-                                  <>
-                                    <span className={styles.globalBadge}>선거</span>
-                                    <span className={styles.regionalBadge}>자동연동</span>
-                                  </>
-                                ) : null}
-                                {isGlobalTvuItem(item) ? (
-                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                    Global
-                                  </span>
-                                ) : null}
-                                {isGridTvuItem(item) ? (
-                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                    Grid
-                                  </span>
-                                ) : null}
-                                {isRentalTvuItem(item) ? (
-                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                    임대
-                                  </span>
-                                ) : null}
-                                {electionOverlay?.equipmentType === "rental" && !isRentalTvuItem(item) ? (
-                                  <span className={styles.globalBadge} style={{ background: vacationStyleTones["대휴"].background }}>
-                                    임대
-                                  </span>
-                                ) : null}
-                              </span>
-                            </td>
-                            <td>
-                              <span className={styles.liveStatusCellValue}>{draft.trs || "-"}</span>
-                            </td>
-                            <td>
-                              <span className={styles.liveStatusCellValue}>{draft.cameraReporter || "-"}</span>
-                            </td>
-                            <td>
-                              <span className={styles.liveStatusCellValue}>{draft.audioMan || "-"}</span>
-                            </td>
-                            <td>
-                              <span className={styles.liveStatusCellValue}>{draft.location || "-"}</span>
-                            </td>
-                            <td>
-                              <span className={styles.liveStatusCellValue}>{draft.note || "-"}</span>
-                            </td>
-                            <td>
-                              <StatusPill borrowed={Boolean(loanItem || electionOverlay || hasStatusDraft)} repairing={item.isUnderRepair} borrowedLabel={borrowedLabel} />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="status note">라이브장비 표시 대상이 없습니다.</div>
-              )}
-            </section>
-          </div>
-        )}
-      </article>
     </section>
   );
 }

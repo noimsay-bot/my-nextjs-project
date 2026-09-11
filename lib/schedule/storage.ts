@@ -2,6 +2,7 @@ import { defaultScheduleState } from "@/lib/schedule/constants";
 import { refreshDeskRecordStore } from "@/lib/schedule/desk-records";
 import { getMonthKey, sanitizeScheduleState } from "@/lib/schedule/engine";
 import { detectScheduleMonthConflict } from "@/lib/schedule/optimistic-lock";
+import { advanceScheduleMonthVersion, draftMonthVersions as scheduleMonthUpdatedAtCache } from "@/lib/schedule/month-version";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import type { GeneratedSchedule, ScheduleState } from "@/lib/schedule/types";
 import {
@@ -31,7 +32,6 @@ interface ScheduleMonthRow {
 
 let scheduleStateCache = sanitizeScheduleState(defaultScheduleState);
 let scheduleMonthKeyCache = new Set<string>();
-const scheduleMonthUpdatedAtCache = new Map<string, string | null>();
 let scheduleRefreshPromise: Promise<ScheduleState> | null = null;
 let scheduledPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let scheduledPersistState: ScheduleState | null = null;
@@ -220,29 +220,30 @@ async function persistScheduleStateNow(state: ScheduleState, dirtyMonthKeys: str
     const existingMonthRows = monthRows.filter((row) => scheduleMonthKeyCache.has(row.month_key));
 
     if (newMonthRows.length > 0) {
-      const { error: insertError } = await supabase.from("schedule_months").upsert(newMonthRows);
+      const { data: insertedRows, error: insertError } = await supabase.from("schedule_months")
+        .insert(newMonthRows).select("month_key, updated_at");
       if (insertError) {
         throw new Error(getSupabaseStorageErrorMessage(insertError, "schedule_months"));
+      }
+      for (const row of insertedRows ?? []) {
+        advanceScheduleMonthVersion("draft", row.month_key, undefined, row.updated_at ?? null);
       }
     }
 
     for (const row of existingMonthRows) {
       const expectedUpdatedAt = scheduleMonthUpdatedAtCache.get(row.month_key);
-      if (expectedUpdatedAt === undefined || expectedUpdatedAt === null) {
-        // updated_at을 모르는 경우(INSERT 직후 등) — 기존 동작 유지
-        const { error: upsertError } = await supabase.from("schedule_months").upsert(row);
-        if (upsertError) {
-          throw new Error(getSupabaseStorageErrorMessage(upsertError, "schedule_months"));
-        }
-        continue;
+      if (expectedUpdatedAt === undefined) {
+        throw new Error("근무표 저장 버전을 확인할 수 없습니다. 새로고침 후 다시 시도해 주세요.");
       }
 
-      const { data: updatedRows, error: updateError } = await supabase
+      let query = supabase
         .from("schedule_months")
         .update({ draft_state: row.draft_state, updated_by: row.updated_by })
-        .eq("month_key", row.month_key)
-        .eq("updated_at", expectedUpdatedAt)
-        .select("month_key, updated_at");
+        .eq("month_key", row.month_key);
+      query = expectedUpdatedAt === null
+        ? query.is("updated_at", null)
+        : query.eq("updated_at", expectedUpdatedAt);
+      const { data: updatedRows, error: updateError } = await query.select("month_key, updated_at");
 
       if (updateError) {
         throw new Error(getSupabaseStorageErrorMessage(updateError, "schedule_months"));
@@ -253,7 +254,7 @@ async function persistScheduleStateNow(state: ScheduleState, dirtyMonthKeys: str
       }
 
       const newUpdatedAt = (updatedRows as Array<{ updated_at: string | null }>)[0]?.updated_at ?? null;
-      scheduleMonthUpdatedAtCache.set(row.month_key, newUpdatedAt);
+      advanceScheduleMonthVersion("draft", row.month_key, expectedUpdatedAt, newUpdatedAt);
     }
   }
 

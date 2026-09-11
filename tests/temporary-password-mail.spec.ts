@@ -56,8 +56,10 @@ test.describe("deliverTemporaryPasswordMail", () => {
     expect(result).toEqual({ sent: false, reason: "log_only" });
     expect(sent).toHaveLength(0);
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("user@example.com");
-    expect(warnings[0]).toContain("Temp1234ab");
+    expect(warnings[0]).toContain("us***@example.com");
+    expect(warnings[0]).not.toContain(sampleInput.email);
+    expect(warnings[0]).not.toContain(sampleInput.loginId);
+    expect(warnings[0]).not.toContain(sampleInput.temporaryPassword);
   });
 
   test("정상 모드에서는 메일을 발송하고 sent:true를 반환한다", async () => {

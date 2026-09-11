@@ -2,7 +2,7 @@
 
 ## 하네스 변경
 - [ ] `npm run harness:all`
-- [ ] generated 문서 상단에 생성 시각과 스크립트명이 있다.
+- [ ] generated 문서 상단에 생성 스크립트명이 있고, 내용 비교 freshness 검사가 통과한다. 실행 시각과 mtime에 의존하지 않는다.
 - [ ] `docs/generated/**`를 직접 편집하지 않았다.
 - [ ] 문서 상대 링크가 깨지지 않는다.
 - [ ] boundary check 실패가 없다.

@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: /offline[\\/]/,
   timeout: 30_000,
   expect: {
     timeout: 10_000,
@@ -13,7 +14,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /mobile[\\/]/,
+      testIgnore: /(?:mobile|offline)[\\/]/,
       use: { ...devices["Desktop Chrome"] },
     },
     {

@@ -10,6 +10,8 @@
     "audit:legacy-home-dataurl": "node scripts/audit-legacy-home-dataurl.mjs",
     "migrate:home-community-attachments": "node scripts/migrate-home-community-attachments.mjs",
     "test:e2e": "playwright test",
+    "test:regression": "node --test tests/*.test.mjs",
+    "test:e2e:offline": "playwright test --config=playwright.offline.config.ts",
     "capture:portfolio": "playwright test tests/portfolio-captures.spec.ts",
     "harness:routes": "node scripts/harness/generate-route-map.mjs",
     "harness:env": "node scripts/harness/generate-env-map.mjs",
@@ -28,14 +30,13 @@
     "@types/canvas-confetti": "^1.9.0",
     "canvas-confetti": "^1.9.4",
     "leaflet": "^1.9.4",
-    "motion": "^12.38.0",
     "next": "^15.0.0",
     "nodemailer": "^8.0.5",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "xlsx": "^0.18.5"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@playwright/test": "^1.58.2",
     "@types/google.maps": "^3.58.1",
     "@types/leaflet": "^1.9.21",

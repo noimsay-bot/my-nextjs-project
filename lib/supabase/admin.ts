@@ -1,8 +1,10 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-let adminClient: ReturnType<typeof createClient> | null = null;
+// ReturnType of the generic factory erases its default schema and makes RPC
+// arguments infer as undefined. Match the factory's default client type instead.
+let adminClient: SupabaseClient | null = null;
 
 export function hasSupabaseAdminEnv() {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);

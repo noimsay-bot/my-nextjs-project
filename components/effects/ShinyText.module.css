@@ -1,3 +1,31 @@
 .shinyText {
   display: inline-block;
+  background-position: var(--shine-start) center;
+  animation-name: shine;
+  animation-iteration-count: infinite;
+  animation-timing-function: linear;
+}
+
+.yoyo {
+  animation-name: shine-yoyo;
+}
+
+.pauseOnHover:hover {
+  animation-play-state: paused;
+}
+
+@keyframes shine {
+  from { background-position: var(--shine-start) center; }
+  to { background-position: var(--shine-end) center; }
+}
+
+@keyframes shine-yoyo {
+  0%, 100% { background-position: var(--shine-start) center; }
+  50% { background-position: var(--shine-end) center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shinyText {
+    animation: none;
+  }
 }

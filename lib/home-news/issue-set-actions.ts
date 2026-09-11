@@ -105,6 +105,14 @@ function isOfficialStatus(status: NewsIssueSetStatus) {
   return status === "published" || status === "locked";
 }
 
+function throwAtomicMutationError(error: { code?: string; message: string } | null) {
+  if (!error) return;
+  if (error.code === "PGRST202" || error.code === "42883") {
+    throw new Error("발행 세트 안전 저장 기능이 아직 적용되지 않았습니다. Supabase SQL Editor에서 supabase/incremental_atomic_news_and_live_status.sql을 적용해 주세요.");
+  }
+  throw error;
+}
+
 export async function ensureTodayNewsIssueSet(slot: HomeNewsBriefingSlot): Promise<NewsIssueSetMutationResult> {
   try {
     const session = await requireAdminSession();
@@ -181,7 +189,7 @@ export async function createNewsIssueSetDraft(slot: HomeNewsBriefingSlot): Promi
 
 export async function saveNewsIssueSetItems(input: UpdateIssueSetItemsInput): Promise<NewsIssueSetMutationResult> {
   try {
-    const session = await requireAdminSession();
+    await requireAdminSession();
     if (input.briefingIds.length > 3) {
       return {
         ok: false,
@@ -206,41 +214,11 @@ export async function saveNewsIssueSetItems(input: UpdateIssueSetItemsInput): Pr
     }
 
     const supabase = await getPortalSupabaseClient();
-    const { error: deleteError } = await supabase
-      .from(HOME_NEWS_ISSUE_SET_ITEMS_TABLE)
-      .delete()
-      .eq("issue_set_id", input.issueSetId);
-
-    if (deleteError) {
-      throw deleteError;
-    }
-
-    if (uniqueBriefingIds.length > 0) {
-      const { error: insertError } = await supabase
-        .from(HOME_NEWS_ISSUE_SET_ITEMS_TABLE)
-        .insert(
-          uniqueBriefingIds.map((briefingId, index) => ({
-            issue_set_id: input.issueSetId,
-            briefing_id: briefingId,
-            display_order: index + 1,
-          })),
-        );
-
-      if (insertError) {
-        throw insertError;
-      }
-    }
-
-    const { error: updateError } = await supabase
-      .from(HOME_NEWS_ISSUE_SETS_TABLE)
-      .update({
-        updated_by: session.id,
-      })
-      .eq("id", input.issueSetId);
-
-    if (updateError) {
-      throw updateError;
-    }
+    const { error } = await supabase.rpc("save_news_issue_set_items_atomic", {
+      p_issue_set_id: input.issueSetId,
+      p_briefing_ids: uniqueBriefingIds,
+    });
+    throwAtomicMutationError(error);
 
     return buildWorkspaceResult("발행 세트 구성을 저장했습니다.", await getIssueSetById(input.issueSetId));
   } catch (error) {
@@ -253,7 +231,7 @@ export async function saveNewsIssueSetItems(input: UpdateIssueSetItemsInput): Pr
 
 export async function publishNewsIssueSet(issueSetId: string): Promise<NewsIssueSetMutationResult> {
   try {
-    const session = await requireAdminSession();
+    await requireAdminSession();
     const issueSet = await getIssueSetById(issueSetId);
     if (issueSet.status === "locked") {
       return {
@@ -276,33 +254,10 @@ export async function publishNewsIssueSet(issueSetId: string): Promise<NewsIssue
     }
 
     const supabase = await getPortalSupabaseClient();
-    const { error: archiveError } = await supabase
-      .from(HOME_NEWS_ISSUE_SETS_TABLE)
-      .update({
-        status: "archived",
-        updated_by: session.id,
-      })
-      .eq("issue_date", issueSet.issue_date)
-      .eq("briefing_slot", issueSet.briefing_slot)
-      .neq("id", issueSetId)
-      .in("status", ["published", "locked"]);
-
-    if (archiveError) {
-      throw archiveError;
-    }
-
-    const { error: publishError } = await supabase
-      .from(HOME_NEWS_ISSUE_SETS_TABLE)
-      .update({
-        status: "published",
-        published_at: new Date().toISOString(),
-        updated_by: session.id,
-      })
-      .eq("id", issueSetId);
-
-    if (publishError) {
-      throw publishError;
-    }
+    const { error } = await supabase.rpc("publish_news_issue_set_atomic", {
+      p_issue_set_id: issueSetId,
+    });
+    throwAtomicMutationError(error);
 
     return buildWorkspaceResult("발행 세트를 공식 발행 상태로 전환했습니다.", await getIssueSetById(issueSetId));
   } catch (error) {

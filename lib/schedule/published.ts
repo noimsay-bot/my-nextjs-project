@@ -4,6 +4,7 @@ import {
   syncGeneralAssignments,
 } from "@/lib/schedule/engine";
 import { detectScheduleMonthConflict } from "@/lib/schedule/optimistic-lock";
+import { advanceScheduleMonthVersion, draftMonthVersions, publishedMonthVersions as publishedMonthUpdatedAtCache } from "@/lib/schedule/month-version";
 import { readStoredScheduleState, refreshScheduleState } from "@/lib/schedule/storage";
 import {
   getPortalSession,
@@ -34,7 +35,6 @@ const E2E_PUBLISHED_SCHEDULES_SEED_ENABLED =
   process.env.NEXT_PUBLIC_E2E === "1" || process.env.NODE_ENV !== "production";
 
 let publishedSchedulesCache: PublishedScheduleItem[] = [];
-const publishedMonthUpdatedAtCache = new Map<string, string | null>();
 const publishedRefreshPromises = new Map<string, Promise<PublishedScheduleItem[]>>();
 
 interface RefreshPublishedSchedulesOptions {
@@ -425,15 +425,19 @@ async function persistPublishedItem(
   }
 
   const supabase = await getPortalSupabaseClient();
-  const expectedUpdatedAt = publishedMonthUpdatedAtCache.get(monthKey);
+  const expectedUpdatedAt = publishedMonthUpdatedAtCache.has(monthKey)
+    ? publishedMonthUpdatedAtCache.get(monthKey)
+    : draftMonthVersions.get(monthKey);
 
-  if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null) {
-    const { data: updatedRows, error } = await supabase
+  if (expectedUpdatedAt !== undefined) {
+    let query = supabase
       .from("schedule_months")
       .update({ ...payload, updated_by: session.id })
-      .eq("month_key", monthKey)
-      .eq("updated_at", expectedUpdatedAt)
-      .select("month_key, updated_at");
+      .eq("month_key", monthKey);
+    query = expectedUpdatedAt === null
+      ? query.is("updated_at", null)
+      : query.eq("updated_at", expectedUpdatedAt);
+    const { data: updatedRows, error } = await query.select("month_key, updated_at");
 
     if (error) {
       throw new Error(getSupabaseStorageErrorMessage(error, "schedule_months"));
@@ -444,20 +448,21 @@ async function persistPublishedItem(
     }
 
     const newUpdatedAt = (updatedRows as Array<{ updated_at: string | null }>)[0]?.updated_at ?? null;
-    publishedMonthUpdatedAtCache.set(monthKey, newUpdatedAt);
+    advanceScheduleMonthVersion("published", monthKey, expectedUpdatedAt, newUpdatedAt);
     return;
   }
 
-  // updated_at을 모르는 경우(최초 게시 등) — 기존 동작 유지
-  const { error } = await supabase.from("schedule_months").upsert({
+  // A concurrently created month must fail instead of overwriting its publication.
+  const { data, error } = await supabase.from("schedule_months").insert({
     month_key: monthKey,
     ...payload,
     updated_by: session.id,
-  });
+  }).select("month_key, updated_at");
 
   if (error) {
     throw new Error(getSupabaseStorageErrorMessage(error, "schedule_months"));
   }
+  advanceScheduleMonthVersion("published", monthKey, undefined, data?.[0]?.updated_at ?? null);
 }
 
 async function syncAssemblyDutiesAfterHubPublish(monthKey: string) {
@@ -512,18 +517,27 @@ async function syncAssemblyDutiesAfterHubPublish(monthKey: string) {
 
 export async function savePublishedSchedules(items: PublishedScheduleItem[]) {
   const previous = cloneItems(publishedSchedulesCache);
+  const previousMap = new Map(previous.map((item) => [item.monthKey, item]));
   publishedSchedulesCache = cloneItems(items).sort((left, right) => left.monthKey.localeCompare(right.monthKey));
+  const changedItems = publishedSchedulesCache.filter((item) => {
+    const stored = previousMap.get(item.monthKey);
+    return !stored || stored.publishedAt !== item.publishedAt ||
+      JSON.stringify(stored.schedule) !== JSON.stringify(item.schedule);
+  });
   emitPublishedSchedulesEvent();
 
   try {
-    await Promise.all(
-      publishedSchedulesCache.map((item) =>
+    // Wait for every write before recovering; otherwise a late write can race the reload.
+    const results = await Promise.allSettled(
+      changedItems.map((item) =>
         persistPublishedItem(item.monthKey, {
           published_state: item.schedule,
           published_at: item.publishedAt || new Date().toISOString(),
         }),
       ),
     );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
   } catch (error) {
     emitPublishedSchedulesStatus({
       ok: false,
