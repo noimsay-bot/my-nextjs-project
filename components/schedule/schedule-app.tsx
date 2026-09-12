@@ -97,9 +97,11 @@ import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
 import { readStoredScheduleState, refreshScheduleState, saveScheduleState, SCHEDULE_PERSIST_STATUS_EVENT } from "@/lib/schedule/storage";
 import {
   DESK_RECORDS_STATUS_EVENT,
+  getDeskLeaveNamesByDate,
   removeDeskPriorityVacationDate,
   restoreDeskPriorityVacationDate,
 } from "@/lib/schedule/desk-records";
+import { filterScheduleForDeskLeave } from "@/lib/schedule/desk-record-leave";
 import { deskEditableVacationTypes, vacationLegendOrder, vacationStyleTones, vacationTypeLabels } from "@/lib/schedule/vacation-styles";
 import { VACATION_STATUS_EVENT } from "@/lib/vacation/storage";
 import { CategoryKey, DaySchedule, GeneratedSchedule, MessageState, ScheduleAssignmentNameTag, ScheduleBigEvent, ScheduleChangeRequest, ScheduleNameObject, SchedulePersonRef, ScheduleState, SnapshotItem, VacationType } from "@/lib/schedule/types";
@@ -714,7 +716,10 @@ export function ScheduleApp() {
 
   const applyNameTagsToState = (input: ScheduleState) => {
     const applyScheduleAssignmentDecorations = (schedule: GeneratedSchedule) =>
-      applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule));
+      filterScheduleForDeskLeave(
+        applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule)),
+        getDeskLeaveNamesByDate(),
+      );
     const generated = input.generated ? applyScheduleAssignmentDecorations(input.generated) : null;
     const generatedHistory = input.generatedHistory.map((schedule) => applyScheduleAssignmentDecorations(schedule));
     return {
@@ -737,7 +742,10 @@ export function ScheduleApp() {
     setPublishedItems(
       getPublishedSchedules(routeMonthKey ? [routeMonthKey] : undefined).map((item) => ({
         ...item,
-        schedule: applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(item.schedule)),
+        schedule: filterScheduleForDeskLeave(
+          applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(item.schedule)),
+          getDeskLeaveNamesByDate(),
+        ),
       })),
     );
   };

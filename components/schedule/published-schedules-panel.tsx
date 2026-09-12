@@ -35,6 +35,8 @@ import {
   refreshScheduleChangeRequests,
 } from "@/lib/schedule/change-requests";
 import { parseVacationEntry } from "@/lib/schedule/engine";
+import { filterScheduleForDeskLeave } from "@/lib/schedule/desk-record-leave";
+import { getDeskLeaveNamesByDate, refreshDeskRecordStore } from "@/lib/schedule/desk-records";
 import {
   loadHiddenPublishedMonthKeys,
   readLocalHiddenPublishedMonthKeys,
@@ -155,8 +157,29 @@ function getPointerMidpoint(left: ActivePanZoomPointer, right: ActivePanZoomPoin
   };
 }
 
-function applyScheduleAssignmentDecorations(schedule: PublishedScheduleItem["schedule"]) {
-  return applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule));
+function applyScheduleAssignmentDecorations(
+  schedule: PublishedScheduleItem["schedule"],
+  deskLeaveNamesByDate: Record<string, string[]> = {},
+) {
+  return filterScheduleForDeskLeave(
+    applyScheduleAssignmentNameTagsToSchedule(applyScheduleAssignmentDutyCategoriesToSchedule(schedule)),
+    deskLeaveNamesByDate,
+  );
+}
+
+async function fetchDeskLeaveNamesByDate() {
+  const response = await fetch("/api/schedule/desk-leave", {
+    method: "GET",
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | { namesByDate?: Record<string, string[]>; message?: string }
+    | null;
+  if (!response.ok) {
+    throw new Error(payload?.message || "휴직 정보를 불러오지 못했습니다.");
+  }
+  return payload?.namesByDate ?? {};
 }
 
 function getScheduleAssignmentMonthKeysForDisplayItems(items: ScheduleDisplaySource[]) {
@@ -1114,14 +1137,13 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const isHomePreview = mode === "home";
   const isReadOnlyPreview = Boolean(readOnlyPreview);
   const [items, setItems] = useState<PublishedScheduleItem[]>(() =>
-    (readOnlyPreview?.items ?? getPublishedSchedules()).map((item) => ({
+    (readOnlyPreview?.items ?? []).map((item) => ({
       ...item,
       schedule: readOnlyPreview ? item.schedule : applyScheduleAssignmentDecorations(item.schedule),
     })),
   );
-  const [itemsLoading, setItemsLoading] = useState(() => (
-    readOnlyPreview ? false : getPublishedSchedules().length === 0
-  ));
+  const [itemsLoading, setItemsLoading] = useState(() => !readOnlyPreview);
+  const deskLeaveNamesByDateRef = useRef<Record<string, string[]>>({});
   const [scheduleHistory, setScheduleHistory] = useState<ScheduleDisplaySource[]>([]);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [showMine, setShowMine] = useState(false);
@@ -1198,11 +1220,11 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     };
   }, [isReadOnlyPreview, session?.id, session?.username]);
 
-  const syncItemsFromCache = () => {
+  const syncItemsFromCache = (leaveNamesByDate = deskLeaveNamesByDateRef.current) => {
     setItems(
       getPublishedSchedules().map((item) => ({
         ...item,
-        schedule: applyScheduleAssignmentDecorations(item.schedule),
+        schedule: applyScheduleAssignmentDecorations(item.schedule, leaveNamesByDate),
       })),
     );
   };
@@ -1215,8 +1237,16 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
     if (isReadOnlyPreview) return;
     setItemsLoading(true);
     try {
-      const publishedItems = await refreshPublishedSchedules({ repair: true });
       const activeSession = getSession();
+      const canManageSchedule = Boolean(activeSession?.approved && hasDeskAccess(activeSession.actualRole));
+      if (canManageSchedule) {
+        await refreshDeskRecordStore();
+      }
+      const [publishedItems, leaveNamesByDate] = await Promise.all([
+        refreshPublishedSchedules({ repair: canManageSchedule }),
+        canManageSchedule ? Promise.resolve(getDeskLeaveNamesByDate()) : fetchDeskLeaveNamesByDate(),
+      ]);
+      deskLeaveNamesByDateRef.current = leaveNamesByDate;
       if (activeSession?.approved) {
         try {
           const monthKeys = getScheduleAssignmentMonthKeysForDisplayItems(
@@ -1235,7 +1265,11 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
           setRequestMessageTone("warn");
         }
       }
-      syncItemsFromCache();
+      syncItemsFromCache(leaveNamesByDate);
+    } catch (error) {
+      setItems([]);
+      setRequestMessage(error instanceof Error ? error.message : "근무표를 안전하게 불러오지 못했습니다.");
+      setRequestMessageTone("warn");
     } finally {
       setItemsLoading(false);
     }
@@ -1252,7 +1286,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
   const syncScheduleHistory = () => {
     const nextHistory = readStoredScheduleState().generatedHistory.map((schedule) => ({
       monthKey: schedule.monthKey,
-      schedule: applyScheduleAssignmentDecorations(schedule),
+      schedule: applyScheduleAssignmentDecorations(schedule, deskLeaveNamesByDateRef.current),
     }));
     setScheduleHistory(nextHistory);
   };

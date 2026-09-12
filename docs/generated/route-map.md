@@ -6,7 +6,7 @@
 ## 요약
 
 - 스캔 대상: `app`
-- 라우트 세그먼트 수: 70
+- 라우트 세그먼트 수: 71
 - route group 괄호 세그먼트는 URL 경로에서 제외했습니다.
 
 ## app/root
@@ -94,6 +94,7 @@
 | /api/schedule/assembly-leave-push | api/schedule/assembly-leave-push |  |  | yes |  |  |
 | /api/schedule/assembly-sync-on-publish | api/schedule/assembly-sync-on-publish |  |  | yes |  |  |
 | /api/schedule/assignment-display | api/schedule/assignment-display |  |  | yes |  |  |
+| /api/schedule/desk-leave | api/schedule/desk-leave |  |  | yes |  |  |
 | /api/schedule/my-work-calendar | api/schedule/my-work-calendar |  |  | yes |  |  |
 | /api/weather/dispatch-recommendation | api/weather/dispatch-recommendation |  |  | yes |  |  |
 | /api/weather/radar-forecast | api/weather/radar-forecast |  |  | yes |  |  |

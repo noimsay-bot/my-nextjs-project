@@ -12,10 +12,6 @@ import {
   saveMyWorkCalendarCustomTexts,
   type MyWorkCalendarCustomTextMap,
 } from "@/lib/my-page/work-calendar-custom-texts";
-import {
-  getPortalSupabaseClient,
-  getSupabaseStorageErrorMessage,
-} from "@/lib/supabase/portal";
 import { logPortalTrafficDebug } from "@/lib/portal/traffic-debug";
 import styles from "./MyWorkCalendar.module.css";
 
@@ -63,10 +59,7 @@ const MONTH_GRID_DAYS = 42;
 const HELP_DISMISSED_STORAGE_PREFIX = "jtbc-my-work-calendar-help-dismissed-v1";
 const MAX_CUSTOM_TEXTS_PER_DAY = 5;
 const CUSTOM_TEXT_HELP_MESSAGE = "날짜를 더블 클릭하면 입력할 수 있습니다. 입력 후 수정/삭제는 오른쪽 클릭해주세요.";
-const MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS = 30_000;
-const myWorkCalendarSummaryCache = new Map<string, MyWorkCalendarSummaryResponse>();
 const myWorkCalendarSummaryPromises = new Map<string, Promise<MyWorkCalendarSummaryResponse>>();
-let myWorkCalendarRpcRetryAfter = 0;
 
 function getTodayDateKey() {
   return formatDateKey(new Date());
@@ -164,18 +157,10 @@ function getCustomTextKey(dateKey: string, index: number) {
 }
 
 async function fetchMyWorkCalendarSummary(monthKey: string) {
-  const cached = myWorkCalendarSummaryCache.get(monthKey);
-  if (cached) return cached;
-
   const existingPromise = myWorkCalendarSummaryPromises.get(monthKey);
   if (existingPromise) return existingPromise;
 
-  const requestPromise = fetchMyWorkCalendarSummaryDirect(monthKey)
-    .catch(() => fetchMyWorkCalendarSummaryViaApi(monthKey))
-    .then((summary) => {
-      myWorkCalendarSummaryCache.set(monthKey, summary);
-      return summary;
-    })
+  const requestPromise = fetchMyWorkCalendarSummaryViaApi(monthKey)
     .finally(() => {
       myWorkCalendarSummaryPromises.delete(monthKey);
     });
@@ -193,49 +178,6 @@ function normalizeMyWorkCalendarSummaryPayload(monthKey: string, payload: unknow
     events: Array.isArray(value.events) ? value.events : [],
     days: Array.isArray(value.days) ? value.days : [],
   };
-}
-
-function hasTaggedWorkEvent(events: MyWorkEvent[]) {
-  return events.some((event) => Boolean(event.nameTag || event.displayLabel || event.nameLabel));
-}
-
-async function fetchMyWorkCalendarSummaryDirect(monthKey: string) {
-  const startedAt = Date.now();
-  if (Date.now() < myWorkCalendarRpcRetryAfter) {
-    logPortalTrafficDebug({
-      route: "my-work-calendar",
-      source: "rpc",
-      status: "skipped",
-      startedAt,
-    });
-    throw new Error("내 일정 RPC 재시도 대기 중입니다.");
-  }
-
-  const supabase = await getPortalSupabaseClient();
-  const { data, error } = await supabase.rpc("get_my_work_calendar", { p_month_key: monthKey });
-  if (error) {
-    myWorkCalendarRpcRetryAfter = Date.now() + MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS;
-    logPortalTrafficDebug({
-      route: "my-work-calendar",
-      source: "rpc",
-      status: "error",
-      startedAt,
-    });
-    throw new Error(getSupabaseStorageErrorMessage(error, "get_my_work_calendar"));
-  }
-
-  logPortalTrafficDebug({
-    route: "my-work-calendar",
-    source: "rpc",
-    status: "success",
-    startedAt,
-  });
-  const summary = normalizeMyWorkCalendarSummaryPayload(monthKey, data);
-  if (summary.events.length > 0 && !hasTaggedWorkEvent(summary.events)) {
-    myWorkCalendarRpcRetryAfter = Date.now() + MY_WORK_CALENDAR_RPC_FALLBACK_COOLDOWN_MS;
-    throw new Error("내 일정 RPC가 근무유형 태그를 포함하지 않아 API로 다시 불러옵니다.");
-  }
-  return summary;
 }
 
 async function fetchMyWorkCalendarSummaryViaApi(monthKey: string) {
@@ -271,8 +213,8 @@ export function MyWorkCalendarPage() {
   const [session, setSession] = useState<SessionUser | null>(() => getSession());
   const [monthKey, setMonthKey] = useState(() => todayKey.slice(0, 7));
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
-  const [workEvents, setWorkEvents] = useState<MyWorkEvent[]>(() => myWorkCalendarSummaryCache.get(todayKey.slice(0, 7))?.events ?? []);
-  const [scheduleDays, setScheduleDays] = useState<MyWorkCalendarDaySummary[]>(() => myWorkCalendarSummaryCache.get(todayKey.slice(0, 7))?.days ?? []);
+  const [workEvents, setWorkEvents] = useState<MyWorkEvent[]>([]);
+  const [scheduleDays, setScheduleDays] = useState<MyWorkCalendarDaySummary[]>([]);
   const [scheduleItems, setScheduleItems] = useState<MyScheduleAssignmentItem[]>([]);
   const [customTexts, setCustomTexts] = useState<CustomTextMap>({});
   const [editingCustomTextDateKey, setEditingCustomTextDateKey] = useState<string | null>(null);

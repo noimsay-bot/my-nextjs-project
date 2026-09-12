@@ -4,6 +4,11 @@ import {
   getSupabaseStorageErrorMessage,
   isSupabaseSchemaMissingError,
 } from "@/lib/supabase/portal";
+import {
+  buildDeskLeaveNamesByDate,
+  isDeskLeaveRecord,
+  parseDeskRecordDateKeysPure,
+} from "@/lib/schedule/desk-record-leave";
 
 export type DeskRecordKind = "long-service-leave" | "health-check";
 
@@ -136,37 +141,6 @@ const configByKind: Record<DeskRecordKind, Omit<DeskRecordConfig, "seedEntries">
   },
 };
 
-function toDateKey(year: number, month: number, day: number) {
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function parseYearToken(value: string | undefined, fallbackYear: number) {
-  if (!value) return fallbackYear;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallbackYear;
-  if (value.length === 2) return 2000 + numeric;
-  return numeric;
-}
-
-function isValidDateParts(year: number, month: number, day: number) {
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day;
-}
-
-function expandDateRange(startDateKey: string, endDateKey: string) {
-  const start = new Date(`${startDateKey}T00:00:00`);
-  const end = new Date(`${endDateKey}T00:00:00`);
-  const from = start <= end ? start : end;
-  const to = start <= end ? end : start;
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return [];
-
-  const dateKeys: string[] = [];
-  for (const cursor = new Date(from); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
-    dateKeys.push(toDateKey(cursor.getFullYear(), cursor.getMonth() + 1, cursor.getDate()));
-  }
-  return dateKeys;
-}
-
 function normalizeDateKeyList(dateKeys: string[]) {
   return Array.from(
     new Set(
@@ -178,39 +152,7 @@ function normalizeDateKeyList(dateKeys: string[]) {
 }
 
 export function parseDeskRecordDateKeys(value: string, fallbackYear = DESK_RECORD_YEAR) {
-  const compact = value.replace(/\s+/g, "");
-  if (!compact) return [];
-
-  const rangeMatch = compact.match(
-    /(?:(\d{2,4})[./-])?(\d{1,2})[./-](\d{1,2})[~\-](?:(\d{2,4})[./-])?(\d{1,2})(?:[./-](\d{1,2}))?/,
-  );
-  if (rangeMatch) {
-    const startYear = parseYearToken(rangeMatch[1], fallbackYear);
-    const startMonth = Number(rangeMatch[2]);
-    const startDay = Number(rangeMatch[3]);
-    const endYear = parseYearToken(rangeMatch[4], startYear);
-    const endMonth = rangeMatch[6] ? Number(rangeMatch[5]) : startMonth;
-    const endDay = rangeMatch[6] ? Number(rangeMatch[6]) : Number(rangeMatch[5]);
-
-    if (isValidDateParts(startYear, startMonth, startDay) && isValidDateParts(endYear, endMonth, endDay)) {
-      return expandDateRange(
-        toDateKey(startYear, startMonth, startDay),
-        toDateKey(endYear, endMonth, endDay),
-      );
-    }
-  }
-
-  const singleMatch = compact.match(/(?:(\d{2,4})[./-])?(\d{1,2})[./-](\d{1,2})/);
-  if (singleMatch) {
-    const year = parseYearToken(singleMatch[1], fallbackYear);
-    const month = Number(singleMatch[2]);
-    const day = Number(singleMatch[3]);
-    if (isValidDateParts(year, month, day)) {
-      return [toDateKey(year, month, day)];
-    }
-  }
-
-  return [];
+  return parseDeskRecordDateKeysPure(value, fallbackYear);
 }
 
 export function formatDeskRecordDateKeys(dateKeys: string[]) {
@@ -229,11 +171,8 @@ export function formatDeskRecordDateKeys(dateKeys: string[]) {
 function normalizeDeskRecordEntry(kind: DeskRecordKind, entry: Partial<DeskRecordEntry>, index: number): DeskRecordEntry {
   const rawDate = typeof entry.date === "string" ? entry.date : "";
   const rawNote = typeof entry.note === "string" ? entry.note : "";
-  const isNonVacationLeaveRecord = kind === "long-service-leave" && /육아휴직|휴직/.test(`${rawDate} ${rawNote}`);
   const dateKeys =
-    isNonVacationLeaveRecord
-      ? []
-      : Array.isArray(entry.dateKeys) && entry.dateKeys.length > 0
+    Array.isArray(entry.dateKeys) && entry.dateKeys.length > 0
       ? normalizeDateKeyList(entry.dateKeys)
       : parseDeskRecordDateKeys(rawDate);
 
@@ -362,6 +301,7 @@ function buildDeskPriorityMapFromStore(store: DeskRecordStore) {
   };
 
   store["long-service-leave"].forEach((entry) => {
+    if (isDeskLeaveRecord(entry)) return;
     entry.dateKeys.forEach((dateKey) => pushEntry(dateKey, `근속휴가:${entry.name}`));
   });
   store["health-check"].forEach((entry) => {
@@ -748,6 +688,7 @@ export function getDeskPriorityVacationMap(monthKey?: string) {
   };
 
   getDeskRecordEntries("long-service-leave").forEach((entry) => {
+    if (isDeskLeaveRecord(entry)) return;
     entry.dateKeys.forEach((dateKey) => pushEntry(dateKey, `근속휴가:${entry.name}`));
   });
 
@@ -756,4 +697,8 @@ export function getDeskPriorityVacationMap(monthKey?: string) {
   });
 
   return map;
+}
+
+export function getDeskLeaveNamesByDate(monthKey?: string) {
+  return buildDeskLeaveNamesByDate(ensureDeskRecordCache(), monthKey);
 }

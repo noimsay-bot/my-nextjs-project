@@ -7,6 +7,7 @@ import {
   scheduleAssignmentNameTagLabels,
 } from "@/lib/schedule/constants";
 import { normalizeGeneratedSchedule } from "@/lib/schedule/engine";
+import { buildDeskLeaveNamesByDate } from "@/lib/schedule/desk-record-leave";
 import type { GeneratedSchedule, ScheduleAssignmentNameTag } from "@/lib/schedule/types";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
@@ -21,6 +22,10 @@ type ScheduleMonthPublishRow = {
   month_key: string;
   published_state: GeneratedSchedule | null;
   published_at: string | null;
+};
+
+type DeskRecordSettingsRow = {
+  state: unknown;
 };
 
 type MyWorkCalendarEvent = {
@@ -49,7 +54,9 @@ function jsonWithUsageDebug(request: Request, startedAt: number, payload: unknow
     startedAt,
     responseBytes: getJsonResponseByteLength(payload),
   });
-  return NextResponse.json(payload, init);
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", "private, no-store");
+  return NextResponse.json(payload, { ...init, headers });
 }
 
 function isValidMonthKey(value: string) {
@@ -70,8 +77,11 @@ function normalizeAssignments(assignments: Record<string, string[]>) {
   );
 }
 
-function normalizePublishedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
-  const normalizedSchedule = normalizeGeneratedSchedule(schedule);
+function normalizePublishedSchedule(
+  schedule: GeneratedSchedule,
+  deskLeaveNamesByDate: Record<string, string[]> = {},
+): GeneratedSchedule {
+  const normalizedSchedule = normalizeGeneratedSchedule(schedule, deskLeaveNamesByDate);
   return {
     ...normalizedSchedule,
     days: normalizedSchedule.days.map((day) => {
@@ -124,10 +134,14 @@ function withAssignmentNameTag(value: string, tag: ScheduleAssignmentNameTag | n
   return tag ? `${value}${scheduleAssignmentNameTagLabels[tag]}` : value;
 }
 
-function buildMyWorkCalendarSummary(schedule: GeneratedSchedule, username: string) {
+function buildMyWorkCalendarSummary(
+  schedule: GeneratedSchedule,
+  username: string,
+  deskLeaveNamesByDate: Record<string, string[]>,
+) {
   const events: MyWorkCalendarEvent[] = [];
   const days: MyWorkCalendarDay[] = [];
-  const normalized = normalizePublishedSchedule(schedule);
+  const normalized = normalizePublishedSchedule(schedule, deskLeaveNamesByDate);
 
   normalized.days
     .filter((day) => day.dateKey.startsWith(`${normalized.monthKey}-`))
@@ -218,15 +232,28 @@ export async function GET(request: Request) {
       return jsonWithUsageDebug(request, startedAt, { message: "승인된 계정이 필요합니다." }, { status: 403 });
     }
 
-    const { data: row, error: scheduleError } = await admin
-      .from("schedule_months")
-      .select("month_key, published_state, published_at")
-      .eq("month_key", monthKey)
-      .not("published_state", "is", null)
-      .maybeSingle<ScheduleMonthPublishRow>();
+    const [
+      { data: row, error: scheduleError },
+      { data: deskRecordRow, error: deskRecordError },
+    ] = await Promise.all([
+      admin
+        .from("schedule_months")
+        .select("month_key, published_state, published_at")
+        .eq("month_key", monthKey)
+        .not("published_state", "is", null)
+        .maybeSingle<ScheduleMonthPublishRow>(),
+      admin
+        .from("schedule_settings")
+        .select("state")
+        .eq("key", "desk_records_v1")
+        .maybeSingle<DeskRecordSettingsRow>(),
+    ]);
 
     if (scheduleError) {
       throw new Error("게시 근무표를 불러오지 못했습니다.");
+    }
+    if (deskRecordError) {
+      throw new Error("휴직 정보를 불러오지 못했습니다.");
     }
 
     if (!row?.published_state) {
@@ -238,7 +265,8 @@ export async function GET(request: Request) {
       });
     }
 
-    const summary = buildMyWorkCalendarSummary(row.published_state, profile.name ?? "");
+    const deskLeaveNamesByDate = buildDeskLeaveNamesByDate(deskRecordRow?.state, monthKey);
+    const summary = buildMyWorkCalendarSummary(row.published_state, profile.name ?? "", deskLeaveNamesByDate);
     return jsonWithUsageDebug(request, startedAt, {
       monthKey,
       publishedAt: row.published_at ?? "",

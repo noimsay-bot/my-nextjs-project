@@ -32,7 +32,7 @@
 | HUB_TO_ASSEMBLY_TOKEN | server-only | yes | lib/schedule/assembly-leave-push.ts:62 (server/shared) |
 | KMA_APIHUB_AUTH_KEY | server-only | yes | app/api/weather/radar-forecast/route.ts:1405 (server/shared) |
 | MAIL_LOG_ONLY | server-only | yes | lib/server/mail.ts:15 (server/shared) |
-| NEXT_PUBLIC_E2E | client-exposed | no | lib/schedule/desk-records.ts:14 (server/shared)<br>lib/schedule/desk-records.ts:14 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>lib/schedule/storage.ts:20 (server/shared)<br>lib/schedule/storage.ts:20 (server/shared) |
+| NEXT_PUBLIC_E2E | client-exposed | no | lib/schedule/desk-records.ts:19 (server/shared)<br>lib/schedule/desk-records.ts:19 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>lib/schedule/storage.ts:20 (server/shared)<br>lib/schedule/storage.ts:20 (server/shared) |
 | NEXT_PUBLIC_GOOGLE_MAPS_API_KEY | client-exposed | no | components/restaurants/restaurant-place-search.tsx:39 (client/component)<br>lib/google/maps.ts:10 (client/component)<br>lib/google/maps.ts:10 (client/component)<br>lib/google/maps.ts:38 (client/component) |
 | NEXT_PUBLIC_PORTAL_DEBUG_TRAFFIC | client-exposed | no | lib/portal/traffic-debug.ts:11 (client/component)<br>lib/portal/traffic-debug.ts:11 (client/component) |
 | NEXT_PUBLIC_SITE_URL | client-exposed | yes | lib/auth/storage.ts:578 (server/shared)<br>lib/auth/storage.ts:578 (server/shared)<br>lib/server/mail.ts:19 (server/shared)<br>lib/server/mail.ts:19 (server/shared)<br>scripts/tests/offline-next.mjs:38 (server/shared) |

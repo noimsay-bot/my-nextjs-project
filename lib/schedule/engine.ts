@@ -15,7 +15,8 @@
   SCHEDULE_YEAR_END,
   SCHEDULE_YEAR_START,
 } from "@/lib/schedule/constants";
-import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
+import { getDeskLeaveNamesByDate, getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
+import { filterDayForDeskLeave, filterScheduleForDeskLeave } from "@/lib/schedule/desk-record-leave";
 import {
   CategoryKey,
   DaySchedule,
@@ -88,8 +89,10 @@ function normalizeDayAssignmentOrderOverrides(day: DaySchedule) {
   });
 }
 
-function getGeneralAssignmentBlockedNames(day: DaySchedule) {
+function getGeneralAssignmentBlockedNames(day: DaySchedule, deskLeaveNames: string[] = []) {
   const blockedNames = new Set<string>();
+
+  deskLeaveNames.forEach((name) => blockedNames.add(name));
 
   Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
     if (category === "일반") return;
@@ -108,7 +111,7 @@ function getGeneralAssignmentBlockedNames(day: DaySchedule) {
   return blockedNames;
 }
 
-function normalizeDayVacationAssignments(day: DaySchedule) {
+function normalizeDayVacationAssignments(day: DaySchedule, deskLeaveNames: string[] = []) {
   const assignments = Object.fromEntries(
     Object.entries(day.assignments ?? {}).map(([category, names]) => [
       category,
@@ -124,7 +127,10 @@ function normalizeDayVacationAssignments(day: DaySchedule) {
     delete assignments["휴가"];
   }
 
-  const blockedGeneralNames = getGeneralAssignmentBlockedNames({ ...day, vacations: vacationEntries, assignments });
+  const blockedGeneralNames = getGeneralAssignmentBlockedNames(
+    { ...day, vacations: vacationEntries, assignments },
+    deskLeaveNames,
+  );
 
   if (assignments["일반"] && blockedGeneralNames.size > 0) {
     assignments["일반"] = assignments["일반"].filter((name) => !blockedGeneralNames.has(name.trim()));
@@ -221,14 +227,17 @@ export function getGeneralAssignmentSyncDateKeysForSchedule(schedule: GeneratedS
   return isBlankTemplateSchedule(schedule) ? getFilledNonGeneralAssignmentDateKeys(schedule) : undefined;
 }
 
-export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): GeneratedSchedule {
+export function normalizeGeneratedSchedule(
+  schedule: GeneratedSchedule,
+  deskLeaveNamesByDate = getDeskLeaveNamesByDate(),
+): GeneratedSchedule {
   const normalizedBigEvents = normalizeScheduleBigEvents(schedule.big_events);
   if (isBlankTemplateSchedule(schedule)) {
-    return applyBigEventsToGeneratedSchedule({
+    return filterScheduleForDeskLeave(applyBigEventsToGeneratedSchedule({
       ...schedule,
       big_events: normalizedBigEvents,
       days: schedule.days.map((day) => {
-        const normalizedDay = normalizeDayVacationAssignments(day);
+        const normalizedDay = normalizeDayVacationAssignments(day, deskLeaveNamesByDate[day.dateKey] ?? []);
         return {
           ...normalizedDay,
           assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
@@ -236,13 +245,16 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
           assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
         };
       }),
-    }, normalizedBigEvents, normalizedBigEvents);
+    }, normalizedBigEvents, normalizedBigEvents), deskLeaveNamesByDate);
   }
-  return applyBigEventsToGeneratedSchedule({
+  return filterScheduleForDeskLeave(applyBigEventsToGeneratedSchedule({
     ...schedule,
     big_events: normalizedBigEvents,
     days: schedule.days.map((day) => {
-      const normalizedDay = normalizeDayVacationAssignments(applyRequiredDayOverride(day));
+      const normalizedDay = normalizeDayVacationAssignments(
+        applyRequiredDayOverride(day),
+        deskLeaveNamesByDate[day.dateKey] ?? [],
+      );
       return {
         ...normalizedDay,
         assignmentNameTags: normalizeDayAssignmentNameTags(normalizedDay),
@@ -250,7 +262,7 @@ export function normalizeGeneratedSchedule(schedule: GeneratedSchedule): Generat
         assignmentOrderOverrides: normalizeDayAssignmentOrderOverrides(normalizedDay),
       };
     }),
-  }, normalizedBigEvents, normalizedBigEvents);
+  }, normalizedBigEvents, normalizedBigEvents), deskLeaveNamesByDate);
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number) {
@@ -633,12 +645,17 @@ export function syncGeneralAssignments(
     .filter(([dateKey]) => /^\d{4}-\d{2}-\d{2}$/.test(dateKey))
     .sort(([left], [right]) => left.localeCompare(right));
   const fallbackGeneralTeamOffPeople = normalizeEditableNameList(state.generalTeamOffPeople);
+  const deskLeaveNamesByDate = getDeskLeaveNamesByDate();
   let generalTeamOffEntryIndex = 0;
   let activeGeneralTeamOffPeople = datedGeneralTeamOffEntries.length > 0 ? [] as string[] : fallbackGeneralTeamOffPeople;
 
   orderedDays.forEach((day) => {
+    Object.assign(day, filterDayForDeskLeave(day, deskLeaveNamesByDate[day.dateKey] ?? []));
     if (hasRequiredDayOverride(day.dateKey)) {
-      const overriddenDay = applyRequiredDayOverride(day);
+      const overriddenDay = filterDayForDeskLeave(
+        applyRequiredDayOverride(day),
+        deskLeaveNamesByDate[day.dateKey] ?? [],
+      );
       day.isHoliday = overriddenDay.isHoliday;
       day.isCustomHoliday = overriddenDay.isCustomHoliday;
       day.isWeekdayHoliday = overriddenDay.isWeekdayHoliday;
@@ -660,7 +677,7 @@ export function syncGeneralAssignments(
       return;
     }
 
-    const generalBlockedNames = getGeneralAssignmentBlockedNames(day);
+    const generalBlockedNames = getGeneralAssignmentBlockedNames(day, deskLeaveNamesByDate[day.dateKey] ?? []);
 
     if (syncDateKeySet && !syncDateKeySet.has(day.dateKey)) {
       day.conflicts = collectConflicts(day.assignments, previousNight, [], day.dateKey);
@@ -1356,6 +1373,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
   const days: DaySchedule[] = [];
   const warnings: Array<{ date: string; category: string; name: string }> = [];
   const rangeStartDateKey = fmtDate(range.start.getFullYear(), range.start.getMonth() + 1, range.start.getDate());
+  const deskLeaveNamesByDate = getDeskLeaveNamesByDate();
   let previousNight: string[] = getPreviousNightSeedForDateKey(nextState, rangeStartDateKey);
   let weeklyExtensionCrew: string[] = [];
   let weeklyExtensionWeekKey = "";
@@ -1373,6 +1391,10 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
     const isWeekdayHoliday = isHoliday && !isWeekend;
     const vacations = vacationMap[dateKey] ?? [];
     const vacationNames = getVacationNames(vacations);
+    const unavailableNames = Array.from(new Set([
+      ...vacationNames,
+      ...(deskLeaveNamesByDate[dateKey] ?? []),
+    ]));
     const assignments: Record<string, string[]> = {};
     const desiredCounts: Record<string, number> = {};
 
@@ -1432,7 +1454,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
     Object.entries(assignments).forEach(([category, names]) => {
       if (category === "휴가") return;
       desiredCounts[category] = names.length;
-      assignments[category] = names.filter((name) => !vacationNames.includes(name));
+      assignments[category] = names.filter((name) => !unavailableNames.includes(name));
     });
 
     const blockedNames = new Set(
@@ -1451,7 +1473,7 @@ export function generateSchedule(state: ScheduleState): GenerationResult {
         targetCount - currentNames.length,
         blockedNames,
         [],
-        vacationNames,
+        unavailableNames,
         pointers,
       );
       nextNames.forEach((name) => blockedNames.add(name));

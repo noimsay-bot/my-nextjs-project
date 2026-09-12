@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { defaultScheduleState, getDayDuplicateNameSet } from "@/lib/schedule/constants";
 import { buildBigEventBlockedByDate, generateEmptySchedule, generateSchedule, removePersonFromCategory, removeVacationPersonFromDay, sanitizeScheduleState, syncGeneralAssignments, updateScheduleBigEvents } from "@/lib/schedule/engine";
 import { getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
+import { buildDeskLeaveNamesByDate, filterScheduleForDeskLeave } from "@/lib/schedule/desk-record-leave";
 import { presetScheduleMonths } from "@/lib/schedule/preset-schedules.generated";
 import { canRepairPublishedGeneralAssignments, normalizePublishedSchedule, prepareScheduleForPublish } from "@/lib/schedule/published";
 import { syncVacationTextForChangedRoute } from "@/lib/schedule/change-requests";
@@ -540,11 +541,87 @@ test("general assignments ignore basic off names", () => {
   expect(day21?.assignments["일반"]).toContain("정상원");
 });
 
-test("childcare leave desk note is not imported as long-service vacation", () => {
+test("childcare leave desk note keeps its dates but is not imported as long-service vacation", () => {
   const deskVacationMap = getDeskPriorityVacationMap();
   const allEntries = Object.values(deskVacationMap).flat();
+  const deskLeaveNamesByDate = buildDeskLeaveNamesByDate({
+    "long-service-leave": [
+      { name: "이완근", date: "4.1-8.31(육아휴직)", note: "", dateKeys: [] },
+    ],
+  });
 
   expect(allEntries).not.toContain("근속휴가:이완근");
+  expect(deskLeaveNamesByDate["2026-04-01"]).toContain("이완근");
+  expect(deskLeaveNamesByDate["2026-08-31"]).toContain("이완근");
+});
+
+test("new schedules exclude desk leave people and refill fixed assignments", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 5,
+  }).state.generated!;
+  const weekday = generated.days.find((day) => day.dateKey === "2026-05-08")!;
+  const workNames = Object.entries(weekday.assignments)
+    .filter(([category]) => category !== "휴가")
+    .flatMap(([, names]) => names);
+
+  expect(workNames).not.toContain("이완근");
+  expect(weekday.assignments["일반"] ?? []).not.toContain("이완근");
+  expect(weekday.assignments["휴가"] ?? []).not.toContain("근속휴가:이완근");
+  expect(weekday.assignments["조근"]).toHaveLength(2);
+  expect(weekday.assignments["연장"]).toHaveLength(4);
+  expect(weekday.assignments["석근"]).toHaveLength(3);
+  expect(weekday.assignments["야근"]).toHaveLength(1);
+});
+
+test("desk leave removes a person from every stored assignment without showing a vacation entry", () => {
+  const generated = generateSchedule({
+    ...defaultScheduleState,
+    year: 2026,
+    month: 11,
+  }).state.generated!;
+  const targetDateKey = "2026-11-09";
+  const targetDay = generated.days.find((day) => day.dateKey === targetDateKey)!;
+  targetDay.headerName = "박대권";
+  targetDay.assignments = {
+    ...targetDay.assignments,
+    조근: ["박대권", "조근자"],
+    일반: ["박대권", "일반자"],
+    휴가: ["근속휴가:박대권", "연차:휴가자"],
+  };
+  targetDay.vacations = ["근속휴가:박대권", "연차:휴가자"];
+
+  const deskLeaveNamesByDate = buildDeskLeaveNamesByDate({
+    "long-service-leave": [
+      { name: "박대권", date: "26.11.2 ~ 27.5.31", note: "육아휴직", dateKeys: [] },
+    ],
+  });
+  const filtered = filterScheduleForDeskLeave(generated, deskLeaveNamesByDate);
+  const filteredDay = filtered.days.find((day) => day.dateKey === targetDateKey)!;
+
+  expect(filteredDay.headerName).toBe("");
+  expect(Object.values(filteredDay.assignments).flat()).not.toContain("박대권");
+  expect(filteredDay.assignments["조근"]).toEqual(["조근자"]);
+  expect(filteredDay.assignments["일반"]).toEqual(["일반자"]);
+  expect(filteredDay.assignments["휴가"]).toEqual(["연차:휴가자"]);
+  expect(filteredDay.vacations).toEqual(["연차:휴가자"]);
+});
+
+test("desk leave ranges include both boundaries and restore eligibility after the end date", () => {
+  const namesByDate = buildDeskLeaveNamesByDate({
+    "long-service-leave": [
+      { name: "박대권", date: "26.11.2 ~ 27.5.31", note: "육아휴직", dateKeys: [] },
+      { name: "이지수", date: "26.11.9 ~ 27.5.31", note: "육아휴직", dateKeys: [] },
+    ],
+  });
+
+  expect(namesByDate["2026-11-01"] ?? []).not.toContain("박대권");
+  expect(namesByDate["2026-11-02"]).toContain("박대권");
+  expect(namesByDate["2026-11-08"] ?? []).not.toContain("이지수");
+  expect(namesByDate["2026-11-09"]).toContain("이지수");
+  expect(namesByDate["2027-05-31"]).toEqual(expect.arrayContaining(["박대권", "이지수"]));
+  expect(namesByDate["2027-06-01"] ?? []).toEqual([]);
 });
 
 test("published repair allows general auto-sync when only vacation data changed", () => {
