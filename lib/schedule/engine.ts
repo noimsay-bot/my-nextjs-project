@@ -89,23 +89,59 @@ function normalizeDayAssignmentOrderOverrides(day: DaySchedule) {
   });
 }
 
+const NAME_PAREN_OPENERS = ["(", "（"];
+const NAME_PAREN_CLOSERS = [")", "）"];
+
+/**
+ * 이름 뒤에 붙은 괄호 표기를 떼어낸 기준 이름을 돌려준다.
+ * 예) "정철원(제크)" -> "정철원"
+ * 화면 표시는 입력한 원문을 그대로 쓰고, 일반 근무 자동계산의 이름 매칭에만 사용한다.
+ */
+export function getBaseAssignmentName(value: string) {
+  let name = (value ?? "").trim();
+
+  while (name.length > 0 && NAME_PAREN_CLOSERS.includes(name[name.length - 1])) {
+    const openIndex = Math.max(...NAME_PAREN_OPENERS.map((opener) => name.lastIndexOf(opener)));
+    if (openIndex <= 0) break;
+    const stripped = name.slice(0, openIndex).trim();
+    if (!stripped) break;
+    name = stripped;
+  }
+
+  return name;
+}
+
+function isGeneralNameBlocked(blockedNames: Set<string>, name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (blockedNames.has(trimmed)) return true;
+  const baseName = getBaseAssignmentName(trimmed);
+  return Boolean(baseName) && blockedNames.has(baseName);
+}
+
 function getGeneralAssignmentBlockedNames(day: DaySchedule, deskLeaveNames: string[] = []) {
   const blockedNames = new Set<string>();
+  // 괄호 표기가 붙은 이름("정철원(제크)")은 원문과 기준 이름("정철원")을 함께 막는다.
+  const addBlockedName = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    blockedNames.add(trimmed);
+    const baseName = getBaseAssignmentName(trimmed);
+    if (baseName) blockedNames.add(baseName);
+  };
 
-  deskLeaveNames.forEach((name) => blockedNames.add(name));
+  deskLeaveNames.forEach((name) => addBlockedName(name));
 
   Object.entries(day.assignments ?? {}).forEach(([category, names]) => {
     if (category === "일반") return;
 
     (names ?? []).forEach((name) => {
-      const trimmed = category === "휴가" ? parseVacationEntry(name).name.trim() : name.trim();
-      if (trimmed) blockedNames.add(trimmed);
+      addBlockedName(category === "휴가" ? parseVacationEntry(name).name : name);
     });
   });
 
   (day.vacations ?? []).forEach((entry) => {
-    const vacationName = parseVacationEntry(entry).name.trim();
-    if (vacationName) blockedNames.add(vacationName);
+    addBlockedName(parseVacationEntry(entry).name);
   });
 
   return blockedNames;
@@ -133,7 +169,7 @@ function normalizeDayVacationAssignments(day: DaySchedule, deskLeaveNames: strin
   );
 
   if (assignments["일반"] && blockedGeneralNames.size > 0) {
-    assignments["일반"] = assignments["일반"].filter((name) => !blockedGeneralNames.has(name.trim()));
+    assignments["일반"] = assignments["일반"].filter((name) => !isGeneralNameBlocked(blockedGeneralNames, name));
   }
 
   return {
@@ -697,8 +733,13 @@ export function syncGeneralAssignments(
     }
 
     const generalTeamOffSet = new Set(activeGeneralTeamOffPeople.map((name) => name.trim()).filter(Boolean));
+    const previousNightBaseNames = new Set(previousNight.map((name) => getBaseAssignmentName(name)).filter(Boolean));
     const nextGeneralNames = generalTeamPeople.filter(
-      (name) => !generalBlockedNames.has(name) && !previousNight.includes(name) && !generalTeamOffSet.has(name),
+      (name) =>
+        !isGeneralNameBlocked(generalBlockedNames, name) &&
+        !previousNight.includes(name) &&
+        !previousNightBaseNames.has(getBaseAssignmentName(name)) &&
+        !generalTeamOffSet.has(name),
     );
 
     if (nextGeneralNames.length > 0) {
@@ -958,7 +999,13 @@ function getNextVacationType(type: VacationType): VacationType {
 }
 
 function getVacationNames(entries: string[]) {
-  return entries.map((entry) => parseVacationEntry(entry).name).filter(Boolean);
+  // 괄호 표기가 붙은 이름("정철원(제크)")은 기준 이름("정철원")도 함께 휴가자로 본다.
+  return entries.flatMap((entry) => {
+    const name = parseVacationEntry(entry).name.trim();
+    if (!name) return [];
+    const baseName = getBaseAssignmentName(name);
+    return baseName && baseName !== name ? [name, baseName] : [name];
+  });
 }
 
 function mergeVacationMaps(...maps: Array<Record<string, string[]>>) {

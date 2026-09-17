@@ -1733,3 +1733,52 @@ test("T1: actual Hwang-Jung assembly compensatory swap clears Jung from June 29"
   expect(vacations).toContain("2026-06-29: 대휴:황현우");
   expect(vacations).not.toContain("2026-06-29: 대휴:정철원");
 });
+
+test("parenthesised manual vacation names drop the person from general auto-sync for every vacation type", () => {
+  const entries = ["연차:정철원(제크)", "대휴:정철원(제크)", "기타:정철원(제크)", "정철원(제크)"];
+
+  entries.forEach((entry) => {
+    const schedule = {
+      year: 2026,
+      month: 6,
+      monthKey: "2026-06",
+      nextPointers: { ...defaultScheduleState.pointers },
+      nextStartDate: "2026-07-01",
+      days: [
+        {
+          dateKey: "2026-06-29",
+          day: 29,
+          month: 6,
+          year: 2026,
+          dow: 1,
+          isWeekend: false,
+          isHoliday: false,
+          isCustomHoliday: false,
+          isWeekdayHoliday: false,
+          isOverflowMonth: false,
+          vacations: [entry],
+          assignments: { 휴가: [entry], 일반: ["정철원"] },
+          manualExtras: [],
+          headerName: "",
+          conflicts: [],
+        },
+      ],
+    } satisfies GeneratedSchedule;
+
+    const state = sanitizeScheduleState({
+      ...defaultScheduleState,
+      year: 2026,
+      month: 6,
+      generated: schedule,
+      generatedHistory: [schedule],
+    });
+    const day = state.generated!.days.find((item) => item.dateKey === "2026-06-29")!;
+
+    // 휴가 칸은 입력한 괄호 표기를 그대로 보여준다.
+    expect(day.assignments["휴가"]).toContain(entry);
+    expect(day.vacations).toContain(entry);
+    // 일반조 자동계산은 괄호를 무시한 기준 이름으로 휴가자를 제외한다.
+    expect(day.assignments["일반"] ?? []).not.toContain("정철원");
+    expect((day.assignments["일반"] ?? []).length).toBeGreaterThan(0);
+  });
+});
