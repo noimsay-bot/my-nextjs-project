@@ -1216,6 +1216,9 @@ function buildTripCards(
 ): TeamLeadTripPersonCard[] {
   const assignmentMap = new Map(assignmentRows.map((row) => [row.month_key, row] as const));
   const timelineMap = new Map<string, TripTimelineRow[]>();
+  // 출장 흐름은 월 경계와 무관하게 날짜 기준으로 이어지도록 하루에 한 번만 모은다.
+  // 날짜의 실제 월 시트를 우선하고, 없으면 다음 달로 넘어간 이전 시트 날짜를 쓴다.
+  const dayByDateKey = new Map<string, { day: DaySchedule; scheduleMonthKey: string; isOwnMonth: boolean }>();
 
   scheduleRows
     .map((row) => ({
@@ -1223,30 +1226,37 @@ function buildTripCards(
       schedule: row.published_state,
     }))
     .filter((row): row is { month_key: string; schedule: GeneratedSchedule } => Boolean(row.schedule))
-    .sort((left, right) => left.month_key.localeCompare(right.month_key))
     .forEach(({ month_key, schedule }) => {
-      const assignment = assignmentMap.get(month_key);
-      const monthEntries = assignment?.entries ?? {};
-      const monthRows = assignment?.rows ?? {};
+      schedule.days.forEach((day) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day.dateKey)) return;
+        const isOwnMonth = day.month === schedule.month && day.year === schedule.year;
+        const current = dayByDateKey.get(day.dateKey);
+        if (current && (current.isOwnMonth || !isOwnMonth)) return;
+        dayByDateKey.set(day.dateKey, { day, scheduleMonthKey: month_key, isOwnMonth });
+      });
+    });
 
-      schedule.days
-        .filter((day) => day.month === schedule.month)
-        .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
-        .forEach((day) => {
-          const rows = getScheduleAssignmentRows(day, normalizeDayRows(monthRows[day.dateKey]));
-          rows.forEach((row) => {
-            const personName = row.name.trim();
-            if (!personName) return;
-            const entry = normalizeScheduleAssignmentEntry(monthEntries[row.key]);
-            const current = timelineMap.get(personName) ?? [];
-            current.push({
-              rowKey: row.key,
-              dateKey: day.dateKey,
-              entry,
-            });
-            timelineMap.set(personName, current);
-          });
+  Array.from(dayByDateKey.values())
+    .sort((left, right) => left.day.dateKey.localeCompare(right.day.dateKey))
+    .forEach(({ day, scheduleMonthKey }) => {
+      const dateAssignment = assignmentMap.get(day.dateKey.slice(0, 7));
+      const scheduleAssignment = assignmentMap.get(scheduleMonthKey);
+      const dayRows = dateAssignment?.rows?.[day.dateKey] ?? scheduleAssignment?.rows?.[day.dateKey];
+      const rows = getScheduleAssignmentRows(day, normalizeDayRows(dayRows));
+      rows.forEach((row) => {
+        const personName = row.name.trim();
+        if (!personName) return;
+        const entry = normalizeScheduleAssignmentEntry(
+          dateAssignment?.entries?.[row.key] ?? scheduleAssignment?.entries?.[row.key],
+        );
+        const current = timelineMap.get(personName) ?? [];
+        current.push({
+          rowKey: row.key,
+          dateKey: day.dateKey,
+          entry,
         });
+        timelineMap.set(personName, current);
+      });
     });
 
   const personTripBuilderMap = new Map<string, Map<string, TripAggregateBuilder>>();

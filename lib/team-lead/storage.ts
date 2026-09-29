@@ -2694,33 +2694,44 @@ function buildTripTimelineRows(
 ) {
   const timelineMap = new Map<string, TripTimelineRow[]>();
   const bigEvents = getScheduleAssignmentBigEvents(schedules);
+  // 출장 흐름은 월 경계와 무관하게 이어져야 하므로 날짜 기준으로 하루에 한 번만 모은다.
+  // 해당 날짜의 실제 월 시트(일정배정 입력 기준)를 우선하고, 없으면 다음 달로 넘어간 이전 시트 날짜를 쓴다.
+  const dayByDateKey = new Map<string, { day: DaySchedule; scheduleMonthKey: string; isOwnMonth: boolean }>();
 
   schedules.forEach((monthSchedule) => {
-    const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
-    const monthRows = store.rows[monthSchedule.monthKey] ?? {};
-
-    monthSchedule.days
-      .filter((day) => day.month === monthSchedule.month)
-      .sort((left, right) => left.dateKey.localeCompare(right.dateKey))
-      .forEach((day) => {
-        const rows = getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents);
-        rows.forEach((row) => {
-          const personName = row.name.trim();
-          if (!personName) return;
-
-          const entry = monthEntries[row.key] ?? createDefaultScheduleAssignmentEntry();
-          const current = timelineMap.get(personName) ?? [];
-          current.push({
-            personName,
-            rowKey: row.key,
-            dateKey: day.dateKey,
-            duty: row.duty,
-            entry,
-          });
-          timelineMap.set(personName, current);
-        });
-      });
+    monthSchedule.days.forEach((day) => {
+      if (!isScheduleAssignmentDateKey(day.dateKey)) return;
+      const isOwnMonth = day.month === monthSchedule.month && day.year === monthSchedule.year;
+      const current = dayByDateKey.get(day.dateKey);
+      if (current && (current.isOwnMonth || !isOwnMonth)) return;
+      dayByDateKey.set(day.dateKey, { day, scheduleMonthKey: monthSchedule.monthKey, isOwnMonth });
+    });
   });
+
+  Array.from(dayByDateKey.values())
+    .sort((left, right) => left.day.dateKey.localeCompare(right.day.dateKey))
+    .forEach(({ day, scheduleMonthKey }) => {
+      const dateMonthKey = getScheduleAssignmentMonthKeyForDateKey(day.dateKey);
+      const dateMonthEntries = store.entries[dateMonthKey] ?? {};
+      const scheduleMonthEntries = store.entries[scheduleMonthKey] ?? {};
+      const dayRows = getScheduleAssignmentDayRowsForDate(store, scheduleMonthKey, day.dateKey);
+      const rows = getScheduleAssignmentRows(day, dayRows, bigEvents);
+      rows.forEach((row) => {
+        const personName = row.name.trim();
+        if (!personName) return;
+
+        const entry = dateMonthEntries[row.key] ?? scheduleMonthEntries[row.key] ?? createDefaultScheduleAssignmentEntry();
+        const current = timelineMap.get(personName) ?? [];
+        current.push({
+          personName,
+          rowKey: row.key,
+          dateKey: day.dateKey,
+          duty: row.duty,
+          entry,
+        });
+        timelineMap.set(personName, current);
+      });
+    });
 
   timelineMap.forEach((rows, personName) => {
     timelineMap.set(
@@ -2911,11 +2922,23 @@ function hasScheduleAssignmentTripDisplay(
   );
 }
 
+// 근무표 시트가 다음 달 초까지 이어질 때(예: 9월 시트의 10/1~10/4) 일정배정은 날짜의 실제 월에 저장되므로 둘 다 본다.
+function getScheduleAssignmentEntriesForDisplay(
+  input: ScheduleAssignmentDisplayNameInput,
+  store: ScheduleAssignmentDataStore,
+): Record<string, ScheduleAssignmentEntry> {
+  const sheetEntries = store.entries[input.monthKey] ?? {};
+  const dateMonthKey = getScheduleAssignmentMonthKeyForDateKey(input.dateKey);
+  if (!dateMonthKey || dateMonthKey === input.monthKey) return sheetEntries;
+  return { ...sheetEntries, ...(store.entries[dateMonthKey] ?? {}) };
+}
+
 function findCustomScheduleAssignmentRowKeyForDisplay(
   input: ScheduleAssignmentDisplayNameInput,
   store: ScheduleAssignmentDataStore,
 ) {
-  const dayRows = store.rows[input.monthKey]?.[input.dateKey];
+  const dateMonthKey = getScheduleAssignmentMonthKeyForDateKey(input.dateKey);
+  const dayRows = (dateMonthKey ? store.rows[dateMonthKey]?.[input.dateKey] : null) ?? store.rows[input.monthKey]?.[input.dateKey];
   if (!dayRows) return null;
 
   const matched = dayRows.addedRows.find((row) => {
@@ -2961,7 +2984,7 @@ export function getScheduleAssignmentTripTooltip(
   const trimmedName = input.name.trim();
   if (!trimmedName || input.category === "휴가") return null;
 
-  const monthEntries = store.entries[input.monthKey] ?? {};
+  const monthEntries = getScheduleAssignmentEntriesForDisplay(input, store);
   const rowKey = createAssignmentRowKey(input.dateKey, input.category, input.index, input.name);
   const directTooltip = getScheduleAssignmentTripTooltipForRow(rowKey, monthEntries[rowKey], visibleTripTagMap);
   if (directTooltip) return directTooltip;
@@ -2987,7 +3010,7 @@ export function formatScheduleAssignmentDisplayName(
   if (!trimmedName || input.category === "휴가") return trimmedName;
 
   const rowKey = createAssignmentRowKey(input.dateKey, input.category, input.index, input.name);
-  const monthEntries = store.entries[input.monthKey] ?? {};
+  const monthEntries = getScheduleAssignmentEntriesForDisplay(input, store);
   const entry = monthEntries[rowKey] ?? null;
   const hasTripTag = hasScheduleAssignmentTripDisplay(rowKey, entry, visibleTripTagMap);
 

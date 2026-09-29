@@ -10,6 +10,7 @@ import {
   getScheduleAssignmentBigEventDutyOptions,
   getScheduleAssignmentBigEvents,
   getScheduleAssignmentTripTooltip,
+  getScheduleAssignmentVisibleTripTagMap,
   getScheduleAssignmentGeneralDisplayNames,
   getScheduleAssignmentRows,
 } from "@/lib/team-lead/storage";
@@ -518,6 +519,65 @@ test("added support assignments tag existing general schedule names across month
     expect(decoratedSchedule.days[0]?.assignments["일반"]).toEqual([name]);
     expect(decoratedSchedule.days[0]?.assignmentNameTags?.[`일반::${name}`]).toBe(expectedTag);
   });
+});
+
+test("trip tag continues across month boundary when previous sheet owns next-month days", () => {
+  const createDay = (dateKey: string, names: string[]) => {
+    const [year, month, dayNumber] = dateKey.split("-").map(Number);
+    return {
+      dateKey,
+      day: dayNumber,
+      month,
+      year,
+      dow: new Date(year, month - 1, dayNumber).getDay(),
+      isWeekend: false,
+      isHoliday: false,
+      isCustomHoliday: false,
+      isWeekdayHoliday: false,
+      isOverflowMonth: false,
+      vacations: [],
+      assignments: { 일반: names },
+      manualExtras: [],
+      headerName: "",
+      conflicts: [],
+    } as DaySchedule;
+  };
+  // 9월 시트가 10/1~10/2까지 담당하고, 일정배정은 10월 날짜를 2026-10에 저장한 상황
+  const septemberSchedule = {
+    year: 2026,
+    month: 9,
+    monthKey: "2026-09",
+    days: [createDay("2026-09-30", ["구본준"]), createDay("2026-10-01", ["구본준"]), createDay("2026-10-02", ["구본준"])],
+    nextPointers: { ...defaultPointers },
+    nextStartDate: "2026-10-03",
+  } as GeneratedSchedule;
+  const departureKey = createAssignmentRowKey("2026-09-30", "일반", 0, "구본준");
+  const octoberKey = createAssignmentRowKey("2026-10-01", "일반", 0, "구본준");
+  const returnKey = createAssignmentRowKey("2026-10-02", "일반", 0, "구본준");
+  const tripEntry = {
+    ...createDefaultScheduleAssignmentEntry(),
+    travelType: "국내출장" as const,
+    tripTagId: "trip-cross-month",
+    tripTagLabel: "출장",
+  };
+  const store: ScheduleAssignmentDataStore = {
+    entries: {
+      "2026-09": { [departureKey]: { ...tripEntry, tripTagPhase: "departure" } },
+      "2026-10": {
+        [octoberKey]: { ...createDefaultScheduleAssignmentEntry(), schedules: ["10월 현지 취재"] },
+        [returnKey]: { ...tripEntry, tripTagPhase: "return" },
+      },
+    },
+    rows: {},
+  };
+  const visibleTripTagMap = getScheduleAssignmentVisibleTripTagMap([septemberSchedule], store);
+  const octoberInput = { monthKey: "2026-09", dateKey: "2026-10-01", category: "일반", index: 0, name: "구본준" };
+
+  expect(formatScheduleAssignmentDisplayName(octoberInput, store, visibleTripTagMap)).toBe("구본준(출)");
+  expect(getScheduleAssignmentTripTooltip(octoberInput, store, visibleTripTagMap)?.schedules).toEqual(["10월 현지 취재"]);
+  expect(
+    formatScheduleAssignmentDisplayName({ ...octoberInput, dateKey: "2026-10-02" }, store, visibleTripTagMap),
+  ).toBe("구본준(출)");
 });
 
 test("big event assignments become schedule assignment duties across month boundaries", () => {
