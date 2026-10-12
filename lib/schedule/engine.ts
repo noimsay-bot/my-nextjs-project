@@ -544,6 +544,25 @@ function getRequiredExtraHolidays(year?: number, month?: number) {
 
 function normalizeHolidayToken(token: string, year?: number, month?: number) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(token)) return token;
+  // 2027-1-1, 2027.1.1, 2027/01/01 처럼 0 패딩이 없거나 구분자가 다른 날짜도 YYYY-MM-DD로 맞춘다.
+  const fullDateMatch = token.match(/^(\d{4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})\.?$/);
+  if (fullDateMatch) {
+    const [, tokenYear, tokenMonth, tokenDay] = fullDateMatch.map(Number);
+    if (tokenMonth >= 1 && tokenMonth <= 12 && tokenDay >= 1 && tokenDay <= daysInMonth(tokenYear, tokenMonth)) {
+      return fmtDate(tokenYear, tokenMonth, tokenDay);
+    }
+    return token;
+  }
+  // 1/1, 1-1, 1.1 처럼 연도 없이 월/일만 쓴 경우 근무표 월 기준으로 연도를 추정한다. (12월 근무표의 1/1 → 다음 해)
+  const monthDayMatch = token.match(/^(\d{1,2})\s*[-./]\s*(\d{1,2})\.?$/);
+  if (monthDayMatch && year && month) {
+    const [, tokenMonth, tokenDay] = monthDayMatch.map(Number);
+    const tokenYear = month === 12 && tokenMonth === 1 ? year + 1 : month === 1 && tokenMonth === 12 ? year - 1 : year;
+    if (tokenMonth >= 1 && tokenMonth <= 12 && tokenDay >= 1 && tokenDay <= daysInMonth(tokenYear, tokenMonth)) {
+      return fmtDate(tokenYear, tokenMonth, tokenDay);
+    }
+    return token;
+  }
   if (/^\d{1,2}$/.test(token) && year && month) {
     const day = Number(token);
     if (day >= 1 && day <= daysInMonth(year, month)) {

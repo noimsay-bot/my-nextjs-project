@@ -1852,7 +1852,7 @@ export function ScheduleApp() {
               disabled={isEditingDate}
               value={state.extraHolidays}
               onChange={(e) => setState((current) => ({ ...current, extraHolidays: e.target.value }))}
-              placeholder="1,2,3 같은 숫자로만 입력."
+              placeholder="1,2,3 같은 숫자 또는 2027-1-1, 1/1 같은 날짜로 입력."
             />
           </label>
             <MessageBox message={message} />

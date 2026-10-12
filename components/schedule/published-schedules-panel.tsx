@@ -278,6 +278,13 @@ function getPublishedScheduleLayoutMode(
 
 const vacationLegendStyles = vacationStyleTones;
 
+// "내 근무 보기"에서 휴가칸의 내 이름은 회색 대신 휴가 종류 색으로 강조한다.
+const vacationMineHighlightStyles: Record<VacationType, { background: string; border: string }> = {
+  연차: { background: "rgba(59,130,246,.55)", border: "4px solid rgba(147,197,253,.95)" },
+  대휴: { background: "rgba(16,185,129,.55)", border: "4px solid rgba(110,231,183,.95)" },
+  기타: { background: "rgba(139,92,246,.55)", border: "4px solid rgba(196,181,253,.95)" },
+};
+
 const displayVacationLabels = vacationTypeLabels;
 
 const displayVacationOrder: VacationType[] = ["연차", "대휴", "기타"];
@@ -538,6 +545,7 @@ function getAssignmentDisplay(category: string, value: string) {
     return {
       name: value,
       chipStyle: label === "조근" ? dutyLegendStyles.조근 : null,
+      mineHighlightStyle: null,
       isVacation: false,
     };
   }
@@ -550,6 +558,7 @@ function getAssignmentDisplay(category: string, value: string) {
   return {
     name: parsed.name,
     chipStyle: vacationLegendStyles[type as keyof typeof vacationLegendStyles],
+    mineHighlightStyle: vacationMineHighlightStyles[type as keyof typeof vacationMineHighlightStyles] ?? null,
     isVacation: true,
   };
 }
@@ -619,7 +628,9 @@ function isSameScheduleActorName(left: string | null | undefined, right: string 
 function dayContainsUser(day: DaySchedule, username: string) {
   if (!username) return false;
   if (isSameScheduleActorName(day.headerName, username)) return true;
+  // 평일 자동 일반 근무는 "내 근무 보기" 강조에서 제외한다.
   return Object.entries(day.assignments).some(([category, names]) =>
+    !isAutoManagedGeneralAssignment(day, category) &&
     names.some((name) => isSameScheduleActorName(getComparableAssignmentName(category, name), username)),
   );
 }
@@ -2939,7 +2950,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                                           const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                           const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                           const mineHighlighted =
-                                            isMine && (showMine || (editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex)));
+                                            isMine && !isAutoManagedGeneralRef(ref, publishedDayIndex) && (showMine || editMode);
                                           const editModeMineHighlighted =
                                             isMine && editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex);
                                           const routeSelected = routeIncludes(selectedRoute, ref);
@@ -3036,7 +3047,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                                                         : recommendedHighlighted
                                                           ? "rgba(124,58,237,.32)"
                                                           : mineHighlighted
-                                                            ? "rgba(148,163,184,.38)"
+                                                            ? assignmentDisplay.mineHighlightStyle?.background ?? "rgba(148,163,184,.38)"
                                                             : dimOtherNames
                                                               ? "rgba(255,255,255,.06)"
                                                               : hasTaggedDisplayName
@@ -3057,7 +3068,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                                                   : recommendedHighlighted
                                                     ? "3px solid rgba(255,255,255,.95)"
                                                   : mineHighlighted
-                                                    ? "4px solid rgba(226,232,240,.82)"
+                                                    ? assignmentDisplay.mineHighlightStyle?.border ?? "4px solid rgba(226,232,240,.82)"
                                                     : dimOtherNames
                                                       ? "1px solid rgba(255,255,255,.08)"
                                                               : hasTaggedDisplayName
@@ -3345,7 +3356,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                                   const ownPendingRequest = findOwnPendingRequestForRef(allPendingRequests, ref, session?.id);
                                   const isMine = isSameScheduleActorName(username, assignmentDisplay.name);
                                   const mineHighlighted =
-                                    isMine && (showMine || (editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex)));
+                                    isMine && !isAutoManagedGeneralRef(ref, publishedDayIndex) && (showMine || editMode);
                                   const editModeMineHighlighted =
                                     isMine && editMode && !isAutoManagedGeneralRef(ref, publishedDayIndex);
                                   const routeSelected = routeIncludes(selectedRoute, ref);
@@ -3442,7 +3453,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                                                 : recommendedHighlighted
                                                   ? "rgba(124,58,237,.32)"
                                                   : mineHighlighted
-                                                    ? "rgba(148,163,184,.38)"
+                                                    ? assignmentDisplay.mineHighlightStyle?.background ?? "rgba(148,163,184,.38)"
                                                     : dimOtherNames
                                                       ? "rgba(255,255,255,.06)"
                                                       : hasTaggedDisplayName
@@ -3463,7 +3474,7 @@ export function PublishedSchedulesPanel({ mode = "page", readOnlyPreview }: Publ
                                                 : recommendedHighlighted
                                                   ? "3px solid rgba(255,255,255,.95)"
                                                 : mineHighlighted
-                                                  ? "4px solid rgba(226,232,240,.82)"
+                                                  ? assignmentDisplay.mineHighlightStyle?.border ?? "4px solid rgba(226,232,240,.82)"
                                                   : dimOtherNames
                                                     ? "1px solid rgba(255,255,255,.08)"
                                                       : hasTaggedDisplayName
