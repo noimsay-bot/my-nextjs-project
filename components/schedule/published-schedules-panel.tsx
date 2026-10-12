@@ -278,13 +278,6 @@ function getPublishedScheduleLayoutMode(
 
 const vacationLegendStyles = vacationStyleTones;
 
-// "내 근무 보기"에서 휴가칸의 내 이름은 회색 대신 휴가 종류 색으로 강조한다.
-const vacationMineHighlightStyles: Record<VacationType, { background: string; border: string }> = {
-  연차: { background: "rgba(59,130,246,.55)", border: "4px solid rgba(147,197,253,.95)" },
-  대휴: { background: "rgba(16,185,129,.55)", border: "4px solid rgba(110,231,183,.95)" },
-  기타: { background: "rgba(139,92,246,.55)", border: "4px solid rgba(196,181,253,.95)" },
-};
-
 const displayVacationLabels = vacationTypeLabels;
 
 const displayVacationOrder: VacationType[] = ["연차", "대휴", "기타"];
@@ -558,7 +551,8 @@ function getAssignmentDisplay(category: string, value: string) {
   return {
     name: parsed.name,
     chipStyle: vacationLegendStyles[type as keyof typeof vacationLegendStyles],
-    mineHighlightStyle: vacationMineHighlightStyles[type as keyof typeof vacationMineHighlightStyles] ?? null,
+    // "내 근무 보기"에서 휴가칸의 내 이름은 회색 대신 원래 휴가 종류 색으로 강조한다.
+    mineHighlightStyle: vacationLegendStyles[type as keyof typeof vacationLegendStyles] ?? null,
     isVacation: true,
   };
 }
