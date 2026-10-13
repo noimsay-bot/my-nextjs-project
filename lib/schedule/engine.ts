@@ -14,6 +14,9 @@
   SCHEDULE_MONTHS,
   SCHEDULE_YEAR_END,
   SCHEDULE_YEAR_START,
+  BLUE_HOUSE_CATEGORY,
+  BLUE_HOUSE_PEOPLE_LIMIT,
+  isBlueHouseToggleDay,
 } from "@/lib/schedule/constants";
 import { getDeskLeaveNamesByDate, getDeskPriorityVacationMap } from "@/lib/schedule/desk-records";
 import { filterDayForDeskLeave, filterScheduleForDeskLeave } from "@/lib/schedule/desk-record-leave";
@@ -674,6 +677,25 @@ function getPreviousNightSeedForDays(state: ScheduleState, days: DaySchedule[]) 
   return getPreviousNightSeedForDateKey(state, firstDay.dateKey);
 }
 
+export { BLUE_HOUSE_CATEGORY, BLUE_HOUSE_PEOPLE_LIMIT, isBlueHouseToggleDay };
+
+function getCurrentKstMonthKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit" }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  return `${year}-${month}`;
+}
+
+// 지난달 근무표의 일반조가 바뀌지 않도록 이번 달 이후의 빈 청와대 칸에만 첫 번째 이름을 기본으로 넣는다.
+function fillDefaultBlueHouseAssignment(state: ScheduleState, day: DaySchedule) {
+  const defaultName = state.blueHousePeople?.[0]?.trim();
+  if (!defaultName || !isBlueHouseToggleDay(day)) return;
+  if (day.dateKey.slice(0, 7) < getCurrentKstMonthKey()) return;
+  const currentNames = (day.assignments[BLUE_HOUSE_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
+  if (currentNames.length > 0) return;
+  day.assignments[BLUE_HOUSE_CATEGORY] = [defaultName];
+}
+
 export function syncGeneralAssignments(
   state: ScheduleState,
   days: DaySchedule[],
@@ -730,6 +752,10 @@ export function syncGeneralAssignments(
       day.assignmentNameTags = normalizeDayAssignmentNameTags(day);
       previousNight = (day.assignments["야근"] ?? []).map((name) => name.trim()).filter(Boolean);
       return;
+    }
+
+    if (!syncDateKeySet || syncDateKeySet.has(day.dateKey)) {
+      fillDefaultBlueHouseAssignment(state, day);
     }
 
     const generalBlockedNames = getGeneralAssignmentBlockedNames(day, deskLeaveNamesByDate[day.dateKey] ?? []);
@@ -917,6 +943,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     generalTeamOffPeople,
     generalTeamOffPeopleByDate,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
+    blueHousePeople: normalizeEditableNameList(input.blueHousePeople).slice(0, BLUE_HOUSE_PEOPLE_LIMIT),
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
     offExcludeByCategory: nextOffExcludeByCategory,
@@ -2429,6 +2456,39 @@ export function updateScheduleBigEvents(state: ScheduleState, monthKey: string, 
   );
   if (next.generated?.monthKey === monthKey) {
     next.generated = updatedSchedule;
+  }
+
+  return sanitizeScheduleState(next);
+}
+
+export function toggleBlueHouseAssignment(state: ScheduleState, monthKey: string, dateKey: string) {
+  const people = state.blueHousePeople.map((name) => name.trim()).filter(Boolean);
+  if (people.length === 0) return state;
+
+  const next = cloneScheduleState(state);
+  const target =
+    next.generatedHistory.find((item) => item.monthKey === monthKey) ??
+    (next.generated?.monthKey === monthKey ? next.generated : null);
+  const day = target?.days.find((item) => item.dateKey === dateKey);
+  if (!target || !day || !isBlueHouseToggleDay(day)) return state;
+
+  const currentName = (day.assignments[BLUE_HOUSE_CATEGORY] ?? []).map((name) => name.trim()).find(Boolean) ?? "";
+  const nextName = currentName === people[0] && people[1] ? people[1] : people[0];
+  day.assignments[BLUE_HOUSE_CATEGORY] = [nextName];
+
+  if (shouldSyncGeneralAssignmentsForSchedule(target)) {
+    syncGeneralAssignments(next, target.days, next.generalTeamPeople, {
+      bigEvents: target.big_events,
+      previousBigEvents: target.big_events,
+      scheduleYear: target.year,
+      scheduleMonth: target.month,
+      syncDateKeys: getGeneralAssignmentSyncDateKeysForSchedule(target),
+    });
+  }
+
+  next.generatedHistory = next.generatedHistory.map((item) => (item.monthKey === monthKey ? target : item));
+  if (next.generated?.monthKey === monthKey) {
+    next.generated = target;
   }
 
   return sanitizeScheduleState(next);

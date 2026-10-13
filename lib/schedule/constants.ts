@@ -473,6 +473,7 @@ export const defaultScheduleState: ScheduleState = {
   generalTeamOffPeople: [],
   generalTeamOffPeopleByDate: {},
   globalOffPool: [],
+  blueHousePeople: [],
   offPeople: [],
   offByCategory: createEmptyOffByCategory(),
   offExcludeByCategory: createEmptyOffByCategory(),
@@ -490,3 +491,11 @@ export const defaultScheduleState: ScheduleState = {
   editingMonthKey: null,
   selectedPerson: null,
 };
+
+export const BLUE_HOUSE_CATEGORY = "청와대";
+export const BLUE_HOUSE_PEOPLE_LIMIT = 2;
+
+// 청와대 칸은 평일(휴일 제외)에만 두 이름을 번갈아 쓰며, 일반조 계산에서 근무로 취급하고 일정배정에는 넘기지 않는다.
+export function isBlueHouseToggleDay(day: Pick<DaySchedule, "isWeekend" | "isHoliday" | "isWeekdayHoliday" | "isCustomHoliday">) {
+  return !day.isWeekend && !day.isHoliday && !day.isWeekdayHoliday && !day.isCustomHoliday;
+}

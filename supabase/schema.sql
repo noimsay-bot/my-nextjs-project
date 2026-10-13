@@ -2826,7 +2826,7 @@ on public.work_manual_webhards
 for select
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  public.current_profile_role() in ('member', 'outlet', 'desk', 'team_lead', 'admin')
   and public.current_profile_approved() = true
 );
 

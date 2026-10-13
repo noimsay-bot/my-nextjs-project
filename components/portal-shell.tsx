@@ -276,6 +276,7 @@ function getVisibleLinks(
           link.href === "/me" ||
           link.href === "/election" ||
           link.href === "/community" ||
+          link.href === "/tips" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||
@@ -290,6 +291,7 @@ function getVisibleLinks(
           link.href === "/me" ||
           link.href === "/election" ||
           link.href === "/community" ||
+          link.href === "/tips" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           link.href === "/equipment" ||

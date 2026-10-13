@@ -83,11 +83,19 @@ test("desk sees webhards with manage buttons", async ({ page }) => {
   await expect(page.getByRole("button", { name: "+ 웹하드 추가" })).toBeVisible();
 });
 
-test("member cannot open the work manual", async ({ page }) => {
+test("member can read webhards without manage buttons", async ({ page }) => {
   await seedManualPage(page, "member");
+  await page.goto("/tips#webhard");
+
+  await expect(page.getByText("2. 샘플 게스트 로그인")).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ 웹하드 추가" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "수정" })).toHaveCount(0);
+});
+
+test("partner cannot open tips", async ({ page }) => {
+  await seedManualPage(page, "partner");
   await page.goto("/tips#webhard");
 
   await expect(page).not.toHaveURL(/\/tips/);
   await expect(page.getByText("샘플 관리자 로그인")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Tips" })).toHaveCount(0);
 });

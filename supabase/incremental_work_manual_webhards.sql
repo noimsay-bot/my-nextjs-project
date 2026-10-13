@@ -1,5 +1,5 @@
 -- Tips > 웹하드 계정 목록
--- 조회: 승인된 desk/team_lead/admin
+-- 조회: 승인된 팀원(member/outlet/desk/team_lead/admin)
 -- 추가/수정/삭제: 승인된 desk/team_lead/admin
 
 create or replace function public.set_updated_at()
@@ -44,7 +44,7 @@ on public.work_manual_webhards
 for select
 to authenticated
 using (
-  public.current_profile_role() in ('desk', 'team_lead', 'admin')
+  public.current_profile_role() in ('member', 'outlet', 'desk', 'team_lead', 'admin')
   and public.current_profile_approved() = true
 );
 

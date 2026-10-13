@@ -83,6 +83,7 @@ function buildSettingsState(state: ScheduleState): Partial<ScheduleState> {
     generalTeamOffPeople: state.generalTeamOffPeople,
     generalTeamOffPeopleByDate: state.generalTeamOffPeopleByDate,
     globalOffPool: state.globalOffPool,
+    blueHousePeople: state.blueHousePeople,
     offPeople: state.offPeople,
     offByCategory: state.offByCategory,
     offExcludeByCategory: state.offExcludeByCategory,

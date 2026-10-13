@@ -143,6 +143,7 @@ export interface ScheduleState {
   generalTeamOffPeople: string[];
   generalTeamOffPeopleByDate: Record<string, string[]>;
   globalOffPool: string[];
+  blueHousePeople: string[];
   offPeople: string[];
   offByCategory: Record<CategoryKey, string[]>;
   offExcludeByCategory: Record<CategoryKey, string[]>;

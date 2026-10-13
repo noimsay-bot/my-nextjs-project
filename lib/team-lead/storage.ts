@@ -9,9 +9,11 @@ import {
   type UserRole,
 } from "@/lib/auth/storage";
 import {
+  BLUE_HOUSE_CATEGORY,
   buildScheduleAssignmentNameTagKey,
   defaultPointers,
   getScheduleCategoryLabel,
+  isBlueHouseToggleDay,
 } from "@/lib/schedule/constants";
 import { getPublishedSchedules } from "@/lib/schedule/published";
 import { readStoredScheduleState } from "@/lib/schedule/storage";
@@ -2394,7 +2396,11 @@ export function applyScheduleAssignmentDutyCategoriesToSchedule(
     const dayRows = getScheduleAssignmentDayRowsForDate(store, schedule.monthKey, day.dateKey);
     const desiredByCategory = new Map<string, string[]>();
 
+    // 평일 청와대 칸은 DESK 작성탭에서만 관리하므로 일정배정 행으로 덮어쓰지 않는다.
+    const skipBlueHouse = isBlueHouseToggleDay(day);
+
     Object.values(scheduleAssignmentLinkedDutyCategoryMap).forEach((category) => {
+      if (skipBlueHouse && category === BLUE_HOUSE_CATEGORY) return;
       if (day.assignments[category]?.length) {
         desiredByCategory.set(category, []);
       }
@@ -2403,6 +2409,7 @@ export function applyScheduleAssignmentDutyCategoriesToSchedule(
     getScheduleAssignmentRows(day, dayRows, bigEvents).forEach((row) => {
       const category = getScheduleAssignmentLinkedDutyCategory(row.duty);
       if (!category) return;
+      if (skipBlueHouse && category === BLUE_HOUSE_CATEGORY) return;
       const names = desiredByCategory.get(category) ?? [];
       addUniqueName(names, row.name);
       desiredByCategory.set(category, names);
@@ -2565,8 +2572,10 @@ export function getScheduleAssignmentRows(
     addedRows.map(getScheduleAssignmentRowDisplaySignature).filter(Boolean),
   );
 
+  const excludeBlueHouse = isBlueHouseToggleDay(day);
   const baseRows = Object.entries(day.assignments)
     .filter(([category, names]) => category !== "휴가" && category !== "제크" && names.length > 0)
+    .filter(([category]) => !(excludeBlueHouse && category === BLUE_HOUSE_CATEGORY))
     .flatMap(([category, names]) =>
       names.map((name, index) => {
         const key = createAssignmentRowKey(day.dateKey, category, index, name);

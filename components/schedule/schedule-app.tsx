@@ -83,6 +83,10 @@ import {
   updateDayHeaderName,
   updateManualAssignment,
   updateScheduleBigEvents,
+  BLUE_HOUSE_CATEGORY,
+  BLUE_HOUSE_PEOPLE_LIMIT,
+  isBlueHouseToggleDay,
+  toggleBlueHouseAssignment,
 } from "@/lib/schedule/engine";
 import {
   getPublishedSchedules,
@@ -405,9 +409,11 @@ function getVisibleDayAssignments(
     assignmentStore?: ScheduleAssignmentDataStore;
     monthKey?: string | null;
     visibleTripTagMap?: Map<string, ScheduleAssignmentVisibleTripTag>;
+    blueHouseEnabled?: boolean;
   },
 ) {
   const isWeekendLike = day.isWeekend || day.isHoliday;
+  const showBlueHouseRow = Boolean(options?.blueHouseEnabled) && isBlueHouseToggleDay(day);
   const visibleMap = new Map<string, string[]>();
   const overrideOrder = (day.assignmentOrderOverrides ?? []).filter((category, index, array) => array.indexOf(category) === index);
   const editMode = Boolean(options?.editMode);
@@ -415,11 +421,15 @@ function getVisibleDayAssignments(
   Object.entries(day.assignments).forEach(([category, names]) => {
     if (isWeekendLike) {
       if (!editMode && (category === "휴가" || category === "제크")) return;
-    } else if (["국회", "청사", "청와대"].includes(category)) {
+    } else if (["국회", "청사"].includes(category) || (category === BLUE_HOUSE_CATEGORY && !showBlueHouseRow)) {
       return;
     }
     visibleMap.set(category, names);
   });
+
+  if (showBlueHouseRow && !visibleMap.has(BLUE_HOUSE_CATEGORY)) {
+    visibleMap.set(BLUE_HOUSE_CATEGORY, day.assignments[BLUE_HOUSE_CATEGORY] ?? []);
+  }
 
   if (editMode) {
     const persistentCategories = day.isWeekend
@@ -466,6 +476,11 @@ function getVisibleDayAssignments(
 
   return Array.from(visibleMap.entries()).sort(
     ([leftCategory], [rightCategory]) => {
+      // 평일 청와대 칸은 항상 날짜 칸 맨 아래에 둔다.
+      if (showBlueHouseRow && (leftCategory === BLUE_HOUSE_CATEGORY || rightCategory === BLUE_HOUSE_CATEGORY)) {
+        if (leftCategory === rightCategory) return 0;
+        return leftCategory === BLUE_HOUSE_CATEGORY ? 1 : -1;
+      }
       const leftOverrideIndex = overrideOrder.indexOf(leftCategory);
       const rightOverrideIndex = overrideOrder.indexOf(rightCategory);
       if (leftOverrideIndex >= 0 || rightOverrideIndex >= 0) {
@@ -687,6 +702,7 @@ export function ScheduleApp() {
   const [addPersonVacationType, setAddPersonVacationType] = useState<VacationType>("연차");
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
+  const [blueHouseDraft, setBlueHouseDraft] = useState<string[] | null>(null);
   const [generalTeamOffEditor, setGeneralTeamOffEditor] = useState<GeneralTeamOffEditorState | null>(null);
   const [isOrderEditMode, setIsOrderEditMode] = useState(false);
   const [isGeneralTeamEditMode, setIsGeneralTeamEditMode] = useState(false);
@@ -974,6 +990,7 @@ export function ScheduleApp() {
   }, []);
 
   const uniquePeople = useMemo(() => getUniquePeople(state), [state]);
+  const blueHousePeople = state.blueHousePeople;
   const generalTeamPeople = useMemo(
     () => (state.generalTeamPeople.length > 0 ? state.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES.map((name) => name.trim()).filter(Boolean)),
     [state.generalTeamPeople],
@@ -1378,6 +1395,22 @@ export function ScheduleApp() {
     setGlobalOffEditor(null);
     setIsGlobalOffEditMode(false);
     setMessage({ tone: "ok", text: "기본 오프 인원을 저장했습니다." });
+  };
+
+  const saveBlueHouseEdit = () => {
+    if (!blueHouseDraft) return;
+    const nextBlueHousePeople = Array.from(new Set(blueHouseDraft.map((name) => name.trim()).filter(Boolean))).slice(
+      0,
+      BLUE_HOUSE_PEOPLE_LIMIT,
+    );
+    setState((current) =>
+      sanitizeScheduleState({
+        ...current,
+        blueHousePeople: nextBlueHousePeople,
+      }),
+    );
+    setBlueHouseDraft(null);
+    setMessage({ tone: "ok", text: "청와대 인원을 저장했습니다." });
   };
 
   const saveGeneralTeamOffEdit = () => {
@@ -2237,6 +2270,7 @@ export function ScheduleApp() {
                     assignmentStore: scheduleAssignmentStore,
                     monthKey: dayOwnerMonthKey,
                     visibleTripTagMap,
+                    blueHouseEnabled: blueHousePeople.length > 0,
                   });
                   const canDragAssignmentCategories = canDragAssignments;
                   const canDropAssignmentCategories = canDropAssignments;
@@ -2531,7 +2565,34 @@ export function ScheduleApp() {
                                   width: "100%",
                                 }}
                               >
-                              {slotNames.length > 0 ? (
+                              {blueHousePeople.length > 0 && category === BLUE_HOUSE_CATEGORY && isBlueHouseToggleDay(day) ? (
+                                <button
+                                  type="button"
+                                  className="schedule-name-chip"
+                                  data-blue-house-toggle="true"
+                                  disabled={editLocked || (isEditingDate && !editMode)}
+                                  title={blueHousePeople.length > 1 ? "클릭하면 다른 이름으로 바뀝니다" : undefined}
+                                  onClick={() => {
+                                    if (editMode) {
+                                      updateEditingState((current) => toggleBlueHouseAssignment(current, dayOwnerMonthKey, day.dateKey));
+                                      return;
+                                    }
+                                    setState((current) => toggleBlueHouseAssignment(current, dayOwnerMonthKey, day.dateKey));
+                                  }}
+                                  style={{
+                                    gridColumn: "1 / -1",
+                                    width: "100%",
+                                    minWidth: 0,
+                                    minHeight: 32,
+                                    padding: "3px 4px",
+                                    borderRadius: 0,
+                                    fontWeight: 800,
+                                    cursor: blueHousePeople.length > 1 ? "pointer" : "default",
+                                  }}
+                                >
+                                  {slotNames.find((name) => !isEmptyScheduleSlot(name)) ?? blueHousePeople[0]}
+                                </button>
+                              ) : slotNames.length > 0 ? (
                                 slotNames.map((name, index) => {
                                   const isBlankSlot = isEmptyScheduleSlot(name);
                                   if (isBlankSlot) {
@@ -3178,6 +3239,71 @@ export function ScheduleApp() {
               ) : (
                 <span className="muted">순번에 등록된 이름이 없습니다.</span>
               )}
+            </div>
+          </div>
+        </section>
+
+        <section className="panel" style={{ width: "100%" }}>
+          <div className="panel-pad" style={{ display: "grid", gap: 4, padding: "8px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="chip">청와대</div>
+              {blueHouseDraft ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn primary" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={saveBlueHouseEdit}>저장</button>
+                  <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={() => setBlueHouseDraft(null)}>취소</button>
+                </div>
+              ) : (
+                <button
+                  className="btn"
+                  style={{ padding: "8px 12px", fontSize: 13 }}
+                  disabled={isEditingDate}
+                  onClick={() => setBlueHouseDraft(Array.from({ length: BLUE_HOUSE_PEOPLE_LIMIT }, (_, index) => blueHousePeople[index] ?? ""))}
+                >
+                  수정
+                </button>
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: "12px 16px",
+                borderRadius: 20,
+                border: "1px solid rgba(255,255,255,.08)",
+                background: "rgba(255,255,255,.04)",
+                color: "#e5edf7",
+                fontSize: 14,
+                fontWeight: 700,
+                lineHeight: 1.55,
+              }}
+            >
+              평일 근무표 맨 아래 청와대 칸에 첫 번째 이름이 기본으로 들어가고, 이름을 누를 때마다 두 이름이 번갈아 바뀝니다. 청와대 인원은 그날 일반조에서 빠집니다.
+            </div>
+
+            <div className="schedule-order-name-grid">
+              {blueHouseDraft
+                ? blueHouseDraft.map((name, index) => (
+                    <input
+                      key={`blue-house-input-${index}`}
+                      className="field-input"
+                      aria-label={`청와대 ${index + 1}번째 이름`}
+                      placeholder={`${index + 1}번째 이름`}
+                      value={name}
+                      onChange={(event) =>
+                        setBlueHouseDraft((current) =>
+                          current ? current.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)) : current,
+                        )
+                      }
+                    />
+                  ))
+                : blueHousePeople.length > 0
+                  ? blueHousePeople.map((name, index) => (
+                      <div key={`blue-house-${name}`} className="schedule-order-name-cell-wrap">
+                        <span className="schedule-order-name-cell">
+                          {index + 1}. {name}
+                        </span>
+                      </div>
+                    ))
+                  : <span className="muted">등록된 이름이 없습니다.</span>}
             </div>
           </div>
         </section>
