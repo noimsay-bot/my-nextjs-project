@@ -59,6 +59,10 @@ test("work manual sections switch from the table of contents", async ({ page }) 
   await page.goto("/tips");
 
   const toc = page.getByRole("navigation", { name: "Tips 목차" });
+  await expect(toc.getByRole("button")).toHaveText(["실물증빙 입력방법", "계정과목 및 부가세", "결재선 즐겨찾기", "웹하드"]);
+  await expect(page.getByRole("heading", { name: "실물증빙 입력방법" })).toBeVisible();
+
+  await toc.getByRole("button", { name: "결재선 즐겨찾기" }).click();
   await expect(page.getByRole("heading", { name: "결재선 즐겨찾기" })).toBeVisible();
 
   await toc.getByRole("button", { name: "실물증빙 입력방법" }).click();

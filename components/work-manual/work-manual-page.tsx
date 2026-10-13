@@ -15,9 +15,9 @@ import {
 type ManualSectionId = "approval-line" | "receipt" | "account" | "webhard";
 
 const MANUAL_SECTIONS: Array<{ id: ManualSectionId; label: string }> = [
-  { id: "approval-line", label: "결재선 즐겨찾기" },
   { id: "receipt", label: "실물증빙 입력방법" },
   { id: "account", label: "계정과목 및 부가세" },
+  { id: "approval-line", label: "결재선 즐겨찾기" },
   { id: "webhard", label: "웹하드" },
 ];
 
@@ -455,7 +455,7 @@ function WebhardSection() {
 }
 
 export function WorkManualPage() {
-  const [activeSection, setActiveSection] = useState<ManualSectionId>("approval-line");
+  const [activeSection, setActiveSection] = useState<ManualSectionId>("receipt");
 
   useEffect(() => {
     const hash = window.location.hash.replace("#", "");
