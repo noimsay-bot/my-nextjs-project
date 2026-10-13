@@ -10,15 +10,15 @@
 
 ## 요약
 
-- SQL 파일: 56
-- 테이블 선언: 55
+- SQL 파일: 57
+- 테이블 선언: 57
 - enum 선언: 1
-- policy 선언: 201
-- function 선언: 67
-- trigger 선언: 40
-- RLS enable 선언: 55
-- table grant 선언: 81
-- table revoke 선언: 56
+- policy 선언: 205
+- function 선언: 68
+- trigger 선언: 42
+- RLS enable 선언: 57
+- table grant 선언: 83
+- table revoke 선언: 58
 - function execute grant 선언: 60
 - function execute revoke 선언: 39
 
@@ -81,6 +81,8 @@
 | public.weather_dispatch_cache | supabase/incremental_weather_cache_tables.sql |
 | public.weather_radar_frame_sets | supabase/incremental_weather_radar_frame_sets.sql |
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
+| public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
+| public.work_manual_webhards | supabase/schema.sql |
 
 ## Enums
 
@@ -147,6 +149,8 @@
 | public.weather_dispatch_cache | supabase/incremental_weather_cache_tables.sql |
 | public.weather_radar_frame_sets | supabase/incremental_weather_radar_frame_sets.sql |
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
+| public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
+| public.work_manual_webhards | supabase/schema.sql |
 
 ## Table Grants
 
@@ -207,6 +211,8 @@
 | public.weather_dispatch_cache | supabase/incremental_weather_cache_tables.sql |
 | public.weather_radar_frame_sets | supabase/incremental_weather_radar_frame_sets.sql |
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
+| public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
+| public.work_manual_webhards | supabase/schema.sql |
 
 ## Table Revokes
 
@@ -265,6 +271,8 @@
 | public.weather_dispatch_cache | supabase/incremental_weather_cache_tables.sql |
 | public.weather_radar_frame_sets | supabase/incremental_weather_radar_frame_sets.sql |
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
+| public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
+| public.work_manual_webhards | supabase/schema.sql |
 
 ## Policies
 
@@ -471,6 +479,10 @@
 | weather_radar_frame_sets_member_portal_select | supabase/incremental_weather_member_access.sql |
 | weather_radar_frames_admin_select | supabase/incremental_weather_cache_tables.sql |
 | weather_radar_frames_member_portal_select | supabase/incremental_weather_member_access.sql |
+| work_manual_webhards_manage_desk_admin | supabase/incremental_work_manual_webhards.sql |
+| work_manual_webhards_manage_desk_admin | supabase/schema.sql |
+| work_manual_webhards_select_internal | supabase/incremental_work_manual_webhards.sql |
+| work_manual_webhards_select_internal | supabase/schema.sql |
 
 ## Functions
 
@@ -533,6 +545,7 @@
 | public.set_tvu_grid_status | supabase/schema.sql |
 | public.set_updated_at | supabase/incremental_portal_celebration_events.sql |
 | public.set_updated_at | supabase/incremental_secure_function_search_path.sql |
+| public.set_updated_at | supabase/incremental_work_manual_webhards.sql |
 | public.set_updated_at | supabase/schema.sql |
 | public.update_my_schedule_final_cut_status | supabase/incremental_my_schedule_final_cut_status.sql |
 | public.update_my_schedule_final_cut_status | supabase/schema.sql |
@@ -695,3 +708,5 @@
 | set_vacation_months_updated_at | supabase/schema.sql |
 | set_vacation_requests_updated_at | supabase/schema.sql |
 | set_vacation_settings_updated_at | supabase/schema.sql |
+| set_work_manual_webhards_updated_at | supabase/incremental_work_manual_webhards.sql |
+| set_work_manual_webhards_updated_at | supabase/schema.sql |

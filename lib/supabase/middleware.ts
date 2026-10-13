@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const SUPABASE_AUTH_COOKIE_SUFFIX = "-auth-token";
-const PROTECTED_ROUTE_PREFIXES = ["/admin", "/review", "/schedule", "/submissions", "/team-lead", "/vacation", "/weather"] as const;
+const PROTECTED_ROUTE_PREFIXES = ["/admin", "/review", "/schedule", "/submissions", "/team-lead", "/tips", "/vacation", "/weather"] as const;
 
 function hasSupabaseAuthCookie(request: NextRequest) {
   return request.cookies

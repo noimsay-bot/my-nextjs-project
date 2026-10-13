@@ -73,6 +73,7 @@ const links: PortalNavLink[] = [
   { href: "/submissions", label: "베스트리포트 제출" },
   { href: "/partner/schedule", label: "일정" },
   { href: "/weather", label: "날씨" },
+  { href: "/tips", label: "Tips" },
   {
     href: "/equipment",
     label: "TVU/장비",
@@ -129,6 +130,7 @@ const SIDEBAR_ICON_BY_HREF: Partial<Record<string, string>> = {
   "/vacation": "/images/sidebar-icons/vacation.webp",
   "/team-lead": "/images/sidebar-icons/team-lead.webp",
   "/weather": "/images/sidebar-icons/weather.webp",
+  "/tips": "/images/sidebar-icons/work-manual.webp",
 };
 
 const SIDEBAR_ACTION_ICON_BY_ID: Record<SidebarNavActionId, string> = {
@@ -146,6 +148,7 @@ const SIDEBAR_NAV_ORDER: Array<{ kind: "link"; href: string } | { kind: "action"
   { kind: "link", href: "/review" },
   { kind: "link", href: "/restaurants" },
   { kind: "link", href: "/community" },
+  { kind: "link", href: "/tips" },
   { kind: "link", href: "/schedule" },
   { kind: "link", href: "/team-lead" },
   { kind: "action", id: "customer-support" },
@@ -338,6 +341,7 @@ function getVisibleLinks(
           link.href === "/me" ||
           link.href === "/election" ||
           link.href === "/community" ||
+          link.href === "/tips" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
@@ -353,6 +357,7 @@ function getVisibleLinks(
           link.href === "/me" ||
           link.href === "/election" ||
           link.href === "/community" ||
+          link.href === "/tips" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||
           (link.href === "/vacation" && vacationRequestOpen) ||
@@ -368,6 +373,7 @@ function getVisibleLinks(
       return visibleRoleLinks
         .filter((link) =>
           link.href === "/community" ||
+          link.href === "/tips" ||
           link.href === "/election" ||
           link.href === "/work-schedule" ||
           link.href === "/restaurants" ||

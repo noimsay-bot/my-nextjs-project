@@ -29,6 +29,7 @@ function authLog(stage: string, details: Record<string, unknown>) {
 
 const AUTH_GATE_PENDING_TIMEOUT_MS = 6_000;
 const MY_PAGE_ACCESS_ROLES = new Set(["member", "outlet", "partner", "desk", "team_lead", "admin"]);
+const WORK_MANUAL_ACCESS_ROLES = new Set(["desk", "team_lead", "admin"]);
 const ADMIN_SCHEDULE_MANAGEMENT_PATHS = [
   "/schedule/write",
   "/schedule/vacations",
@@ -53,6 +54,10 @@ function hasAccess(
 
   if (pathname.startsWith("/weather")) {
     return hasMemberPortalAccess(session.role);
+  }
+
+  if (pathname.startsWith("/tips")) {
+    return WORK_MANUAL_ACCESS_ROLES.has(session.role);
   }
 
   if (pathname.startsWith("/team-lead")) {
