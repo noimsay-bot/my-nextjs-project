@@ -1560,7 +1560,7 @@ export function ScheduleApp() {
     const result = generateSchedule(state);
     const nextState = sanitizeScheduleState(result.state);
     if (nextState.generated) {
-      syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
+      void syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
     }
     markVisibleMonthAsLocallyFresh(nextState.generated?.monthKey ?? null);
     setState(nextState);
@@ -1594,7 +1594,7 @@ export function ScheduleApp() {
     const result = generateSchedule(state);
     const nextState = sanitizeScheduleState(result.state);
     if (nextState.generated) {
-      syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
+      void syncVacationMonthSheetFromGeneratedSchedule(nextState.generated);
     }
     markVisibleMonthAsLocallyFresh(nextState.generated?.monthKey ?? null);
     setState(nextState);
@@ -1720,7 +1720,7 @@ export function ScheduleApp() {
       sanitizeScheduleState(backup)
     );
     if (backup.generated) {
-      syncVacationMonthSheetFromGeneratedSchedule(backup.generated);
+      void syncVacationMonthSheetFromGeneratedSchedule(backup.generated);
     }
     markVisibleMonthAsLocallyFresh(backup.generated?.monthKey ?? null);
     setVisibleMonthKey(backup.generated?.monthKey ?? null);

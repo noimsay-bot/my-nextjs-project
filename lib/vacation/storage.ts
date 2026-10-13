@@ -111,6 +111,9 @@ interface VacationSettingsRow {
 }
 
 let vacationStoreCache = createEmptyStore();
+// DB에서 휴가 데이터를 한 번이라도 정상으로 불러왔는지. 불러오기 전의 빈 캐시를 저장하면
+// vacation_months 전체(당첨자/정원)가 빈 값으로 덮어써지므로 저장을 막는다.
+let vacationStoreLoaded = false;
 let vacationRefreshPromise: Promise<VacationStore> | null = null;
 let vacationPersistPromise: Promise<{ ok: boolean; message?: string }> | null = null;
 
@@ -296,7 +299,14 @@ function cloneVacationStore(store: VacationStore) {
   return JSON.parse(JSON.stringify(sanitized)) as VacationStore;
 }
 
-async function persistVacationStore(store: VacationStore) {
+interface VacationPersistScope {
+  // 이번 저장에서 실제로 바뀐 달만 vacation_months에 쓴다. 다른 달까지 다시 쓰면
+  // 오래된 화면 상태가 다른 DESK의 추첨 결과를 덮어쓸 수 있다.
+  monthKeys: string[];
+  requestOpenChanged: boolean;
+}
+
+async function persistVacationStore(store: VacationStore, scope: VacationPersistScope) {
   const session = await getPortalSession();
   if (!session?.approved) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
@@ -325,7 +335,8 @@ async function persistVacationStore(store: VacationStore) {
       status: "submitted",
     }));
 
-  const monthRows = Object.values(sanitized.months).map((month) => ({
+  const changedMonthKeySet = new Set(scope.monthKeys);
+  const monthRows = Object.values(sanitized.months).filter((month) => changedMonthKeySet.has(month.monthKey)).map((month) => ({
     month_key: month.monthKey,
     managed_date_keys: month.managedDateKeys,
     limits: month.limits,
@@ -350,7 +361,7 @@ async function persistVacationStore(store: VacationStore) {
       canManageVacationMonths && monthRows.length > 0
         ? supabase.from("vacation_months").upsert(monthRows)
         : Promise.resolve({ error: null }),
-      canManageVacationMonths
+      canManageVacationMonths && scope.requestOpenChanged
         ? supabase.from("vacation_settings").upsert(settingsRow)
         : Promise.resolve({ error: null }),
     ]);
@@ -383,11 +394,25 @@ async function persistVacationStore(store: VacationStore) {
 }
 
 function writeStore(store: VacationStore) {
+  if (!vacationStoreLoaded) {
+    emitVacationStatus({
+      ok: false,
+      message: "휴가 데이터를 아직 불러오지 못해 저장하지 않았습니다. 새로고침 후 다시 시도해 주세요.",
+    });
+    return;
+  }
   const previous = cloneVacationStore(vacationStoreCache);
   vacationStoreCache = cloneVacationStore(store);
   emitVacationEvent();
 
-  vacationPersistPromise = persistVacationStore(vacationStoreCache)
+  const scope: VacationPersistScope = {
+    monthKeys: Object.keys(vacationStoreCache.months).filter(
+      (monthKey) => JSON.stringify(previous.months[monthKey]) !== JSON.stringify(vacationStoreCache.months[monthKey]),
+    ),
+    requestOpenChanged: previous.requestOpen !== vacationStoreCache.requestOpen,
+  };
+
+  vacationPersistPromise = persistVacationStore(vacationStoreCache, scope)
     .then((persistedStore) => {
       vacationStoreCache = cloneVacationStore(persistedStore);
       emitVacationEvent();
@@ -462,6 +487,7 @@ export async function refreshVacationStore() {
           settingsRows,
           fallbackStore: createEmptyStore(),
         });
+        vacationStoreLoaded = true;
         emitVacationEvent();
         return cloneVacationStore(vacationStoreCache);
       }
@@ -494,6 +520,7 @@ export async function refreshVacationStore() {
     }
 
     vacationStoreCache = rowsToVacationStore({ requestRows, monthRows, settingsRows });
+    vacationStoreLoaded = true;
     emitVacationEvent();
     return cloneVacationStore(vacationStoreCache);
   })().finally(() => {
@@ -1196,7 +1223,13 @@ export function syncVacationMonthSheet(year: number, month: number) {
   };
 }
 
-export function syncVacationMonthSheetFromGeneratedSchedule(generated: GeneratedSchedule) {
+export async function syncVacationMonthSheetFromGeneratedSchedule(generated: GeneratedSchedule) {
+  // DESK 근무표 페이지는 휴가 데이터를 미리 불러오지 않으므로, 최신 DB 상태를 받은 뒤에 시트를 맞춘다.
+  try {
+    await refreshVacationStore();
+  } catch {
+    // 불러오기 실패 시 writeStore가 저장을 막는다.
+  }
   const store = readStore();
   const managedDateKeys = getManagedDateKeysFromSchedule(generated, [generated]);
   const synced = syncMonthStateToManagedDates(store, generated.year, generated.month, managedDateKeys, generated);
