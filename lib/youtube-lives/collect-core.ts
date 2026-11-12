@@ -22,6 +22,11 @@ export interface CollectYoutubeLivesOptions {
   channelId?: string;
   /** 이 시각(ms) 이후에 시작한 라이브만 모은다. */
   sinceMs: number;
+  /**
+   * "uploads"면 라이브 전용 재생목록을 건너뛰고 전체 업로드 재생목록을 쓴다.
+   * 라이브 전용 재생목록은 API가 최근 일부만 돌려주므로 오래된 구간 백필에 쓴다.
+   */
+  source?: "auto" | "uploads";
   /** 재생목록 최대 페이지 수(페이지당 50건). */
   maxPages?: number;
   onPage?: (info: { page: number; scanned: number; collected: number }) => void;
@@ -133,12 +138,12 @@ export async function collectYoutubeLives(options: CollectYoutubeLivesOptions): 
   const stopBeforeMs = options.sinceMs - PUBLISHED_AT_MARGIN_MS;
 
   // 라이브 전용 재생목록을 먼저 쓰고, API에서 찾지 못하면 전체 업로드 재생목록으로 내려간다.
-  let playlistId = playlistIds.live;
+  let playlistId = options.source === "uploads" ? playlistIds.uploads : playlistIds.live;
   let page: PlaylistPage;
   try {
     page = await fetchPlaylistPage(playlistId, "", options.apiKey);
   } catch (error) {
-    if (!isPlaylistMissing(error)) throw error;
+    if (playlistId === playlistIds.uploads || !isPlaylistMissing(error)) throw error;
     playlistId = playlistIds.uploads;
     page = await fetchPlaylistPage(playlistId, "", options.apiKey);
   }

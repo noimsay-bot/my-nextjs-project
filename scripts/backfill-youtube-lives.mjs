@@ -5,6 +5,7 @@
 //   node scripts/backfill-youtube-lives.mjs            # dry-run: 건수만 확인
 //   node scripts/backfill-youtube-lives.mjs --apply    # 실제 DB에 upsert
 //   node scripts/backfill-youtube-lives.mjs --since 2026-03-01 --apply
+//   node scripts/backfill-youtube-lives.mjs --uploads --apply   # 전체 업로드 재생목록으로 더 오래된 구간까지
 //
 // 필요 환경변수(.env.local 또는 셸): YOUTUBE_API_KEY,
 // --apply일 때는 NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY도 필요하다.
@@ -75,6 +76,7 @@ async function main() {
     apiKey,
     channelId: process.env.YOUTUBE_LIVE_CHANNEL_ID,
     sinceMs,
+    source: argv.includes("--uploads") ? "uploads" : "auto",
     maxPages: MAX_PAGES,
     onPage: ({ page, scanned, collected: count }) => {
       if (page % 10 === 0) console.log(`  ${page}페이지 / 확인 ${scanned}건 / 라이브 ${count}건`);

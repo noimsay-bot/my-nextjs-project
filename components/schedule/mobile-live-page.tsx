@@ -165,7 +165,8 @@ export function MobileLivePage() {
                       flex: 1,
                       minWidth: 0,
                       display: "flex",
-                      gap: 12,
+                      gap: "4px 12px",
+                      flexWrap: "wrap",
                       alignItems: "baseline",
                       justifyContent: "flex-start",
                       textAlign: "left",
@@ -183,7 +184,12 @@ export function MobileLivePage() {
                       {getKstTimeLabel(item.startedAt)}
                     </span>
                     <span
-                      style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", fontWeight: item.checked ? 700 : 400 }}
+                      style={{
+                        flex: "1 1 180px",
+                        minWidth: 0,
+                        overflowWrap: "anywhere",
+                        fontWeight: item.checked ? 700 : 400,
+                      }}
                     >
                       {item.checked ? "✓ " : ""}
                       {item.title || "(제목 없음)"}
