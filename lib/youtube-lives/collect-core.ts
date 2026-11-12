@@ -178,3 +178,23 @@ export async function collectYoutubeLives(options: CollectYoutubeLivesOptions): 
   const rows = [...rowsById.values()].sort((left, right) => left.started_at.localeCompare(right.started_at));
   return { rows, playlistId, scannedCount, pageCount, truncated };
 }
+
+/**
+ * 영상 ID 목록으로 라이브 정보를 받는다(채널 관리자에게 받은 목록 가져오기용).
+ * 재생목록 API가 닿지 않는 오래된 구간은 이 방식으로 채운다.
+ * 존재하지 않거나 라이브가 아닌(actualStartTime 없는) 영상은 결과에서 빠진다.
+ */
+export async function fetchYoutubeLivesByIds(
+  videoIds: string[],
+  apiKey: string,
+  onChunk?: (info: { requested: number; collected: number }) => void,
+): Promise<YoutubeLiveRow[]> {
+  const uniqueIds = [...new Set(videoIds.map((id) => id.trim()).filter(Boolean))];
+  const rowsById = new Map<string, YoutubeLiveRow>();
+  for (let index = 0; index < uniqueIds.length; index += PAGE_SIZE) {
+    const rows = await fetchLiveRows(uniqueIds.slice(index, index + PAGE_SIZE), 0, apiKey);
+    for (const row of rows) rowsById.set(row.video_id, row);
+    onChunk?.({ requested: Math.min(index + PAGE_SIZE, uniqueIds.length), collected: rowsById.size });
+  }
+  return [...rowsById.values()].sort((left, right) => left.started_at.localeCompare(right.started_at));
+}
