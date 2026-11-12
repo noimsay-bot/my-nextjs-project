@@ -10,15 +10,15 @@
 
 ## 요약
 
-- SQL 파일: 57
-- 테이블 선언: 57
+- SQL 파일: 59
+- 테이블 선언: 61
 - enum 선언: 1
-- policy 선언: 205
+- policy 선언: 213
 - function 선언: 68
 - trigger 선언: 42
-- RLS enable 선언: 57
-- table grant 선언: 83
-- table revoke 선언: 58
+- RLS enable 선언: 61
+- table grant 선언: 91
+- table revoke 선언: 66
 - function execute grant 선언: 60
 - function execute revoke 선언: 39
 
@@ -46,6 +46,8 @@
 | public.live_equipment_status_board | supabase/incremental_equipment_loans.sql |
 | public.live_equipment_status_board | supabase/incremental_live_equipment_status_board.sql |
 | public.live_equipment_status_board | supabase/schema.sql |
+| public.live_participation | supabase/incremental_youtube_lives.sql |
+| public.live_participation | supabase/schema.sql |
 | public.page_visit_events | supabase/incremental_page_visit_events.sql |
 | public.page_visit_events | supabase/schema.sql |
 | public.portal_celebration_events | supabase/incremental_portal_celebration_events.sql |
@@ -83,6 +85,8 @@
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
 | public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
 | public.work_manual_webhards | supabase/schema.sql |
+| public.youtube_lives | supabase/incremental_youtube_lives.sql |
+| public.youtube_lives | supabase/schema.sql |
 
 ## Enums
 
@@ -114,6 +118,8 @@
 | public.live_equipment_status_board | supabase/incremental_equipment_loans.sql |
 | public.live_equipment_status_board | supabase/incremental_live_equipment_status_board.sql |
 | public.live_equipment_status_board | supabase/schema.sql |
+| public.live_participation | supabase/incremental_youtube_lives.sql |
+| public.live_participation | supabase/schema.sql |
 | public.page_visit_events | supabase/incremental_page_visit_events.sql |
 | public.page_visit_events | supabase/schema.sql |
 | public.portal_celebration_events | supabase/incremental_portal_celebration_events.sql |
@@ -151,6 +157,8 @@
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
 | public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
 | public.work_manual_webhards | supabase/schema.sql |
+| public.youtube_lives | supabase/incremental_youtube_lives.sql |
+| public.youtube_lives | supabase/schema.sql |
 
 ## Table Grants
 
@@ -176,6 +184,8 @@
 | public.live_equipment_status_board | supabase/incremental_equipment_loans.sql |
 | public.live_equipment_status_board | supabase/incremental_live_equipment_status_board.sql |
 | public.live_equipment_status_board | supabase/schema.sql |
+| public.live_participation | supabase/incremental_youtube_lives.sql |
+| public.live_participation | supabase/schema.sql |
 | public.page_visit_events | supabase/incremental_page_visit_events.sql |
 | public.page_visit_events | supabase/schema.sql |
 | public.portal_celebration_events | supabase/incremental_portal_celebration_events.sql |
@@ -213,6 +223,8 @@
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
 | public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
 | public.work_manual_webhards | supabase/schema.sql |
+| public.youtube_lives | supabase/incremental_youtube_lives.sql |
+| public.youtube_lives | supabase/schema.sql |
 
 ## Table Revokes
 
@@ -238,6 +250,8 @@
 | public.live_equipment_status_board | supabase/incremental_equipment_loans.sql |
 | public.live_equipment_status_board | supabase/incremental_live_equipment_status_board.sql |
 | public.live_equipment_status_board | supabase/schema.sql |
+| public.live_participation | supabase/incremental_youtube_lives.sql |
+| public.live_participation | supabase/schema.sql |
 | public.page_visit_events | supabase/incremental_page_visit_events.sql |
 | public.page_visit_events | supabase/schema.sql |
 | public.portal_celebration_events | supabase/incremental_portal_celebration_events.sql |
@@ -273,6 +287,8 @@
 | public.weather_radar_frames | supabase/incremental_weather_cache_tables.sql |
 | public.work_manual_webhards | supabase/incremental_work_manual_webhards.sql |
 | public.work_manual_webhards | supabase/schema.sql |
+| public.youtube_lives | supabase/incremental_youtube_lives.sql |
+| public.youtube_lives | supabase/schema.sql |
 
 ## Policies
 
@@ -364,6 +380,12 @@
 | live_equipment_status_board_update_privileged | supabase/incremental_equipment_loans.sql |
 | live_equipment_status_board_update_privileged | supabase/incremental_live_equipment_status_board.sql |
 | live_equipment_status_board_update_privileged | supabase/schema.sql |
+| live_participation_delete_desk | supabase/incremental_youtube_lives.sql |
+| live_participation_delete_desk | supabase/schema.sql |
+| live_participation_insert_desk | supabase/incremental_youtube_lives.sql |
+| live_participation_insert_desk | supabase/schema.sql |
+| live_participation_select_approved | supabase/incremental_youtube_lives.sql |
+| live_participation_select_approved | supabase/schema.sql |
 | page_visit_events_insert_own | supabase/incremental_page_visit_events.sql |
 | page_visit_events_insert_own | supabase/schema.sql |
 | page_visit_events_select_managers | supabase/incremental_page_visit_events.sql |
@@ -483,6 +505,8 @@
 | work_manual_webhards_manage_desk_admin | supabase/schema.sql |
 | work_manual_webhards_select_internal | supabase/incremental_work_manual_webhards.sql |
 | work_manual_webhards_select_internal | supabase/schema.sql |
+| youtube_lives_select_approved | supabase/incremental_youtube_lives.sql |
+| youtube_lives_select_approved | supabase/schema.sql |
 
 ## Functions
 

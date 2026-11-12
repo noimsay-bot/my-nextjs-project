@@ -6,7 +6,7 @@
 ## 요약
 
 - 스캔 대상: `app`
-- 라우트 세그먼트 수: 72
+- 라우트 세그먼트 수: 75
 - route group 괄호 세그먼트는 URL 경로에서 제외했습니다.
 
 ## app/root
@@ -48,6 +48,8 @@
 | /schedule/health-checks | (portal)/schedule/health-checks | yes |  |  |  |  |
 | /schedule/international-trip | (portal)/schedule/international-trip | yes |  |  |  |  |
 | /schedule/long-service-leave | (portal)/schedule/long-service-leave | yes |  |  |  |  |
+| /schedule/mobile-live | (portal)/schedule/mobile-live | yes |  |  |  |  |
+| /schedule/mobile-live/stats | (portal)/schedule/mobile-live/stats | yes |  |  |  |  |
 | /schedule/press-support | (portal)/schedule/press-support | yes |  |  |  |  |
 | /schedule/schedule-assignment | (portal)/schedule/schedule-assignment | yes |  |  |  |  |
 | /schedule/vacations | (portal)/schedule/vacations | yes |  |  |  |  |
@@ -91,6 +93,7 @@
 | /api/home/public-workspace | api/home/public-workspace |  |  | yes |  |  |
 | /api/internal/schedule/assembly-sync | api/internal/schedule/assembly-sync |  |  | yes |  |  |
 | /api/internal/schedule-assignment/daily-backup | api/internal/schedule-assignment/daily-backup |  |  | yes |  |  |
+| /api/internal/youtube-lives/collect | api/internal/youtube-lives/collect |  |  | yes |  |  |
 | /api/portal/page-visit | api/portal/page-visit |  |  | yes |  |  |
 | /api/schedule/assembly-leave-push | api/schedule/assembly-leave-push |  |  | yes |  |  |
 | /api/schedule/assembly-sync-on-publish | api/schedule/assembly-sync-on-publish |  |  | yes |  |  |

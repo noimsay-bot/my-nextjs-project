@@ -12,9 +12,9 @@
 
 ## 요약
 
-- 환경 키 수: 37
+- 환경 키 수: 39
 - client-exposed: NEXT_PUBLIC_E2E, NEXT_PUBLIC_GOOGLE_MAPS_API_KEY, NEXT_PUBLIC_PORTAL_DEBUG_TRAFFIC, NEXT_PUBLIC_SITE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, NEXT_PUBLIC_SUPABASE_URL
-- server-only: APP_ORIGIN, ASSEMBLY_EXPORT_API_URL, ASSEMBLY_EXPORT_TOKEN, ASSEMBLY_LEAVE_APPLY_URL, CRON_SECRET, DATA_GO_KR_SERVICE_KEY, EMAIL_FROM, HOME_NEWS_EXTERNAL_FEEDS, HUB_ASSEMBLY_SYNC_TOKEN, HUB_TO_ASSEMBLY_TOKEN, KMA_APIHUB_AUTH_KEY, MAIL_LOG_ONLY, OPENAI_API_KEY, OPENAI_NEWS_DRAFT_MODEL, PORT, PORTFOLIO_STORAGE_STATE_PATH, PREVIEW_SCHEDULE_DEMO, SEED_ADMIN_EMAIL, SEED_ADMIN_LOGIN_ID, SEED_ADMIN_NAME, SEED_ADMIN_PASSWORD, SMTP_HOST, SMTP_PASS, SMTP_PORT, SMTP_SECURE, SMTP_USER, SUPABASE_SERVICE_ROLE_KEY, VERCEL_ENV, VERCEL_GIT_COMMIT_REF, VERCEL_USAGE_DEBUG
+- server-only: APP_ORIGIN, ASSEMBLY_EXPORT_API_URL, ASSEMBLY_EXPORT_TOKEN, ASSEMBLY_LEAVE_APPLY_URL, CRON_SECRET, DATA_GO_KR_SERVICE_KEY, EMAIL_FROM, HOME_NEWS_EXTERNAL_FEEDS, HUB_ASSEMBLY_SYNC_TOKEN, HUB_TO_ASSEMBLY_TOKEN, KMA_APIHUB_AUTH_KEY, MAIL_LOG_ONLY, OPENAI_API_KEY, OPENAI_NEWS_DRAFT_MODEL, PORT, PORTFOLIO_STORAGE_STATE_PATH, PREVIEW_SCHEDULE_DEMO, SEED_ADMIN_EMAIL, SEED_ADMIN_LOGIN_ID, SEED_ADMIN_NAME, SEED_ADMIN_PASSWORD, SMTP_HOST, SMTP_PASS, SMTP_PORT, SMTP_SECURE, SMTP_USER, SUPABASE_SERVICE_ROLE_KEY, VERCEL_ENV, VERCEL_GIT_COMMIT_REF, VERCEL_USAGE_DEBUG, YOUTUBE_API_KEY, YOUTUBE_LIVE_CHANNEL_ID
 
 ## Environment Map
 
@@ -24,7 +24,7 @@
 | ASSEMBLY_EXPORT_API_URL | server-only | yes | lib/schedule/assembly-sync.ts:132 (server/shared) |
 | ASSEMBLY_EXPORT_TOKEN | server-only | yes | lib/schedule/assembly-sync.ts:133 (server/shared) |
 | ASSEMBLY_LEAVE_APPLY_URL | server-only | yes | lib/schedule/assembly-leave-push.ts:61 (server/shared) |
-| CRON_SECRET | server-only | no | app/api/internal/schedule-assignment/daily-backup/route.ts:187 (server/shared) |
+| CRON_SECRET | server-only | no | app/api/internal/schedule-assignment/daily-backup/route.ts:187 (server/shared)<br>app/api/internal/youtube-lives/collect/route.ts:48 (server/shared) |
 | DATA_GO_KR_SERVICE_KEY | server-only | no | app/api/weather/dispatch-recommendation/route.ts:590 (server/shared) |
 | EMAIL_FROM | server-only | yes | lib/server/mail.ts:64 (server/shared)<br>lib/server/mail.ts:81 (server/shared) |
 | HOME_NEWS_EXTERNAL_FEEDS | server-only | no | lib/home-news/external-source-fetchers.ts:82 (server/shared) |
@@ -57,6 +57,8 @@
 | VERCEL_ENV | server-only | no | lib/schedule/preview-readonly.ts:101 (server/shared)<br>tests/preview-readonly-work-schedule.spec.ts:4 (server/shared) |
 | VERCEL_GIT_COMMIT_REF | server-only | no | lib/schedule/preview-readonly.ts:102 (server/shared)<br>tests/preview-readonly-work-schedule.spec.ts:5 (server/shared) |
 | VERCEL_USAGE_DEBUG | server-only | yes | lib/server/usage-debug.ts:19 (server/shared) |
+| YOUTUBE_API_KEY | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:60 (server/shared) |
+| YOUTUBE_LIVE_CHANNEL_ID | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:22 (server/shared)<br>scripts/backfill-youtube-lives.mjs:76 (server/shared) |
 
 ## 미확인/주의
 

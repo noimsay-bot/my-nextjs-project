@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/schedule-assignment/daily-backup",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/internal/youtube-lives/collect",
+      "schedule": "0 21 * * *"
     }
   ]
 }
