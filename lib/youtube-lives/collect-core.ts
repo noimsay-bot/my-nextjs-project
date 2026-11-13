@@ -41,6 +41,18 @@ export interface CollectYoutubeLivesResult {
   truncated: boolean;
 }
 
+// 띄어쓰기를 지운 소문자 기준으로 적는다.
+const TITLE_EXCLUDE_KEYWORDS = ["이슈play", "[다시보기]뉴스룸"];
+
+/**
+ * 수집 대상 제목인지 판단한다. 대소문자와 띄어쓰기는 무시한다.
+ * 제외 단어가 든 제목만 빼고 나머지는 모두 모은다(데스크가 체크로 거른다).
+ */
+export function isCollectableLiveTitle(title: string) {
+  const normalized = title.toLowerCase().replace(/\s+/g, "");
+  return !TITLE_EXCLUDE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
 class YoutubeApiError extends Error {
   status: number;
   reason: string;
@@ -113,11 +125,13 @@ async function fetchLiveRows(videoIds: string[], sinceMs: number, apiKey: string
     // 일반 업로드와 예정된 라이브는 actualStartTime이 없으므로 제외된다.
     const startedMs = live.actualStartTime ? Date.parse(live.actualStartTime) : Number.NaN;
     if (!id || !Number.isFinite(startedMs) || startedMs < sinceMs) continue;
+    const title = (snippet.title ?? "").trim();
+    if (!isCollectableLiveTitle(title)) continue;
     const statistics = (item.statistics ?? {}) as { viewCount?: string };
     const viewCount = statistics.viewCount === undefined ? Number.NaN : Number(statistics.viewCount);
     rows.push({
       video_id: id,
-      title: (snippet.title ?? "").trim(),
+      title,
       started_at: new Date(startedMs).toISOString(),
       view_count: Number.isFinite(viewCount) && viewCount >= 0 ? Math.trunc(viewCount) : null,
     });
@@ -182,7 +196,7 @@ export async function collectYoutubeLives(options: CollectYoutubeLivesOptions): 
 /**
  * 영상 ID 목록으로 라이브 정보를 받는다(채널 관리자에게 받은 목록 가져오기용).
  * 재생목록 API가 닿지 않는 오래된 구간은 이 방식으로 채운다.
- * 존재하지 않거나 라이브가 아닌(actualStartTime 없는) 영상은 결과에서 빠진다.
+ * 존재하지 않거나 라이브가 아닌(actualStartTime 없는) 영상, 제목 조건에 맞지 않는 영상은 결과에서 빠진다.
  */
 export async function fetchYoutubeLivesByIds(
   videoIds: string[],
