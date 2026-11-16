@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
+import { consumeRateLimit, getClientIp } from "@/lib/server/rate-limit";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 
+// 사내 공용 IP에서 여러 명이 동시에 로그인하므로 정상 사용은 막지 않되,
+// 아이디를 바꿔 가며 이메일을 긁는 반복 호출은 늦춘다.
+const LOGIN_EMAIL_LOOKUP_RATE_LIMIT = 60;
+const LOGIN_EMAIL_LOOKUP_RATE_WINDOW_MS = 60 * 1000;
 const LOGIN_EMAIL_LOOKUP_TIMEOUT_MS = 8000;
 const LOGIN_EMAIL_LOOKUP_TIMEOUT_MESSAGE = "로그인 아이디 조회 시간이 초과되었습니다.";
 
@@ -32,7 +37,7 @@ function logResolveLoginEmail(
   stage: string,
   details: {
     elapsedMs?: number;
-    reason?: "missing_env" | "invalid_input" | "timeout" | "query_error" | "not_found" | "ok" | "unexpected_error";
+    reason?: "missing_env" | "invalid_input" | "rate_limited" | "timeout" | "query_error" | "not_found" | "ok" | "unexpected_error";
     status?: number;
     message?: string;
   },
@@ -82,6 +87,25 @@ export async function POST(request: Request) {
           message: "로그인 아이디 조회에는 SUPABASE_SERVICE_ROLE_KEY가 필요합니다.",
         },
         { status: 500 },
+      );
+    }
+
+    const rateLimit = consumeRateLimit({
+      key: `resolve-login-email:${getClientIp(request)}`,
+      limit: LOGIN_EMAIL_LOOKUP_RATE_LIMIT,
+      windowMs: LOGIN_EMAIL_LOOKUP_RATE_WINDOW_MS,
+    });
+    if (!rateLimit.allowed) {
+      logResolveLoginEmail("failed", {
+        reason: "rate_limited",
+        status: 429,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+        },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
       );
     }
 

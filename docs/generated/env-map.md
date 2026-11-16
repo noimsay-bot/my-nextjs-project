@@ -58,7 +58,7 @@
 | VERCEL_GIT_COMMIT_REF | server-only | no | lib/schedule/preview-readonly.ts:102 (server/shared)<br>tests/preview-readonly-work-schedule.spec.ts:5 (server/shared) |
 | VERCEL_USAGE_DEBUG | server-only | yes | lib/server/usage-debug.ts:19 (server/shared) |
 | YOUTUBE_API_KEY | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:60 (server/shared) |
-| YOUTUBE_LIVE_CHANNEL_ID | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:22 (server/shared)<br>scripts/backfill-youtube-lives.mjs:76 (server/shared) |
+| YOUTUBE_LIVE_CHANNEL_ID | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:22 (server/shared)<br>scripts/backfill-youtube-lives.mjs:77 (server/shared) |
 
 ## 미확인/주의
 

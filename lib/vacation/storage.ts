@@ -303,7 +303,29 @@ interface VacationPersistScope {
   // 이번 저장에서 실제로 바뀐 달만 vacation_months에 쓴다. 다른 달까지 다시 쓰면
   // 오래된 화면 상태가 다른 DESK의 추첨 결과를 덮어쓸 수 있다.
   monthKeys: string[];
+  // 이번 저장에서 신청 내용이 실제로 바뀐 달. 내 신청의 저장/삭제는 이 달 안에서만 한다.
+  // 캐시에 없다는 이유로 다른 달의 신청까지 지우면, 조회가 잘렸거나 다른 기기에서 넣은
+  // 신청이 조용히 삭제된다.
+  requestMonthKeys: string[];
   requestOpenChanged: boolean;
+}
+
+function getChangedRequestMonthKeys(previous: VacationStore, next: VacationStore) {
+  const serializeByMonth = (store: VacationStore) => {
+    const byMonth = new Map<string, string[]>();
+    store.requests.forEach((request) => {
+      const serialized = byMonth.get(request.monthKey) ?? [];
+      serialized.push(JSON.stringify(request));
+      byMonth.set(request.monthKey, serialized);
+    });
+    return new Map(Array.from(byMonth, ([monthKey, serialized]) => [monthKey, serialized.sort().join("\n")] as const));
+  };
+  const previousByMonth = serializeByMonth(previous);
+  const nextByMonth = serializeByMonth(next);
+
+  return Array.from(new Set([...previousByMonth.keys(), ...nextByMonth.keys()])).filter(
+    (monthKey) => previousByMonth.get(monthKey) !== nextByMonth.get(monthKey),
+  );
 }
 
 async function persistVacationStore(store: VacationStore, scope: VacationPersistScope) {
@@ -317,10 +339,13 @@ async function persistVacationStore(store: VacationStore, scope: VacationPersist
   const supabase = await getPortalSupabaseClient();
   const sanitized = sanitizeVacationStore(store);
 
+  const requestMonthKeys = Array.from(new Set(scope.requestMonthKeys.filter(Boolean)));
+  const requestMonthKeySet = new Set(requestMonthKeys);
   const ownRequestRows = sanitized.requests
     .filter((request) =>
-      request.requesterId === session.id ||
-      (!request.requesterId && request.requesterName.trim() === session.username.trim()),
+      requestMonthKeySet.has(request.monthKey) &&
+      (request.requesterId === session.id ||
+        (!request.requesterId && request.requesterName.trim() === session.username.trim())),
     )
     .map((request) => ({
       id: request.id,
@@ -356,7 +381,9 @@ async function persistVacationStore(store: VacationStore, scope: VacationPersist
     { error: settingsUpsertError },
   ] =
     await Promise.all([
-      supabase.from("vacation_requests").select("id").eq("requester_id", session.id),
+      requestMonthKeys.length > 0
+        ? supabase.from("vacation_requests").select("id").eq("requester_id", session.id).in("month_key", requestMonthKeys)
+        : Promise.resolve({ data: [] as Array<{ id: string }>, error: null }),
       ownRequestRows.length > 0 ? supabase.from("vacation_requests").upsert(ownRequestRows) : Promise.resolve({ error: null }),
       canManageVacationMonths && monthRows.length > 0
         ? supabase.from("vacation_months").upsert(monthRows)
@@ -384,7 +411,12 @@ async function persistVacationStore(store: VacationStore, scope: VacationPersist
     .filter((id) => !ownRequestRows.some((request) => request.id === id));
 
   if (staleRequestIds.length > 0) {
-    const { error: deleteError } = await supabase.from("vacation_requests").delete().in("id", staleRequestIds);
+    const { error: deleteError } = await supabase
+      .from("vacation_requests")
+      .delete()
+      .eq("requester_id", session.id)
+      .in("month_key", requestMonthKeys)
+      .in("id", staleRequestIds);
     if (deleteError) {
       throw new Error(getSupabaseStorageErrorMessage(deleteError, "vacation_requests"));
     }
@@ -409,6 +441,7 @@ function writeStore(store: VacationStore) {
     monthKeys: Object.keys(vacationStoreCache.months).filter(
       (monthKey) => JSON.stringify(previous.months[monthKey]) !== JSON.stringify(vacationStoreCache.months[monthKey]),
     ),
+    requestMonthKeys: getChangedRequestMonthKeys(previous, vacationStoreCache),
     requestOpenChanged: previous.requestOpen !== vacationStoreCache.requestOpen,
   };
 

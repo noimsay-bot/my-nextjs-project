@@ -3,6 +3,22 @@ import type { AdminUserAttributes, User } from "@supabase/supabase-js";
 import { createAdminClient, hasSupabaseAdminEnv } from "@/lib/supabase/admin";
 import { hasTemporaryPasswordMailEnv, sendTemporaryPasswordMail } from "@/lib/server/mail";
 import { maskEmail, type TemporaryPasswordMailResult } from "@/lib/server/mail-core";
+import { consumeRateLimit, getClientIp } from "@/lib/server/rate-limit";
+
+// 로그인 없이 호출되는 API라, 아이디만 아는 제3자가 반복 호출해 남의 비밀번호를
+// 계속 바꿔 버릴 수 있다. IP별 호출 횟수와 계정별 재발급 간격을 함께 제한한다.
+const TEMPORARY_PASSWORD_IP_RATE_LIMIT = 10;
+const TEMPORARY_PASSWORD_IP_RATE_WINDOW_MS = 10 * 60 * 1000;
+const TEMPORARY_PASSWORD_ACCOUNT_COOLDOWN_MS = 10 * 60 * 1000;
+// 계정별 마지막 발급 시각. 사용자가 직접 바꿀 수 없는 app_metadata에 둔다.
+const TEMPORARY_PASSWORD_ISSUED_AT_KEY = "temporary_password_issued_at";
+
+function getTemporaryPasswordCooldownRemainingMs(user: User, now = Date.now()) {
+  const issuedAt = user.app_metadata?.[TEMPORARY_PASSWORD_ISSUED_AT_KEY];
+  const issuedAtMs = typeof issuedAt === "string" ? Date.parse(issuedAt) : Number.NaN;
+  if (!Number.isFinite(issuedAtMs)) return 0;
+  return Math.max(0, issuedAtMs + TEMPORARY_PASSWORD_ACCOUNT_COOLDOWN_MS - now);
+}
 
 const PROFILE_COLUMNS = "id, email, login_id, name";
 const AUTH_USER_LOOKUP_PAGE_SIZE = 1000;
@@ -132,6 +148,21 @@ export async function POST(request: Request) {
       );
     }
 
+    const rateLimit = consumeRateLimit({
+      key: `temporary-password:${getClientIp(request)}`,
+      limit: TEMPORARY_PASSWORD_IP_RATE_LIMIT,
+      windowMs: TEMPORARY_PASSWORD_IP_RATE_WINDOW_MS,
+    });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+        },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+      );
+    }
+
     const body = (await request.json().catch(() => null)) as { loginId?: unknown } | null;
     const identifier = normalizeIdentifier(body?.loginId);
     if (!identifier) {
@@ -180,6 +211,18 @@ export async function POST(request: Request) {
           message: "일치하는 아이디 또는 이메일을 찾지 못했습니다.",
         },
         { status: 404 },
+      );
+    }
+
+    const cooldownRemainingMs = getTemporaryPasswordCooldownRemainingMs(authUser);
+    if (cooldownRemainingMs > 0) {
+      const retryAfterSeconds = Math.ceil(cooldownRemainingMs / 1000);
+      return NextResponse.json(
+        {
+          ok: false,
+          message: `조금 전에 임시 비밀번호를 보냈습니다. 메일함을 확인하시고, 받지 못했다면 ${Math.ceil(retryAfterSeconds / 60)}분 후 다시 시도해 주세요.`,
+        },
+        { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
       );
     }
 
@@ -256,6 +299,10 @@ export async function POST(request: Request) {
     const { error: updateError } = await admin.auth.admin.updateUserById(authUser.id, {
       password: temporaryPassword,
       user_metadata: nextUserMetadata,
+      app_metadata: {
+        ...(authUser.app_metadata ?? {}),
+        [TEMPORARY_PASSWORD_ISSUED_AT_KEY]: new Date().toISOString(),
+      },
     });
 
     if (updateError) {
