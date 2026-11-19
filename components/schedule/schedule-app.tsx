@@ -87,6 +87,13 @@ import {
   BLUE_HOUSE_PEOPLE_LIMIT,
   isBlueHouseToggleDay,
   toggleBlueHouseAssignment,
+  cancelRosterReservationInMap,
+  getBlueHousePeopleForDate,
+  getCurrentKstDateKey,
+  getUpcomingRosterReservation,
+  remapBlueHouseAssignmentsForRosterChange,
+  reserveRosterInMap,
+  setCurrentRosterInMap,
 } from "@/lib/schedule/engine";
 import {
   getPublishedSchedules,
@@ -95,6 +102,7 @@ import {
   PublishedScheduleItem,
   refreshPublishedSchedules,
   removePublishedSchedule,
+  savePublishedSchedules,
 } from "@/lib/schedule/published";
 import { PUBLISHED_SCHEDULES_STATUS_EVENT } from "@/lib/schedule/published";
 import { CHANGE_REQUESTS_STATUS_EVENT } from "@/lib/schedule/change-requests";
@@ -114,6 +122,29 @@ const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 const ALL_DAYS_EDIT_KEY = "__all_days__";
 const FOCUS_REFRESH_THROTTLE_MS = 60_000;
 const REQUEST_VISIBLE_STATUSES: ScheduleChangeRequest["status"][] = ["pending", "accepted", "rejected", "rolledBack"];
+type RosterReservationKind = "general" | "blueHouse";
+
+interface RosterReservationEditorState {
+  kind: RosterReservationKind;
+  effectiveDateKey: string;
+  names: string[];
+  draftName: string;
+}
+
+type BlueHouseRosterSnapshot = Pick<ScheduleState, "blueHousePeople" | "blueHousePeopleByDate">;
+
+function getNextMonthFirstDateKey(todayDateKey: string) {
+  const [year, month] = todayDateKey.split("-").map(Number);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+}
+
+function formatRosterDateLabel(dateKey: string) {
+  const [, month, day] = dateKey.split("-").map(Number);
+  return `${month}월 ${day}일`;
+}
+
 function getWeekdayLabel(dow: number) {
   return weekdayLabels[(dow + 6) % 7] ?? "";
 }
@@ -703,6 +734,8 @@ export function ScheduleApp() {
   const [orderOffEditor, setOrderOffEditor] = useState<OrderOffEditorState | null>(null);
   const [globalOffEditor, setGlobalOffEditor] = useState<GlobalOffEditorState | null>(null);
   const [blueHouseDraft, setBlueHouseDraft] = useState<string[] | null>(null);
+  const [rosterReservationEditor, setRosterReservationEditor] = useState<RosterReservationEditorState | null>(null);
+  const pendingPublishedRosterChangeRef = useRef<{ previous: BlueHouseRosterSnapshot; next: BlueHouseRosterSnapshot } | null>(null);
   const [generalTeamOffEditor, setGeneralTeamOffEditor] = useState<GeneralTeamOffEditorState | null>(null);
   const [isOrderEditMode, setIsOrderEditMode] = useState(false);
   const [isGeneralTeamEditMode, setIsGeneralTeamEditMode] = useState(false);
@@ -841,6 +874,34 @@ export function ScheduleApp() {
     syncPublishedItemsFromCache();
   };
 
+  // 명단 예약이 저장되면 게시 근무표의 청와대 칸을 새 명단에 맞추고, 전체 게시 근무표의 일반조를 다시 계산한다.
+  const syncPublishedSchedulesForRosterChange = async (change: {
+    previous: BlueHouseRosterSnapshot;
+    next: BlueHouseRosterSnapshot;
+  }) => {
+    try {
+      await refreshPublishedSchedules({ repair: false });
+      const items = getPublishedSchedules();
+      let changed = false;
+      const nextItems = items.map((item) => {
+        const remapped = remapBlueHouseAssignmentsForRosterChange(item.schedule, change.previous, change.next);
+        if (!remapped.changed) return item;
+        changed = true;
+        return { ...item, schedule: remapped.schedule };
+      });
+      if (changed) {
+        await savePublishedSchedules(nextItems);
+      }
+      await refreshPublishedSchedules({ repair: true });
+      syncPublishedItemsFromCache();
+    } catch (error) {
+      setMessage({
+        tone: "warn",
+        text: `명단은 저장했지만 게시 근무표 반영에 실패했습니다. 새로고침 후 다시 확인해 주세요. ${error instanceof Error ? error.message : ""}`.trim(),
+      });
+    }
+  };
+
   useEffect(() => {
     let active = true;
     void refreshRouteData({ includeRequests: true }).finally(() => {
@@ -857,7 +918,14 @@ export function ScheduleApp() {
   useEffect(() => {
     if (!loaded || typeof window === "undefined") return;
     if (hasBlockingBigEventValidationInState(state)) return;
-    void saveScheduleState(state).catch(() => undefined);
+    const rosterChange = pendingPublishedRosterChangeRef.current;
+    pendingPublishedRosterChangeRef.current = null;
+    void saveScheduleState(state)
+      .then(async () => {
+        if (!rosterChange) return;
+        await syncPublishedSchedulesForRosterChange(rosterChange);
+      })
+      .catch(() => undefined);
   }, [loaded, state]);
 
   useEffect(() => {
@@ -1291,23 +1359,27 @@ export function ScheduleApp() {
   const appendGeneralTeamPerson = (rawName: string) => {
     const trimmed = rawName.trim();
     if (!trimmed) return;
-    setState((current) =>
-      sanitizeScheduleState({
+    setState((current) => {
+      const nextGeneralTeamPeople = Array.from(
+        new Set([...(current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES), trimmed]),
+      );
+      return sanitizeScheduleState({
         ...current,
-        generalTeamPeople: Array.from(
-          new Set([...(current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES), trimmed]),
-        ),
-      }),
-    );
+        generalTeamPeople: nextGeneralTeamPeople,
+        generalTeamPeopleByDate: setCurrentRosterInMap(current.generalTeamPeopleByDate, nextGeneralTeamPeople),
+      });
+    });
     setGeneralTeamDraftName("");
     setIsGeneralTeamAdding(false);
   };
 
   const removeGeneralTeamPerson = (name: string) => {
-    setState((current) =>
-      sanitizeScheduleState({
+    setState((current) => {
+      const nextGeneralTeamPeople = (current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES).filter((item) => item !== name);
+      return sanitizeScheduleState({
         ...current,
-        generalTeamPeople: (current.generalTeamPeople.length > 0 ? current.generalTeamPeople : GENERAL_TEAM_DEFAULT_NAMES).filter((item) => item !== name),
+        generalTeamPeople: nextGeneralTeamPeople,
+        generalTeamPeopleByDate: setCurrentRosterInMap(current.generalTeamPeopleByDate, nextGeneralTeamPeople),
         generalTeamOffPeople: current.generalTeamOffPeople.filter((item) => item !== name),
         generalTeamOffPeopleByDate: Object.fromEntries(
           Object.entries(current.generalTeamOffPeopleByDate ?? {}).map(([dateKey, names]) => [
@@ -1315,8 +1387,8 @@ export function ScheduleApp() {
             names.filter((item) => item !== name),
           ]),
         ),
-      }),
-    );
+      });
+    });
     setGeneralTeamOffEditor((current) => (current ? { ...current, selectedNames: current.selectedNames.filter((item) => item !== name) } : current));
   };
 
@@ -1407,10 +1479,239 @@ export function ScheduleApp() {
       sanitizeScheduleState({
         ...current,
         blueHousePeople: nextBlueHousePeople,
+        blueHousePeopleByDate: setCurrentRosterInMap(current.blueHousePeopleByDate, nextBlueHousePeople),
       }),
     );
     setBlueHouseDraft(null);
     setMessage({ tone: "ok", text: "청와대 인원을 저장했습니다." });
+  };
+
+  // 날짜별 명단을 바꾸고, 바뀐 날짜의 청와대 칸 이름을 근무표 초안에 맞춰 둔다.
+  // 게시 근무표는 상태 저장이 끝난 뒤 같은 방식으로 맞추고 일반조를 다시 계산한다.
+  const applyRosterMapChange = (kind: RosterReservationKind, nextMap: Record<string, string[]>) => {
+    const previousBlueHouse = {
+      blueHousePeople: state.blueHousePeople,
+      blueHousePeopleByDate: state.blueHousePeopleByDate,
+    };
+    const nextState = sanitizeScheduleState(
+      kind === "general"
+        ? { ...state, generalTeamPeopleByDate: nextMap }
+        : { ...state, blueHousePeopleByDate: nextMap },
+    );
+    const nextBlueHouse = {
+      blueHousePeople: nextState.blueHousePeople,
+      blueHousePeopleByDate: nextState.blueHousePeopleByDate,
+    };
+    const remappedState =
+      kind === "blueHouse"
+        ? sanitizeScheduleState({
+            ...nextState,
+            generated: nextState.generated
+              ? remapBlueHouseAssignmentsForRosterChange(nextState.generated, previousBlueHouse, nextBlueHouse).schedule
+              : nextState.generated,
+            generatedHistory: nextState.generatedHistory.map(
+              (item) => remapBlueHouseAssignmentsForRosterChange(item, previousBlueHouse, nextBlueHouse).schedule,
+            ),
+          })
+        : nextState;
+    pendingPublishedRosterChangeRef.current = {
+      previous: pendingPublishedRosterChangeRef.current?.previous ?? previousBlueHouse,
+      next: nextBlueHouse,
+    };
+    setState(remappedState);
+  };
+
+  const upcomingGeneralTeamReservation = getUpcomingRosterReservation(state.generalTeamPeopleByDate);
+  const upcomingBlueHouseReservation = getUpcomingRosterReservation(state.blueHousePeopleByDate);
+
+  const renderRosterReservationSection = (kind: RosterReservationKind) => {
+    const upcoming = kind === "general" ? upcomingGeneralTeamReservation : upcomingBlueHouseReservation;
+    const editor = rosterReservationEditor?.kind === kind ? rosterReservationEditor : null;
+    const label = kind === "general" ? "일반조" : "청와대";
+    const boxStyle = {
+      display: "grid",
+      gap: 8,
+      padding: "10px 12px",
+      borderRadius: 16,
+      border: "1px solid rgba(96,165,250,.45)",
+      background: "rgba(59,130,246,.10)",
+    } as const;
+
+    if (editor) {
+      const updateEditor = (patch: Partial<RosterReservationEditorState>) =>
+        setRosterReservationEditor((current) => (current && current.kind === kind ? { ...current, ...patch } : current));
+      const addDraftName = () => {
+        const trimmed = editor.draftName.trim();
+        if (!trimmed) return;
+        updateEditor({ names: Array.from(new Set([...editor.names, trimmed])), draftName: "" });
+      };
+
+      return (
+        <div style={boxStyle} data-roster-reservation-editor={kind}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 13 }}>{label} 명단 예약</strong>
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+              시행일
+              <input
+                type="date"
+                className="field-input"
+                style={{ padding: "6px 8px", fontSize: 13 }}
+                aria-label={`${label} 명단 시행일`}
+                value={editor.effectiveDateKey}
+                onChange={(event) => updateEditor({ effectiveDateKey: event.target.value })}
+              />
+            </label>
+          </div>
+          <span className="muted" style={{ fontSize: 12 }}>
+            시행일 전날까지는 지금 명단, 시행일부터는 아래 명단으로 근무표와 게시 근무표가 계산됩니다. 시행일이 되면 이 명단이 본 명단이 됩니다.
+          </span>
+          {kind === "blueHouse" ? (
+            <div className="schedule-order-name-grid">
+              {editor.names.map((name, index) => (
+                <input
+                  key={`blue-house-reservation-input-${index}`}
+                  className="field-input"
+                  aria-label={`예약 청와대 ${index + 1}번째 이름`}
+                  placeholder={`${index + 1}번째 이름`}
+                  value={name}
+                  onChange={(event) =>
+                    updateEditor({
+                      names: editor.names.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)),
+                    })
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="schedule-order-name-grid schedule-order-name-grid--wide">
+                {editor.names.length > 0 ? (
+                  editor.names.map((name) => (
+                    <div key={`general-team-reservation-${name}`} className="schedule-order-name-cell-wrap">
+                      <span className="schedule-order-name-cell">{name}</span>
+                      <button
+                        type="button"
+                        className="schedule-order-name-delete"
+                        onClick={() => updateEditor({ names: editor.names.filter((item) => item !== name) })}
+                        aria-label={`예약 명단에서 ${name} 삭제`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <span className="muted">예약 명단이 비어 있습니다.</span>
+                )}
+              </div>
+              <form
+                style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addDraftName();
+                }}
+              >
+                <input
+                  className="field-input"
+                  style={{ width: 180, minWidth: 140, padding: "8px 10px", fontSize: 13 }}
+                  aria-label="예약 일반조 이름 입력"
+                  value={editor.draftName}
+                  onChange={(event) => updateEditor({ draftName: event.target.value })}
+                  placeholder="이름 입력 후 Enter"
+                />
+                <button type="submit" className="btn" style={{ padding: "8px 12px", fontSize: 13 }}>추가</button>
+              </form>
+            </>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn primary" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={saveRosterReservation}>예약 저장</button>
+            <button
+              className="btn"
+              style={{ padding: "8px 12px", fontSize: 13 }}
+              onClick={() => updateEditor({ names: kind === "blueHouse" ? editor.names.map(() => "") : [] })}
+            >
+              비우기
+            </button>
+            <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} onClick={() => setRosterReservationEditor(null)}>닫기</button>
+            {upcoming ? (
+              <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={() => cancelRosterReservation(kind)}>
+                예약 취소
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (!upcoming) return null;
+
+    return (
+      <div style={{ ...boxStyle, gridTemplateColumns: "1fr auto", alignItems: "center" }} data-roster-reservation={kind}>
+        <span style={{ fontSize: 13, fontWeight: 700, minWidth: 0, overflowWrap: "anywhere" }}>
+          {formatRosterDateLabel(upcoming.effectiveDateKey)}부터 적용 예정: {upcoming.names.join(", ")}
+        </span>
+        <button className="btn" style={{ padding: "6px 10px", fontSize: 12 }} disabled={isEditingDate} onClick={() => cancelRosterReservation(kind)}>
+          예약 취소
+        </button>
+      </div>
+    );
+  };
+
+  const startRosterReservation = (kind: RosterReservationKind) => {
+    const map = kind === "general" ? state.generalTeamPeopleByDate : state.blueHousePeopleByDate;
+    const upcoming = getUpcomingRosterReservation(map);
+    const currentNames = kind === "general" ? generalTeamPeople : blueHousePeople;
+    const names = upcoming?.names ?? currentNames;
+    setRosterReservationEditor({
+      kind,
+      effectiveDateKey: upcoming?.effectiveDateKey ?? getNextMonthFirstDateKey(getCurrentKstDateKey()),
+      names:
+        kind === "blueHouse"
+          ? Array.from({ length: BLUE_HOUSE_PEOPLE_LIMIT }, (_, index) => names[index] ?? "")
+          : [...names],
+      draftName: "",
+    });
+  };
+
+  const saveRosterReservation = () => {
+    if (!rosterReservationEditor) return;
+    const { kind, effectiveDateKey } = rosterReservationEditor;
+    const todayDateKey = getCurrentKstDateKey();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDateKey) || effectiveDateKey <= todayDateKey) {
+      setMessage({ tone: "warn", text: "예약 시행일은 내일 이후 날짜로 지정해 주세요." });
+      return;
+    }
+    const names = Array.from(
+      new Set(rosterReservationEditor.names.map((name) => name.trim()).filter(Boolean)),
+    ).slice(0, kind === "blueHouse" ? BLUE_HOUSE_PEOPLE_LIMIT : undefined);
+    if (names.length === 0) {
+      setMessage({ tone: "warn", text: "예약할 명단을 한 명 이상 입력해 주세요." });
+      return;
+    }
+    applyRosterMapChange(
+      kind,
+      reserveRosterInMap(
+        kind === "general" ? state.generalTeamPeopleByDate : state.blueHousePeopleByDate,
+        kind === "general" ? state.generalTeamPeople : state.blueHousePeople,
+        effectiveDateKey,
+        names,
+      ),
+    );
+    setRosterReservationEditor(null);
+    setMessage({
+      tone: "ok",
+      text: `${kind === "general" ? "일반조" : "청와대"} 명단을 ${effectiveDateKey}부터 적용하도록 예약했습니다. 그 날짜 이후 근무표와 게시 근무표에 반영됩니다.`,
+    });
+  };
+
+  const cancelRosterReservation = (kind: RosterReservationKind) => {
+    const label = kind === "general" ? "일반조" : "청와대";
+    if (!window.confirm(`${label} 명단 예약을 취소할까요? 예약일 이후 근무표가 지금 명단으로 다시 계산됩니다.`)) return;
+    applyRosterMapChange(
+      kind,
+      cancelRosterReservationInMap(kind === "general" ? state.generalTeamPeopleByDate : state.blueHousePeopleByDate),
+    );
+    setRosterReservationEditor(null);
+    setMessage({ tone: "ok", text: `${label} 명단 예약을 취소했습니다.` });
   };
 
   const saveGeneralTeamOffEdit = () => {
@@ -2270,7 +2571,7 @@ export function ScheduleApp() {
                     assignmentStore: scheduleAssignmentStore,
                     monthKey: dayOwnerMonthKey,
                     visibleTripTagMap,
-                    blueHouseEnabled: blueHousePeople.length > 0,
+                    blueHouseEnabled: getBlueHousePeopleForDate(state, day.dateKey).length > 0,
                   });
                   const canDragAssignmentCategories = canDragAssignments;
                   const canDropAssignmentCategories = canDropAssignments;
@@ -2565,13 +2866,13 @@ export function ScheduleApp() {
                                   width: "100%",
                                 }}
                               >
-                              {blueHousePeople.length > 0 && category === BLUE_HOUSE_CATEGORY && isBlueHouseToggleDay(day) ? (
+                              {getBlueHousePeopleForDate(state, day.dateKey).length > 0 && category === BLUE_HOUSE_CATEGORY && isBlueHouseToggleDay(day) ? (
                                 <button
                                   type="button"
                                   className="schedule-name-chip"
                                   data-blue-house-toggle="true"
                                   disabled={editLocked || (isEditingDate && !editMode)}
-                                  title={blueHousePeople.length > 1 ? "클릭하면 다른 이름으로 바뀝니다" : undefined}
+                                  title={getBlueHousePeopleForDate(state, day.dateKey).length > 1 ? "클릭하면 다른 이름으로 바뀝니다" : undefined}
                                   onClick={() => {
                                     if (editMode) {
                                       updateEditingState((current) => toggleBlueHouseAssignment(current, dayOwnerMonthKey, day.dateKey));
@@ -2587,10 +2888,10 @@ export function ScheduleApp() {
                                     padding: "3px 4px",
                                     borderRadius: 0,
                                     fontWeight: 800,
-                                    cursor: blueHousePeople.length > 1 ? "pointer" : "default",
+                                    cursor: getBlueHousePeopleForDate(state, day.dateKey).length > 1 ? "pointer" : "default",
                                   }}
                                 >
-                                  {slotNames.find((name) => !isEmptyScheduleSlot(name)) ?? blueHousePeople[0]}
+                                  {slotNames.find((name) => !isEmptyScheduleSlot(name)) ?? getBlueHousePeopleForDate(state, day.dateKey)[0]}
                                 </button>
                               ) : slotNames.length > 0 ? (
                                 slotNames.map((name, index) => {
@@ -3122,9 +3423,21 @@ export function ScheduleApp() {
                 )}
               </div>
             ) : (
-              <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={startGeneralTeamOffEdit}>수정</button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={startGeneralTeamOffEdit}>수정</button>
+                <button
+                  className="btn"
+                  style={{ padding: "8px 12px", fontSize: 13 }}
+                  disabled={isEditingDate || rosterReservationEditor?.kind === "general"}
+                  onClick={() => startRosterReservation("general")}
+                >
+                  {upcomingGeneralTeamReservation ? "예약 수정" : "예약"}
+                </button>
+              </div>
             )}
           </div>
+
+          {renderRosterReservationSection("general")}
 
           <div className="schedule-order-name-grid schedule-order-name-grid--wide">
             {generalTeamPeople.map((name) => {
@@ -3253,16 +3566,28 @@ export function ScheduleApp() {
                   <button className="btn" style={{ padding: "8px 12px", fontSize: 13 }} disabled={isEditingDate} onClick={() => setBlueHouseDraft(null)}>취소</button>
                 </div>
               ) : (
-                <button
-                  className="btn"
-                  style={{ padding: "8px 12px", fontSize: 13 }}
-                  disabled={isEditingDate}
-                  onClick={() => setBlueHouseDraft(Array.from({ length: BLUE_HOUSE_PEOPLE_LIMIT }, (_, index) => blueHousePeople[index] ?? ""))}
-                >
-                  수정
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="btn"
+                    style={{ padding: "8px 12px", fontSize: 13 }}
+                    disabled={isEditingDate}
+                    onClick={() => setBlueHouseDraft(Array.from({ length: BLUE_HOUSE_PEOPLE_LIMIT }, (_, index) => blueHousePeople[index] ?? ""))}
+                  >
+                    수정
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ padding: "8px 12px", fontSize: 13 }}
+                    disabled={isEditingDate || rosterReservationEditor?.kind === "blueHouse"}
+                    onClick={() => startRosterReservation("blueHouse")}
+                  >
+                    {upcomingBlueHouseReservation ? "예약 수정" : "예약"}
+                  </button>
+                </div>
               )}
             </div>
+
+            {renderRosterReservationSection("blueHouse")}
 
             <div
               style={{

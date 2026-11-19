@@ -686,9 +686,154 @@ function getCurrentKstMonthKey() {
   return `${year}-${month}`;
 }
 
+export function getCurrentKstDateKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  return `${year}-${month}-${day}`;
+}
+
+// 명단 예약 전의 기존 명단은 이 날짜부터 적용되는 것으로 저장한다. 과거 근무표가 모두 기존 명단으로 계산된다.
+export const ROSTER_BASE_EFFECTIVE_DATE_KEY = "2000-01-01";
+
+const ROSTER_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeRosterByDate(value: unknown, limit?: number) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, string[]>;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([dateKey]) => ROSTER_DATE_KEY_PATTERN.test(dateKey))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([dateKey, names]) => {
+        const normalized = normalizeEditableNameList(names);
+        return [dateKey, typeof limit === "number" ? normalized.slice(0, limit) : normalized];
+      }),
+  ) as Record<string, string[]>;
+}
+
+function getSortedRosterEntries(rosterByDate: Record<string, string[]> | undefined) {
+  return Object.entries(rosterByDate ?? {})
+    .filter(([dateKey]) => ROSTER_DATE_KEY_PATTERN.test(dateKey))
+    .sort(([left], [right]) => left.localeCompare(right));
+}
+
+// 해당 날짜에 적용되는 명단 항목(시행일이 그 날짜 이전인 것 중 가장 최근)을 찾는다.
+function findRosterEntryForDate(rosterByDate: Record<string, string[]> | undefined, dateKey: string) {
+  const entries = getSortedRosterEntries(rosterByDate);
+  let found: [string, string[]] | null = null;
+  for (const entry of entries) {
+    if (entry[0].localeCompare(dateKey) > 0) break;
+    found = entry;
+  }
+  return found ?? entries[0] ?? null;
+}
+
+export function getRosterForDate(
+  rosterByDate: Record<string, string[]> | undefined,
+  fallback: string[],
+  dateKey: string,
+) {
+  return findRosterEntryForDate(rosterByDate, dateKey)?.[1] ?? fallback;
+}
+
+export function getGeneralTeamPeopleForDate(state: ScheduleState, dateKey: string) {
+  return getRosterForDate(state.generalTeamPeopleByDate, state.generalTeamPeople, dateKey);
+}
+
+export function getBlueHousePeopleForDate(state: ScheduleState, dateKey: string) {
+  return getRosterForDate(state.blueHousePeopleByDate, state.blueHousePeople, dateKey);
+}
+
+// 오늘 이후 시행일로 예약된 명단 변경(가장 가까운 것)을 돌려준다.
+export function getUpcomingRosterReservation(
+  rosterByDate: Record<string, string[]> | undefined,
+  todayDateKey = getCurrentKstDateKey(),
+) {
+  const entry = getSortedRosterEntries(rosterByDate).find(([dateKey]) => dateKey.localeCompare(todayDateKey) > 0);
+  return entry ? { effectiveDateKey: entry[0], names: entry[1] } : null;
+}
+
+// 오늘 적용 중인 명단을 바로 수정한다. 예약 명단이 있으면 현재 시행 구간의 명단만 바꾼다.
+export function setCurrentRosterInMap(
+  rosterByDate: Record<string, string[]> | undefined,
+  names: string[],
+  todayDateKey = getCurrentKstDateKey(),
+) {
+  const entries = getSortedRosterEntries(rosterByDate);
+  if (entries.length === 0) return {} as Record<string, string[]>;
+  const activeEntry = findRosterEntryForDate(rosterByDate, todayDateKey);
+  const activeKey =
+    activeEntry && activeEntry[0].localeCompare(todayDateKey) <= 0 ? activeEntry[0] : ROSTER_BASE_EFFECTIVE_DATE_KEY;
+  return { ...Object.fromEntries(entries), [activeKey]: [...names] };
+}
+
+// 시행일부터 적용할 명단을 예약한다. 처음 예약하면 지금 명단을 기존 명단으로 함께 남긴다.
+export function reserveRosterInMap(
+  rosterByDate: Record<string, string[]> | undefined,
+  currentNames: string[],
+  effectiveDateKey: string,
+  names: string[],
+  todayDateKey = getCurrentKstDateKey(),
+) {
+  const entries = getSortedRosterEntries(rosterByDate).filter(
+    ([dateKey]) => dateKey.localeCompare(todayDateKey) <= 0,
+  );
+  const next = Object.fromEntries(entries) as Record<string, string[]>;
+  if (entries.length === 0) {
+    next[ROSTER_BASE_EFFECTIVE_DATE_KEY] = [...currentNames];
+  }
+  next[effectiveDateKey] = [...names];
+  return next;
+}
+
+// 아직 시행되지 않은 예약을 취소한다. 예약이 없어지면 날짜별 명단을 비워 기존 단일 명단 방식으로 되돌린다.
+export function cancelRosterReservationInMap(
+  rosterByDate: Record<string, string[]> | undefined,
+  todayDateKey = getCurrentKstDateKey(),
+) {
+  const entries = getSortedRosterEntries(rosterByDate).filter(
+    ([dateKey]) => dateKey.localeCompare(todayDateKey) <= 0,
+  );
+  if (entries.length <= 1) return {} as Record<string, string[]>;
+  return Object.fromEntries(entries) as Record<string, string[]>;
+}
+
+type BlueHouseRosterSource = Pick<ScheduleState, "blueHousePeople" | "blueHousePeopleByDate">;
+
+// 청와대 명단 예약/취소 전후로 그 날짜의 명단이 달라졌으면, 칸에 남은 예전 이름을 같은 순서의 새 이름으로 바꾼다.
+export function remapBlueHouseAssignmentsForRosterChange(
+  schedule: GeneratedSchedule,
+  previous: BlueHouseRosterSource,
+  next: BlueHouseRosterSource,
+) {
+  let changed = false;
+  const days = schedule.days.map((day) => {
+    if (!isBlueHouseToggleDay(day)) return day;
+    const previousRoster = getRosterForDate(previous.blueHousePeopleByDate, previous.blueHousePeople ?? [], day.dateKey);
+    const nextRoster = getRosterForDate(next.blueHousePeopleByDate, next.blueHousePeople ?? [], day.dateKey);
+    if (nextRoster.length === 0) return day;
+    const currentName = (day.assignments[BLUE_HOUSE_CATEGORY] ?? []).map((name) => name.trim()).find(Boolean);
+    if (!currentName || nextRoster.includes(currentName)) return day;
+    const previousIndex = previousRoster.indexOf(currentName);
+    if (previousIndex < 0) return day;
+    changed = true;
+    return {
+      ...day,
+      assignments: { ...day.assignments, [BLUE_HOUSE_CATEGORY]: [nextRoster[previousIndex] ?? nextRoster[0]] },
+    };
+  });
+  return changed ? { schedule: { ...schedule, days }, changed } : { schedule, changed };
+}
+
 // 지난달 근무표의 일반조가 바뀌지 않도록 이번 달 이후의 빈 청와대 칸에만 첫 번째 이름을 기본으로 넣는다.
 function fillDefaultBlueHouseAssignment(state: ScheduleState, day: DaySchedule) {
-  const defaultName = state.blueHousePeople?.[0]?.trim();
+  const defaultName = getBlueHousePeopleForDate(state, day.dateKey)?.[0]?.trim();
   if (!defaultName || !isBlueHouseToggleDay(day)) return;
   if (day.dateKey.slice(0, 7) < getCurrentKstMonthKey()) return;
   const currentNames = (day.assignments[BLUE_HOUSE_CATEGORY] ?? []).map((name) => name.trim()).filter(Boolean);
@@ -779,7 +924,8 @@ export function syncGeneralAssignments(
 
     const generalTeamOffSet = new Set(activeGeneralTeamOffPeople.map((name) => name.trim()).filter(Boolean));
     const previousNightBaseNames = new Set(previousNight.map((name) => getBaseAssignmentName(name)).filter(Boolean));
-    const nextGeneralNames = generalTeamPeople.filter(
+    const generalTeamPeopleForDay = getRosterForDate(state.generalTeamPeopleByDate, generalTeamPeople, day.dateKey);
+    const nextGeneralNames = generalTeamPeopleForDay.filter(
       (name) =>
         !isGeneralNameBlocked(generalBlockedNames, name) &&
         !previousNight.includes(name) &&
@@ -903,13 +1049,32 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     typeof input.generalTeamRosterVersion === "number"
       ? input.generalTeamRosterVersion
       : 0;
-  const generalTeamPeople =
-    generalTeamRosterVersion === GENERAL_TEAM_ROSTER_VERSION && normalizedGeneralTeamPeople.length > 0
+  const isCurrentGeneralTeamRosterVersion = generalTeamRosterVersion === GENERAL_TEAM_ROSTER_VERSION;
+  const baseGeneralTeamPeople =
+    isCurrentGeneralTeamRosterVersion && normalizedGeneralTeamPeople.length > 0
       ? normalizedGeneralTeamPeople
       : [...GENERAL_TEAM_DEFAULT_NAMES];
+  const generalTeamPeopleByDate = isCurrentGeneralTeamRosterVersion
+    ? Object.fromEntries(
+        Object.entries(normalizeRosterByDate(input.generalTeamPeopleByDate)).filter(([, names]) => names.length > 0),
+      ) as Record<string, string[]>
+    : {};
+  const rosterTodayDateKey = getCurrentKstDateKey();
+  // 날짜별 명단이 있으면 오늘 적용되는 명단을 대표 명단으로 둔다. 시행일이 지나면 예약 명단이 자동으로 본 명단이 된다.
+  const generalTeamPeople =
+    Object.keys(generalTeamPeopleByDate).length > 0
+      ? [...getRosterForDate(generalTeamPeopleByDate, baseGeneralTeamPeople, rosterTodayDateKey)]
+      : baseGeneralTeamPeople;
+  const allGeneralTeamPeople = new Set([...generalTeamPeople, ...Object.values(generalTeamPeopleByDate).flat()]);
+  const blueHousePeopleByDate = normalizeRosterByDate(input.blueHousePeopleByDate, BLUE_HOUSE_PEOPLE_LIMIT);
+  const baseBlueHousePeople = normalizeEditableNameList(input.blueHousePeople).slice(0, BLUE_HOUSE_PEOPLE_LIMIT);
+  const blueHousePeople =
+    Object.keys(blueHousePeopleByDate).length > 0
+      ? [...getRosterForDate(blueHousePeopleByDate, baseBlueHousePeople, rosterTodayDateKey)]
+      : baseBlueHousePeople;
   const generalTeamOffPeople = Array.from(
     new Set(
-      normalizeEditableNameList(input.generalTeamOffPeople).filter((name) => generalTeamPeople.includes(name)),
+      normalizeEditableNameList(input.generalTeamOffPeople).filter((name) => allGeneralTeamPeople.has(name)),
     ),
   );
   const generalTeamOffPeopleByDate = Object.fromEntries(
@@ -919,7 +1084,7 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
         dateKey,
         Array.from(
           new Set(
-            normalizeEditableNameList(names).filter((name) => generalTeamPeople.includes(name)),
+            normalizeEditableNameList(names).filter((name) => allGeneralTeamPeople.has(name)),
           ),
         ),
       ]),
@@ -942,8 +1107,10 @@ export function sanitizeScheduleState(input?: Partial<ScheduleState> | null): Sc
     generalTeamRosterVersion: GENERAL_TEAM_ROSTER_VERSION,
     generalTeamOffPeople,
     generalTeamOffPeopleByDate,
+    generalTeamPeopleByDate,
     globalOffPool: normalizeEditableNameList(input.globalOffPool),
-    blueHousePeople: normalizeEditableNameList(input.blueHousePeople).slice(0, BLUE_HOUSE_PEOPLE_LIMIT),
+    blueHousePeople,
+    blueHousePeopleByDate,
     offPeople: Array.from(new Set(legacyOffPeople.map((name) => name.trim()).filter(Boolean))),
     offByCategory: nextOffByCategory,
     offExcludeByCategory: nextOffExcludeByCategory,
@@ -2462,7 +2629,7 @@ export function updateScheduleBigEvents(state: ScheduleState, monthKey: string, 
 }
 
 export function toggleBlueHouseAssignment(state: ScheduleState, monthKey: string, dateKey: string) {
-  const people = state.blueHousePeople.map((name) => name.trim()).filter(Boolean);
+  const people = getBlueHousePeopleForDate(state, dateKey).map((name) => name.trim()).filter(Boolean);
   if (people.length === 0) return state;
 
   const next = cloneScheduleState(state);

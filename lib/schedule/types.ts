@@ -142,8 +142,12 @@ export interface ScheduleState {
   generalTeamRosterVersion: number;
   generalTeamOffPeople: string[];
   generalTeamOffPeopleByDate: Record<string, string[]>;
+  // 시행일(YYYY-MM-DD)별 일반조 명단. 비어 있으면 generalTeamPeople 하나로 모든 날짜를 계산한다.
+  generalTeamPeopleByDate: Record<string, string[]>;
   globalOffPool: string[];
   blueHousePeople: string[];
+  // 시행일(YYYY-MM-DD)별 청와대 명단. 비어 있으면 blueHousePeople 하나로 모든 날짜를 계산한다.
+  blueHousePeopleByDate: Record<string, string[]>;
   offPeople: string[];
   offByCategory: Record<CategoryKey, string[]>;
   offExcludeByCategory: Record<CategoryKey, string[]>;
