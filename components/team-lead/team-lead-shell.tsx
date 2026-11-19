@@ -17,6 +17,7 @@ const items = [
   { href: "/team-lead/overall-score", label: "개인별 점수" },
   { href: "/team-lead/overall-score-summary", label: "종합점수" },
   { href: "/team-lead/reference-notes", label: "참고사항" },
+  { href: "/team-lead/mobile-live-report", label: "주간업무보고서" },
 ];
 
 const utilityItems = [

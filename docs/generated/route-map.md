@@ -49,7 +49,6 @@
 | /schedule/international-trip | (portal)/schedule/international-trip | yes |  |  |  |  |
 | /schedule/long-service-leave | (portal)/schedule/long-service-leave | yes |  |  |  |  |
 | /schedule/mobile-live | (portal)/schedule/mobile-live | yes |  |  |  |  |
-| /schedule/mobile-live/report | (portal)/schedule/mobile-live/report | yes |  |  |  |  |
 | /schedule/mobile-live/stats | (portal)/schedule/mobile-live/stats | yes |  |  |  |  |
 | /schedule/press-support | (portal)/schedule/press-support | yes |  |  |  |  |
 | /schedule/schedule-assignment | (portal)/schedule/schedule-assignment | yes |  |  |  |  |
@@ -63,6 +62,7 @@
 | /team-lead/final-cut | (portal)/team-lead/final-cut | yes |  |  |  |  |
 | /team-lead/international-trip | (portal)/team-lead/international-trip | yes |  |  |  |  |
 | /team-lead/live-safety | (portal)/team-lead/live-safety | yes |  |  |  |  |
+| /team-lead/mobile-live-report | (portal)/team-lead/mobile-live-report | yes |  |  |  |  |
 | /team-lead/overall-score | (portal)/team-lead/overall-score | yes |  |  |  |  |
 | /team-lead/overall-score-summary | (portal)/team-lead/overall-score-summary | yes |  |  |  |  |
 | /team-lead/reference-notes | (portal)/team-lead/reference-notes | yes |  |  |  |  |
