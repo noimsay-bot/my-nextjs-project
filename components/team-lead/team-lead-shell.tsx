@@ -17,7 +17,7 @@ const items = [
   { href: "/team-lead/overall-score", label: "개인별 점수" },
   { href: "/team-lead/overall-score-summary", label: "종합점수" },
   { href: "/team-lead/reference-notes", label: "참고사항" },
-  { href: "/team-lead/mobile-live-report", label: "주간업무보고서" },
+  { href: "/team-lead/mobile-live", label: "모바일 라이브" },
 ];
 
 const utilityItems = [
@@ -46,7 +46,12 @@ export function TeamLeadShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={buildHref(item.href)}
-                className={`btn ${pathname === item.href ? "white" : ""} ${
+                className={`btn ${
+                  pathname === item.href ||
+                  (item.href === "/team-lead/mobile-live" && pathname.startsWith("/team-lead/mobile-live/"))
+                    ? "white"
+                    : ""
+                } ${
                   item.href === "/team-lead/overall-score"
                     ? "btn-team-lead-personal"
                     : item.href === "/team-lead/overall-score-summary"

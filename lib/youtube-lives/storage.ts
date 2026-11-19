@@ -33,7 +33,7 @@ const PAGE_SIZE = 1000;
 const SCHEMA_MESSAGE =
   "모바일 라이브 테이블 또는 조회수 컬럼이 아직 없습니다. Supabase SQL Editor에서 supabase/incremental_youtube_lives.sql, supabase/incremental_youtube_lives_view_count.sql, supabase/incremental_youtube_lives_report.sql을 실행해 주세요.";
 
-/** DESK 메뉴 접근 권한(AuthGate의 /schedule)과 같은 기준이다. 실제 강제는 RLS가 한다. */
+/** 화면은 총괄팀장 메뉴(/team-lead, team_lead만)에 있다. RLS는 desk/team_lead 쓰기를 허용한다. */
 export function canCheckLiveParticipation(role: UserRole | null | undefined) {
   return role === "desk" || role === "team_lead";
 }

@@ -13,7 +13,6 @@ const items = [
   { href: "/schedule/final-cut", label: "정제본" },
   { href: "/schedule/domestic-trip", label: "국내출장" },
   { href: "/schedule/international-trip", label: "해외출장" },
-  { href: "/schedule/mobile-live", label: "모바일 라이브" },
 ];
 
 export function DeskShell({ children }: { children: React.ReactNode }) {
@@ -86,7 +85,6 @@ export function DeskShell({ children }: { children: React.ReactNode }) {
             {visibleItems.map((item) => {
               const active =
                 pathname === item.href ||
-                (item.href === "/schedule/mobile-live" && pathname.startsWith("/schedule/mobile-live/")) ||
                 (item.href === "/schedule/write" &&
                   (pathname.startsWith("/schedule/write") ||
                     pathname === "/schedule/vacations" ||

@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/schedule/mobile-live", label: "라이브 목록" },
-  { href: "/schedule/mobile-live/stats", label: "통계" },];
+  { href: "/team-lead/mobile-live", label: "라이브 목록" },
+  { href: "/team-lead/mobile-live/stats", label: "통계" },
+  { href: "/team-lead/mobile-live/report", label: "주간업무보고서" },
+];
 
 export function MobileLiveTabs() {
   const pathname = usePathname();

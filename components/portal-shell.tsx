@@ -97,11 +97,6 @@ const links: PortalNavLink[] = [
       { href: "/schedule/final-cut", label: "정제본" },
       { href: "/schedule/domestic-trip", label: "국내출장" },
       { href: "/schedule/international-trip", label: "해외출장" },
-      {
-        href: "/schedule/mobile-live",
-        label: "모바일 라이브",
-        children: [{ href: "/schedule/mobile-live/stats", label: "통계" }],
-      },
     ],
   },
   { href: "/review", label: "베스트리포트 평가" },
@@ -117,7 +112,14 @@ const links: PortalNavLink[] = [
       { href: "/team-lead/overall-score-summary", label: "종합점수" },
       { href: "/team-lead/reviewer-management", label: "평가자 관리" },
       { href: "/team-lead/reference-notes", label: "참고사항" },
-      { href: "/team-lead/mobile-live-report", label: "주간업무보고서" },
+      {
+        href: "/team-lead/mobile-live",
+        label: "모바일 라이브",
+        children: [
+          { href: "/team-lead/mobile-live/stats", label: "통계" },
+          { href: "/team-lead/mobile-live/report", label: "주간업무보고서" },
+        ],
+      },
     ],
   },
   { href: "/admin", label: "관리자" },

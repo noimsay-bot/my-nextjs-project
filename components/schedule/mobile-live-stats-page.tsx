@@ -70,7 +70,6 @@ export function MobileLiveStatsPage() {
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">DESK 모바일 라이브</div>
           <strong style={{ fontSize: 24 }}>모바일 라이브 통계</strong>
           <MobileLiveTabs />
           <div className="status note">체크된 라이브만 집계합니다. 구간은 12월 1일부터 다음 해 11월 30일까지입니다.</div>

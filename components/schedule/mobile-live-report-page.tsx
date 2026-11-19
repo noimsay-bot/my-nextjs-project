@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MobileLiveTabs } from "@/components/schedule/mobile-live-tabs";
 import {
   addDaysToDateKey,
   getKstDateKey,
@@ -219,6 +220,7 @@ export function MobileLiveReportPage() {
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
           <strong style={{ fontSize: 24 }}>모바일 라이브 주간업무보고서</strong>
+          <MobileLiveTabs />
           <div className="status note">
             라이브 목록에서 빨강으로 체크한 건만 문구와 이미지에 들어갑니다. 횟수는 참여 체크(노랑+빨강) 전체 기준입니다.
           </div>

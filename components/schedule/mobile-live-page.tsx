@@ -105,7 +105,6 @@ export function MobileLivePage() {
     <section style={{ display: "grid", gap: 16 }}>
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
-          <div className="chip">DESK 모바일 라이브</div>
           <strong style={{ fontSize: 24 }}>모바일 라이브</strong>
           <MobileLiveTabs />
           <div className="status note">
