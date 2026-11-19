@@ -6,7 +6,7 @@
 ## 요약
 
 - 스캔 대상: `app`
-- 라우트 세그먼트 수: 75
+- 라우트 세그먼트 수: 76
 - route group 괄호 세그먼트는 URL 경로에서 제외했습니다.
 
 ## app/root
@@ -49,6 +49,7 @@
 | /schedule/international-trip | (portal)/schedule/international-trip | yes |  |  |  |  |
 | /schedule/long-service-leave | (portal)/schedule/long-service-leave | yes |  |  |  |  |
 | /schedule/mobile-live | (portal)/schedule/mobile-live | yes |  |  |  |  |
+| /schedule/mobile-live/report | (portal)/schedule/mobile-live/report | yes |  |  |  |  |
 | /schedule/mobile-live/stats | (portal)/schedule/mobile-live/stats | yes |  |  |  |  |
 | /schedule/press-support | (portal)/schedule/press-support | yes |  |  |  |  |
 | /schedule/schedule-assignment | (portal)/schedule/schedule-assignment | yes |  |  |  |  |

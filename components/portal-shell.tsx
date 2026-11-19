@@ -100,7 +100,10 @@ const links: PortalNavLink[] = [
       {
         href: "/schedule/mobile-live",
         label: "모바일 라이브",
-        children: [{ href: "/schedule/mobile-live/stats", label: "통계" }],
+        children: [
+          { href: "/schedule/mobile-live/stats", label: "통계" },
+          { href: "/schedule/mobile-live/report", label: "주간업무보고서" },
+        ],
       },
     ],
   },

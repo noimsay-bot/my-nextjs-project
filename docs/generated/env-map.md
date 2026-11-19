@@ -24,7 +24,7 @@
 | ASSEMBLY_EXPORT_API_URL | server-only | yes | lib/schedule/assembly-sync.ts:132 (server/shared) |
 | ASSEMBLY_EXPORT_TOKEN | server-only | yes | lib/schedule/assembly-sync.ts:133 (server/shared) |
 | ASSEMBLY_LEAVE_APPLY_URL | server-only | yes | lib/schedule/assembly-leave-push.ts:61 (server/shared) |
-| CRON_SECRET | server-only | no | app/api/internal/schedule-assignment/daily-backup/route.ts:187 (server/shared)<br>app/api/internal/youtube-lives/collect/route.ts:48 (server/shared) |
+| CRON_SECRET | server-only | no | app/api/internal/schedule-assignment/daily-backup/route.ts:187 (server/shared)<br>app/api/internal/youtube-lives/collect/route.ts:72 (server/shared) |
 | DATA_GO_KR_SERVICE_KEY | server-only | no | app/api/weather/dispatch-recommendation/route.ts:590 (server/shared) |
 | EMAIL_FROM | server-only | yes | lib/server/mail.ts:64 (server/shared)<br>lib/server/mail.ts:81 (server/shared) |
 | HOME_NEWS_EXTERNAL_FEEDS | server-only | no | lib/home-news/external-source-fetchers.ts:82 (server/shared) |
@@ -57,8 +57,8 @@
 | VERCEL_ENV | server-only | no | lib/schedule/preview-readonly.ts:101 (server/shared)<br>tests/preview-readonly-work-schedule.spec.ts:4 (server/shared) |
 | VERCEL_GIT_COMMIT_REF | server-only | no | lib/schedule/preview-readonly.ts:102 (server/shared)<br>tests/preview-readonly-work-schedule.spec.ts:5 (server/shared) |
 | VERCEL_USAGE_DEBUG | server-only | yes | lib/server/usage-debug.ts:19 (server/shared) |
-| YOUTUBE_API_KEY | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:60 (server/shared) |
-| YOUTUBE_LIVE_CHANNEL_ID | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:22 (server/shared)<br>scripts/backfill-youtube-lives.mjs:77 (server/shared) |
+| YOUTUBE_API_KEY | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:84 (server/shared) |
+| YOUTUBE_LIVE_CHANNEL_ID | server-only | yes | app/api/internal/youtube-lives/collect/route.ts:47 (server/shared)<br>scripts/backfill-youtube-lives.mjs:77 (server/shared) |
 
 ## 미확인/주의
 

@@ -73,6 +73,17 @@ export function getKstDayRange(dateKey: string) {
   };
 }
 
+/** 월요일 0 ~ 일요일 6. */
+export function getMondayBasedWeekday(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+}
+
+/** 날짜가 속한 주(월~일)의 월요일 날짜 키. */
+export function getWeekStartDateKey(dateKey: string) {
+  return addDaysToDateKey(dateKey, -getMondayBasedWeekday(dateKey));
+}
+
 /** 12월 1일 ~ 다음 해 11월 30일 구간. 구간 이름은 끝나는 해다. */
 export function getLivePeriod(year: number): LivePeriod {
   return {

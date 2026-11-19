@@ -13,6 +13,7 @@ import {
   canCheckLiveParticipation,
   listYoutubeLivesByDate,
   setLiveParticipation,
+  setLiveReportSelected,
   type YoutubeLiveItem,
 } from "@/lib/youtube-lives/storage";
 
@@ -57,8 +58,10 @@ export function MobileLivePage() {
     };
   }, [dateKey]);
 
-  const setItemChecked = (videoId: string, checked: boolean) => {
-    setItems((current) => current.map((item) => (item.videoId === videoId ? { ...item, checked } : item)));
+  const setItemState = (videoId: string, checked: boolean, reportSelected: boolean) => {
+    setItems((current) =>
+      current.map((item) => (item.videoId === videoId ? { ...item, checked, reportSelected } : item)),
+    );
   };
 
   const setItemPending = (videoId: string, pending: boolean) => {
@@ -70,16 +73,24 @@ export function MobileLivePage() {
     });
   };
 
+  // 미체크 → 참여(노랑) → 보고서 포함(연한 레드) → 미체크
   const toggle = async (item: YoutubeLiveItem) => {
     if (!canCheck || pendingIds.has(item.videoId)) return;
-    const nextChecked = !item.checked;
     setMessage("");
     setItemPending(item.videoId, true);
-    setItemChecked(item.videoId, nextChecked);
     try {
-      await setLiveParticipation(item.videoId, nextChecked);
+      if (!item.checked) {
+        setItemState(item.videoId, true, false);
+        await setLiveParticipation(item.videoId, true);
+      } else if (!item.reportSelected) {
+        setItemState(item.videoId, true, true);
+        await setLiveReportSelected(item.videoId, true);
+      } else {
+        setItemState(item.videoId, false, false);
+        await setLiveParticipation(item.videoId, false);
+      }
     } catch (error) {
-      setItemChecked(item.videoId, item.checked);
+      setItemState(item.videoId, item.checked, item.reportSelected);
       setMessage(error instanceof Error ? error.message : "체크를 저장하지 못했습니다.");
     } finally {
       setItemPending(item.videoId, false);
@@ -87,6 +98,7 @@ export function MobileLivePage() {
   };
 
   const checkedCount = items.filter((item) => item.checked).length;
+  const reportCount = items.filter((item) => item.checked && item.reportSelected).length;
   const yesterdayKey = getYesterdayKstDateKey();
 
   return (
@@ -97,7 +109,8 @@ export function MobileLivePage() {
           <strong style={{ fontSize: 24 }}>모바일 라이브</strong>
           <MobileLiveTabs />
           <div className="status note">
-            JTBC News 유튜브 라이브 중 영상취재팀이 참여한 건의 제목을 눌러 체크합니다. 다시 누르면 해제됩니다. 조회수는 매일
+            JTBC News 유튜브 라이브 중 영상취재팀이 참여한 건의 제목을 눌러 체크합니다(노랑). 한 번 더 누르면 주간업무보고서
+            포함(빨강), 다시 누르면 해제됩니다. 조회수는 매일
             06:00 수집 시점 기준이며 라이브 후 3일까지 갱신됩니다.
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -143,7 +156,7 @@ export function MobileLivePage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <div className="chip">{getDateLabel(dateKey)}</div>
             <span className="muted">
-              라이브 {items.length}건 · 참여 {checkedCount}건
+              라이브 {items.length}건 · 참여 {checkedCount}건 · 보고서 {reportCount}건
             </span>
           </div>
           {message ? <div className="status note">{message}</div> : null}
@@ -153,7 +166,10 @@ export function MobileLivePage() {
             </div>
           ) : (
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-              {items.map((item) => (
+              {items.map((item) => {
+                const isReport = item.checked && item.reportSelected;
+                const accent = isReport ? "#fca5a5" : "#facc15";
+                return (
                 <li key={item.videoId} style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                   <button
                     type="button"
@@ -173,9 +189,17 @@ export function MobileLivePage() {
                       whiteSpace: "normal",
                       height: "auto",
                       padding: "10px 14px",
-                      borderColor: item.checked ? "rgba(250,204,21,.58)" : "rgba(148,163,184,.24)",
-                      background: item.checked ? "rgba(250,204,21,.22)" : undefined,
-                      color: item.checked ? "#facc15" : undefined,
+                      borderColor: isReport
+                        ? "rgba(248,113,113,.62)"
+                        : item.checked
+                          ? "rgba(250,204,21,.58)"
+                          : "rgba(148,163,184,.24)",
+                      background: isReport
+                        ? "rgba(248,113,113,.22)"
+                        : item.checked
+                          ? "rgba(250,204,21,.22)"
+                          : undefined,
+                      color: item.checked ? accent : undefined,
                       opacity: pendingIds.has(item.videoId) ? 0.7 : 1,
                       cursor: canCheck ? "pointer" : "default",
                     }}
@@ -191,7 +215,7 @@ export function MobileLivePage() {
                         fontWeight: item.checked ? 700 : 400,
                       }}
                     >
-                      {item.checked ? "✓ " : ""}
+                      {isReport ? "★ " : item.checked ? "✓ " : ""}
                       {item.title || "(제목 없음)"}
                     </span>
                     {item.viewCount !== null ? (
@@ -215,7 +239,8 @@ export function MobileLivePage() {
                     ↗
                   </a>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>
