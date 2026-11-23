@@ -256,9 +256,9 @@ export function SecurityKeysPage() {
             총괄팀장 데이터(점수판·참고사항·기여도·분기 결과)는 이 열쇠가 있는 기기에서만 열 수 있게 됩니다. 서버와
             개발자는 내용을 볼 수 없습니다.
           </div>
-          {meta && !meta.enabled ? (
-            <div className="status note">
-              열쇠는 준비되었습니다. 기존 데이터를 암호문으로 바꾸는 작업은 다음 업데이트에서 진행됩니다.
+          {meta?.enabled && status?.protectedData?.plaintext === 0 ? (
+            <div className="status ok">
+              데이터 보호 중입니다. 저장된 총괄팀장 데이터는 모두 암호문이라 이 열쇠가 있는 기기에서만 보입니다.
             </div>
           ) : null}
           <StorageRiskNotice risks={storageRisks} />
@@ -399,6 +399,44 @@ export function SecurityKeysPage() {
                 </div>
               </div>
             </details>
+          </div>
+        </article>
+      ) : null}
+
+      {status?.unlocked && meta && (!meta.enabled || (status.protectedData?.plaintext ?? 0) > 0) ? (
+        <article className="panel" style={{ border: "2px solid rgba(34,197,94,.55)" }}>
+          <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
+            <strong>{meta.enabled ? "남은 데이터 암호화 마치기" : "3. 데이터 잠그기 (암호화 시작)"}</strong>
+            <span className="muted" style={{ fontSize: 13 }}>
+              점수판·참고사항·기여도·분기 결과를 암호문으로 바꿉니다. 바꾼 뒤에는 열쇠가 있는 기기에서만 보이고, 서버와
+              개발자는 내용을 볼 수 없습니다. 몇 초면 끝나며 화면 내용은 그대로입니다.
+            </span>
+            {!meta.enabled ? (
+              <div className="status warn">
+                누르기 전에 복구 코드 봉투가 사무실에 보관되어 있는지 확인하세요. 한 번 시작하면 되돌릴 수 없습니다.
+              </div>
+            ) : null}
+            <div>
+              <button
+                type="button"
+                className="btn white"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    !meta.enabled &&
+                    !window.confirm("복구 코드 봉투를 보관했나요? 데이터 암호화를 시작하면 되돌릴 수 없습니다.")
+                  ) {
+                    return;
+                  }
+                  void run(async () => {
+                    await teamLeadE2eKeys.encryptProtectedData();
+                    setMessage({ tone: "ok", text: "데이터를 잠갔습니다. 이제 이 열쇠가 있는 기기에서만 볼 수 있습니다." });
+                  }, "데이터를 암호문으로 바꾸지 못했습니다.");
+                }}
+              >
+                {meta.enabled ? "이어서 암호화" : "데이터 잠그기"}
+              </button>
+            </div>
           </div>
         </article>
       ) : null}
