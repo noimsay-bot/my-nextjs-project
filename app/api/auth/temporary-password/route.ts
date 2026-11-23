@@ -226,7 +226,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const email = profile?.email || authUser.email;
+    // 수신처는 반드시 Supabase Auth에 등록된 이메일을 우선한다.
+    // profiles.email은 다른 사람이 수정할 수 있는 값이라, 이를 우선하면 이메일을 바꿔 치기한 뒤
+    // 임시 비밀번호를 가로채 남의 계정(예: 총괄팀장)에 로그인할 수 있다.
+    const email = authUser.email || profile?.email;
     if (!email) {
       return NextResponse.json(
         {

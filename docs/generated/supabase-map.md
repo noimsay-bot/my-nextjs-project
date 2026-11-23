@@ -10,17 +10,17 @@
 
 ## 요약
 
-- SQL 파일: 60
-- 테이블 선언: 61
+- SQL 파일: 62
+- 테이블 선언: 65
 - enum 선언: 1
-- policy 선언: 214
-- function 선언: 68
-- trigger 선언: 42
-- RLS enable 선언: 61
-- table grant 선언: 92
-- table revoke 선언: 66
+- policy 선언: 232
+- function 선언: 72
+- trigger 선언: 48
+- RLS enable 선언: 65
+- table grant 선언: 96
+- table revoke 선언: 70
 - function execute grant 선언: 60
-- function execute revoke 선언: 39
+- function execute revoke 선언: 43
 
 ## Tables
 
@@ -69,6 +69,10 @@
 | public.team_lead_final_cut_decision_history | supabase/incremental_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/migrations/20260621194500_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/schema.sql |
+| public.team_lead_key_envelopes | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_envelopes | supabase/schema.sql |
+| public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_holders | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -141,6 +145,10 @@
 | public.team_lead_final_cut_decision_history | supabase/incremental_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/migrations/20260621194500_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/schema.sql |
+| public.team_lead_key_envelopes | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_envelopes | supabase/schema.sql |
+| public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_holders | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -208,6 +216,10 @@
 | public.team_lead_final_cut_decision_history | supabase/incremental_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/migrations/20260621194500_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/schema.sql |
+| public.team_lead_key_envelopes | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_envelopes | supabase/schema.sql |
+| public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_holders | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -274,6 +286,10 @@
 | public.team_lead_final_cut_decision_history | supabase/incremental_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/migrations/20260621194500_atomic_final_cut_decisions.sql |
 | public.team_lead_final_cut_decision_history | supabase/schema.sql |
+| public.team_lead_key_envelopes | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_envelopes | supabase/schema.sql |
+| public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
+| public.team_lead_key_holders | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -418,10 +434,14 @@
 | profiles_select_approved_directory | supabase/schema.sql |
 | profiles_select_own | supabase/schema.sql |
 | profiles_update_own_basic_fields | supabase/schema.sql |
+| review_assignments_delete_leads | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | review_assignments_delete_leads | supabase/schema.sql |
+| review_assignments_insert_leads | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | review_assignments_insert_leads | supabase/schema.sql |
+| review_assignments_select_leads | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | review_assignments_select_leads | supabase/schema.sql |
 | review_assignments_select_own | supabase/schema.sql |
+| review_assignments_update_leads | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | review_assignments_update_leads | supabase/schema.sql |
 | reviews_delete_assigned_reviewer | supabase/schema.sql |
 | reviews_delete_granted_reviewers | supabase/schema.sql |
@@ -462,6 +482,16 @@
 | team_lead_final_cut_decision_history_select_managers | supabase/incremental_atomic_final_cut_decisions.sql |
 | team_lead_final_cut_decision_history_select_managers | supabase/migrations/20260621194500_atomic_final_cut_decisions.sql |
 | team_lead_final_cut_decision_history_select_managers | supabase/schema.sql |
+| team_lead_key_envelopes_manage_team_lead | supabase/incremental_team_lead_e2e_keys.sql |
+| team_lead_key_envelopes_manage_team_lead | supabase/schema.sql |
+| team_lead_key_holders_delete_team_lead | supabase/incremental_team_lead_e2e_keys.sql |
+| team_lead_key_holders_delete_team_lead | supabase/schema.sql |
+| team_lead_key_holders_insert_team_lead | supabase/incremental_team_lead_e2e_keys.sql |
+| team_lead_key_holders_insert_team_lead | supabase/schema.sql |
+| team_lead_key_holders_select_team_lead | supabase/incremental_team_lead_e2e_keys.sql |
+| team_lead_key_holders_select_team_lead | supabase/schema.sql |
+| team_lead_key_holders_update_team_lead | supabase/incremental_team_lead_e2e_keys.sql |
+| team_lead_key_holders_update_team_lead | supabase/schema.sql |
 | team_lead_schedule_assignment_backups_manage_privileged | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | team_lead_schedule_assignment_backups_manage_privileged | supabase/schema.sql |
 | team_lead_schedule_assignment_backups_select_managers | supabase/incremental_team_lead_schedule_assignment_backups.sql |
@@ -472,8 +502,12 @@
 | team_lead_schedule_assignment_cell_locks_select_managers | supabase/schema.sql |
 | team_lead_schedule_assignments_manage_privileged | supabase/schema.sql |
 | team_lead_schedule_assignments_select_managers | supabase/schema.sql |
+| team_lead_state_manage_admin_final_cut | supabase/incremental_restrict_admin_privilege_escalation.sql |
+| team_lead_state_manage_admin_final_cut | supabase/schema.sql |
 | team_lead_state_manage_desk_final_cut | supabase/schema.sql |
-| team_lead_state_manage_team_lead_admin | supabase/schema.sql |
+| team_lead_state_manage_team_lead | supabase/incremental_restrict_admin_privilege_escalation.sql |
+| team_lead_state_manage_team_lead | supabase/schema.sql |
+| team_lead_state_select_managers | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | team_lead_state_select_managers | supabase/schema.sql |
 | team_lead_state_select_submission_access_approved | supabase/incremental_best_report_current_select_approved.sql |
 | team_lead_state_select_submission_access_approved | supabase/schema.sql |
@@ -539,6 +573,8 @@
 | public.get_partner_schedule_assignment_items | supabase/incremental_my_schedule_overflow_month_items.sql |
 | public.get_partner_schedule_assignment_items | supabase/schema.sql |
 | public.get_portal_support_summary | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
+| public.guard_profile_privileged_changes | supabase/incremental_restrict_admin_privilege_escalation.sql |
+| public.guard_profile_privileged_changes | supabase/schema.sql |
 | public.handle_new_user | supabase/incremental_safe_profile_bootstrap.sql |
 | public.handle_new_user | supabase/schema.sql |
 | public.is_admin | supabase/schema.sql |
@@ -558,6 +594,8 @@
 | public.return_equipment_loan_items | supabase/incremental_equipment_loans.sql |
 | public.return_equipment_loan_items | supabase/incremental_equipment_return_desk.sql |
 | public.return_equipment_loan_items | supabase/schema.sql |
+| public.revoke_team_lead_key_holders_on_demotion | supabase/incremental_team_lead_e2e_keys.sql |
+| public.revoke_team_lead_key_holders_on_demotion | supabase/schema.sql |
 | public.save_live_equipment_status_atomic | supabase/incremental_atomic_news_and_live_status.sql |
 | public.save_live_equipment_status_atomic | supabase/schema.sql |
 | public.save_news_issue_set_items_atomic | supabase/incremental_atomic_news_and_live_status.sql |
@@ -671,6 +709,8 @@
 | public.get_partner_schedule_assignment_items(date) | supabase/incremental_my_schedule_overflow_month_items.sql |
 | public.get_partner_schedule_assignment_items(date) | supabase/schema.sql |
 | public.get_portal_support_summary() | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
+| public.guard_profile_privileged_changes() | supabase/incremental_restrict_admin_privilege_escalation.sql |
+| public.guard_profile_privileged_changes() | supabase/schema.sql |
 | public.is_admin() | supabase/incremental_restore_rls_helper_execute.sql |
 | public.mark_customer_support_feedback_seen(uuid) | supabase/incremental_customer_support_messages.sql |
 | public.mark_customer_support_feedback_seen(uuid) | supabase/schema.sql |
@@ -679,6 +719,8 @@
 | public.return_equipment_loan_items(uuid[]) | supabase/incremental_equipment_loans.sql |
 | public.return_equipment_loan_items(uuid[]) | supabase/incremental_equipment_return_desk.sql |
 | public.return_equipment_loan_items(uuid[]) | supabase/schema.sql |
+| public.revoke_team_lead_key_holders_on_demotion() | supabase/incremental_team_lead_e2e_keys.sql |
+| public.revoke_team_lead_key_holders_on_demotion() | supabase/schema.sql |
 | public.set_equipment_items_repair_status(uuid[], boolean) | supabase/incremental_equipment_loans.sql |
 | public.set_equipment_items_repair_status(uuid[], boolean) | supabase/incremental_regional_tvu_items.sql |
 | public.set_equipment_items_repair_status(uuid[], boolean) | supabase/schema.sql |
@@ -694,9 +736,13 @@
 
 | 트리거 | 파일 |
 | --- | --- |
+| guard_profile_privileged_changes | supabase/incremental_restrict_admin_privilege_escalation.sql |
+| guard_profile_privileged_changes | supabase/schema.sql |
 | on_auth_user_created | supabase/schema.sql |
 | prune_team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | prune_team_lead_schedule_assignment_backups | supabase/schema.sql |
+| revoke_team_lead_key_holders_on_demotion | supabase/incremental_team_lead_e2e_keys.sql |
+| revoke_team_lead_key_holders_on_demotion | supabase/schema.sql |
 | set_customer_support_messages_updated_at | supabase/incremental_customer_support_messages.sql |
 | set_customer_support_messages_updated_at | supabase/schema.sql |
 | set_election_events_updated_at | supabase/incremental_election_events.sql |
@@ -723,6 +769,8 @@
 | set_schedule_partner_entries_updated_at | supabase/schema.sql |
 | set_schedule_settings_updated_at | supabase/schema.sql |
 | set_submissions_updated_at | supabase/schema.sql |
+| set_team_lead_key_holders_updated_at | supabase/incremental_team_lead_e2e_keys.sql |
+| set_team_lead_key_holders_updated_at | supabase/schema.sql |
 | set_team_lead_schedule_assignment_backups_updated_at | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | set_team_lead_schedule_assignment_backups_updated_at | supabase/schema.sql |
 | set_team_lead_schedule_assignment_cell_locks_updated_at | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |

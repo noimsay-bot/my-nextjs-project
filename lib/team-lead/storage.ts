@@ -32,6 +32,22 @@ import {
   getTeamLeadEvaluationYear,
 } from "@/lib/team-lead/evaluation-year";
 
+// 근무표 등 일반 화면도 이 모듈을 불러오므로, 암호 모듈은 보호 데이터를 실제로 다룰 때만 동적으로 불러온다.
+const TEAM_LEAD_PROTECTED_STATE_KEYS = new Set([
+  "scoreboard_v1",
+  "reference_notes_v1",
+  "contribution_manual_v1",
+  "best_report_quarters_v1",
+]);
+
+function looksLikeTeamLeadEnvelope(value: unknown) {
+  return Boolean(value && typeof value === "object" && (value as { enc?: unknown }).enc === "tl-e2e-v1");
+}
+
+async function loadTeamLeadProtectedState() {
+  return (await import("@/lib/team-lead/e2e-state")).teamLeadProtectedState;
+}
+
 export type AssignmentTimeColor = "" | "red" | "blue" | "yellow";
 export type AssignmentTravelType = "" | "국내출장" | "해외출장" | "당일출장";
 export type AssignmentTripTagPhase = "" | "departure" | "ongoing" | "return";
@@ -1014,6 +1030,25 @@ export async function refreshScheduleAssignmentDisplayMonths(monthKeys: string[]
   applyAssignmentDisplayRowsToCache(Array.isArray(payload.rows) ? payload.rows : [], normalizedMonthKeys);
 }
 
+/**
+ * 보호 대상 key의 암호문을 복호화한다. 평문은 그대로 둔다.
+ * 잠겨 있으면(열쇠 없음, DESK 등) state를 null로 바꿔 빈 값으로 보이게 한다. 저장은 persistTeamLeadState에서 막힌다.
+ */
+async function readProtectedTeamLeadState(key: string, rawState: unknown) {
+  return (await readProtectedTeamLeadStateResult(key, rawState)).state;
+}
+
+async function readProtectedTeamLeadStateResult(key: string, rawState: unknown) {
+  if (!looksLikeTeamLeadEnvelope(rawState)) {
+    return { locked: false as const, state: rawState };
+  }
+  return (await loadTeamLeadProtectedState()).read(key, rawState);
+}
+
+async function decryptTeamLeadStateRows(rows: TeamLeadStateRow[]) {
+  return Promise.all(rows.map(async (row) => ({ ...row, state: await readProtectedTeamLeadState(row.key, row.state) })));
+}
+
 function applyTeamLeadMetaStateRows(rows: TeamLeadStateRow[]) {
   const rowMap = new Map(rows.map((row) => [row.key, row] as const));
   contributionManualCache = normalizeContributionManualStore(rowMap.get(TEAM_LEAD_CONTRIBUTION_STATE_KEY)?.state);
@@ -1142,10 +1177,16 @@ async function persistTeamLeadState(key: string, state: unknown) {
     throw new Error("승인된 로그인 세션이 필요합니다.");
   }
 
+  // 보호 대상 key(점수판·참고사항·기여도·분기 결과)는 암호화가 켜져 있으면 암호문으로 저장한다.
+  // 이 기기가 잠겨 있으면 여기서 저장을 거부해 빈 값으로 암호문을 덮어쓰지 않는다.
+  const storedState = TEAM_LEAD_PROTECTED_STATE_KEYS.has(key)
+    ? await (await loadTeamLeadProtectedState()).prepareForWrite(key, state)
+    : state;
+
   const supabase = await getPortalSupabaseClient();
   const { error } = await supabase.from("team_lead_state").upsert({
     key,
-    state,
+    state: storedState,
     updated_by: session.id,
   });
 
@@ -1423,7 +1464,7 @@ export async function refreshTeamLeadMetaState() {
       throw new Error(error.message);
     }
 
-    applyTeamLeadMetaStateRows(data ?? []);
+    applyTeamLeadMetaStateRows(await decryptTeamLeadStateRows(data ?? []));
     finalCutCache = await recoverLegacyFinalCutStoreIfNeeded(finalCutCache);
     emitTeamLeadEvent(TEAM_LEAD_CONTRIBUTION_EVENT);
     emitTeamLeadEvent(TEAM_LEAD_FINAL_CUT_EVENT);
@@ -3974,7 +4015,8 @@ async function getSavedBestReportQuarterSnapshots() {
     throw new Error(error.message);
   }
 
-  return mergeDefaultBestReportQuarterSnapshots(normalizeBestReportQuarterSnapshots(data?.state));
+  const state = await readProtectedTeamLeadState(TEAM_LEAD_BEST_REPORT_QUARTER_STATE_KEY, data?.state);
+  return mergeDefaultBestReportQuarterSnapshots(normalizeBestReportQuarterSnapshots(state));
 }
 
 async function getBestReportCurrentResetAt() {
@@ -4206,7 +4248,8 @@ export async function getTeamLeadReferenceNotesWorkspace(
     }
   }
 
-  const noteMap = normalizeReferenceNotesState(stateRow?.state)[String(evaluationYear)] ?? {};
+  const noteState = await readProtectedTeamLeadState(TEAM_LEAD_REFERENCE_NOTES_STATE_KEY, stateRow?.state);
+  const noteMap = normalizeReferenceNotesState(noteState)[String(evaluationYear)] ?? {};
   const visibleProfiles = (profiles ?? []).filter((profile) => !isTeamLeadScoringExcludedRole(profile.role));
 
   return {
@@ -4244,7 +4287,15 @@ export async function saveTeamLeadReferenceNotes(
     return { ok: false as const, message: stateError.message };
   }
 
-  const nextState = normalizeReferenceNotesState(stateRow?.state);
+  const currentRead = await readProtectedTeamLeadStateResult(TEAM_LEAD_REFERENCE_NOTES_STATE_KEY, stateRow?.state);
+  if (currentRead.locked) {
+    // 잠긴 상태에서 한 사람 메모만 저장하면 다른 사람 메모 전체를 지우게 되므로 거부한다.
+    return {
+      ok: false as const,
+      message: "이 기기는 보안 열쇠가 잠겨 있어 저장할 수 없습니다. 보안 열쇠 화면에서 이 기기를 연 뒤 다시 시도해 주세요.",
+    };
+  }
+  const nextState = normalizeReferenceNotesState(currentRead.state);
   const yearKey = String(evaluationYear);
   const nextYearState = {
     ...(nextState[yearKey] ?? {}),
