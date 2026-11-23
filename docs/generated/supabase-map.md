@@ -10,16 +10,16 @@
 
 ## 요약
 
-- SQL 파일: 64
-- 테이블 선언: 65
+- SQL 파일: 65
+- 테이블 선언: 67
 - enum 선언: 1
 - policy 선언: 232
-- function 선언: 75
-- trigger 선언: 51
-- RLS enable 선언: 65
-- table grant 선언: 96
-- table revoke 선언: 70
-- function execute grant 선언: 60
+- function 선언: 85
+- trigger 선언: 59
+- RLS enable 선언: 67
+- table grant 선언: 98
+- table revoke 선언: 72
+- function execute grant 선언: 62
 - function execute revoke 선언: 43
 
 ## Tables
@@ -73,6 +73,8 @@
 | public.team_lead_key_envelopes | supabase/schema.sql |
 | public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
 | public.team_lead_key_holders | supabase/schema.sql |
+| public.team_lead_protected_backups | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.team_lead_protected_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -149,6 +151,8 @@
 | public.team_lead_key_envelopes | supabase/schema.sql |
 | public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
 | public.team_lead_key_holders | supabase/schema.sql |
+| public.team_lead_protected_backups | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.team_lead_protected_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -220,6 +224,8 @@
 | public.team_lead_key_envelopes | supabase/schema.sql |
 | public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
 | public.team_lead_key_holders | supabase/schema.sql |
+| public.team_lead_protected_backups | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.team_lead_protected_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -290,6 +296,8 @@
 | public.team_lead_key_envelopes | supabase/schema.sql |
 | public.team_lead_key_holders | supabase/incremental_team_lead_e2e_keys.sql |
 | public.team_lead_key_holders | supabase/schema.sql |
+| public.team_lead_protected_backups | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.team_lead_protected_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_backups | supabase/incremental_team_lead_schedule_assignment_backups.sql |
 | public.team_lead_schedule_assignment_backups | supabase/schema.sql |
 | public.team_lead_schedule_assignment_cell_locks | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
@@ -551,6 +559,10 @@
 | public.acquire_team_lead_schedule_assignment_cell_lock | supabase/incremental_secure_function_search_path.sql |
 | public.acquire_team_lead_schedule_assignment_cell_lock | supabase/incremental_team_lead_schedule_assignment_cell_locks.sql |
 | public.acquire_team_lead_schedule_assignment_cell_lock | supabase/schema.sql |
+| public.backup_team_lead_protected_state | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.backup_team_lead_protected_state | supabase/schema.sql |
+| public.block_team_lead_protected_state_delete | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.block_team_lead_protected_state_delete | supabase/schema.sql |
 | public.borrow_eng_sets | supabase/incremental_equipment_loans.sql |
 | public.borrow_eng_sets | supabase/schema.sql |
 | public.borrow_equipment_items | supabase/incremental_equipment_loans.sql |
@@ -575,6 +587,12 @@
 | public.get_portal_support_summary | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
 | public.guard_profile_privileged_changes | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | public.guard_profile_privileged_changes | supabase/schema.sql |
+| public.guard_team_lead_key_envelope_change | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.guard_team_lead_key_envelope_change | supabase/schema.sql |
+| public.guard_team_lead_key_holder_change | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.guard_team_lead_key_holder_change | supabase/schema.sql |
+| public.guard_team_lead_key_version_bump | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.guard_team_lead_key_version_bump | supabase/schema.sql |
 | public.guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_key_version_guard.sql |
 | public.guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_plaintext_guard.sql |
 | public.guard_team_lead_protected_state | supabase/schema.sql |
@@ -626,6 +644,8 @@
 
 | 함수 | 파일 |
 | --- | --- |
+| public.backup_team_lead_protected_state(integer) | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| public.backup_team_lead_protected_state(integer) | supabase/schema.sql |
 | public.borrow_eng_sets(uuid[]) | supabase/incremental_equipment_loans.sql |
 | public.borrow_eng_sets(uuid[]) | supabase/schema.sql |
 | public.borrow_equipment_items(uuid[], text, text, text, text, text, text) | supabase/incremental_equipment_loans.sql |
@@ -739,8 +759,16 @@
 
 | 트리거 | 파일 |
 | --- | --- |
+| block_team_lead_protected_state_delete | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| block_team_lead_protected_state_delete | supabase/schema.sql |
 | guard_profile_privileged_changes | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | guard_profile_privileged_changes | supabase/schema.sql |
+| guard_team_lead_key_envelope_change | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| guard_team_lead_key_envelope_change | supabase/schema.sql |
+| guard_team_lead_key_holder_change | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| guard_team_lead_key_holder_change | supabase/schema.sql |
+| guard_team_lead_key_version_bump | supabase/incremental_team_lead_e2e_delete_guard.sql |
+| guard_team_lead_key_version_bump | supabase/schema.sql |
 | guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_key_version_guard.sql |
 | guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_plaintext_guard.sql |
 | guard_team_lead_protected_state | supabase/schema.sql |
