@@ -23,6 +23,11 @@ export function toPosix(relativePath) {
   return relativePath.split(path.sep).join("/");
 }
 
+// OS·로케일과 무관한 고정 정렬. localeCompare와 readdir 순서는 Windows와 Linux(CI)에서 다를 수 있다.
+export function compareText(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function rel(filePath) {
   return toPosix(path.relative(repoRoot, filePath));
 }
@@ -74,7 +79,7 @@ export function listFiles(startRelative, options = {}) {
   }
 
   walk(start);
-  return files.sort((a, b) => rel(a).localeCompare(rel(b)));
+  return files.sort((a, b) => compareText(rel(a), rel(b)));
 }
 
 export function listRepoFiles(options = {}) {

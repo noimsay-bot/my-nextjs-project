@@ -184,8 +184,8 @@
 | public.live_equipment_status_board | supabase/incremental_equipment_loans.sql |
 | public.live_equipment_status_board | supabase/incremental_live_equipment_status_board.sql |
 | public.live_equipment_status_board | supabase/schema.sql |
-| public.live_participation | supabase/incremental_youtube_lives_report.sql |
 | public.live_participation | supabase/incremental_youtube_lives.sql |
+| public.live_participation | supabase/incremental_youtube_lives_report.sql |
 | public.live_participation | supabase/schema.sql |
 | public.page_visit_events | supabase/incremental_page_visit_events.sql |
 | public.page_visit_events | supabase/schema.sql |
@@ -400,8 +400,8 @@
 | portal_celebration_events_admin_select_all | supabase/schema.sql |
 | portal_celebration_events_admin_update | supabase/incremental_portal_celebration_events.sql |
 | portal_celebration_events_admin_update | supabase/schema.sql |
-| portal_celebration_events_select_current_active | supabase/incremental_portal_celebration_events_recurrence.sql |
 | portal_celebration_events_select_current_active | supabase/incremental_portal_celebration_events.sql |
+| portal_celebration_events_select_current_active | supabase/incremental_portal_celebration_events_recurrence.sql |
 | portal_celebration_events_select_current_active | supabase/schema.sql |
 | portal_user_settings_delete_own | supabase/incremental_portal_user_settings.sql |
 | portal_user_settings_delete_own | supabase/schema.sql |
