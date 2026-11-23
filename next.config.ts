@@ -44,8 +44,24 @@ function buildTeamLeadSecurityManifest(): TeamLeadSecurityManifest {
   };
 }
 
+// 모든 응답에 붙이는 보안 헤더. 화면 동작을 바꾸지 않는 것만 넣는다.
+// - 다른 사이트가 포털을 몰래 iframe으로 덮어씌워 버튼(예: 보안 열쇠 승인)을 누르게 하는 것(클릭재킹)을 막는다.
+// - 스크립트 출처 제한(script-src)은 지도·유튜브·날씨 등 외부 리소스 목록을 확인한 뒤 따로 넣는다.
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'self'; base-uri 'self'; object-src 'none'" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), payment=(), usb=(), geolocation=(self)" },
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
   distDir: isDevelopment ? ".next-dev" : ".next",
   outputFileTracingRoot: path.resolve(__dirname),
   env: {
