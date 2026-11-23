@@ -124,7 +124,16 @@ function createFakeBackend() {
       }
       if (method === "DELETE") {
         const holderId = readEq(url, "holder_id");
-        envelopes.splice(0, envelopes.length, ...envelopes.filter((row) => row.holder_id !== holderId));
+        const below = url.searchParams.get("key_version")?.startsWith("lt.")
+          ? Number(url.searchParams.get("key_version")?.slice(3))
+          : null;
+        envelopes.splice(
+          0,
+          envelopes.length,
+          ...envelopes.filter((row) =>
+            below !== null ? Number(row.key_version) >= below : row.holder_id !== holderId,
+          ),
+        );
         await reply(route, []);
         return;
       }
@@ -270,6 +279,17 @@ test("휴대폰에서 기기 등록 → 열쇠 만들기 → 복구 코드 확�
   expect((backend.state.get("crypto_meta_v1")?.state as { enabled?: boolean } | undefined)?.enabled).toBe(true);
   await expectNoHorizontalScroll(page);
   await page.screenshot({ path: testInfo.outputPath("5-locked-data.png"), fullPage: true });
+
+  // 열쇠 새로 고치기: 데이터가 2세대 열쇠로 다시 잠긴다.
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "열쇠 새로 고치기" }).click();
+  await expect(page.getByText("열쇠를 새로 고쳤습니다.", { exact: false })).toBeVisible({ timeout: 30_000 });
+  expect((backend.state.get("reference_notes_v1")?.state as { keyVersion?: number } | undefined)?.keyVersion).toBe(2);
+  expect((backend.state.get("crypto_meta_v1")?.state as { currentKeyVersion?: number } | undefined)?.currentKeyVersion).toBe(2);
+  await page.getByText("총괄팀장이 바뀔 때 순서").click();
+  await expect(page.getByText("열쇠 새로 고치기를 누릅니다", { exact: false })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await page.screenshot({ path: testInfo.outputPath("5b-rotated.png"), fullPage: true });
 });
 
 test("카카오톡 인앱 브라우저로 열면 다른 브라우저로 열라는 경고가 보인다", async ({ browser }, testInfo) => {

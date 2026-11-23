@@ -176,7 +176,8 @@ DEK ──RSA-OAEP(복구 공개키)────> 감싼 DEK #R   ┘
 | P3 | 보안 열쇠 화면(`/team-lead/security`): 기기 등록, 최초 열쇠 만들기(데이터 키 생성, 데이터 전환은 P5), 확인 코드 승인, 목록, 해제, 복구 코드 발급·인쇄·열기. 로직 `lib/team-lead/e2e-key-manager.ts`(테스트 `tests/team-lead-e2e-key-manager.test.mjs`), 저장소 연결 `lib/team-lead/e2e-keys.ts` | 총괄팀장 메뉴에 1개 추가 |
 | P4 | 4개 key 읽기·쓰기에 envelope 처리 연결(`lib/team-lead/e2e-state-core.ts`, `e2e-state.ts`, 테스트 `tests/team-lead-e2e-state.test.mjs`). 평문이면 지금과 똑같이 동작. `storage.ts`는 암호문·보호 key를 만날 때만 암호 모듈을 동적으로 불러와 일반 화면 번들 크기를 유지 | 전환 전에는 없음 |
 | P5 | 보안 열쇠 화면의 "데이터 잠그기" 버튼(`encryptProtectedData`: 암호화를 먼저 켜고, 행마다 암호화 → 왕복 확인 → `updated_at`이 같을 때만 덮어쓰기)과 평문 덮어쓰기 방지 트리거 `supabase/incremental_team_lead_e2e_plaintext_guard.sql`(켠 암호화 설정은 끄거나 지울 수 없음). 테스트 `tests/team-lead-e2e-plaintext-guard.test.mjs`, `tests/team-lead-e2e-key-manager.test.mjs` | 전환 후 잠긴 기기에서 4개 화면 편집 불가 |
-| P6 | 등급 변경과 연동: `team_lead`에서 내려갈 때 기기 자동 해제, 열쇠 새로 고치기 안내 | 등급 변경 흐름에 안내 추가 |
+| P6 | 열쇠 새로 고치기(`rotateDataKey`: 새 세대 사본을 활성 보관자 모두에게 먼저 만들고 → 세대를 올리고 → 4개 행을 다시 암호화 → 모두 바뀐 뒤 이전 세대 사본 삭제). 중간에 멈추면 이전 세대 사본으로 읽고 "이어서 암호화"로 마침. 승인됐던 기기가 마지막 새로 고치기 뒤 해제되면 화면이 새로 고치기를 권함. 보안 열쇠 화면에 교체 순서 안내, 관리자 화면에서 총괄팀장 등급을 내릴 때 확인 창. 세대 검사 트리거 `supabase/incremental_team_lead_e2e_key_version_guard.sql`(현재 세대 암호문만 저장, 세대 감소 금지). 기기 자동 해제는 P2 트리거가 이미 한다 | 관리자 화면 등급 저장 시 확인 창 1개 추가 |
+| 알림 | 보안 관련 코드 변경 알림 메일. 빌드할 때 `next.config.ts`가 감시 대상 파일(`lib/team-lead/security-alert-core.ts`의 `isTeamLeadSecurityWatchedPath`) 지문을 서버 코드에 넣고, 매일 09:30(KST) Vercel Cron `/api/internal/team-lead/security-change-alert`가 지난 지문(`team_lead_state.security_code_manifest_v1`)과 비교해 바뀌면 승인된 총괄팀장 이메일로 알림. 처음 한 번은 "알림 시작" 메일. Git 커밋 정보 없이 배포되면 메일에 경고. 메일이 나간 뒤에만 기준 갱신. 남는 위험 1(악성 코드 배포)의 억지력일 뿐 차단은 아니다(알림 코드도 개발자가 바꿀 수 있지만, 바꾸는 배포 자체가 알림 대상이다) | 새 Cron 1개, 메일 발송 |
 | 2차 | `reviews` 평가 점수를 팀장 공개키로 암호화(평가자는 쓰기만 가능) | 별도 설계 |
 
 ## 10. 검증 계획

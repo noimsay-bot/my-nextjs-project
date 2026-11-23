@@ -2187,7 +2187,7 @@ before update on public.team_lead_state
 for each row
 execute function public.set_updated_at();
 
--- 총괄팀장 보호 데이터 평문 덮어쓰기 방지 (incremental_team_lead_e2e_plaintext_guard.sql)
+-- 총괄팀장 보호 데이터 평문 덮어쓰기 방지와 열쇠 세대 검사 (incremental_team_lead_e2e_plaintext_guard.sql, incremental_team_lead_e2e_key_version_guard.sql)
 create or replace function public.guard_team_lead_protected_state()
 returns trigger
 language plpgsql
@@ -2195,6 +2195,7 @@ set search_path = public
 as $$
 declare
   v_enabled boolean;
+  v_current_version integer;
 begin
   if tg_op = 'DELETE' then
     if old.key = 'crypto_meta_v1' and coalesce(old.state -> 'enabled' = 'true'::jsonb, false) then
@@ -2213,6 +2214,14 @@ begin
         errcode = '22023',
         message = '한 번 켠 총괄팀장 데이터 암호화는 끌 수 없습니다.';
     end if;
+    if tg_op = 'UPDATE'
+      and jsonb_typeof(old.state -> 'currentKeyVersion') = 'number'
+      and (jsonb_typeof(new.state -> 'currentKeyVersion') is distinct from 'number'
+        or (new.state ->> 'currentKeyVersion')::numeric < (old.state ->> 'currentKeyVersion')::numeric) then
+      raise exception using
+        errcode = '22023',
+        message = '총괄팀장 데이터 열쇠 세대는 되돌릴 수 없습니다.';
+    end if;
     return new;
   end if;
 
@@ -2220,8 +2229,11 @@ begin
     return new;
   end if;
 
-  select coalesce(state -> 'enabled' = 'true'::jsonb, false)
-  into v_enabled
+  select
+    coalesce(state -> 'enabled' = 'true'::jsonb, false),
+    case when jsonb_typeof(state -> 'currentKeyVersion') = 'number'
+      then (state ->> 'currentKeyVersion')::numeric::integer end
+  into v_enabled, v_current_version
   from public.team_lead_state
   where key = 'crypto_meta_v1';
 
@@ -2234,6 +2246,11 @@ begin
     and jsonb_typeof(new.state -> 'keyVersion') = 'number'
     and jsonb_typeof(new.state -> 'iv') = 'string'
     and jsonb_typeof(new.state -> 'ct') = 'string' then
+    if v_current_version is not null and (new.state ->> 'keyVersion')::numeric <> v_current_version then
+      raise exception using
+        errcode = '22023',
+        message = '예전 열쇠로 잠근 데이터는 저장할 수 없습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.';
+    end if;
     return new;
   end if;
 

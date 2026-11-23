@@ -21,6 +21,8 @@ export interface TeamLeadProtectedStateDeps {
   getSession(): Promise<{ id: string; role: string; approved: boolean } | null>;
   loadCryptoMeta(): Promise<{ enabled: boolean; currentKeyVersion: number } | null>;
   getUnlockedDataKey(profileId: string): { keyVersion: number; dataKey: CryptoKey } | null;
+  /** 다른 세대(열쇠 새로 고치기 전후)의 데이터 키. 이 기기에 그 세대 사본이 없으면 null. */
+  getDataKeyForVersion?(profileId: string, keyVersion: number): Promise<CryptoKey | null>;
   unlock(): Promise<boolean>;
   onLocked?(stateKey: string): void;
 }
@@ -70,13 +72,18 @@ export function createTeamLeadProtectedState(deps: TeamLeadProtectedStateDeps) {
       deps.onLocked?.(stateKey);
       return { locked: true, encrypted: true, state: null, reason: "no_key" };
     }
+    let dataKey: CryptoKey | null = key.dataKey;
     if (key.keyVersion !== rawState.keyVersion) {
-      deps.onLocked?.(stateKey);
-      return { locked: true, encrypted: true, state: null, reason: "key_version" };
+      // 열쇠 새로 고치기 도중이거나 다른 탭에서 새로 고쳤다. 그 세대 사본으로 연다.
+      dataKey = (await deps.getDataKeyForVersion?.(session.id, rawState.keyVersion)) ?? null;
+      if (!dataKey) {
+        deps.onLocked?.(stateKey);
+        return { locked: true, encrypted: true, state: null, reason: "key_version" };
+      }
     }
 
     try {
-      const state = await decryptTeamLeadState(key.dataKey, { stateKey, keyVersion: key.keyVersion, envelope: rawState });
+      const state = await decryptTeamLeadState(dataKey, { stateKey, keyVersion: rawState.keyVersion, envelope: rawState });
       return { locked: false, encrypted: true, state };
     } catch {
       deps.onLocked?.(stateKey);
@@ -93,7 +100,16 @@ export function createTeamLeadProtectedState(deps: TeamLeadProtectedStateDeps) {
     if (!mustEncrypt) return value;
 
     const session = await deps.getSession();
-    const key = await getDataKeyForSession(session);
+    let key = await getDataKeyForSession(session);
+    if (key && session && meta && key.keyVersion !== meta.currentKeyVersion) {
+      // 다른 탭에서 열쇠를 새로 고쳤다. 새 세대 열쇠를 다시 연다.
+      try {
+        await deps.unlock();
+      } catch {
+        // 아래에서 잠김으로 처리한다.
+      }
+      key = deps.getUnlockedDataKey(session.id);
+    }
     if (!key || (meta && key.keyVersion !== meta.currentKeyVersion)) {
       throw new TeamLeadProtectedStateLockedError(LOCKED_WRITE_MESSAGE);
     }

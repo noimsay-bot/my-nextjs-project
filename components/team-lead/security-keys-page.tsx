@@ -171,6 +171,63 @@ function RecoveryCodePanel({ recoveryCode, onDone }: { recoveryCode: string; onD
   );
 }
 
+function RotateKeyButton({
+  busy,
+  run,
+  setMessage,
+  primary = false,
+}: {
+  busy: boolean;
+  run: (action: () => Promise<void>, fallback: string) => Promise<void>;
+  setMessage: (message: Message) => void;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={primary ? "btn white" : "btn"}
+      disabled={busy}
+      onClick={() => {
+        if (!window.confirm("새 열쇠로 데이터를 다시 잠급니다. 해제된 기기는 앞으로의 데이터를 열 수 없게 됩니다. 계속할까요?")) {
+          return;
+        }
+        void run(async () => {
+          await teamLeadE2eKeys.rotateDataKey();
+          setMessage({ tone: "ok", text: "열쇠를 새로 고쳤습니다. 지금 기기와 복구 코드는 그대로 쓰시면 됩니다." });
+        }, "열쇠를 새로 고치지 못했습니다.");
+      }}
+    >
+      열쇠 새로 고치기
+    </button>
+  );
+}
+
+function HandoverGuide() {
+  return (
+    <article className="panel">
+      <details className="panel-pad">
+        <summary style={{ cursor: "pointer", fontWeight: 700 }}>총괄팀장이 바뀔 때 순서</summary>
+        <ol style={{ margin: "12px 0 0", paddingLeft: 20, display: "grid", gap: 8, fontSize: 14, lineHeight: 1.6 }}>
+          <li>지금 팀장이 관리자 화면에서 새 팀장의 등급을 총괄팀장으로 올립니다.</li>
+          <li>새 팀장이 자기 기기에서 이 화면을 열고 <strong>이 기기 등록</strong>을 누릅니다. 6자리 숫자가 뜹니다.</li>
+          <li>
+            지금 팀장이 이 화면의 <strong>승인 대기 중인 기기</strong>에 그 6자리를 입력하고 <strong>승인</strong>을 누릅니다.
+          </li>
+          <li>새 팀장 화면에서 새로고침을 눌러 <strong>이 기기: 열림</strong>이 되는지 확인합니다.</li>
+          <li>새 팀장이 관리자 화면에서 이전 팀장의 등급을 내립니다. 이전 팀장 기기 열쇠는 자동으로 해제됩니다.</li>
+          <li>
+            새 팀장이 이 화면에서 <strong>열쇠 새로 고치기</strong>를 누릅니다. 복구 코드 봉투는 그대로 두면 됩니다.
+          </li>
+        </ol>
+        <div className="status note" style={{ marginTop: 12 }}>
+          이전 팀장이 승인해 줄 수 없으면, 새 팀장이 사무실 봉투의 복구 코드로 엽니다(2번 다음 화면의 &quot;복구 코드로
+          열기&quot;). 그 뒤 새 복구 코드를 인쇄해 다시 봉인합니다.
+        </div>
+      </details>
+    </article>
+  );
+}
+
 export function SecurityKeysPage() {
   const [status, setStatus] = useState<TeamLeadKeyStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -256,7 +313,7 @@ export function SecurityKeysPage() {
             총괄팀장 데이터(점수판·참고사항·기여도·분기 결과)는 이 열쇠가 있는 기기에서만 열 수 있게 됩니다. 서버와
             개발자는 내용을 볼 수 없습니다.
           </div>
-          {meta?.enabled && status?.protectedData?.plaintext === 0 ? (
+          {meta?.enabled && status?.protectedData?.plaintext === 0 && status.protectedData.outdated === 0 ? (
             <div className="status ok">
               데이터 보호 중입니다. 저장된 총괄팀장 데이터는 모두 암호문이라 이 열쇠가 있는 기기에서만 보입니다.
             </div>
@@ -403,10 +460,18 @@ export function SecurityKeysPage() {
         </article>
       ) : null}
 
-      {status?.unlocked && meta && (!meta.enabled || (status.protectedData?.plaintext ?? 0) > 0) ? (
+      {status?.unlocked &&
+      meta &&
+      (!meta.enabled || (status.protectedData?.plaintext ?? 0) > 0 || (status.protectedData?.outdated ?? 0) > 0) ? (
         <article className="panel" style={{ border: "2px solid rgba(34,197,94,.55)" }}>
           <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
-            <strong>{meta.enabled ? "남은 데이터 암호화 마치기" : "3. 데이터 잠그기 (암호화 시작)"}</strong>
+            <strong>
+              {!meta.enabled
+                ? "3. 데이터 잠그기 (암호화 시작)"
+                : (status.protectedData?.outdated ?? 0) > 0
+                  ? "열쇠 새로 고치기 마저 하기"
+                  : "남은 데이터 암호화 마치기"}
+            </strong>
             <span className="muted" style={{ fontSize: 13 }}>
               점수판·참고사항·기여도·분기 결과를 암호문으로 바꿉니다. 바꾼 뒤에는 열쇠가 있는 기기에서만 보이고, 서버와
               개발자는 내용을 볼 수 없습니다. 몇 초면 끝나며 화면 내용은 그대로입니다.
@@ -436,6 +501,21 @@ export function SecurityKeysPage() {
               >
                 {meta.enabled ? "이어서 암호화" : "데이터 잠그기"}
               </button>
+            </div>
+          </div>
+        </article>
+      ) : null}
+
+      {status?.unlocked && meta?.enabled && status.rotationRecommended ? (
+        <article className="panel" style={{ border: "2px solid rgba(250,204,21,.6)" }}>
+          <div className="panel-pad" style={{ display: "grid", gap: 10 }}>
+            <strong>열쇠 새로 고치기를 해 주세요</strong>
+            <span className="muted" style={{ fontSize: 13 }}>
+              해제된 기기(이전 팀장 기기 등)가 있습니다. 새로 고치면 그 기기가 예전에 받은 열쇠로는 앞으로의 데이터를 열 수
+              없습니다. 몇 초면 끝나며, 지금 쓰는 기기와 복구 코드는 그대로 쓸 수 있습니다(복구 코드 다시 인쇄 불필요).
+            </span>
+            <div>
+              <RotateKeyButton busy={busy} run={run} setMessage={setMessage} primary />
             </div>
           </div>
         </article>
@@ -504,6 +584,9 @@ export function SecurityKeysPage() {
                   복구 코드 다시 발급
                 </button>
               ) : null}
+              {status.unlocked && meta?.enabled && !status.rotationRecommended ? (
+                <RotateKeyButton busy={busy} run={run} setMessage={setMessage} />
+              ) : null}
             </div>
             <div style={{ display: "grid", gap: 8 }}>
               {visibleHolders.map((holder) => (
@@ -555,6 +638,8 @@ export function SecurityKeysPage() {
           </div>
         </article>
       ) : null}
+
+      {status ? <HandoverGuide /> : null}
     </section>
   );
 }

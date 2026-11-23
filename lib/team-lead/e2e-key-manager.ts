@@ -60,6 +60,8 @@ export interface TeamLeadCryptoMeta {
   setupAt: string;
   setupBy: string;
   enabledAt?: string;
+  /** 마지막으로 열쇠 새로 고치기를 한 시각. */
+  rotatedAt?: string;
 }
 
 /** 보호 대상 team_lead_state 행. 전환·상태 확인에만 쓴다. */
@@ -70,8 +72,11 @@ export interface TeamLeadProtectedStateRow {
 }
 
 export interface TeamLeadProtectedDataStatus {
+  /** 현재 세대 열쇠로 잠긴 행 수 */
   encrypted: number;
   plaintext: number;
+  /** 이전 세대 열쇠로 잠긴 행 수(열쇠 새로 고치기를 마치지 못한 경우) */
+  outdated: number;
 }
 
 export interface TeamLeadLocalDeviceKey {
@@ -113,6 +118,8 @@ export interface TeamLeadE2eKeyBackend {
   getEnvelope(holderId: string, keyVersion: number): Promise<TeamLeadKeyEnvelopeRow | null>;
   upsertEnvelope(input: TeamLeadKeyEnvelopeRow): Promise<void>;
   deleteEnvelopesForHolder(holderId: string): Promise<void>;
+  /** keyVersion보다 이전 세대의 감싼 데이터 키 사본을 모두 지운다. */
+  deleteEnvelopesBelowVersion(keyVersion: number): Promise<void>;
   loadProtectedStateRows(keys: readonly string[]): Promise<TeamLeadProtectedStateRow[]>;
   /** 읽은 뒤 아무도 바꾸지 않았을 때만(updated_at 일치) 바꾼다. 바꿨으면 true. */
   replaceProtectedState(key: string, expectedUpdatedAt: string, state: unknown): Promise<boolean>;
@@ -138,6 +145,11 @@ export interface TeamLeadKeyStatus {
   activeRecoveryCount: number;
   /** 열쇠를 만든 뒤에만 채운다. 형식만 보고 세며 내용은 풀지 않는다. */
   protectedData: TeamLeadProtectedDataStatus | null;
+  /**
+   * 마지막 열쇠 생성·새로 고치기 뒤에 해제된 기기가 있으면 true.
+   * 이전 팀장 기기 등 해제된 기기가 예전 데이터 키를 알고 있으므로 새로 고치기를 권한다.
+   */
+  rotationRecommended: boolean;
 }
 
 export class TeamLeadKeyManagerError extends Error {
@@ -157,6 +169,8 @@ function normalizeConfirmationCode(value: string) {
 
 export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
   let unlocked: { profileId: string; keyVersion: number; dataKey: CryptoKey } | null = null;
+  /** 열쇠 새로 고치기 도중·직후에 이전 세대 데이터를 읽기 위한 키. 이 탭 메모리에만 둔다. */
+  const previousKeys = new Map<number, CryptoKey>();
 
   async function requireTeamLeadSession() {
     const session = await backend.getSession();
@@ -165,6 +179,7 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
     }
     if (unlocked && unlocked.profileId !== session.id) {
       unlocked = null;
+      previousKeys.clear();
     }
     return session;
   }
@@ -192,13 +207,29 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
     const [meta, holders] = await Promise.all([backend.loadCryptoMeta(), backend.listHolders()]);
     const thisDevice = await resolveThisDevice(session, holders);
     let protectedData: TeamLeadProtectedDataStatus | null = null;
+    let rotationRecommended = false;
     if (meta) {
       const rows = await backend.loadProtectedStateRows(TEAM_LEAD_E2E_PROTECTED_STATE_KEYS);
-      const encrypted = rows.filter((row) => isTeamLeadE2eEnvelope(row.state)).length;
-      protectedData = { encrypted, plaintext: rows.length - encrypted };
+      const envelopes = rows.filter((row) => isTeamLeadE2eEnvelope(row.state));
+      const encrypted = envelopes.filter(
+        (row) => (row.state as { keyVersion: number }).keyVersion === meta.currentKeyVersion,
+      ).length;
+      protectedData = { encrypted, plaintext: rows.length - envelopes.length, outdated: envelopes.length - encrypted };
+
+      const since = Date.parse(meta.rotatedAt || meta.setupAt);
+      rotationRecommended =
+        meta.enabled &&
+        holders.some(
+          (row) =>
+            row.kind === "device" &&
+            row.status === "revoked" &&
+            Boolean(row.approved_at) &&
+            Date.parse(row.revoked_at ?? "") > (Number.isNaN(since) ? 0 : since),
+        );
     }
     return {
       protectedData,
+      rotationRecommended,
       session,
       meta,
       holders,
@@ -476,21 +507,43 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
    * - 중간에 실패해도 남은 평문은 그대로 읽히고, 다시 누르면 남은 것만 이어서 바꾼다.
    */
   async function encryptProtectedData() {
-    const { meta, dataKey } = await requireUnlocked();
+    const { session, meta, dataKey } = await requireUnlocked();
     if (!meta.enabled) {
       await backend.saveCryptoMeta({ ...meta, enabled: true, enabledAt: backend.now() });
     }
+    return migrateProtectedRows(session, meta.currentKeyVersion, dataKey);
+  }
 
-    const keyVersion = meta.currentKeyVersion;
+  /**
+   * 보호 데이터 4개를 모두 현재 세대 암호문으로 맞춘다. 평문은 암호화하고, 이전 세대 암호문은 다시 암호화한다.
+   * 모두 현재 세대가 된 뒤에만 이전 세대의 감싼 데이터 키 사본을 지운다.
+   */
+  async function migrateProtectedRows(session: TeamLeadE2eSession, keyVersion: number, dataKey: CryptoKey) {
     let converted = 0;
     for (const stateKey of TEAM_LEAD_E2E_PROTECTED_STATE_KEYS) {
       for (let attempt = 0; ; attempt += 1) {
         const [row] = await backend.loadProtectedStateRows([stateKey]);
-        if (!row || isTeamLeadE2eEnvelope(row.state)) break;
+        if (!row) break;
+        const stored = row.state;
+        const storedEnvelope = isTeamLeadE2eEnvelope(stored) ? stored : null;
+        if (storedEnvelope && storedEnvelope.keyVersion === keyVersion) break;
 
-        const envelope = await encryptTeamLeadState(dataKey, { stateKey, keyVersion, value: row.state });
+        let value: unknown = stored;
+        if (storedEnvelope) {
+          const previousKey = await openDataKeyVersion(session, storedEnvelope.keyVersion);
+          if (!previousKey) {
+            fail("이전 열쇠로 잠긴 데이터를 이 기기에서 열 수 없습니다. 이전 열쇠를 가진 기기에서 다시 시도해 주세요.");
+          }
+          value = await decryptTeamLeadState(previousKey, {
+            stateKey,
+            keyVersion: storedEnvelope.keyVersion,
+            envelope: storedEnvelope,
+          });
+        }
+
+        const envelope = await encryptTeamLeadState(dataKey, { stateKey, keyVersion, value });
         const roundTrip = await decryptTeamLeadState(dataKey, { stateKey, keyVersion, envelope });
-        if (JSON.stringify(roundTrip) !== JSON.stringify(row.state ?? null)) {
+        if (JSON.stringify(roundTrip) !== JSON.stringify(value ?? null)) {
           fail("암호화 확인에 실패해 이 데이터는 바꾸지 않았습니다. 잠시 후 다시 시도해 주세요.");
         }
         if (await backend.replaceProtectedState(stateKey, row.updated_at, envelope)) {
@@ -502,11 +555,81 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
         }
       }
     }
+
+    const rows = await backend.loadProtectedStateRows(TEAM_LEAD_E2E_PROTECTED_STATE_KEYS);
+    const allCurrent = rows.every((row) => isTeamLeadE2eEnvelope(row.state) && row.state.keyVersion === keyVersion);
+    if (allCurrent) {
+      await backend.deleteEnvelopesBelowVersion(keyVersion);
+      previousKeys.clear();
+    }
     return { converted };
+  }
+
+  /**
+   * 열쇠 새로 고치기(P6): 새 데이터 키를 만들어 활성 기기·복구 코드에 감싸 두고, 세대를 올린 뒤
+   * 보호 데이터 4개를 새 열쇠로 다시 암호화한다. 이전 팀장 기기처럼 해제된 열쇠가 예전에 알던
+   * 데이터 키로는 이후 데이터를 열 수 없게 한다. 복구 코드는 다시 입력할 필요가 없다(공개키로 감싼다).
+   */
+  async function rotateDataKey() {
+    const { session, meta, dataKey: currentKey } = await requireUnlocked();
+    if (!meta.enabled) fail("데이터 잠그기를 먼저 해 주세요.");
+
+    const activeHolders = (await backend.listHolders()).filter((row) => row.status === "active");
+    if (!activeHolders.some((row) => row.kind === "recovery")) {
+      fail("사용 중인 복구 코드가 없습니다. 복구 코드를 먼저 다시 발급해 주세요.");
+    }
+
+    const oldVersion = meta.currentKeyVersion;
+    const newVersion = oldVersion + 1;
+    const newKey = await generateTeamLeadDataKey();
+    // 1) 새 세대 사본을 먼저 모든 활성 보관자에게 만든다. 여기서 실패하면 아무것도 바뀌지 않는다.
+    for (const holder of activeHolders) {
+      await backend.upsertEnvelope({
+        holder_id: holder.id,
+        key_version: newVersion,
+        wrapped_dek: await wrapTeamLeadDataKey(newKey, await importTeamLeadPublicKey(holder.public_key)),
+      });
+    }
+    // 2) 세대를 올린다. 이후 어느 탭에서 저장해도 새 열쇠로 저장된다.
+    await backend.saveCryptoMeta({ ...meta, currentKeyVersion: newVersion, rotatedAt: backend.now() });
+    previousKeys.set(oldVersion, currentKey);
+    unlocked = { profileId: session.id, keyVersion: newVersion, dataKey: newKey };
+    // 3) 데이터를 새 열쇠로 다시 암호화하고, 다 바뀌면 이전 세대 사본을 지운다.
+    //    중간에 실패해도 이전 세대 사본이 남아 있어 읽을 수 있고, "이어서 암호화"로 마저 할 수 있다.
+    const result = await migrateProtectedRows(session, newVersion, newKey);
+    return { keyVersion: newVersion, converted: result.converted };
+  }
+
+  /** 이 기기에 있는 감싼 사본으로 특정 세대의 데이터 키를 연다. 없으면 null. */
+  async function openDataKeyVersion(session: TeamLeadE2eSession, keyVersion: number) {
+    if (unlocked && unlocked.profileId === session.id && unlocked.keyVersion === keyVersion) return unlocked.dataKey;
+    const cached = previousKeys.get(keyVersion);
+    if (cached) return cached;
+
+    const holders = await backend.listHolders();
+    const thisDevice = await resolveThisDevice(session, holders);
+    if (!thisDevice.local || !thisDevice.holder || thisDevice.state !== "active") return null;
+    const envelope = await backend.getEnvelope(thisDevice.holder.id, keyVersion);
+    if (!envelope) return null;
+    const dataKey = await unwrapTeamLeadDataKey(envelope.wrapped_dek, thisDevice.local.privateKey);
+    previousKeys.set(keyVersion, dataKey);
+    return dataKey;
+  }
+
+  /** 다른 세대로 저장된 데이터를 읽을 때 쓴다(새로 고치기 도중이거나 다른 탭에서 새로 고친 경우). */
+  async function getDataKeyForVersion(profileId: string, keyVersion: number) {
+    const session = await backend.getSession();
+    if (!session || !session.approved || session.role !== "team_lead" || session.id !== profileId) return null;
+    try {
+      return await openDataKeyVersion(session, keyVersion);
+    } catch {
+      return null;
+    }
   }
 
   function lock() {
     unlocked = null;
+    previousKeys.clear();
   }
 
   /** P4에서 데이터 암호화·복호화에 사용한다. 잠겨 있으면 null. */
@@ -525,8 +648,10 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
     reissueRecoveryCode,
     recoverWithCode,
     encryptProtectedData,
+    rotateDataKey,
     lock,
     getUnlockedDataKey,
+    getDataKeyForVersion,
   };
 }
 
