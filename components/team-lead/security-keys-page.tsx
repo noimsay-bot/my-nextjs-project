@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { printHtmlDocument } from "@/lib/print";
+import { detectTeamLeadKeyStorageRisks, type TeamLeadKeyStorageRisks } from "@/lib/team-lead/e2e-browser-check";
 import type { TeamLeadKeyHolderRow, TeamLeadKeyStatus } from "@/lib/team-lead/e2e-key-manager";
 import { teamLeadE2eKeys } from "@/lib/team-lead/e2e-keys";
 
@@ -88,6 +89,27 @@ function printRecoveryCode(recoveryCode: string) {
   });
 }
 
+function StorageRiskNotice({ risks }: { risks: TeamLeadKeyStorageRisks | null }) {
+  if (!risks) return null;
+  if (risks.inAppBrowser) {
+    return (
+      <div className="status warn" role="alert">
+        지금 {risks.inAppBrowser} 안의 브라우저로 열려 있습니다. 여기서 등록한 열쇠는 크롬·사파리와 따로 저장되고 금방 사라질 수
+        있습니다. 화면 메뉴(⋮ 또는 공유 버튼)에서 <strong>다른 브라우저로 열기</strong>를 눌러 크롬이나 사파리에서 다시 여세요.
+      </div>
+    );
+  }
+  if (risks.maybePrivateWindow) {
+    return (
+      <div className="status warn" role="alert">
+        시크릿(개인정보 보호) 창으로 보입니다. 이 창을 닫으면 이 기기 열쇠가 사라집니다. 일반 창에서 다시 여세요. 시크릿 창이
+        아니라면 이 안내는 무시하셔도 됩니다.
+      </div>
+    );
+  }
+  return null;
+}
+
 function RecoveryCodePanel({ recoveryCode, onDone }: { recoveryCode: string; onDone: () => void }) {
   const [confirmText, setConfirmText] = useState("");
   const [printed, setPrinted] = useState(false);
@@ -106,7 +128,8 @@ function RecoveryCodePanel({ recoveryCode, onDone }: { recoveryCode: string; onD
             padding: 16,
             borderRadius: 10,
             border: "1px solid rgba(255,255,255,.25)",
-            wordBreak: "break-all",
+            // 좁은 휴대폰에서도 4자리 묶음 중간이 아니라 "-" 자리에서 줄이 바뀌게 한다.
+            overflowWrap: "anywhere",
             textAlign: "center",
           }}
         >
@@ -157,6 +180,7 @@ export function SecurityKeysPage() {
   const [approvalCodes, setApprovalCodes] = useState<Record<string, string>>({});
   const [recoveryInput, setRecoveryInput] = useState("");
   const [shownRecoveryCode, setShownRecoveryCode] = useState("");
+  const [storageRisks, setStorageRisks] = useState<TeamLeadKeyStorageRisks | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -182,6 +206,7 @@ export function SecurityKeysPage() {
   useEffect(() => {
     setDeviceLabel(getDefaultDeviceLabel());
     void refresh();
+    void detectTeamLeadKeyStorageRisks().then(setStorageRisks, () => setStorageRisks(null));
   }, [refresh]);
 
   async function run(action: () => Promise<void>, fallback: string) {
@@ -236,6 +261,7 @@ export function SecurityKeysPage() {
               열쇠는 준비되었습니다. 기존 데이터를 암호문으로 바꾸는 작업은 다음 업데이트에서 진행됩니다.
             </div>
           ) : null}
+          <StorageRiskNotice risks={storageRisks} />
           {message ? <div className={`status ${message.tone}`}>{message.text}</div> : null}
           {loading && !status ? <div className="muted">불러오는 중…</div> : null}
 

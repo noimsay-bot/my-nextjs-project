@@ -76,6 +76,20 @@ export async function saveTeamLeadDeviceKey(record: TeamLeadDeviceKeyRecord) {
     throw new Error("기기 열쇠는 추출 불가 개인키만 저장할 수 있습니다.");
   }
   await runDeviceKeyTransaction("readwrite", (store) => store.put(record));
+  // 휴대폰·사파리가 저장 공간이 부족하거나 오래 안 쓴 사이트의 데이터를 자동으로 지우지 않도록 요청한다.
+  // 허용 여부는 브라우저가 정하며, 거절되어도 등록은 그대로 진행한다.
+  await requestTeamLeadPersistentStorage();
+}
+
+/** 이 사이트 저장 공간을 "자동 삭제하지 말 것"으로 요청한다. true=유지됨, false=거절, null=지원 안 함. */
+export async function requestTeamLeadPersistentStorage(): Promise<boolean | null> {
+  try {
+    if (typeof navigator === "undefined" || typeof navigator.storage?.persist !== "function") return null;
+    if (typeof navigator.storage.persisted === "function" && (await navigator.storage.persisted())) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return null;
+  }
 }
 
 export async function setTeamLeadDeviceKeyHolderId(profileId: string, holderId: string) {
