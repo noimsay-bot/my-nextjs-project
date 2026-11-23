@@ -216,7 +216,11 @@ function HandoverGuide() {
           <li>새 팀장 화면에서 새로고침을 눌러 <strong>이 기기: 열림</strong>이 되는지 확인합니다.</li>
           <li>새 팀장이 관리자 화면에서 이전 팀장의 등급을 내립니다. 이전 팀장 기기 열쇠는 자동으로 해제됩니다.</li>
           <li>
-            새 팀장이 이 화면에서 <strong>열쇠 새로 고치기</strong>를 누릅니다. 복구 코드 봉투는 그대로 두면 됩니다.
+            새 팀장이 이 화면에서 <strong>복구 코드 다시 발급</strong>을 누르고 새 코드를 인쇄해 봉인합니다. 이전 팀장이
+            예전 코드를 알고 있으므로 예전 종이는 파쇄합니다.
+          </li>
+          <li>
+            마지막으로 새 팀장이 이 화면에서 <strong>열쇠 새로 고치기</strong>를 누릅니다.
           </li>
         </ol>
         <div className="status note" style={{ marginTop: 12 }}>
