@@ -18,6 +18,7 @@ export const teamLeadProtectedState = createTeamLeadProtectedState({
   },
   loadCryptoMeta: loadTeamLeadCryptoMeta,
   getUnlockedDataKey: (profileId) => teamLeadE2eKeys.getUnlockedDataKey(profileId),
+  getDataKeyForVersion: (profileId, keyVersion) => teamLeadE2eKeys.getDataKeyForVersion(profileId, keyVersion),
   unlock: () => teamLeadE2eKeys.unlock(),
   onLocked() {
     // 총괄팀장 화면에만 한 번 안내한다(같은 순간 여러 key가 잠겨도 한 번만).

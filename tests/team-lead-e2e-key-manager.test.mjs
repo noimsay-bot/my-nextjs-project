@@ -34,8 +34,7 @@ function createSharedDb() {
 }
 
 // 브라우저 하나 = 세션 하나 + 그 브라우저의 IndexedDB(deviceKeys). DB는 공유한다.
-function createBrowser(db, session) {
-  const deviceKeys = new Map();
+function createBrowser(db, session, deviceKeys = new Map()) {
   const state = { session };
   const names = new Map([LEAD_A, LEAD_B, ADMIN].map((user) => [user.id, user.name]));
   const backend = {
@@ -82,6 +81,9 @@ function createBrowser(db, session) {
     async deleteEnvelopesForHolder(holderId) {
       for (const key of [...db.envelopes.keys()]) if (key.startsWith(`${holderId}|`)) db.envelopes.delete(key);
     },
+    async deleteEnvelopesBelowVersion(keyVersion) {
+      for (const [key, row] of [...db.envelopes.entries()]) if (row.key_version < keyVersion) db.envelopes.delete(key);
+    },
     async loadProtectedStateRows(keys) {
       return keys.filter((key) => db.stateRows.has(key)).map((key) => ({ key, ...structuredClone(db.stateRows.get(key)) }));
     },
@@ -103,7 +105,7 @@ function createBrowser(db, session) {
       deviceKeys.delete(profileId);
     },
     now() {
-      return "2026-11-23T00:00:00.000Z";
+      return db.nowValue ?? "2026-11-23T00:00:00.000Z";
     },
   };
   return { manager: managerModule.createTeamLeadE2eKeyManager(backend), state, deviceKeys };
@@ -284,7 +286,7 @@ test("데이터 잠그기: 켜고, 평문 4개를 암호문으로 바꾸고, 다
   for (const [key, value] of Object.entries(originals)) putStateRow(db, key, value);
 
   let status = await browserA.manager.getStatus();
-  assert.deepEqual(status.protectedData, { encrypted: 0, plaintext: 3 }, "보호 대상 key만 센다");
+  assert.deepEqual(status.protectedData, { encrypted: 0, plaintext: 3, outdated: 0 }, "보호 대상 key만 센다");
 
   // 잠긴 브라우저(열쇠 없음)는 전환할 수 없다.
   const lockedBrowser = createBrowser(db, LEAD_A);
@@ -316,7 +318,7 @@ test("데이터 잠그기: 켜고, 평문 4개를 암호문으로 바꾸고, 다
   }
 
   status = await browserA.manager.getStatus();
-  assert.deepEqual(status.protectedData, { encrypted: 3, plaintext: 0 });
+  assert.deepEqual(status.protectedData, { encrypted: 3, plaintext: 0, outdated: 0 });
 
   // 다시 눌러도 이미 암호문인 행은 건드리지 않는다.
   const before = JSON.stringify([...db.stateRows.entries()]);
@@ -335,4 +337,107 @@ test("데이터 잠그기: 계속 다른 화면이 저장하면 덮어쓰지 않
   db.beforeReplace = null;
   assert.deepEqual(db.stateRows.get("scoreboard_v1").state, { a: 2 }, "마지막으로 저장된 값이 남는다");
   assert.equal(db.meta.enabled, true, "암호화는 먼저 켜져 이후 저장은 암호문이 된다");
+});
+
+async function decryptRow(db, dataKey, key) {
+  const stored = db.stateRows.get(key).state;
+  return crypto.decryptTeamLeadState(dataKey, { stateKey: key, keyVersion: stored.keyVersion, envelope: stored });
+}
+
+test("열쇠 새로 고치기: 해제된 기기의 예전 열쇠로는 열 수 없고, 남은 기기·복구 코드는 그대로 연다", async () => {
+  const db = createSharedDb();
+  const browserA = createBrowser(db, LEAD_A);
+  const browserB = createBrowser(db, LEAD_B);
+  await browserA.manager.registerThisDevice("사무실 PC");
+  const { recoveryCode } = await browserA.manager.setupKeys();
+  putStateRow(db, "scoreboard_v1", { a: 1 });
+  putStateRow(db, "reference_notes_v1", { notes: { u1: "메모" } });
+  await browserA.manager.encryptProtectedData();
+
+  // 이전 팀장(B) 기기 승인 후 해제(등급 강등 트리거와 같은 결과)
+  db.nowValue = "2026-11-24T00:00:00.000Z";
+  const deviceB = await browserB.manager.registerThisDevice("B 노트북");
+  await browserA.manager.approveDevice(deviceB.id, deviceB.fingerprint);
+  assert.equal(await browserB.manager.unlock(), true);
+  const oldKeyOfB = browserB.manager.getUnlockedDataKey(LEAD_B.id).dataKey;
+  assert.equal((await browserA.manager.getStatus()).rotationRecommended, false, "해제 전에는 권하지 않는다");
+  db.nowValue = "2026-11-25T00:00:00.000Z";
+  await browserA.manager.revokeHolder(deviceB.id);
+  assert.equal((await browserA.manager.getStatus()).rotationRecommended, true, "승인됐던 기기가 해제되면 권한다");
+
+  db.nowValue = "2026-11-26T00:00:00.000Z";
+  const result = await browserA.manager.rotateDataKey();
+  assert.equal(result.keyVersion, 2);
+  assert.equal(result.converted, 2);
+  assert.equal(db.meta.currentKeyVersion, 2);
+  assert.equal(db.meta.rotatedAt, "2026-11-26T00:00:00.000Z");
+  assert.ok([...db.envelopes.values()].every((row) => row.key_version === 2), "예전 세대 사본은 지운다");
+
+  const status = await browserA.manager.getStatus();
+  assert.deepEqual(status.protectedData, { encrypted: 2, plaintext: 0, outdated: 0 });
+  assert.equal(status.rotationRecommended, false);
+
+  // 해제된 B가 갖고 있던 예전 데이터 키로는 새 데이터를 열 수 없다.
+  await assert.rejects(decryptRow(db, oldKeyOfB, "scoreboard_v1"));
+
+  // 같은 기기의 다른 탭(같은 IndexedDB)은 새 세대로 자동으로 연다.
+  const otherTab = createBrowser(db, LEAD_A, browserA.deviceKeys);
+  assert.equal(await otherTab.manager.unlock(), true);
+  assert.deepEqual(await decryptRow(db, otherTab.manager.getUnlockedDataKey(LEAD_A.id).dataKey, "scoreboard_v1"), { a: 1 });
+
+  // 복구 코드는 다시 입력하지 않아도 새 세대를 연다.
+  const freshBrowser = createBrowser(db, LEAD_A);
+  await freshBrowser.manager.recoverWithCode(recoveryCode, "새 PC");
+  const recovered = freshBrowser.manager.getUnlockedDataKey(LEAD_A.id);
+  assert.equal(recovered.keyVersion, 2);
+  assert.deepEqual(await decryptRow(db, recovered.dataKey, "reference_notes_v1"), { notes: { u1: "메모" } });
+});
+
+test("열쇠 새로 고치기가 중간에 멈춰도 데이터를 읽을 수 있고, 이어서 암호화로 마친다", async () => {
+  const db = createSharedDb();
+  const browserA = createBrowser(db, LEAD_A);
+  await browserA.manager.registerThisDevice("사무실 PC");
+  await browserA.manager.setupKeys();
+  putStateRow(db, "scoreboard_v1", { a: 1 });
+  putStateRow(db, "contribution_manual_v1", { c: 3 });
+  await browserA.manager.encryptProtectedData();
+
+  db.beforeReplace = async (key) => {
+    if (key === "scoreboard_v1") throw new Error("network down");
+  };
+  await rejectsWithMessage(browserA.manager.rotateDataKey(), /network down/);
+  db.beforeReplace = null;
+  assert.equal(db.meta.currentKeyVersion, 2);
+  assert.equal(db.stateRows.get("scoreboard_v1").state.keyVersion, 1, "멈춘 행은 예전 세대로 남는다");
+  assert.ok([...db.envelopes.values()].some((row) => row.key_version === 1), "다 바뀌기 전에는 예전 사본을 지우지 않는다");
+
+  // 다른 탭(같은 기기)은 예전 세대 행도 그 세대 사본으로 읽는다.
+  const otherTab = createBrowser(db, LEAD_A, browserA.deviceKeys);
+  await otherTab.manager.unlock();
+  const v1Key = await otherTab.manager.getDataKeyForVersion(LEAD_A.id, 1);
+  assert.deepEqual(await decryptRow(db, v1Key, "scoreboard_v1"), { a: 1 });
+  assert.equal(await otherTab.manager.getDataKeyForVersion(LEAD_B.id, 1), null, "다른 사람 몫은 열지 않는다");
+
+  const status = await otherTab.manager.getStatus();
+  // scoreboard_v1에서 멈춰 그 뒤 행도 아직 예전 세대다.
+  assert.deepEqual(status.protectedData, { encrypted: 0, plaintext: 0, outdated: 2 });
+
+  await otherTab.manager.encryptProtectedData();
+  assert.equal(db.stateRows.get("scoreboard_v1").state.keyVersion, 2);
+  assert.ok([...db.envelopes.values()].every((row) => row.key_version === 2));
+  const v2Key = otherTab.manager.getUnlockedDataKey(LEAD_A.id).dataKey;
+  assert.deepEqual(await decryptRow(db, v2Key, "scoreboard_v1"), { a: 1 });
+  assert.deepEqual(await decryptRow(db, v2Key, "contribution_manual_v1"), { c: 3 });
+});
+
+test("열쇠 새로 고치기는 데이터 잠그기 전이나 복구 코드가 없으면 하지 않는다", async () => {
+  const db = createSharedDb();
+  const browserA = createBrowser(db, LEAD_A);
+  await browserA.manager.registerThisDevice("사무실 PC");
+  await browserA.manager.setupKeys();
+  await rejectsWithMessage(browserA.manager.rotateDataKey(), /데이터 잠그기를 먼저/);
+  await browserA.manager.encryptProtectedData();
+  for (const row of db.holders) if (row.kind === "recovery") row.status = "revoked";
+  await rejectsWithMessage(browserA.manager.rotateDataKey(), /복구 코드가 없습니다/);
+  assert.equal(db.meta.currentKeyVersion, 1);
 });

@@ -1118,12 +1118,28 @@ export default function AdminPage() {
                             className="btn primary"
                             disabled={!dirty || savingProfileId === profile.id}
                             onClick={async () => {
+                              // 총괄팀장 보안 열쇠: 내리면 그 사람 기기 열쇠가 DB 트리거로 자동 해제된다.
+                              if (
+                                profile.role === "team_lead" &&
+                                draftRole !== "team_lead" &&
+                                !window.confirm(
+                                  `${profile.name}님을 총괄팀장에서 내리면 이 사람의 보안 열쇠 기기가 모두 해제됩니다.\n\n` +
+                                    "새 총괄팀장 기기가 보안 열쇠 화면에서 승인되어 '열림' 상태인지 먼저 확인하세요.\n" +
+                                    "내린 뒤에는 새 총괄팀장이 보안 열쇠 화면에서 '열쇠 새로 고치기'를 눌러 주세요.\n\n계속할까요?",
+                                )
+                              ) {
+                                return;
+                              }
                               setSavingProfileId(profile.id);
                               const result = await updateAdminProfileAccess(profile.id, {
                                 role: draftRole,
                                 approved: profile.approved,
                               });
-                              setMessage(result.message);
+                              setMessage(
+                                result.ok && draftRole === "team_lead" && profile.role !== "team_lead"
+                                  ? `${result.message} 새 총괄팀장이 보안 열쇠 화면에서 기기를 등록하면, 화면에 뜬 6자리로 승인해 주세요.`
+                                  : result.message,
+                              );
                               if (result.ok) {
                                 await refresh();
                               }

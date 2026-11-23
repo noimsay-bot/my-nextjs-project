@@ -6,10 +6,15 @@ import { PGlite } from "@electric-sql/pglite";
 // 메모리 안의 실제 Postgres 엔진으로 평문 덮어쓰기 방지 트리거를 검사한다. Supabase에 접속하지 않는다.
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const guardSql = readFileSync(new URL("../supabase/incremental_team_lead_e2e_plaintext_guard.sql", import.meta.url), "utf8");
+// 6단계에서 같은 트리거 함수를 세대 검사까지 하도록 바꿨다. schema.sql은 최신(6단계) 내용과 같아야 한다.
+const versionGuardSql = readFileSync(
+  new URL("../supabase/incremental_team_lead_e2e_key_version_guard.sql", import.meta.url),
+  "utf8",
+);
 
 const ENVELOPE = JSON.stringify({ enc: "tl-e2e-v1", keyVersion: 1, iv: "aXY=", ct: "Y3Q=" });
 
-test("schema.sql과 incremental SQL의 평문 방지 블록이 같다", () => {
+test("schema.sql과 최신 incremental SQL의 평문 방지 블록이 같다", () => {
   const block = (sql) => {
     const text = sql.replace(/\r\n/g, "\n");
     const start = text.indexOf("create or replace function public.guard_team_lead_protected_state()");
@@ -18,7 +23,7 @@ test("schema.sql과 incremental SQL의 평문 방지 블록이 같다", () => {
     assert.ok(start >= 0 && end > start, "평문 방지 블록을 찾지 못했습니다.");
     return text.slice(start, end + endMarker.length);
   };
-  assert.equal(block(schema), block(guardSql));
+  assert.equal(block(schema), block(versionGuardSql));
 });
 
 test("암호화를 켜면 보호 대상 4개 key는 암호문만 저장되고, 켠 설정은 끄거나 지울 수 없다", async (t) => {
@@ -31,9 +36,10 @@ test("암호화를 켜면 보호 대상 4개 key는 암호문만 저장되고, �
       updated_at timestamptz not null default now()
     );
   `);
+  // 운영 적용 순서대로 5단계 → 6단계 SQL을 실행한다. 여러 번 실행해도 안전해야 한다.
   await db.exec(guardSql);
-  // 여러 번 실행해도 안전해야 한다.
-  await db.exec(guardSql);
+  await db.exec(versionGuardSql);
+  await db.exec(versionGuardSql);
 
   const put = (key, state) =>
     db.query(
@@ -76,6 +82,18 @@ test("암호화를 켜면 보호 대상 4개 key는 암호문만 저장되고, �
     await rejects(put("crypto_meta_v1", "{}"), /끌 수 없습니다/);
     await rejects(db.query("delete from team_lead_state where key = 'crypto_meta_v1'"), /지울 수 없습니다/);
     await put("crypto_meta_v1", JSON.stringify({ enabled: true, currentKeyVersion: 2 }));
+  });
+
+  await t.test("열쇠 세대를 올리면 예전 세대 암호문은 저장할 수 없고, 세대는 줄일 수 없다", async () => {
+    // 위 단계에서 currentKeyVersion이 2가 되었다.
+    await rejects(put("scoreboard_v1", ENVELOPE), /예전 열쇠로/);
+    const v2 = JSON.stringify({ enc: "tl-e2e-v1", keyVersion: 2, iv: "aXY=", ct: "Y3Q=" });
+    await put("scoreboard_v1", v2);
+    await put("reference_notes_v1", v2);
+    await rejects(put("crypto_meta_v1", JSON.stringify({ enabled: true, currentKeyVersion: 1 })), /되돌릴 수 없습니다/);
+    await rejects(put("crypto_meta_v1", JSON.stringify({ enabled: true })), /되돌릴 수 없습니다/);
+    await put("crypto_meta_v1", JSON.stringify({ enabled: true, currentKeyVersion: 3, rotatedAt: "2026-11-24" }));
+    await rejects(put("scoreboard_v1", v2), /예전 열쇠로/);
   });
 
   await t.test("보호 대상 행 삭제는 막지 않는다(평문이 생기지 않음)", async () => {

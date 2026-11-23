@@ -6,7 +6,7 @@
 ## 요약
 
 - 스캔 대상: `app`
-- 라우트 세그먼트 수: 77
+- 라우트 세그먼트 수: 78
 - route group 괄호 세그먼트는 URL 경로에서 제외했습니다.
 
 ## app/root
@@ -95,6 +95,7 @@
 | /api/home/public-workspace | api/home/public-workspace |  |  | yes |  |  |
 | /api/internal/schedule/assembly-sync | api/internal/schedule/assembly-sync |  |  | yes |  |  |
 | /api/internal/schedule-assignment/daily-backup | api/internal/schedule-assignment/daily-backup |  |  | yes |  |  |
+| /api/internal/team-lead/security-change-alert | api/internal/team-lead/security-change-alert |  |  | yes |  |  |
 | /api/internal/youtube-lives/collect | api/internal/youtube-lives/collect |  |  | yes |  |  |
 | /api/portal/page-visit | api/portal/page-visit |  |  | yes |  |  |
 | /api/schedule/assembly-leave-push | api/schedule/assembly-leave-push |  |  | yes |  |  |

@@ -10,12 +10,12 @@
 
 ## 요약
 
-- SQL 파일: 63
+- SQL 파일: 64
 - 테이블 선언: 65
 - enum 선언: 1
 - policy 선언: 232
-- function 선언: 74
-- trigger 선언: 50
+- function 선언: 75
+- trigger 선언: 51
 - RLS enable 선언: 65
 - table grant 선언: 96
 - table revoke 선언: 70
@@ -575,6 +575,7 @@
 | public.get_portal_support_summary | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
 | public.guard_profile_privileged_changes | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | public.guard_profile_privileged_changes | supabase/schema.sql |
+| public.guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_key_version_guard.sql |
 | public.guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_plaintext_guard.sql |
 | public.guard_team_lead_protected_state | supabase/schema.sql |
 | public.handle_new_user | supabase/incremental_safe_profile_bootstrap.sql |
@@ -740,6 +741,7 @@
 | --- | --- |
 | guard_profile_privileged_changes | supabase/incremental_restrict_admin_privilege_escalation.sql |
 | guard_profile_privileged_changes | supabase/schema.sql |
+| guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_key_version_guard.sql |
 | guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_plaintext_guard.sql |
 | guard_team_lead_protected_state | supabase/schema.sql |
 | on_auth_user_created | supabase/schema.sql |

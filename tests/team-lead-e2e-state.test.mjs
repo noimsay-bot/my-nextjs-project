@@ -155,3 +155,44 @@ test("열쇠 세대가 다르거나 다른 열쇠로 잠긴 암호문은 잠김�
   const foreign = await crypto.encryptTeamLeadState(otherKey, { stateKey: "scoreboard_v1", keyVersion: 1, value: 1 });
   assert.equal((await sameVersion.protectedState.read("scoreboard_v1", foreign)).reason, "decrypt_failed");
 });
+
+test("열쇠 새로 고치기 전후: 다른 세대 암호문은 그 세대 사본으로 읽고, 저장은 새 세대로 한다", async () => {
+  const oldKey = await crypto.generateTeamLeadDataKey();
+  const newKey = await crypto.generateTeamLeadDataKey();
+  const state = { meta: { enabled: true, currentKeyVersion: 2 }, unlocked: { keyVersion: 1, dataKey: oldKey }, unlockCalls: 0 };
+  const protectedState = core.createTeamLeadProtectedState({
+    async getSession() {
+      return TEAM_LEAD;
+    },
+    async loadCryptoMeta() {
+      return state.meta;
+    },
+    getUnlockedDataKey() {
+      return state.unlocked;
+    },
+    async getDataKeyForVersion(profileId, keyVersion) {
+      assert.equal(profileId, TEAM_LEAD.id);
+      return keyVersion === 1 ? oldKey : keyVersion === 2 ? newKey : null;
+    },
+    async unlock() {
+      // 다른 탭이 세대를 올렸으므로 다시 열면 새 세대가 열린다.
+      state.unlockCalls += 1;
+      state.unlocked = { keyVersion: 2, dataKey: newKey };
+      return true;
+    },
+  });
+
+  const v2Envelope = await crypto.encryptTeamLeadState(newKey, { stateKey: "scoreboard_v1", keyVersion: 2, value: { a: 2 } });
+  const v1Envelope = await crypto.encryptTeamLeadState(oldKey, { stateKey: "reference_notes_v1", keyVersion: 1, value: { a: 1 } });
+  assert.deepEqual((await protectedState.read("scoreboard_v1", v2Envelope)).state, { a: 2 }, "새 세대 행도 읽는다");
+
+  const written = await protectedState.prepareForWrite("scoreboard_v1", { a: 3 });
+  assert.equal(written.keyVersion, 2, "저장은 새 세대 열쇠로 한다");
+  assert.equal(state.unlockCalls, 1);
+  assert.deepEqual((await protectedState.read("reference_notes_v1", v1Envelope)).state, { a: 1 }, "예전 세대 행도 읽는다");
+
+  const v9Envelope = { ...v1Envelope, keyVersion: 9 };
+  const locked = await protectedState.read("reference_notes_v1", v9Envelope);
+  assert.equal(locked.locked, true);
+  assert.equal(locked.reason, "key_version");
+});

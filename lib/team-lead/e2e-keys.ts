@@ -49,6 +49,7 @@ function normalizeCryptoMeta(value: unknown): TeamLeadCryptoMeta | null {
     setupAt: typeof candidate.setupAt === "string" ? candidate.setupAt : "",
     setupBy: typeof candidate.setupBy === "string" ? candidate.setupBy : "",
     ...(typeof candidate.enabledAt === "string" ? { enabledAt: candidate.enabledAt } : {}),
+    ...(typeof candidate.rotatedAt === "string" ? { rotatedAt: candidate.rotatedAt } : {}),
   };
 }
 
@@ -141,6 +142,12 @@ const supabaseBackend: TeamLeadE2eKeyBackend = {
     const supabase = await getPortalSupabaseClient();
     const { error } = await supabase.from("team_lead_key_envelopes").delete().eq("holder_id", holderId);
     throwIfError(error, "감싼 데이터 키를 지우지 못했습니다.");
+  },
+
+  async deleteEnvelopesBelowVersion(keyVersion) {
+    const supabase = await getPortalSupabaseClient();
+    const { error } = await supabase.from("team_lead_key_envelopes").delete().lt("key_version", keyVersion);
+    throwIfError(error, "이전 열쇠 사본을 지우지 못했습니다.");
   },
 
   async loadProtectedStateRows(keys) {
