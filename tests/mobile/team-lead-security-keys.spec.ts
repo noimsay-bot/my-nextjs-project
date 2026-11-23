@@ -11,8 +11,13 @@ type Row = Record<string, unknown>;
 function createFakeBackend() {
   const holders: Row[] = [];
   const envelopes: Row[] = [];
-  const state = new Map<string, unknown>();
+  const state = new Map<string, { state: unknown; updated_at: string }>();
   let sequence = 0;
+  let clock = 0;
+  const putState = (key: string, value: unknown) => {
+    clock += 1;
+    state.set(key, { state: value, updated_at: new Date(Date.UTC(2026, 10, 23, 2, 0, clock)).toISOString() });
+  };
 
   const withOwner = (row: Row) => ({ ...row, owner: { name: row.profile_id ? "총괄팀장" : null } });
 
@@ -39,8 +44,16 @@ function createFakeBackend() {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(rows ?? []) });
   }
 
+  function readIn(url: URL, column: string) {
+    const raw = url.searchParams.get(column);
+    if (!raw?.startsWith("in.(")) return null;
+    return raw.slice(4, -1).split(",").map((item) => item.replace(/^"|"$/g, ""));
+  }
+
   return {
     holders,
+    state,
+    putState,
     async handleHolders(route: Route) {
       const request = route.request();
       const url = new URL(request.url());
@@ -122,16 +135,30 @@ function createFakeBackend() {
       const url = new URL(request.url());
       if (request.method() === "GET") {
         const key = readEq(url, "key");
+        const keys = readIn(url, "key");
         const rows = [...state.entries()]
-          .filter(([stateKey]) => !key || stateKey === key)
-          .map(([stateKey, value]) => ({ key: stateKey, state: value, updated_at: new Date().toISOString() }));
+          .filter(([stateKey]) => (!key || stateKey === key) && (!keys || keys.includes(stateKey)))
+          .map(([stateKey, row]) => ({ key: stateKey, ...row }));
         await reply(route, rows);
         return;
       }
       if (request.method() === "POST") {
         const body = JSON.parse(request.postData() ?? "{}") as Row | Row[];
-        for (const item of Array.isArray(body) ? body : [body]) state.set(String(item.key), item.state);
+        for (const item of Array.isArray(body) ? body : [body]) putState(String(item.key), item.state);
         await reply(route, []);
+        return;
+      }
+      if (request.method() === "PATCH") {
+        const key = readEq(url, "key") ?? "";
+        const expected = readEq(url, "updated_at");
+        const patch = JSON.parse(request.postData() ?? "{}") as Row;
+        const current = state.get(key);
+        if (!current || current.updated_at !== expected) {
+          await reply(route, []);
+          return;
+        }
+        putState(key, patch.state);
+        await reply(route, [{ key }]);
         return;
       }
       await reply(route, []);
@@ -201,6 +228,7 @@ async function expectNoHorizontalScroll(page: Page) {
 test("휴대폰에서 기기 등록 → 열쇠 만들기 → 복구 코드 확인까지 화면이 넘치지 않는다", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   const backend = await openSecurityPageAsTeamLead(page);
+  backend.putState("reference_notes_v1", { notes: { "user-1": "야간 선호" } });
 
   const registerButton = page.getByRole("button", { name: "이 기기 등록" });
   await expect(registerButton).toBeVisible();
@@ -230,6 +258,18 @@ test("휴대폰에서 기기 등록 → 열쇠 만들기 → 복구 코드 확�
   await expect(page.getByText("등록된 열쇠")).toBeVisible();
   await expectNoHorizontalScroll(page);
   await page.screenshot({ path: testInfo.outputPath("4-unlocked.png"), fullPage: true });
+
+  const lockButton = page.getByRole("button", { name: "데이터 잠그기" });
+  await expect(lockButton).toBeVisible();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await lockButton.click();
+  await expect(page.getByText("데이터 보호 중입니다.", { exact: false })).toBeVisible({ timeout: 30_000 });
+  const stored = backend.state.get("reference_notes_v1")?.state as { enc?: string } | undefined;
+  expect(stored?.enc).toBe("tl-e2e-v1");
+  expect(JSON.stringify(stored)).not.toContain("야간");
+  expect((backend.state.get("crypto_meta_v1")?.state as { enabled?: boolean } | undefined)?.enabled).toBe(true);
+  await expectNoHorizontalScroll(page);
+  await page.screenshot({ path: testInfo.outputPath("5-locked-data.png"), fullPage: true });
 });
 
 test("카카오톡 인앱 브라우저로 열면 다른 브라우저로 열라는 경고가 보인다", async ({ browser }, testInfo) => {
@@ -245,6 +285,6 @@ test("카카오톡 인앱 브라우저로 열면 다른 브라우저로 열라�
 
   await expect(page.getByRole("alert").filter({ hasText: "카카오톡 안의 브라우저" })).toBeVisible();
   await expectNoHorizontalScroll(page);
-  await page.screenshot({ path: testInfo.outputPath("5-kakao-warning.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("6-kakao-warning.png"), fullPage: true });
   await context.close();
 });

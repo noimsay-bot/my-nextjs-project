@@ -16,6 +16,7 @@ import {
   type TeamLeadE2eKeyBackend,
   type TeamLeadKeyEnvelopeRow,
   type TeamLeadKeyHolderRow,
+  type TeamLeadProtectedStateRow,
 } from "@/lib/team-lead/e2e-key-manager";
 
 const HOLDER_COLUMNS =
@@ -47,6 +48,7 @@ function normalizeCryptoMeta(value: unknown): TeamLeadCryptoMeta | null {
     currentKeyVersion: candidate.currentKeyVersion,
     setupAt: typeof candidate.setupAt === "string" ? candidate.setupAt : "",
     setupBy: typeof candidate.setupBy === "string" ? candidate.setupBy : "",
+    ...(typeof candidate.enabledAt === "string" ? { enabledAt: candidate.enabledAt } : {}),
   };
 }
 
@@ -139,6 +141,30 @@ const supabaseBackend: TeamLeadE2eKeyBackend = {
     const supabase = await getPortalSupabaseClient();
     const { error } = await supabase.from("team_lead_key_envelopes").delete().eq("holder_id", holderId);
     throwIfError(error, "감싼 데이터 키를 지우지 못했습니다.");
+  },
+
+  async loadProtectedStateRows(keys) {
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_state")
+      .select("key, state, updated_at")
+      .in("key", [...keys])
+      .returns<TeamLeadProtectedStateRow[]>();
+    throwIfError(error, "총괄팀장 데이터를 불러오지 못했습니다.");
+    return data ?? [];
+  },
+
+  async replaceProtectedState(key, expectedUpdatedAt, state) {
+    const session = await getPortalSession();
+    const supabase = await getPortalSupabaseClient();
+    const { data, error } = await supabase
+      .from("team_lead_state")
+      .update({ state, updated_by: session?.id ?? null })
+      .eq("key", key)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("key");
+    throwIfError(error, "총괄팀장 데이터를 암호문으로 바꾸지 못했습니다.");
+    return (data?.length ?? 0) > 0;
   },
 
   getDeviceKey: getTeamLeadDeviceKey,

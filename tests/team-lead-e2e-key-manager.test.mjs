@@ -30,7 +30,7 @@ const LEAD_B = { id: "lead-b", name: "이팀장", role: "team_lead", approved: t
 const ADMIN = { id: "admin-1", name: "개발자", role: "admin", approved: true };
 
 function createSharedDb() {
-  return { meta: null, holders: [], envelopes: new Map(), sequence: 0 };
+  return { meta: null, holders: [], envelopes: new Map(), sequence: 0, stateRows: new Map(), clock: 0, beforeReplace: null };
 }
 
 // 브라우저 하나 = 세션 하나 + 그 브라우저의 IndexedDB(deviceKeys). DB는 공유한다.
@@ -81,6 +81,17 @@ function createBrowser(db, session) {
     },
     async deleteEnvelopesForHolder(holderId) {
       for (const key of [...db.envelopes.keys()]) if (key.startsWith(`${holderId}|`)) db.envelopes.delete(key);
+    },
+    async loadProtectedStateRows(keys) {
+      return keys.filter((key) => db.stateRows.has(key)).map((key) => ({ key, ...structuredClone(db.stateRows.get(key)) }));
+    },
+    async replaceProtectedState(key, expectedUpdatedAt, value) {
+      if (db.beforeReplace) await db.beforeReplace(key);
+      const row = db.stateRows.get(key);
+      if (!row || row.updated_at !== expectedUpdatedAt) return false;
+      db.clock += 1;
+      db.stateRows.set(key, { state: structuredClone(value), updated_at: `t${db.clock}` });
+      return true;
     },
     async getDeviceKey(profileId) {
       return deviceKeys.get(profileId) ?? null;
@@ -251,4 +262,77 @@ test("최초 설정 → 인수인계 승인 → 복구 코드 → 해제까지 �
     assert.equal(fresh.status, "pending");
     assert.notEqual(fresh.id, status.thisDevice.holder.id);
   });
+});
+
+function putStateRow(db, key, value) {
+  db.clock += 1;
+  db.stateRows.set(key, { state: structuredClone(value), updated_at: `t${db.clock}` });
+}
+
+test("데이터 잠그기: 켜고, 평문 4개를 암호문으로 바꾸고, 다시 눌러도 안전하다", async () => {
+  const db = createSharedDb();
+  const browserA = createBrowser(db, LEAD_A);
+  await browserA.manager.registerThisDevice("사무실 PC");
+  await browserA.manager.setupKeys();
+
+  const originals = {
+    scoreboard_v1: { broadcastAccident: { 홍길동: [{ score: -2, memo: "자막 오류" }] } },
+    reference_notes_v1: { notes: { "user-1": "야간 선호" } },
+    contribution_manual_v1: { "2026-Q4": { "user-2": 3 } },
+    final_cut_v1: { item: "circle" },
+  };
+  for (const [key, value] of Object.entries(originals)) putStateRow(db, key, value);
+
+  let status = await browserA.manager.getStatus();
+  assert.deepEqual(status.protectedData, { encrypted: 0, plaintext: 3 }, "보호 대상 key만 센다");
+
+  // 잠긴 브라우저(열쇠 없음)는 전환할 수 없다.
+  const lockedBrowser = createBrowser(db, LEAD_A);
+  await rejectsWithMessage(lockedBrowser.manager.encryptProtectedData(), /잠겨 있습니다/);
+  assert.equal(db.meta.enabled, false);
+
+  // 전환 도중 다른 화면이 같은 행을 한 번 저장해도 최신 값을 다시 읽어 암호화한다.
+  let raced = false;
+  db.beforeReplace = async (key) => {
+    if (key === "reference_notes_v1" && !raced) {
+      raced = true;
+      putStateRow(db, key, { notes: { "user-1": "주간 선호(수정)" } });
+    }
+  };
+  const result = await browserA.manager.encryptProtectedData();
+  db.beforeReplace = null;
+  assert.equal(result.converted, 3);
+  assert.equal(db.meta.enabled, true);
+  assert.equal(db.meta.enabledAt, "2026-11-23T00:00:00.000Z");
+  assert.deepEqual(db.stateRows.get("final_cut_v1").state, originals.final_cut_v1, "보호 대상이 아닌 key는 그대로 둔다");
+
+  const { dataKey, keyVersion } = browserA.manager.getUnlockedDataKey(LEAD_A.id);
+  const expected = { ...originals, reference_notes_v1: { notes: { "user-1": "주간 선호(수정)" } } };
+  for (const key of ["scoreboard_v1", "reference_notes_v1", "contribution_manual_v1"]) {
+    const stored = db.stateRows.get(key).state;
+    assert.ok(crypto.isTeamLeadE2eEnvelope(stored), `${key}는 암호문이어야 한다`);
+    assert.ok(!JSON.stringify(stored).includes("선호") && !JSON.stringify(stored).includes("자막"), "평문이 남지 않는다");
+    assert.deepEqual(await crypto.decryptTeamLeadState(dataKey, { stateKey: key, keyVersion, envelope: stored }), expected[key]);
+  }
+
+  status = await browserA.manager.getStatus();
+  assert.deepEqual(status.protectedData, { encrypted: 3, plaintext: 0 });
+
+  // 다시 눌러도 이미 암호문인 행은 건드리지 않는다.
+  const before = JSON.stringify([...db.stateRows.entries()]);
+  assert.equal((await browserA.manager.encryptProtectedData()).converted, 0);
+  assert.equal(JSON.stringify([...db.stateRows.entries()]), before);
+});
+
+test("데이터 잠그기: 계속 다른 화면이 저장하면 덮어쓰지 않고 멈춘다", async () => {
+  const db = createSharedDb();
+  const browserA = createBrowser(db, LEAD_A);
+  await browserA.manager.registerThisDevice("사무실 PC");
+  await browserA.manager.setupKeys();
+  putStateRow(db, "scoreboard_v1", { a: 1 });
+  db.beforeReplace = async (key) => putStateRow(db, key, { a: 2 });
+  await rejectsWithMessage(browserA.manager.encryptProtectedData(), /다른 화면에서/);
+  db.beforeReplace = null;
+  assert.deepEqual(db.stateRows.get("scoreboard_v1").state, { a: 2 }, "마지막으로 저장된 값이 남는다");
+  assert.equal(db.meta.enabled, true, "암호화는 먼저 켜져 이후 저장은 암호문이 된다");
 });

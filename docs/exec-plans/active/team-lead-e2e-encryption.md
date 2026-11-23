@@ -175,7 +175,7 @@ DEK ──RSA-OAEP(복구 공개키)────> 감싼 DEK #R   ┘
 | P2 | SQL: 두 테이블 + RLS + 등급 강등 시 기기 열쇠 자동 해제 트리거(`supabase/incremental_team_lead_e2e_keys.sql`). `schema.sql` 동기화. PGlite 테스트 `tests/team-lead-e2e-keys-rls.test.mjs` | 없음(테이블만 추가) |
 | P3 | 보안 열쇠 화면(`/team-lead/security`): 기기 등록, 최초 열쇠 만들기(데이터 키 생성, 데이터 전환은 P5), 확인 코드 승인, 목록, 해제, 복구 코드 발급·인쇄·열기. 로직 `lib/team-lead/e2e-key-manager.ts`(테스트 `tests/team-lead-e2e-key-manager.test.mjs`), 저장소 연결 `lib/team-lead/e2e-keys.ts` | 총괄팀장 메뉴에 1개 추가 |
 | P4 | 4개 key 읽기·쓰기에 envelope 처리 연결(`lib/team-lead/e2e-state-core.ts`, `e2e-state.ts`, 테스트 `tests/team-lead-e2e-state.test.mjs`). 평문이면 지금과 똑같이 동작. `storage.ts`는 암호문·보호 key를 만날 때만 암호 모듈을 동적으로 불러와 일반 화면 번들 크기를 유지 | 전환 전에는 없음 |
-| P5 | 최초 전환 버튼(7.1)과 평문 덮어쓰기 방지 트리거 SQL | 전환 후 잠긴 기기에서 4개 화면 편집 불가 |
+| P5 | 보안 열쇠 화면의 "데이터 잠그기" 버튼(`encryptProtectedData`: 암호화를 먼저 켜고, 행마다 암호화 → 왕복 확인 → `updated_at`이 같을 때만 덮어쓰기)과 평문 덮어쓰기 방지 트리거 `supabase/incremental_team_lead_e2e_plaintext_guard.sql`(켠 암호화 설정은 끄거나 지울 수 없음). 테스트 `tests/team-lead-e2e-plaintext-guard.test.mjs`, `tests/team-lead-e2e-key-manager.test.mjs` | 전환 후 잠긴 기기에서 4개 화면 편집 불가 |
 | P6 | 등급 변경과 연동: `team_lead`에서 내려갈 때 기기 자동 해제, 열쇠 새로 고치기 안내 | 등급 변경 흐름에 안내 추가 |
 | 2차 | `reviews` 평가 점수를 팀장 공개키로 암호화(평가자는 쓰기만 가능) | 별도 설계 |
 

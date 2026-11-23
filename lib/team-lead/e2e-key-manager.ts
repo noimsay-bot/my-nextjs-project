@@ -11,10 +11,14 @@
 import {
   computeTeamLeadKeyFingerprint,
   createTeamLeadRecoveryHolder,
+  decryptTeamLeadState,
+  encryptTeamLeadState,
   exportTeamLeadPublicKey,
   generateTeamLeadDataKey,
   generateTeamLeadDeviceKeyPair,
   importTeamLeadPublicKey,
+  isTeamLeadE2eEnvelope,
+  TEAM_LEAD_E2E_PROTECTED_STATE_KEYS,
   type TeamLeadE2eRecoveryKdf,
   unlockTeamLeadRecoveryPrivateKey,
   unwrapTeamLeadDataKey,
@@ -50,11 +54,24 @@ export interface TeamLeadKeyEnvelopeRow {
 }
 
 export interface TeamLeadCryptoMeta {
-  /** P5에서 데이터를 암호문으로 전환한 뒤 true가 된다. P3에서는 false. */
+  /** 총괄팀장이 "데이터 암호화 시작"을 누른 뒤 true가 된다. 한 번 켜면 DB 트리거가 끄지 못하게 막는다. */
   enabled: boolean;
   currentKeyVersion: number;
   setupAt: string;
   setupBy: string;
+  enabledAt?: string;
+}
+
+/** 보호 대상 team_lead_state 행. 전환·상태 확인에만 쓴다. */
+export interface TeamLeadProtectedStateRow {
+  key: string;
+  state: unknown;
+  updated_at: string;
+}
+
+export interface TeamLeadProtectedDataStatus {
+  encrypted: number;
+  plaintext: number;
 }
 
 export interface TeamLeadLocalDeviceKey {
@@ -96,6 +113,9 @@ export interface TeamLeadE2eKeyBackend {
   getEnvelope(holderId: string, keyVersion: number): Promise<TeamLeadKeyEnvelopeRow | null>;
   upsertEnvelope(input: TeamLeadKeyEnvelopeRow): Promise<void>;
   deleteEnvelopesForHolder(holderId: string): Promise<void>;
+  loadProtectedStateRows(keys: readonly string[]): Promise<TeamLeadProtectedStateRow[]>;
+  /** 읽은 뒤 아무도 바꾸지 않았을 때만(updated_at 일치) 바꾼다. 바꿨으면 true. */
+  replaceProtectedState(key: string, expectedUpdatedAt: string, state: unknown): Promise<boolean>;
   getDeviceKey(profileId: string): Promise<TeamLeadLocalDeviceKey | null>;
   saveDeviceKey(record: TeamLeadLocalDeviceKey): Promise<void>;
   deleteDeviceKey(profileId: string): Promise<void>;
@@ -116,6 +136,8 @@ export interface TeamLeadKeyStatus {
   unlocked: boolean;
   activeDeviceCount: number;
   activeRecoveryCount: number;
+  /** 열쇠를 만든 뒤에만 채운다. 형식만 보고 세며 내용은 풀지 않는다. */
+  protectedData: TeamLeadProtectedDataStatus | null;
 }
 
 export class TeamLeadKeyManagerError extends Error {
@@ -169,7 +191,14 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
     const session = await requireTeamLeadSession();
     const [meta, holders] = await Promise.all([backend.loadCryptoMeta(), backend.listHolders()]);
     const thisDevice = await resolveThisDevice(session, holders);
+    let protectedData: TeamLeadProtectedDataStatus | null = null;
+    if (meta) {
+      const rows = await backend.loadProtectedStateRows(TEAM_LEAD_E2E_PROTECTED_STATE_KEYS);
+      const encrypted = rows.filter((row) => isTeamLeadE2eEnvelope(row.state)).length;
+      protectedData = { encrypted, plaintext: rows.length - encrypted };
+    }
     return {
+      protectedData,
       session,
       meta,
       holders,
@@ -440,6 +469,42 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
     return { mustReissueRecoveryCode: true as const };
   }
 
+  /**
+   * 데이터 암호화 시작(P5): 암호화를 켜고, 남아 있는 평문 보호 데이터를 암호문으로 바꾼다.
+   * - 먼저 켠다. 그 뒤로는 어느 탭에서 저장해도 암호문으로만 저장되므로 새 평문이 생기지 않는다.
+   * - 행마다 "암호화 → 이 탭에서 다시 풀어 원본과 같은지 확인 → 읽은 뒤 아무도 안 바꿨을 때만 덮어쓰기" 순서로 한다.
+   * - 중간에 실패해도 남은 평문은 그대로 읽히고, 다시 누르면 남은 것만 이어서 바꾼다.
+   */
+  async function encryptProtectedData() {
+    const { meta, dataKey } = await requireUnlocked();
+    if (!meta.enabled) {
+      await backend.saveCryptoMeta({ ...meta, enabled: true, enabledAt: backend.now() });
+    }
+
+    const keyVersion = meta.currentKeyVersion;
+    let converted = 0;
+    for (const stateKey of TEAM_LEAD_E2E_PROTECTED_STATE_KEYS) {
+      for (let attempt = 0; ; attempt += 1) {
+        const [row] = await backend.loadProtectedStateRows([stateKey]);
+        if (!row || isTeamLeadE2eEnvelope(row.state)) break;
+
+        const envelope = await encryptTeamLeadState(dataKey, { stateKey, keyVersion, value: row.state });
+        const roundTrip = await decryptTeamLeadState(dataKey, { stateKey, keyVersion, envelope });
+        if (JSON.stringify(roundTrip) !== JSON.stringify(row.state ?? null)) {
+          fail("암호화 확인에 실패해 이 데이터는 바꾸지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        }
+        if (await backend.replaceProtectedState(stateKey, row.updated_at, envelope)) {
+          converted += 1;
+          break;
+        }
+        if (attempt >= 2) {
+          fail("다른 화면에서 같은 데이터를 저장하고 있어 바꾸지 못했습니다. 잠시 후 다시 눌러 주세요.");
+        }
+      }
+    }
+    return { converted };
+  }
+
   function lock() {
     unlocked = null;
   }
@@ -459,6 +524,7 @@ export function createTeamLeadE2eKeyManager(backend: TeamLeadE2eKeyBackend) {
     revokeHolder,
     reissueRecoveryCode,
     recoverWithCode,
+    encryptProtectedData,
     lock,
     getUnlockedDataKey,
   };
