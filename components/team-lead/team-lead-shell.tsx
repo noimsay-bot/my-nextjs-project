@@ -22,6 +22,7 @@ const items = [
 
 const utilityItems = [
   { href: "/team-lead/reviewer-management", label: "영상평가 관리" },
+  { href: "/team-lead/security", label: "보안 열쇠" },
 ];
 
 export function TeamLeadShell({ children }: { children: React.ReactNode }) {

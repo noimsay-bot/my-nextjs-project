@@ -135,6 +135,76 @@ after insert on auth.users
 for each row
 execute function public.handle_new_user();
 
+-- admin 등 총괄팀장이 아닌 로그인 사용자가 권한 등급, 총괄팀장·관리자 계정,
+-- 다른 사람의 이메일·아이디를 바꾸지 못하게 막는다. (incremental_restrict_admin_privilege_escalation.sql)
+-- service_role·SQL Editor처럼 auth.uid()가 없는 맥락은 검사하지 않는다.
+create or replace function public.guard_profile_privileged_changes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor_id uuid := auth.uid();
+  actor_role public.app_role;
+begin
+  if actor_id is null then
+    return coalesce(new, old);
+  end if;
+
+  select role
+  into actor_role
+  from public.profiles
+  where id = actor_id
+    and approved = true;
+
+  if actor_role = 'team_lead' then
+    return coalesce(new, old);
+  end if;
+
+  if tg_op = 'DELETE' then
+    if old.role in ('team_lead', 'admin') then
+      raise exception '총괄팀장·관리자 계정은 총괄팀장만 삭제할 수 있습니다.'
+        using errcode = '42501';
+    end if;
+    return old;
+  end if;
+
+  if new.id is distinct from old.id then
+    raise exception '프로필 ID는 변경할 수 없습니다.'
+      using errcode = '42501';
+  end if;
+
+  if new.role is distinct from old.role then
+    raise exception '권한 등급은 총괄팀장만 변경할 수 있습니다.'
+      using errcode = '42501';
+  end if;
+
+  if old.id <> actor_id then
+    if old.role in ('team_lead', 'admin') then
+      raise exception '총괄팀장·관리자 계정 정보는 총괄팀장만 변경할 수 있습니다.'
+        using errcode = '42501';
+    end if;
+
+    if new.email is distinct from old.email
+      or new.login_id is distinct from old.login_id then
+      raise exception '다른 사용자의 이메일·아이디는 총괄팀장만 변경할 수 있습니다.'
+        using errcode = '42501';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke execute on function public.guard_profile_privileged_changes() from public, anon, authenticated;
+
+drop trigger if exists guard_profile_privileged_changes on public.profiles;
+create trigger guard_profile_privileged_changes
+before update or delete on public.profiles
+for each row
+execute function public.guard_profile_privileged_changes();
+
 -- Bootstrap administrators by verified auth.users.id through a trusted operator.
 -- Never infer privileges from a self-selected login_id or other user metadata.
 
@@ -344,7 +414,7 @@ on public.review_assignments
 for select
 to authenticated
 using (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
 );
 
@@ -354,7 +424,7 @@ on public.review_assignments
 for insert
 to authenticated
 with check (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
 );
 
@@ -364,11 +434,11 @@ on public.review_assignments
 for update
 to authenticated
 using (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
 );
 
@@ -378,7 +448,7 @@ on public.review_assignments
 for delete
 to authenticated
 using (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
 );
 
@@ -2125,7 +2195,7 @@ on public.team_lead_state
 for select
 to authenticated
 using (
-  public.current_profile_role() in ('team_lead', 'admin', 'desk')
+  public.current_profile_role() in ('team_lead', 'desk')
   and public.current_profile_approved() = true
 );
 
@@ -2139,18 +2209,37 @@ using (
   and public.current_profile_approved() = true
 );
 
+-- admin은 총괄팀장 데이터(점수판·참고 메모·평가 권한 명단 등)에 접근하지 못한다.
+-- DESK 최종컷(final_cut_v1)만 admin에게 허용한다.
 drop policy if exists "team_lead_state_manage_team_lead_admin" on public.team_lead_state;
-create policy "team_lead_state_manage_team_lead_admin"
+drop policy if exists "team_lead_state_manage_team_lead" on public.team_lead_state;
+create policy "team_lead_state_manage_team_lead"
 on public.team_lead_state
 for all
 to authenticated
 using (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
 )
 with check (
-  public.current_profile_role() in ('team_lead', 'admin')
+  public.current_profile_role() = 'team_lead'
   and public.current_profile_approved() = true
+);
+
+drop policy if exists "team_lead_state_manage_admin_final_cut" on public.team_lead_state;
+create policy "team_lead_state_manage_admin_final_cut"
+on public.team_lead_state
+for all
+to authenticated
+using (
+  public.current_profile_role() = 'admin'
+  and public.current_profile_approved() = true
+  and key = 'final_cut_v1'
+)
+with check (
+  public.current_profile_role() = 'admin'
+  and public.current_profile_approved() = true
+  and key = 'final_cut_v1'
 );
 
 drop policy if exists "team_lead_state_manage_desk_final_cut" on public.team_lead_state;
@@ -2168,6 +2257,176 @@ with check (
   and public.current_profile_approved() = true
   and key = 'final_cut_v1'
 );
+
+-- 총괄팀장 데이터 종단간 암호화 열쇠 보관 (incremental_team_lead_e2e_keys.sql)
+create table if not exists public.team_lead_key_holders (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('device', 'recovery')),
+  profile_id uuid references public.profiles (id) on delete cascade,
+  label text not null default '' check (char_length(label) <= 120),
+  public_key text not null check (char_length(public_key) between 100 and 2000),
+  fingerprint text not null check (fingerprint ~ '^[0-9]{6}$'),
+  wrapped_private_key text,
+  kdf jsonb,
+  status text not null default 'pending' check (status in ('pending', 'active', 'revoked')),
+  created_by uuid references public.profiles (id) on delete set null default auth.uid(),
+  created_at timestamptz not null default timezone('utc', now()),
+  approved_by uuid references public.profiles (id) on delete set null,
+  approved_at timestamptz,
+  revoked_at timestamptz,
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint team_lead_key_holders_kind_shape check (
+    (
+      kind = 'device'
+      and profile_id is not null
+      and wrapped_private_key is null
+      and kdf is null
+    )
+    or (
+      kind = 'recovery'
+      and profile_id is null
+      and wrapped_private_key is not null
+      and kdf is not null
+    )
+  ),
+  constraint team_lead_key_holders_revoked_at check (
+    (status = 'revoked') = (revoked_at is not null)
+  )
+);
+
+create index if not exists team_lead_key_holders_profile_idx
+  on public.team_lead_key_holders (profile_id);
+
+create index if not exists team_lead_key_holders_status_idx
+  on public.team_lead_key_holders (status, kind);
+
+drop trigger if exists set_team_lead_key_holders_updated_at on public.team_lead_key_holders;
+create trigger set_team_lead_key_holders_updated_at
+before update on public.team_lead_key_holders
+for each row
+execute function public.set_updated_at();
+
+create table if not exists public.team_lead_key_envelopes (
+  holder_id uuid not null references public.team_lead_key_holders (id) on delete cascade,
+  key_version integer not null check (key_version >= 1),
+  wrapped_dek text not null check (char_length(wrapped_dek) between 100 and 2000),
+  created_by uuid references public.profiles (id) on delete set null default auth.uid(),
+  created_at timestamptz not null default timezone('utc', now()),
+  primary key (holder_id, key_version)
+);
+
+create index if not exists team_lead_key_envelopes_version_idx
+  on public.team_lead_key_envelopes (key_version);
+
+alter table public.team_lead_key_holders enable row level security;
+alter table public.team_lead_key_envelopes enable row level security;
+
+drop policy if exists "team_lead_key_holders_select_team_lead" on public.team_lead_key_holders;
+create policy "team_lead_key_holders_select_team_lead"
+on public.team_lead_key_holders
+for select
+to authenticated
+using (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+);
+
+-- 기기는 본인 것만 pending으로 등록한다. 복구 코드 보관자는 팀장이 바로 active로 만든다.
+drop policy if exists "team_lead_key_holders_insert_team_lead" on public.team_lead_key_holders;
+create policy "team_lead_key_holders_insert_team_lead"
+on public.team_lead_key_holders
+for insert
+to authenticated
+with check (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+  and (
+    (kind = 'device' and profile_id = auth.uid() and status = 'pending')
+    or (kind = 'recovery' and status = 'active')
+  )
+);
+
+drop policy if exists "team_lead_key_holders_update_team_lead" on public.team_lead_key_holders;
+create policy "team_lead_key_holders_update_team_lead"
+on public.team_lead_key_holders
+for update
+to authenticated
+using (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+)
+with check (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "team_lead_key_holders_delete_team_lead" on public.team_lead_key_holders;
+create policy "team_lead_key_holders_delete_team_lead"
+on public.team_lead_key_holders
+for delete
+to authenticated
+using (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+);
+
+drop policy if exists "team_lead_key_envelopes_manage_team_lead" on public.team_lead_key_envelopes;
+create policy "team_lead_key_envelopes_manage_team_lead"
+on public.team_lead_key_envelopes
+for all
+to authenticated
+using (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+)
+with check (
+  public.current_profile_role() = 'team_lead'
+  and public.current_profile_approved() = true
+);
+
+revoke all on table public.team_lead_key_holders from anon;
+revoke all on table public.team_lead_key_envelopes from anon;
+grant select, insert, update, delete on table public.team_lead_key_holders to authenticated, service_role;
+grant select, insert, update, delete on table public.team_lead_key_envelopes to authenticated, service_role;
+
+-- team_lead에서 내려간 사람의 기기 열쇠를 자동으로 해제한다.
+-- 앱 화면이 아닌 DB에서 처리하므로 어떤 경로로 등급을 바꿔도 적용된다.
+create or replace function public.revoke_team_lead_key_holders_on_demotion()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.role = 'team_lead' and new.role is distinct from 'team_lead' then
+    delete from public.team_lead_key_envelopes
+    where holder_id in (
+      select id
+      from public.team_lead_key_holders
+      where profile_id = new.id
+        and kind = 'device'
+    );
+
+    update public.team_lead_key_holders
+    set
+      status = 'revoked',
+      revoked_at = coalesce(revoked_at, timezone('utc', now()))
+    where profile_id = new.id
+      and kind = 'device'
+      and status <> 'revoked';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke execute on function public.revoke_team_lead_key_holders_on_demotion() from public, anon, authenticated;
+
+drop trigger if exists revoke_team_lead_key_holders_on_demotion on public.profiles;
+create trigger revoke_team_lead_key_holders_on_demotion
+after update of role on public.profiles
+for each row
+execute function public.revoke_team_lead_key_holders_on_demotion();
 
 create table if not exists public.team_lead_final_cut_decision_history (
   id bigint generated by default as identity primary key,

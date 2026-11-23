@@ -18,6 +18,7 @@ import {
   refreshTeamLeadMetaState,
 } from "@/lib/team-lead/storage";
 import { getTeamLeadEvaluationYear } from "@/lib/team-lead/evaluation-year";
+import { teamLeadProtectedState } from "@/lib/team-lead/e2e-state";
 
 export const TEAM_LEAD_SCOREBOARD_EVENT = "j-team-lead-scoreboard-updated";
 const TEAM_LEAD_SCOREBOARD_STATE_KEY = "scoreboard_v1";
@@ -231,10 +232,12 @@ function saveScoreboardStore(store: TeamLeadScoreboardStore) {
         throw new Error("승인된 로그인 세션이 필요합니다.");
       }
 
+      // 암호화가 켜져 있으면 암호문으로 저장하고, 이 기기가 잠겨 있으면 저장을 거부한다.
+      const storedState = await teamLeadProtectedState.prepareForWrite(TEAM_LEAD_SCOREBOARD_STATE_KEY, normalized);
       const supabase = await getPortalSupabaseClient();
       const { error } = await supabase.from("team_lead_state").upsert({
         key: TEAM_LEAD_SCOREBOARD_STATE_KEY,
-        state: normalized,
+        state: storedState,
         updated_by: session.id,
       });
 
@@ -303,7 +306,9 @@ export async function refreshScoreboardState() {
       throw new Error(stateError.message);
     }
 
-    scoreboardCache = normalizeScoreboardStore(stateRow?.state);
+    scoreboardCache = normalizeScoreboardStore(
+      (await teamLeadProtectedState.read(TEAM_LEAD_SCOREBOARD_STATE_KEY, stateRow?.state)).state,
+    );
     const liveQuarterHasScores = nextVideoWorkspace.rows.some((row) =>
       row.reviewerScores.some((score) => score.score !== null),
     );
