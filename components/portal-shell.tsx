@@ -120,6 +120,7 @@ const links: PortalNavLink[] = [
           { href: "/team-lead/mobile-live/report", label: "주간업무보고서" },
         ],
       },
+      { href: "/team-lead/security", label: "보안 열쇠" },
     ],
   },
   { href: "/admin", label: "관리자" },
