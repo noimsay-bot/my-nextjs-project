@@ -24,10 +24,7 @@ function groupFor(relativeDir) {
 }
 
 function walk(current) {
-  // readdir 순서는 파일 시스템마다 달라서(NTFS·ext4) 이름 코드값 순으로 고정한다.
-  const entries = fs
-    .readdirSync(current, { withFileTypes: true })
-    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+  const entries = fs.readdirSync(current, { withFileTypes: true });
   const files = new Set(entries.filter((entry) => entry.isFile()).map((entry) => entry.name));
   const hasRouteConvention = [...routeFiles].some((file) => files.has(file));
   const relativeDir = path.relative(appDir, current);
