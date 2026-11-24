@@ -55,11 +55,14 @@ async function loadPrivilegedAccounts(admin: AdminClient) {
   for (const row of data ?? []) {
     const { data: authData, error: authError } = await admin.auth.admin.getUserById(row.id);
     if (authError) throw new Error(authError.message);
+    const { data: factorData, error: factorError } = await admin.auth.admin.mfa.listFactors({ userId: row.id });
+    if (factorError) throw new Error(factorError.message);
     accounts[row.id] = {
       name: row.name?.trim() || "이름 없음",
       role: row.role,
       approved: row.approved === true,
       email: (authData.user?.email ?? row.email ?? "").trim().toLowerCase(),
+      mfaFactors: (factorData?.factors ?? []).filter((factor) => factor.status === "verified").length,
     };
   }
   return accounts;

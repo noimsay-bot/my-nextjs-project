@@ -19,6 +19,8 @@ import {
   isPortalAccessStateLoaded,
   subscribeToPortalAccessState,
 } from "@/lib/portal/access-state";
+import { getMfaGateDecision, hasChosenMfaLater } from "@/lib/auth/mfa";
+import { isMfaRole, type MfaGateDecision } from "@/lib/auth/mfa-core";
 
 function authLog(stage: string, details: Record<string, unknown>) {
   if (process.env.NODE_ENV !== "development") {
@@ -165,6 +167,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const needsSubmissionAccessCheck = pathname.startsWith("/submissions");
   const [session, setSession] = useState<SessionUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  // 총괄팀장 · DESK · admin 2단계 인증 판단(로그인한 사용자마다 한 번). 설명: lib/auth/mfa-core.ts
+  const [mfaCheck, setMfaCheck] = useState<{ userId: string; decision: MfaGateDecision } | null>(null);
   const [hadSessionCookie, setHadSessionCookie] = useState(false);
   const [recoveryAttempted, setRecoveryAttempted] = useState(false);
   const [vacationRequestOpen, setVacationRequestOpen] = useState<boolean | null>(() => {
@@ -286,6 +290,26 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   const authPending = checkingSession && !session;
+  const mfaRole = session?.actualRole ?? session?.role ?? null;
+  const needsMfaCheck = Boolean(session?.approved && !session.mustChangePassword && isMfaRole(mfaRole));
+  const mfaDecision = needsMfaCheck && mfaCheck && mfaCheck.userId === session?.id ? mfaCheck.decision : null;
+  const mfaPending = needsMfaCheck && mfaDecision === null;
+  const mfaBlocks =
+    mfaDecision === "challenge" ||
+    mfaDecision === "enroll-required" ||
+    (mfaDecision === "enroll-suggested" && !hasChosenMfaLater());
+
+  useEffect(() => {
+    if (!needsMfaCheck || !session || mfaCheck?.userId === session.id) return;
+    let cancelled = false;
+    const userId = session.id;
+    void getMfaGateDecision(mfaRole).then((decision) => {
+      if (!cancelled) setMfaCheck({ userId, decision });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mfaCheck?.userId, mfaRole, needsMfaCheck, session]);
 
   useEffect(() => {
     if (!authPending) {
@@ -350,6 +374,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    if (mfaPending) {
+      return;
+    }
+
+    if (mfaBlocks) {
+      authLog("redirect", {
+        pathname,
+        reason: `mfa-${mfaDecision}`,
+      });
+      router.replace(`/mfa?next=${encodeURIComponent(pathname)}`);
+      return;
+    }
+
     if (
       needsVacationAccessCheck &&
       effectiveVacationRequestOpen === null
@@ -371,6 +408,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [
     authPending,
     hadSessionCookie,
+    mfaBlocks,
+    mfaDecision,
+    mfaPending,
     needsSubmissionAccessCheck,
     needsVacationAccessCheck,
     pathname,
@@ -383,6 +423,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (
     authPending ||
+    mfaPending ||
     (needsVacationAccessCheck && effectiveVacationRequestOpen === null) ||
     (needsSubmissionAccessCheck && effectiveSubmissionAccessOpen === null)
   ) {
@@ -393,6 +434,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     !session ||
     !session.approved ||
     session.mustChangePassword ||
+    mfaBlocks ||
     !hasAccess(pathname, session, effectiveVacationRequestOpen, effectiveSubmissionAccessOpen)
   ) {
     return null;
