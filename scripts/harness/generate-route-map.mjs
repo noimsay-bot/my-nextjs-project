@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { markdownTable, rel, repoRoot, toPosix, writeGenerated } from "./utils.mjs";
+import { compareText, markdownTable, rel, repoRoot, toPosix, writeGenerated } from "./utils.mjs";
 
 const appDir = path.join(repoRoot, "app");
 const routeFiles = new Set(["page.tsx", "layout.tsx", "route.ts", "loading.tsx", "error.tsx"]);
@@ -24,7 +24,9 @@ function groupFor(relativeDir) {
 }
 
 function walk(current) {
-  const entries = fs.readdirSync(current, { withFileTypes: true });
+  const entries = fs
+    .readdirSync(current, { withFileTypes: true })
+    .sort((a, b) => compareText(a.name, b.name));
   const files = new Set(entries.filter((entry) => entry.isFile()).map((entry) => entry.name));
   const hasRouteConvention = [...routeFiles].some((file) => files.has(file));
   const relativeDir = path.relative(appDir, current);

@@ -6,7 +6,8 @@ on:
 
 jobs:
   harness:
-    runs-on: ubuntu-latest
+    # Playwright 1.58.2는 ubuntu-latest(26.04)용 Chromium 의존성을 설치하지 못한다.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:

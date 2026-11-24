@@ -39,8 +39,8 @@
 | /partner/assignments | (portal)/partner/assignments | yes |  |  |  |  |
 | /partner/schedule | (portal)/partner/schedule | yes |  |  |  |  |
 | /restaurants | (portal)/restaurants | yes | yes |  |  |  |
-| /restaurants/new | (portal)/restaurants/new | yes |  |  |  |  |
 | /restaurants/[id] | (portal)/restaurants/[id] | yes |  |  |  |  |
+| /restaurants/new | (portal)/restaurants/new | yes |  |  |  |  |
 | /review | (portal)/review | yes |  |  |  |  |
 | /schedule | (portal)/schedule | yes | yes |  | yes |  |
 | /schedule/domestic-trip | (portal)/schedule/domestic-trip | yes |  |  |  |  |
@@ -70,6 +70,7 @@
 | /team-lead/schedule-assignment | (portal)/team-lead/schedule-assignment | yes |  |  |  |  |
 | /team-lead/security | (portal)/team-lead/security | yes |  |  |  |  |
 | /team-lead/special-report | (portal)/team-lead/special-report | yes |  |  |  |  |
+| /team-lead/statistics | (portal)/team-lead/statistics | yes |  |  |  |  |
 | /tips | (portal)/tips | yes |  |  |  |  |
 | /vacation | (portal)/vacation | yes |  |  |  |  |
 | /weather | (portal)/weather | yes | yes |  |  |  |

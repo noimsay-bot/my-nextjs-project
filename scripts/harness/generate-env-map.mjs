@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   codeFiles,
+  compareText,
   isClientComponentSource,
   lineNumberForIndex,
   markdownTable,
@@ -73,7 +74,7 @@ for (const key of exampleKeys) {
 }
 
 const rows = [...usage.entries()]
-  .sort(([a], [b]) => a.localeCompare(b))
+  .sort(([a], [b]) => compareText(a, b))
   .map(([key, items]) => [
     key,
     classify(key),
