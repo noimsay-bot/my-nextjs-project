@@ -83,7 +83,13 @@ export function ScheduleAssignmentStatsPage() {
     // 12개월 확정 근무표·일정배정을 모두 받은 뒤에만 집계한다.
     // 확정 근무표 없이 집계하면 DESK 초안 근무표로 행을 만들게 되어, 일정배정 행 키가 맞지 않아 건수가 빠진다.
     let ready = false;
-    const monthKeys = getTeamLeadEvaluationMonthKeys(evaluationYear);
+    // 확정 근무표는 1일에 딱 맞춰 시작하지 않을 수 있어 월초·월말 며칠은 앞뒤 달 근무표에서 채운다.
+    // 일정배정 화면이 앞뒤 달까지 불러오는 것과 같게, 평가연도 앞뒤 한 달씩을 함께 불러온다.
+    const monthKeys = [
+      `${evaluationYear - 1}-11`,
+      ...getTeamLeadEvaluationMonthKeys(evaluationYear),
+      `${evaluationYear}-12`,
+    ];
     const sync = () => {
       if (!cancelled && ready) setStats(getScheduleAssignmentYearStats(evaluationYear));
     };
