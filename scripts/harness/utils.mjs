@@ -64,7 +64,9 @@ export function listFiles(startRelative, options = {}) {
     const entries = fs.readdirSync(current, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name)) walk(path.join(current, entry.name));
+        const dirPath = path.join(current, entry.name);
+        // 로컬 에이전트 worktree(.claude/worktrees)는 저장소 사본이라 스캔하지 않는다.
+        if (!IGNORED_DIRS.has(entry.name) && rel(dirPath) !== ".claude/worktrees") walk(dirPath);
         continue;
       }
       if (!entry.isFile()) continue;
