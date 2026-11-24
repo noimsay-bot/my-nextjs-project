@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AdminProfileItem,
+  approveAdminProfile,
   deleteAdminProfile,
   getAdminWorkspace,
   updateAdminProfileAccess,
@@ -572,6 +573,14 @@ export default function AdminPage() {
     void refresh();
   }, []);
 
+  const pendingProfiles = useMemo(
+    () =>
+      profiles
+        .filter((profile) => !profile.approved)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
+    [profiles],
+  );
+
   const filteredProfiles = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     const visibleProfiles = !keyword
@@ -1017,6 +1026,76 @@ export default function AdminPage() {
           <MonthlyVisitorRanking rows={visitAnalytics.monthlyTopVisitors} />
         </div>
       </article>
+
+      {pendingProfiles.length > 0 ? (
+        <article className="panel">
+          <div className="panel-pad" style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="chip">가입 승인 대기</div>
+              <span className="muted">{pendingProfiles.length}명 · 아는 사람인지 확인한 뒤 승인해 주세요.</span>
+            </div>
+            <table className="table-like">
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>login_id</th>
+                  <th>email</th>
+                  <th>신청</th>
+                  <th>관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingProfiles.map((profile) => (
+                  <tr key={profile.id}>
+                    <td>{profile.name}</td>
+                    <td>{profile.loginId}</td>
+                    <td style={{ overflowWrap: "anywhere" }}>{profile.email}</td>
+                    <td>{formatDateTime(profile.createdAt)}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          className="btn primary"
+                          disabled={savingProfileId === profile.id}
+                          onClick={async () => {
+                            if (!window.confirm(`${profile.name}(${profile.email})님의 가입을 승인할까요?`)) return;
+                            setSavingProfileId(profile.id);
+                            const result = await approveAdminProfile(profile.id);
+                            setMessage(result.message);
+                            if (result.ok) {
+                              await refresh();
+                            }
+                            setSavingProfileId(null);
+                          }}
+                        >
+                          승인
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={savingProfileId === profile.id}
+                          onClick={async () => {
+                            if (!window.confirm(`${profile.name}님의 가입 신청을 거절(삭제)할까요?`)) return;
+                            setSavingProfileId(profile.id);
+                            const result = await deleteAdminProfile(profile.id);
+                            setMessage(result.ok ? "가입 신청을 거절했습니다." : result.message);
+                            if (result.ok) {
+                              await refresh();
+                            }
+                            setSavingProfileId(null);
+                          }}
+                        >
+                          거절
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      ) : null}
 
       <article className="panel">
         <div className="panel-pad" style={{ display: "grid", gap: 16 }}>

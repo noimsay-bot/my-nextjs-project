@@ -66,7 +66,7 @@ export default function LoginPage() {
     !session &&
     supabaseConfigured &&
     (recoveringSession || approvalReason === "supabase-unavailable" || hasSupabaseSessionCookie());
-  const signupEnabled: boolean = false;
+  const signupEnabled: boolean = true;
   const authTabs: Array<Extract<Mode, "login" | "signup" | "forgot">> = signupEnabled
     ? ["login", "signup", "forgot"]
     : ["login", "forgot"];
@@ -385,8 +385,9 @@ export default function LoginPage() {
             <div className="muted" style={{ fontSize: 13 }}>
               이메일은 비밀번호 찾기와 재설정 메일 수신용으로 사용됩니다.
             </div>
+            <div className="status note">가입 신청 후 관리자가 승인하면 로그인할 수 있습니다.</div>
             <button className="btn primary" type="submit" disabled={submitting || !supabaseConfigured}>
-              회원가입
+              가입 신청
             </button>
           </form>
         ) : null}

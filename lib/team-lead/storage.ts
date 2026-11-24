@@ -4890,6 +4890,39 @@ export async function updateAdminProfileAccess(
   };
 }
 
+/** 회원가입 승인: 승인 대기(approved = false) 계정만 승인한다. 등급은 바꾸지 않는다. */
+export async function approveAdminProfile(profileId: string) {
+  const session = await getPrivilegedPortalSession();
+  if (!session || !hasAdminLikeAccess(session.role)) {
+    return { ok: false as const, message: "관리자 권한이 없습니다." };
+  }
+
+  const supabase = await getPrivilegedSupabaseClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ approved: true })
+    .eq("id", profileId)
+    .eq("approved", false)
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (error) {
+    return { ok: false as const, message: error.message };
+  }
+  if (!data) {
+    return { ok: false as const, message: "이미 승인되었거나 찾을 수 없는 계정입니다. 새로고침해 주세요." };
+  }
+
+  try {
+    const authModule = await import("@/lib/auth/storage");
+    await authModule.refreshUsers();
+  } catch {
+    // 사용자 목록 캐시 갱신 실패는 승인 결과에 영향을 주지 않는다.
+  }
+
+  return { ok: true as const, message: "가입을 승인했습니다. 이제 로그인할 수 있습니다." };
+}
+
 export async function deleteAdminProfile(profileId: string) {
   const session = await getPrivilegedPortalSession();
   if (!session || !hasAdminLikeAccess(session.role)) {

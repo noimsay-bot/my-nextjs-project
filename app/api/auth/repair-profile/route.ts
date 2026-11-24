@@ -17,7 +17,7 @@ function buildProfileInsertPayload(user: {
     login_id: loginId || null,
     name: displayName || user.email || "User",
     role: "member" as const,
-    approved: true,
+    approved: false,
   };
 }
 
