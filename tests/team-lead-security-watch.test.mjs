@@ -100,6 +100,15 @@ test("등급 · 이메일 · 기기 변화를 문장으로 알려 주고, 강등
   assert.equal(store.value.accounts.b.role, "team_lead");
 });
 
+test("2단계 인증 등록 · 초기화를 알려 주고, 예전 기록(수 없음)과는 비교하지 않는다", () => {
+  const previous = snapshot({ a: { ...lead, mfaFactors: 1 }, b: { ...desk, mfaFactors: 0 }, c: { ...desk, name: "옛기록" } });
+  const next = snapshot({ a: { ...lead, mfaFactors: 0 }, b: { ...desk, mfaFactors: 1 }, c: { ...desk, name: "옛기록", mfaFactors: 1 } });
+  assert.deepEqual(core.diffSecurityWatchSnapshot(previous, next), [
+    "2단계 인증 해제(초기화): 김팀장",
+    "2단계 인증 등록: 박데스크",
+  ]);
+});
+
 test("메일이 안 나가면 기준을 바꾸지 않아 다음 점검 때 다시 보낸다", async () => {
   const previous = snapshot({ a: lead });
   const next = snapshot({ a: lead, b: desk });

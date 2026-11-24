@@ -24,7 +24,7 @@
 | ASSEMBLY_EXPORT_API_URL | server-only | yes | lib/schedule/assembly-sync.ts:132 (server/shared) |
 | ASSEMBLY_EXPORT_TOKEN | server-only | yes | lib/schedule/assembly-sync.ts:133 (server/shared) |
 | ASSEMBLY_LEAVE_APPLY_URL | server-only | yes | lib/schedule/assembly-leave-push.ts:61 (server/shared) |
-| CRON_SECRET | server-only | no | app/api/internal/schedule-assignment/daily-backup/route.ts:187 (server/shared)<br>app/api/internal/team-lead/security-change-alert/route.ts:77 (server/shared)<br>app/api/internal/youtube-lives/collect/route.ts:72 (server/shared) |
+| CRON_SECRET | server-only | no | app/api/internal/schedule-assignment/daily-backup/route.ts:187 (server/shared)<br>app/api/internal/team-lead/security-change-alert/route.ts:80 (server/shared)<br>app/api/internal/youtube-lives/collect/route.ts:72 (server/shared) |
 | DATA_GO_KR_SERVICE_KEY | server-only | no | app/api/weather/dispatch-recommendation/route.ts:590 (server/shared) |
 | EMAIL_FROM | server-only | yes | lib/server/mail.ts:64 (server/shared)<br>lib/server/mail.ts:85 (server/shared)<br>lib/server/mail.ts:118 (server/shared) |
 | HOME_NEWS_EXTERNAL_FEEDS | server-only | no | lib/home-news/external-source-fetchers.ts:82 (server/shared) |
@@ -35,10 +35,10 @@
 | NEXT_PUBLIC_E2E | client-exposed | no | lib/schedule/desk-records.ts:19 (server/shared)<br>lib/schedule/desk-records.ts:19 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>lib/schedule/storage.ts:20 (server/shared)<br>lib/schedule/storage.ts:20 (server/shared) |
 | NEXT_PUBLIC_GOOGLE_MAPS_API_KEY | client-exposed | no | components/restaurants/restaurant-place-search.tsx:39 (client/component)<br>lib/google/maps.ts:10 (client/component)<br>lib/google/maps.ts:10 (client/component)<br>lib/google/maps.ts:38 (client/component) |
 | NEXT_PUBLIC_PORTAL_DEBUG_TRAFFIC | client-exposed | no | lib/portal/traffic-debug.ts:11 (client/component)<br>lib/portal/traffic-debug.ts:11 (client/component) |
-| NEXT_PUBLIC_SITE_URL | client-exposed | yes | app/api/internal/team-lead/security-change-alert/route.ts:95 (server/shared)<br>app/api/internal/team-lead/security-change-alert/route.ts:95 (server/shared)<br>lib/auth/storage.ts:580 (server/shared)<br>lib/auth/storage.ts:580 (server/shared)<br>lib/server/mail.ts:19 (server/shared)<br>lib/server/mail.ts:19 (server/shared) |
+| NEXT_PUBLIC_SITE_URL | client-exposed | yes | app/api/internal/team-lead/security-change-alert/route.ts:98 (server/shared)<br>app/api/internal/team-lead/security-change-alert/route.ts:98 (server/shared)<br>lib/auth/storage.ts:580 (server/shared)<br>lib/auth/storage.ts:580 (server/shared)<br>lib/server/mail.ts:19 (server/shared)<br>lib/server/mail.ts:19 (server/shared) |
 | NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | client-exposed | yes | lib/auth/storage.ts:382 (server/shared)<br>lib/supabase/client.ts:8 (server/shared)<br>lib/supabase/client.ts:26 (server/shared)<br>lib/supabase/client.ts:4 (server/shared)<br>lib/supabase/client.ts:8 (server/shared)<br>lib/supabase/client.ts:26 (server/shared) |
 | NEXT_PUBLIC_SUPABASE_URL | client-exposed | yes | lib/auth/storage.ts:382 (server/shared)<br>lib/supabase/admin.ts:10 (server/shared)<br>lib/supabase/admin.ts:14 (server/shared)<br>lib/supabase/admin.ts:10 (server/shared)<br>lib/supabase/admin.ts:14 (server/shared)<br>lib/supabase/admin.ts:19 (server/shared) |
-| NODE_ENV | runtime | no | components/auth/auth-gate.tsx:24 (client/component)<br>lib/auth/storage.ts:103 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>next.config.ts:12 (server/shared) |
+| NODE_ENV | runtime | no | components/auth/auth-gate.tsx:26 (client/component)<br>lib/auth/storage.ts:103 (server/shared)<br>lib/schedule/published.ts:35 (server/shared)<br>next.config.ts:12 (server/shared) |
 | OPENAI_API_KEY | server-only | no | lib/home-news/ai-draft-actions.ts:61 (server/shared)<br>lib/home-news/ai-draft-actions.ts:93 (server/shared)<br>lib/home-news/timed-live-preview-actions.ts:49 (server/shared)<br>lib/home-news/timed-live-preview-actions.ts:441 (server/shared) |
 | OPENAI_NEWS_DRAFT_MODEL | server-only | no | lib/home-news/ai-draft-actions.ts:16 (server/shared)<br>lib/home-news/timed-live-preview-actions.ts:32 (server/shared) |
 | PORT | server-only | no | backend/src/main.ts:42 (server/shared) |
@@ -54,7 +54,7 @@
 | SMTP_SECURE | server-only | yes | lib/server/mail.ts:32 (server/shared) |
 | SMTP_USER | server-only | yes | lib/server/mail.ts:43 (server/shared)<br>lib/server/mail.ts:45 (server/shared) |
 | SUPABASE_SERVICE_ROLE_KEY | server-only | no | lib/supabase/admin.ts:10 (server/shared)<br>lib/supabase/admin.ts:15 (server/shared)<br>scripts/audit-schedule-assembly-sync.mjs:138 (server/shared) |
-| TEAM_LEAD_SECURITY_MANIFEST | server-only | no | app/api/internal/team-lead/security-change-alert/route.ts:108 (server/shared) |
+| TEAM_LEAD_SECURITY_MANIFEST | server-only | no | app/api/internal/team-lead/security-change-alert/route.ts:111 (server/shared) |
 | VERCEL_ENV | server-only | no | lib/schedule/preview-readonly.ts:101 (server/shared)<br>tests/preview-readonly-work-schedule.spec.ts:4 (server/shared) |
 | VERCEL_GIT_COMMIT_AUTHOR_LOGIN | server-only | no | next.config.ts:40 (server/shared) |
 | VERCEL_GIT_COMMIT_MESSAGE | server-only | no | next.config.ts:39 (server/shared) |

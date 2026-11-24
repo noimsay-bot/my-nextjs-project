@@ -2,6 +2,7 @@
 //
 // 매일 한 번 아래 상태를 찍어 지난번과 비교하고, 바뀐 점이 있으면 총괄팀장(이전 · 현재 모두)에게 메일을 보낸다.
 //   - 총괄팀장 · DESK · admin 계정: 등급, 승인 여부, 로그인 이메일(Supabase Auth 기준)
+//   - 2단계 인증(인증 앱) 등록 · 해제(개발자가 초기화한 경우 포함)
 //   - 보안 열쇠: 새 기기 등록(승인 대기), 승인, 해제, 복구 코드 발급, 기록 삭제
 // 비밀번호가 털려 누군가 등급을 바꾸거나 몰래 기기를 올려도 다음 날 아침에는 알 수 있게 하는 장치다.
 // 막는 장치는 아니다(하루 늦게 안다).
@@ -14,6 +15,8 @@ export interface SecurityWatchAccount {
   role: string;
   approved: boolean;
   email: string;
+  /** 확인 끝난 2단계 인증(인증 앱) 수. 예전 기록에는 없을 수 있다. */
+  mfaFactors?: number;
 }
 
 export interface SecurityWatchHolder {
@@ -79,6 +82,15 @@ export function diffSecurityWatchSnapshot(previous: SecurityWatchSnapshot, next:
     }
     if (before.email !== after.email) {
       events.push(`로그인 이메일 변경: ${after.name} (${maskAddress(before.email)} → ${maskAddress(after.email)})`);
+    }
+    if (typeof before.mfaFactors === "number" && typeof after.mfaFactors === "number" && before.mfaFactors !== after.mfaFactors) {
+      events.push(
+        after.mfaFactors > before.mfaFactors
+          ? `2단계 인증 등록: ${after.name}`
+          : after.mfaFactors === 0
+            ? `2단계 인증 해제(초기화): ${after.name}`
+            : `2단계 인증 일부 해제: ${after.name}`,
+      );
     }
   }
 

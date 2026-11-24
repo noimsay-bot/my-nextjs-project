@@ -10,16 +10,16 @@
 
 ## 요약
 
-- SQL 파일: 66
+- SQL 파일: 67
 - 테이블 선언: 67
 - enum 선언: 1
 - policy 선언: 233
-- function 선언: 86
+- function 선언: 89
 - trigger 선언: 59
 - RLS enable 선언: 67
 - table grant 선언: 98
 - table revoke 선언: 72
-- function execute grant 선언: 62
+- function execute grant 선언: 63
 - function execute revoke 선언: 43
 
 ## Tables
@@ -573,7 +573,9 @@
 | public.current_profile_has_review_access | supabase/incremental_admin_review_access_only_when_granted.sql |
 | public.current_profile_has_review_access | supabase/incremental_review_access_active_window.sql |
 | public.current_profile_has_review_access | supabase/schema.sql |
+| public.current_profile_role | supabase/incremental_privileged_roles_require_mfa.sql |
 | public.current_profile_role | supabase/schema.sql |
+| public.current_session_mfa_ok | supabase/incremental_privileged_roles_require_mfa.sql |
 | public.find_email_by_login_id | supabase/schema.sql |
 | public.get_home_current_trips | supabase/incremental_home_current_trips_range_rpc.sql |
 | public.get_home_current_trips | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
@@ -600,6 +602,7 @@
 | public.handle_new_user | supabase/incremental_safe_profile_bootstrap.sql |
 | public.handle_new_user | supabase/incremental_signup_requires_approval.sql |
 | public.handle_new_user | supabase/schema.sql |
+| public.is_admin | supabase/incremental_privileged_roles_require_mfa.sql |
 | public.is_admin | supabase/schema.sql |
 | public.mark_customer_support_feedback_seen | supabase/incremental_customer_support_messages.sql |
 | public.mark_customer_support_feedback_seen | supabase/schema.sql |
@@ -663,6 +666,7 @@
 | public.current_profile_role() | supabase/incremental_restore_rls_helper_execute.sql |
 | public.current_profile_role() | supabase/incremental_revoke_security_definer_execute.sql |
 | public.current_profile_role() | supabase/schema.sql |
+| public.current_session_mfa_ok() | supabase/incremental_privileged_roles_require_mfa.sql |
 | public.get_home_current_trips() | supabase/incremental_home_current_trips_range_rpc.sql |
 | public.get_home_current_trips() | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
 | public.get_home_current_trips() | supabase/schema.sql |
