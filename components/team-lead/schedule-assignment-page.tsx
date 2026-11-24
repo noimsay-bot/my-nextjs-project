@@ -53,6 +53,7 @@ import {
   ScheduleAssignmentRow,
   ScheduleAssignmentVisibleTripTag,
 } from "@/lib/team-lead/storage";
+import { downloadScheduleAssignmentMonthXlsx } from "@/lib/team-lead/schedule-assignment-export";
 
 type PortalSupabaseClient = Awaited<ReturnType<typeof getPortalSupabaseClient>>;
 type PortalRealtimeChannel = ReturnType<PortalSupabaseClient["channel"]>;
@@ -3113,6 +3114,17 @@ export function ScheduleAssignmentPage() {
               onClick={() => void restoreSelectedBackup()}
             >
               백업 불러오기
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!selectedMonth || assignmentMonthLoading}
+              onClick={() => {
+                if (!selectedMonth) return;
+                downloadScheduleAssignmentMonthXlsx(selectedMonth, store, scheduleBigEvents, visibleTripTagMap);
+              }}
+            >
+              엑셀 저장
             </button>
           </div>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>

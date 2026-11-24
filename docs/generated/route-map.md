@@ -6,7 +6,7 @@
 ## 요약
 
 - 스캔 대상: `app`
-- 라우트 세그먼트 수: 78
+- 라우트 세그먼트 수: 79
 - route group 괄호 세그먼트는 URL 경로에서 제외했습니다.
 
 ## app/root
@@ -70,6 +70,7 @@
 | /team-lead/schedule-assignment | (portal)/team-lead/schedule-assignment | yes |  |  |  |  |
 | /team-lead/security | (portal)/team-lead/security | yes |  |  |  |  |
 | /team-lead/special-report | (portal)/team-lead/special-report | yes |  |  |  |  |
+| /team-lead/statistics | (portal)/team-lead/statistics | yes |  |  |  |  |
 | /tips | (portal)/tips | yes |  |  |  |  |
 | /vacation | (portal)/vacation | yes |  |  |  |  |
 | /weather | (portal)/weather | yes | yes |  |  |  |
