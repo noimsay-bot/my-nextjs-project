@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { listFiles, markdownTable, rel, repoRoot, writeGenerated } from "./utils.mjs";
+import { compareText, listFiles, markdownTable, rel, repoRoot, writeGenerated } from "./utils.mjs";
 
 const sqlFiles = listFiles("supabase", { extensions: [".sql"] });
 
@@ -45,7 +45,7 @@ function uniqueRows(items) {
       seen.add(key);
       return true;
     })
-    .sort((a, b) => `${a.name}${a.file}`.localeCompare(`${b.name}${b.file}`))
+    .sort((a, b) => compareText(`${a.name}${a.file}`, `${b.name}${b.file}`))
     .map((item) => [item.name, item.file]);
 }
 

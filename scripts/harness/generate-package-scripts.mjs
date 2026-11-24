@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { markdownTable, repoRoot, writeGenerated } from "./utils.mjs";
+import { compareText, markdownTable, repoRoot, writeGenerated } from "./utils.mjs";
 
 const packagePath = path.join(repoRoot, "package.json");
 const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
@@ -18,7 +18,7 @@ function category(name, command) {
 }
 
 const rows = Object.entries(scripts)
-  .sort(([a], [b]) => a.localeCompare(b))
+  .sort(([a], [b]) => compareText(a, b))
   .map(([name, command]) => [name, category(name, command), command]);
 
 const content = [
