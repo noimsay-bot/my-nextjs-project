@@ -10,9 +10,6 @@ const USER_ID = "admin-seed";
 test.setTimeout(90_000);
 const FIRST_LOAD = { timeout: 30_000 };
 
-// 처음 여는 /mfa 화면은 개발 서버가 컴파일하느라 느릴 수 있다.
-test.setTimeout(90_000);
-
 function fakeJwt(payload: Record<string, unknown>) {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "HS256", typ: "JWT" })}.${encode(payload)}.c2ln`;
