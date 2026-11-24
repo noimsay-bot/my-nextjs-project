@@ -3100,6 +3100,105 @@ export function getTeamLeadTripCards(
     .filter((card) => card.items.length > 0);
 }
 
+export interface ScheduleAssignmentPersonStats {
+  name: string;
+  total: number;
+  /** 평가연도 월 순서(전년 12월 → 당해 11월)대로 건수. */
+  monthCounts: number[];
+  dayTripCount: number;
+  domesticTripCount: number;
+  internationalTripCount: number;
+}
+
+export interface ScheduleAssignmentYearStats {
+  evaluationYear: number;
+  monthKeys: string[];
+  people: ScheduleAssignmentPersonStats[];
+}
+
+// 일정 통계에서 빼는 등급: 팀장, 데스크, 파트너, 출입처. 팀원·관리자 등은 포함한다.
+const SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES = new Set(["team_lead", "desk", "partner", "outlet"]);
+
+/**
+ * 평가연도(전년 12월~당해 11월) 동안 사람별 일정배정 건수.
+ * 일정 칸에 적힌 일정 하나를 1건으로 센다. 출장은 출장 묶음(tripTag) 하나를 1건으로 센다.
+ */
+export function getScheduleAssignmentYearStats(
+  evaluationYear = getTeamLeadEvaluationYear(),
+): ScheduleAssignmentYearStats {
+  const monthKeys = getTeamLeadEvaluationMonthKeys(evaluationYear);
+  const monthIndex = new Map(monthKeys.map((monthKey, index) => [monthKey, index] as const));
+  const allSchedules = getTeamLeadSchedules();
+  const schedules = allSchedules.filter((schedule) => monthIndex.has(schedule.monthKey));
+  const store = getScheduleAssignmentStore();
+  const bigEvents = getScheduleAssignmentBigEvents(allSchedules);
+  const excludedNames = new Set(
+    getUsers()
+      .filter((user) => SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES.has(user.role))
+      .map((user) => user.username.trim())
+      .filter(Boolean),
+  );
+  const personMap = new Map<string, ScheduleAssignmentPersonStats>();
+  const getPerson = (name: string) => {
+    const current = personMap.get(name);
+    if (current) return current;
+    const created: ScheduleAssignmentPersonStats = {
+      name,
+      total: 0,
+      monthCounts: monthKeys.map(() => 0),
+      dayTripCount: 0,
+      domesticTripCount: 0,
+      internationalTripCount: 0,
+    };
+    personMap.set(name, created);
+    return created;
+  };
+
+  schedules.forEach((monthSchedule) => {
+    const index = monthIndex.get(monthSchedule.monthKey) ?? -1;
+    if (index < 0) return;
+    const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
+    const monthRows = store.rows[monthSchedule.monthKey] ?? {};
+
+    monthSchedule.days
+      .filter((day) => day.month === monthSchedule.month && day.year === monthSchedule.year)
+      .forEach((day) => {
+        getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents)
+          .forEach((row) => {
+            const personName = row.name.trim();
+            if (!personName || excludedNames.has(personName)) return;
+            const entry = monthEntries[row.key];
+            if (!entry) return;
+            const count = entry.schedules.filter((schedule) => schedule.trim()).length;
+            if (count === 0) return;
+            const person = getPerson(personName);
+            person.total += count;
+            person.monthCounts[index] += count;
+          });
+      });
+  });
+
+  buildScheduleAssignmentTripWorkspace(schedules, store).tripCards.forEach((card) => {
+    const personName = card.name.trim();
+    if (!personName || excludedNames.has(personName)) return;
+    card.items.forEach((item) => {
+      if (item.travelType !== "당일출장" && item.travelType !== "국내출장" && item.travelType !== "해외출장") return;
+      const person = getPerson(personName);
+      if (item.travelType === "당일출장") person.dayTripCount += 1;
+      else if (item.travelType === "국내출장") person.domesticTripCount += 1;
+      else person.internationalTripCount += 1;
+    });
+  });
+
+  return {
+    evaluationYear,
+    monthKeys,
+    people: Array.from(personMap.values()).sort(
+      (left, right) => right.total - left.total || left.name.localeCompare(right.name, "ko"),
+    ),
+  };
+}
+
 export function getFinalCutCards(monthKey?: string) {
   const schedules = getTeamLeadSchedules().filter((schedule) => !monthKey || schedule.monthKey === monthKey);
   const store = getScheduleAssignmentStore();
