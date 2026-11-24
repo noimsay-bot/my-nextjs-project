@@ -71,6 +71,8 @@ const AUTH_REQUEST_TIMEOUT_MS = 4_000;
 const AUTH_REFRESH_STALE_MS = 60_000;
 const AUTH_FAILURE_COOLDOWN_MS = 10_000;
 const APPROVAL_REQUIRED_MESSAGE = "승인되지 않은 계정입니다. 관리자에게 문의해 주세요.";
+const SIGNUP_PENDING_APPROVAL_MESSAGE =
+  "가입 신청이 접수되었습니다. 관리자가 승인하면 로그인할 수 있습니다. 승인이 늦어지면 관리자에게 알려 주세요.";
 const PROFILE_SYNC_FAILED_MESSAGE = "계정 정보를 확인하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.";
 const AUTH_TIMEOUT = Symbol("auth-timeout");
 
@@ -614,7 +616,7 @@ function buildProfileInsertPayload(user: User) {
         ? user.user_metadata.name.trim()
         : user.email ?? "User",
     role: "member" as const,
-    approved: true,
+    approved: false,
   };
 }
 
@@ -1206,9 +1208,17 @@ export async function registerUser(input: {
       rememberLoginEmail(loginId, data.user.email ?? email);
       const nextSession = await syncSessionFromUser(data.user);
       if (!nextSession) {
+        const blockedMessage = await buildBlockedAuthMessage(data.user.id);
+        // 새 가입자는 관리자 승인 전까지 쓸 수 없다(승인 대기). 가입 자체는 성공이다.
+        if (blockedMessage === APPROVAL_REQUIRED_MESSAGE) {
+          return {
+            ok: true as const,
+            message: SIGNUP_PENDING_APPROVAL_MESSAGE,
+          };
+        }
         return {
           ok: false as const,
-          message: await buildBlockedAuthMessage(data.user.id),
+          message: blockedMessage,
         };
       }
     }
@@ -1216,7 +1226,7 @@ export async function registerUser(input: {
     if (!data.session) {
       return {
         ok: true as const,
-        message: "회원가입은 완료되었지만 즉시 로그인되지 않았습니다. Supabase Auth에서 이메일 확인을 꺼 두었는지 확인해 주세요.",
+        message: SIGNUP_PENDING_APPROVAL_MESSAGE,
       };
     }
 
