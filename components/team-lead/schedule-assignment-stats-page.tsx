@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { refreshUsers } from "@/lib/auth/storage";
+import { PUBLISHED_SCHEDULES_EVENT, refreshPublishedSchedules } from "@/lib/schedule/published";
 import { refreshScheduleState, SCHEDULE_STATE_EVENT } from "@/lib/schedule/storage";
 import {
   getScheduleAssignmentYearStats,
-  getTeamLeadSchedules,
   refreshTeamLeadAssignmentMonths,
   TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT,
   type ScheduleAssignmentPersonStats,
@@ -75,20 +75,35 @@ export function ScheduleAssignmentStatsPage() {
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>("total");
   const [sortDesc, setSortDesc] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const lastFocusRefreshAtRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    // 12개월 확정 근무표·일정배정을 모두 받은 뒤에만 집계한다.
+    // 확정 근무표 없이 집계하면 DESK 초안 근무표로 행을 만들게 되어, 일정배정 행 키가 맞지 않아 건수가 빠진다.
+    let ready = false;
+    const monthKeys = getTeamLeadEvaluationMonthKeys(evaluationYear);
     const sync = () => {
-      if (!cancelled) setStats(getScheduleAssignmentYearStats(evaluationYear));
+      if (!cancelled && ready) setStats(getScheduleAssignmentYearStats(evaluationYear));
     };
     const refresh = async () => {
-      await Promise.all([refreshUsers(), refreshScheduleState()]);
-      await refreshTeamLeadAssignmentMonths([
-        ...getTeamLeadEvaluationMonthKeys(evaluationYear),
-        ...getTeamLeadSchedules().map((schedule) => schedule.monthKey),
-      ]);
-      sync();
+      try {
+        await Promise.all([
+          refreshUsers(),
+          refreshScheduleState(),
+          refreshPublishedSchedules({ monthKeys, repair: false }),
+          refreshTeamLeadAssignmentMonths(monthKeys),
+        ]);
+        if (cancelled) return;
+        ready = true;
+        setLoadError("");
+        sync();
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "일정배정 통계를 불러오지 못했습니다.");
+        }
+      }
     };
     const onFocusRefresh = () => {
       const now = Date.now();
@@ -98,7 +113,7 @@ export function ScheduleAssignmentStatsPage() {
     };
 
     setLoading(true);
-    sync();
+    setStats(null);
     void refresh().finally(() => {
       lastFocusRefreshAtRef.current = Date.now();
       if (!cancelled) setLoading(false);
@@ -106,11 +121,13 @@ export function ScheduleAssignmentStatsPage() {
     window.addEventListener("focus", onFocusRefresh);
     window.addEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, sync);
     window.addEventListener(SCHEDULE_STATE_EVENT, sync);
+    window.addEventListener(PUBLISHED_SCHEDULES_EVENT, sync);
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocusRefresh);
       window.removeEventListener(TEAM_LEAD_SCHEDULE_ASSIGNMENT_EVENT, sync);
       window.removeEventListener(SCHEDULE_STATE_EVENT, sync);
+      window.removeEventListener(PUBLISHED_SCHEDULES_EVENT, sync);
     };
   }, [evaluationYear]);
 
@@ -171,6 +188,7 @@ export function ScheduleAssignmentStatsPage() {
             </button>
             {loading ? <span className="muted" style={{ fontSize: 13 }}>최신 일정배정을 불러오는 중입니다.</span> : null}
           </div>
+          {loadError ? <div className="status warn">통계를 불러오지 못했습니다: {loadError}</div> : null}
         </div>
       </article>
 
