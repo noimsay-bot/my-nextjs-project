@@ -10,11 +10,11 @@
 
 ## 요약
 
-- SQL 파일: 65
+- SQL 파일: 66
 - 테이블 선언: 67
 - enum 선언: 1
-- policy 선언: 232
-- function 선언: 85
+- policy 선언: 233
+- function 선언: 86
 - trigger 선언: 59
 - RLS enable 선언: 67
 - table grant 선언: 98
@@ -438,6 +438,7 @@
 | profiles_admin_delete_all | supabase/schema.sql |
 | profiles_admin_select_all | supabase/schema.sql |
 | profiles_admin_update_all | supabase/schema.sql |
+| profiles_insert_own | supabase/incremental_signup_requires_approval.sql |
 | profiles_insert_own | supabase/schema.sql |
 | profiles_select_approved_directory | supabase/schema.sql |
 | profiles_select_own | supabase/schema.sql |
@@ -597,6 +598,7 @@
 | public.guard_team_lead_protected_state | supabase/incremental_team_lead_e2e_plaintext_guard.sql |
 | public.guard_team_lead_protected_state | supabase/schema.sql |
 | public.handle_new_user | supabase/incremental_safe_profile_bootstrap.sql |
+| public.handle_new_user | supabase/incremental_signup_requires_approval.sql |
 | public.handle_new_user | supabase/schema.sql |
 | public.is_admin | supabase/schema.sql |
 | public.mark_customer_support_feedback_seen | supabase/incremental_customer_support_messages.sql |

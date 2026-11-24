@@ -6,7 +6,7 @@ create table if not exists public.profiles (
   login_id text,
   name text not null,
   role public.app_role not null default 'member',
-  approved boolean not null default true,
+  approved boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
@@ -114,14 +114,15 @@ begin
     next_login_id,
     next_name,
     'member'::public.app_role,
-    true
+    -- 새 가입자는 관리자가 승인해야 쓸 수 있다.
+    false
   )
   on conflict (id) do update
   set
     email = excluded.email,
     login_id = coalesce(excluded.login_id, public.profiles.login_id),
     name = coalesce(excluded.name, public.profiles.name),
-    -- User-controlled metadata must never grant or change an existing role.
+    -- User-controlled metadata must never grant or change an existing role or approval.
     updated_at = timezone('utc', now());
 
   return new;
@@ -229,7 +230,7 @@ to authenticated
 with check (
   auth.uid() = id
   and role = 'member'
-  and approved = true
+  and approved = false
 );
 
 create policy "profiles_update_own_basic_fields"

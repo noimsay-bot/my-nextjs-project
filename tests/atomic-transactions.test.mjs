@@ -7,6 +7,8 @@ import { PGlite } from "@electric-sql/pglite";
 const schema = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
 const atomicSql = readFileSync(new URL("../supabase/incremental_atomic_news_and_live_status.sql", import.meta.url), "utf8");
 const bootstrapSql = readFileSync(new URL("../supabase/incremental_safe_profile_bootstrap.sql", import.meta.url), "utf8");
+// 회원가입 승인제(2026-11): handle_new_user의 최신 정의는 이 파일에 있다.
+const signupApprovalSql = readFileSync(new URL("../supabase/incremental_signup_requires_approval.sql", import.meta.url), "utf8");
 const admin = "00000000-0000-4000-8000-000000000001";
 const member = "00000000-0000-4000-8000-000000000002";
 const draft = "00000000-0000-4000-8000-000000000101";
@@ -29,7 +31,7 @@ test("baseline schema and incremental rollout define the same hardened functions
   for (const name of ["save_news_issue_set_items_atomic", "publish_news_issue_set_atomic", "save_live_equipment_status_atomic"]) {
     assert.equal(definition(schema, name), definition(atomicSql, name));
   }
-  assert.equal(definition(schema, "handle_new_user"), definition(bootstrapSql, "handle_new_user"));
+  assert.equal(definition(schema, "handle_new_user"), definition(signupApprovalSql, "handle_new_user"));
 });
 
 test("Postgres signup hardening and atomic writes preserve permissions and roll back failures", async (t) => {
@@ -52,10 +54,12 @@ test("Postgres signup hardening and atomic writes preserve permissions and roll 
     ('${admin}', 'admin@example.test', '{"login_id":"operator"}'),
     ('${member}', 'member@example.test', '{"login_id":"noimsay","role":"admin"}');`);
 
-  await t.test("self-selected privileged-looking signup metadata always creates a member", async () => {
+  await t.test("self-selected privileged-looking signup metadata always creates a member awaiting approval", async () => {
     const { rows } = await db.query("select role, approved from profiles where id=$1", [member]);
-    assert.deepEqual(rows, [{ role: "member", approved: true }]);
+    assert.deepEqual(rows, [{ role: "member", approved: false }]);
   });
+  // 관리자 승인 이후 상태로 시작한다.
+  await db.exec(`update profiles set approved=true;`);
   await db.exec(`update profiles set role='admin' where id='${admin}';`);
   await t.test("incremental bootstrap is repeatable and preserves existing roles and approvals", async () => {
     await db.exec(`update profiles set approved=false where id='${member}';`);
