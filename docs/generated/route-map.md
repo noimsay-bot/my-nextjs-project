@@ -39,8 +39,8 @@
 | /partner/assignments | (portal)/partner/assignments | yes |  |  |  |  |
 | /partner/schedule | (portal)/partner/schedule | yes |  |  |  |  |
 | /restaurants | (portal)/restaurants | yes | yes |  |  |  |
-| /restaurants/new | (portal)/restaurants/new | yes |  |  |  |  |
 | /restaurants/[id] | (portal)/restaurants/[id] | yes |  |  |  |  |
+| /restaurants/new | (portal)/restaurants/new | yes |  |  |  |  |
 | /review | (portal)/review | yes |  |  |  |  |
 | /schedule | (portal)/schedule | yes | yes |  | yes |  |
 | /schedule/domestic-trip | (portal)/schedule/domestic-trip | yes |  |  |  |  |
