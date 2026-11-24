@@ -3119,6 +3119,11 @@ export interface ScheduleAssignmentYearStats {
 // 일정 통계에서 빼는 등급: 팀장, 데스크, 파트너, 출입처. 팀원·관리자 등은 포함한다.
 const SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES = new Set(["team_lead", "desk", "partner", "outlet"]);
 
+// 같은 사람이 공백·유니코드 조합 차이로 따로 집계되지 않게 이름을 맞춘다.
+function normalizeScheduleAssignmentStatsName(name: string) {
+  return name.normalize("NFC").replace(/\s+/g, " ").trim();
+}
+
 /**
  * 평가연도(전년 12월~당해 11월) 동안 사람별 일정배정 건수.
  * 일정 칸에 적힌 일정 하나를 1건으로 센다. 출장은 출장 묶음(tripTag) 하나를 1건으로 센다.
@@ -3135,7 +3140,7 @@ export function getScheduleAssignmentYearStats(
   const excludedNames = new Set(
     getUsers()
       .filter((user) => SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES.has(user.role))
-      .map((user) => user.username.trim())
+      .map((user) => normalizeScheduleAssignmentStatsName(user.username))
       .filter(Boolean),
   );
   const personMap = new Map<string, ScheduleAssignmentPersonStats>();
@@ -3165,7 +3170,7 @@ export function getScheduleAssignmentYearStats(
       .forEach((day) => {
         getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents)
           .forEach((row) => {
-            const personName = row.name.trim();
+            const personName = normalizeScheduleAssignmentStatsName(row.name);
             if (!personName || excludedNames.has(personName)) return;
             const entry = monthEntries[row.key];
             if (!entry) return;
@@ -3179,7 +3184,7 @@ export function getScheduleAssignmentYearStats(
   });
 
   buildScheduleAssignmentTripWorkspace(schedules, store).tripCards.forEach((card) => {
-    const personName = card.name.trim();
+    const personName = normalizeScheduleAssignmentStatsName(card.name);
     if (!personName || excludedNames.has(personName)) return;
     card.items.forEach((item) => {
       if (item.travelType !== "당일출장" && item.travelType !== "국내출장" && item.travelType !== "해외출장") return;
