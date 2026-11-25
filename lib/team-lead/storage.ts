@@ -3126,7 +3126,8 @@ function normalizeScheduleAssignmentStatsName(name: string) {
 
 /**
  * 평가연도(전년 12월~당해 11월) 동안 사람별 일정배정 건수.
- * 일정 칸에 적힌 일정 하나를 1건으로 센다. 출장은 출장 묶음(tripTag) 하나를 1건으로 센다.
+ * 저장된 일정배정 칸에 이름과 일정 내용이 있으면 일정 하나를 1건으로 센다(내용이 없으면 0건).
+ * 출장은 출장 묶음(tripTag) 하나를 1건으로 센다.
  */
 export function getScheduleAssignmentYearStats(
   evaluationYear = getTeamLeadEvaluationYear(),
@@ -3136,7 +3137,6 @@ export function getScheduleAssignmentYearStats(
   const allSchedules = getTeamLeadSchedules();
   const schedules = allSchedules.filter((schedule) => monthIndex.has(schedule.monthKey));
   const store = getScheduleAssignmentStore();
-  const bigEvents = getScheduleAssignmentBigEvents(allSchedules);
   const excludedNames = new Set(
     getUsers()
       .filter((user) => SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES.has(user.role))
@@ -3159,28 +3159,46 @@ export function getScheduleAssignmentYearStats(
     return created;
   };
 
-  schedules.forEach((monthSchedule) => {
-    const index = monthIndex.get(monthSchedule.monthKey) ?? -1;
-    if (index < 0) return;
-    const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
-    const monthRows = store.rows[monthSchedule.monthKey] ?? {};
+  // 근무표 행과 맞춰 보지 않고, 저장된 일정배정 칸을 그대로 센다.
+  // 칸에 사람 이름과 일정 내용이 있으면 일정 하나당 1건, 내용이 없으면 0건.
+  // 같은 날짜·같은 사람·같은 일정 내용은 여러 월 묶음이나 행에 겹쳐 저장돼 있어도 1건만 센다.
+  const countedItems = new Set<string>();
+  Object.entries(store.entries).forEach(([bucketMonthKey, monthEntries]) => {
+    const bucketRows = store.rows[bucketMonthKey] ?? {};
+    Object.entries(monthEntries ?? {}).forEach(([rowKey, entry]) => {
+      const scheduleTexts = (entry?.schedules ?? [])
+        .map((schedule) => normalizeScheduleAssignmentStatsName(schedule ?? ""))
+        .filter(Boolean);
+      if (scheduleTexts.length === 0) return;
 
-    monthSchedule.days
-      .filter((day) => day.month === monthSchedule.month && day.year === monthSchedule.year)
-      .forEach((day) => {
-        getScheduleAssignmentRows(day, monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(), bigEvents)
-          .forEach((row) => {
-            const personName = normalizeScheduleAssignmentStatsName(row.name);
-            if (!personName || excludedNames.has(personName)) return;
-            const entry = monthEntries[row.key];
-            if (!entry) return;
-            const count = entry.schedules.filter((schedule) => schedule.trim()).length;
-            if (count === 0) return;
-            const person = getPerson(personName);
-            person.total += count;
-            person.monthCounts[index] += count;
-          });
+      const [dateKey, category, ...restParts] = rowKey.split("::");
+      if (!dateKey || !category) return;
+      const index = monthIndex.get(dateKey.slice(0, 7)) ?? -1;
+      if (index < 0) return;
+
+      const dayRows = bucketRows[dateKey];
+      if (dayRows?.deletedRowKeys.includes(rowKey)) return;
+      let rawName = "";
+      if (category === "custom") {
+        rawName = dayRows?.addedRows.find((row) => row.id === restParts.join("::"))?.name ?? "";
+      } else {
+        rawName = dayRows?.rowOverrides[rowKey]?.name || restParts.slice(1).join("::");
+      }
+      const personName = normalizeScheduleAssignmentStatsName(rawName);
+      if (!personName || excludedNames.has(personName)) return;
+
+      let count = 0;
+      scheduleTexts.forEach((text) => {
+        const itemKey = `${dateKey}\u0000${personName}\u0000${text}`;
+        if (countedItems.has(itemKey)) return;
+        countedItems.add(itemKey);
+        count += 1;
       });
+      if (count === 0) return;
+      const person = getPerson(personName);
+      person.total += count;
+      person.monthCounts[index] += count;
+    });
   });
 
   buildScheduleAssignmentTripWorkspace(schedules, store).tripCards.forEach((card) => {
