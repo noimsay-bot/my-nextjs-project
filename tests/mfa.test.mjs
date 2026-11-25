@@ -46,7 +46,7 @@ test("돌아갈 주소는 포털 안의 경로만, 6자리는 숫자만", () => 
 test("AuthGate가 대상 등급을 /mfa로 보내고, /mfa는 로그인 보호 경로 밖에 있다", () => {
   const gate = readFileSync(new URL("../components/auth/auth-gate.tsx", import.meta.url), "utf8");
   assert.match(gate, /router\.replace\(`\/mfa\?next=\$\{encodeURIComponent\(pathname\)\}`\)/);
-  assert.match(gate, /mfaBlocks \|\|\n\s+!hasAccess\(/);
+  assert.match(gate, /mfaBlocks \|\|\r?\n\s+!hasAccess\(/);
   const middleware = readFileSync(new URL("../middleware.ts", import.meta.url), "utf8");
   assert.ok(!middleware.includes('"/mfa'), "middleware가 /mfa를 막으면 안 된다");
 });
