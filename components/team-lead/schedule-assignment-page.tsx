@@ -53,7 +53,15 @@ import {
   ScheduleAssignmentRow,
   ScheduleAssignmentVisibleTripTag,
 } from "@/lib/team-lead/storage";
-import { downloadScheduleAssignmentMonthXlsx } from "@/lib/team-lead/schedule-assignment-export";
+import {
+  countScheduleAssignmentMonthSchedules,
+  downloadScheduleAssignmentMonthXlsx,
+} from "@/lib/team-lead/schedule-assignment-export";
+import {
+  getRecentTeamLeadEvaluationYears,
+  getTeamLeadEvaluationMonthKeys,
+  getTeamLeadEvaluationYearFromMonthKey,
+} from "@/lib/team-lead/evaluation-year";
 
 type PortalSupabaseClient = Awaited<ReturnType<typeof getPortalSupabaseClient>>;
 type PortalRealtimeChannel = ReturnType<PortalSupabaseClient["channel"]>;
@@ -1020,6 +1028,22 @@ export function ScheduleAssignmentPage() {
   const selectedMonthKeyRef = useRef("");
   const todayDateKey = useMemo(() => getTodayDateKey(), []);
   const todayMonthKey = useMemo(() => getTodayMonthKey(), []);
+  // 월 버튼 범위: 선택한 연도 주기(전년 12월 ~ 해당 연도 11월) 12개월은 항상 모두 표시한다.
+  const currentEvaluationYear = useMemo(
+    () => getTeamLeadEvaluationYearFromMonthKey(todayMonthKey) ?? new Date().getFullYear(),
+    [todayMonthKey],
+  );
+  const [selectedEvaluationYear, setSelectedEvaluationYear] = useState(currentEvaluationYear);
+  const evaluationMonthKeys = useMemo(
+    () => getTeamLeadEvaluationMonthKeys(selectedEvaluationYear),
+    [selectedEvaluationYear],
+  );
+  const evaluationMonthKeysRef = useRef<string[]>(evaluationMonthKeys);
+  evaluationMonthKeysRef.current = evaluationMonthKeys;
+  const [hoveredMonthKey, setHoveredMonthKey] = useState("");
+  const [monthCountLoadingKeys, setMonthCountLoadingKeys] = useState<string[]>([]);
+  const [monthCountVersion, setMonthCountVersion] = useState(0);
+  const monthCountCheckedKeysRef = useRef(new Set<string>());
 
   const applyBackupItems = (nextItems: ScheduleAssignmentBackupSummary[]) => {
     setBackupItems(nextItems);
@@ -1612,7 +1636,8 @@ export function ScheduleAssignmentPage() {
       setSchedules(nextSchedules);
       setStore(getScheduleAssignmentStore());
       setSelectedMonthKey((current) =>
-        nextSchedules.some((schedule) => schedule.monthKey === current)
+        nextSchedules.some((schedule) => schedule.monthKey === current) ||
+        (current && evaluationMonthKeysRef.current.includes(current))
           ? current
           : nextSchedules.some((schedule) => schedule.monthKey === todayMonthKey)
             ? todayMonthKey
@@ -2164,6 +2189,86 @@ export function ScheduleAssignmentPage() {
 
   const selectedMonth = useMemo(() => schedules.find((schedule) => schedule.monthKey === selectedMonthKey) ?? null, [schedules, selectedMonthKey]);
   const scheduleBigEvents = useMemo(() => getScheduleAssignmentBigEvents(schedules), [schedules]);
+  const monthButtonKeys = useMemo(() => {
+    const evaluationEnd = evaluationMonthKeys[evaluationMonthKeys.length - 1] ?? "";
+    // 현재 연도를 볼 때는 다음 주기 달이라도 이미 근무표가 있으면(예: 11월에 미리 배포된 12월) 함께 보여 미리 배정할 수 있게 한다.
+    const futureKeys = selectedEvaluationYear === currentEvaluationYear
+      ? schedules
+        .map((schedule) => schedule.monthKey)
+        .filter((monthKey) => evaluationEnd && monthKey > evaluationEnd)
+      : [];
+    return Array.from(new Set([...evaluationMonthKeys, ...futureKeys])).sort((left, right) => left.localeCompare(right));
+  }, [currentEvaluationYear, evaluationMonthKeys, schedules, selectedEvaluationYear]);
+  const evaluationYearOptions = useMemo(() => {
+    const years = new Set<number>(getRecentTeamLeadEvaluationYears(selectedEvaluationYear));
+    years.add(currentEvaluationYear);
+    schedules.forEach((schedule) => {
+      const year = getTeamLeadEvaluationYearFromMonthKey(schedule.monthKey);
+      if (year && year <= currentEvaluationYear) years.add(year);
+    });
+    return Array.from(years).sort((left, right) => left - right);
+  }, [currentEvaluationYear, schedules, selectedEvaluationYear]);
+
+  const selectEvaluationYear = (year: number) => {
+    if (year === selectedEvaluationYear) return;
+    setSelectedEvaluationYear(year);
+    const nextMonthKeys = getTeamLeadEvaluationMonthKeys(year);
+    if (nextMonthKeys.includes(selectedMonthKey)) return;
+    // 현재 연도는 이번 달, 지난 연도는 그 주기의 마지막 달(11월)을 연다.
+    setSelectedMonthKey(
+      year === currentEvaluationYear && nextMonthKeys.includes(todayMonthKey)
+        ? todayMonthKey
+        : nextMonthKeys[nextMonthKeys.length - 1] ?? "",
+    );
+  };
+
+  // 검색 결과 이동 등으로 다른 연도의 달이 선택되면 연도 버튼도 그 연도로 맞춘다.
+  useEffect(() => {
+    if (!selectedMonthKey || monthButtonKeys.includes(selectedMonthKey)) return;
+    const year = getTeamLeadEvaluationYearFromMonthKey(selectedMonthKey);
+    if (year) setSelectedEvaluationYear(year);
+  }, [monthButtonKeys, selectedMonthKey]);
+  const hoveredMonthCountLabel = useMemo(() => {
+    if (!hoveredMonthKey) return "";
+    void monthCountVersion;
+    const schedule = schedules.find((item) => item.monthKey === hoveredMonthKey);
+    if (monthCountLoadingKeys.includes(hoveredMonthKey)) return "불러오는 중…";
+    if (!schedule) {
+      return monthCountCheckedKeysRef.current.has(hoveredMonthKey) ? "근무표 없음" : "입력 저장 후 확인 가능";
+    }
+    if (!isScheduleAssignmentMonthLoaded(hoveredMonthKey)) return "불러오는 중…";
+    // 화면 상태(store)에 있는 달은 편집 중인 최신값으로, 없으면 방금 불러온 캐시로 센다.
+    const sourceStore = store.entries[hoveredMonthKey] !== undefined ? store : getScheduleAssignmentStore();
+    return `일정 ${countScheduleAssignmentMonthSchedules(schedule, sourceStore, scheduleBigEvents)}개`;
+  }, [hoveredMonthKey, monthCountLoadingKeys, monthCountVersion, scheduleBigEvents, schedules, store]);
+
+  const handleMonthButtonHover = (monthKey: string) => {
+    setHoveredMonthKey(monthKey);
+    if (monthCountLoadingKeys.includes(monthKey) || monthCountCheckedKeysRef.current.has(monthKey)) return;
+    const hasSchedule = schedules.some((schedule) => schedule.monthKey === monthKey);
+    if (hasSchedule && isScheduleAssignmentMonthLoaded(monthKey)) return;
+    // 근무표 캐시에 없는 달은 배포본도 함께 조회해야 한다. 배포본 갱신은 편집 상태를 초기화하므로 편집 중에는 미룬다.
+    const hasDrafts =
+      pendingAssignmentWritesRef.current > 0 ||
+      Object.keys(editingDayRowsRef.current).length > 0 ||
+      Boolean(editingTripTagRef.current);
+    if (!hasSchedule && hasDrafts) return;
+    setMonthCountLoadingKeys((current) => [...current, monthKey]);
+    // 해당 달만 1회 조회한다. 화면 store는 건드리지 않아 편집 중인 내용에 영향이 없다.
+    void Promise.all([
+      hasSchedule ? Promise.resolve() : refreshPublishedSchedules({ monthKeys: [monthKey], repair: false }),
+      isScheduleAssignmentMonthLoaded(monthKey) ? Promise.resolve() : refreshTeamLeadAssignmentMonth(monthKey),
+    ])
+      .then(() => {
+        monthCountCheckedKeysRef.current.add(monthKey);
+        if (!hasSchedule) setSchedules(getTeamLeadSchedules());
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        setMonthCountLoadingKeys((current) => current.filter((key) => key !== monthKey));
+        setMonthCountVersion((current) => current + 1);
+      });
+  };
   const effectiveDutyOptions = useMemo(
     () => mergeDutyOptions(dutyOptions, getScheduleAssignmentBigEventDutyOptions(schedules)),
     [schedules],
@@ -3014,12 +3119,48 @@ export function ScheduleAssignmentPage() {
               <div className="chip">일정배정</div>
               <strong style={{ fontSize: 24 }}>월별 일정배정</strong>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {schedules.map((schedule) => (
-                <button key={schedule.monthKey} type="button" className={`btn ${selectedMonthKey === schedule.monthKey ? "white" : ""}`} onClick={() => setSelectedMonthKey(schedule.monthKey)}>
-                  {schedule.year}년 {schedule.month}월
+            <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }} aria-label="일정배정 연도 선택">
+              {evaluationYearOptions.map((year) => (
+                <button
+                  key={year}
+                  type="button"
+                  className={`btn ${selectedEvaluationYear === year ? "white" : ""}`}
+                  onClick={() => selectEvaluationYear(year)}
+                  title={`${year - 1}년 12월 ~ ${year}년 11월`}
+                  aria-pressed={selectedEvaluationYear === year}
+                >
+                  {year}년
                 </button>
               ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {monthButtonKeys.map((monthKey) => {
+                const [yearText, monthText] = monthKey.split("-");
+                const isHovered = hoveredMonthKey === monthKey;
+                return (
+                  <span key={monthKey} className="schedule-assignment-month-button">
+                    <button
+                      type="button"
+                      className={`btn ${selectedMonthKey === monthKey ? "white" : ""}`}
+                      onClick={() => setSelectedMonthKey(monthKey)}
+                      onMouseEnter={() => handleMonthButtonHover(monthKey)}
+                      onMouseLeave={() => setHoveredMonthKey((current) => (current === monthKey ? "" : current))}
+                      onFocus={() => handleMonthButtonHover(monthKey)}
+                      onBlur={() => setHoveredMonthKey((current) => (current === monthKey ? "" : current))}
+                      aria-describedby={isHovered ? "schedule-assignment-month-count-tooltip" : undefined}
+                    >
+                      {yearText}년 {Number(monthText)}월
+                    </button>
+                    {isHovered && hoveredMonthCountLabel ? (
+                      <span id="schedule-assignment-month-count-tooltip" role="tooltip" className="schedule-assignment-month-button__tooltip">
+                        {yearText}년 {Number(monthText)}월 · {hoveredMonthCountLabel}
+                      </span>
+                    ) : null}
+                  </span>
+                );
+              })}
+            </div>
             </div>
           </div>
           <form
@@ -3129,6 +3270,9 @@ export function ScheduleAssignmentPage() {
           </div>
           <div className="status note">근무표의 해당 날짜 근무자를 자동으로 불러오고, 인원 수정과 근무유형 변경까지 이 페이지에서 직접 관리합니다.</div>
           {assignmentMonthLoading ? <div className="status note">선택한 월의 일정배정 저장본을 불러오는 중입니다.</div> : null}
+          {selectedMonthKey && !selectedMonth && !assignmentMonthLoading ? (
+            <div className="status note">선택한 월({selectedMonthKey})은 게시되었거나 작성된 근무표가 없습니다.</div>
+          ) : null}
           {importMessage ? <div className={`status ${importMessage.tone}`}>{importMessage.text}</div> : null}
         </div>
       </article>

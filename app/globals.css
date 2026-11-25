@@ -3458,6 +3458,33 @@ html[data-theme="light"] .schedule-assignment-today-button {
   box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
 }
 
+.schedule-assignment-month-button {
+  position: relative;
+  display: inline-flex;
+}
+
+.schedule-assignment-month-button__tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+}
+
+html[data-theme="light"] .schedule-assignment-month-button__tooltip {
+  background: #173a79;
+  color: #ffffff;
+}
+
 html[data-theme="light"] .schedule-assignment-top-button {
   background: linear-gradient(180deg, #ffffff 0%, #dbeafe 100%);
   color: #0f172a;
