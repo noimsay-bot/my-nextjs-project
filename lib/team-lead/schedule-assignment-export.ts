@@ -95,9 +95,44 @@ export function buildScheduleAssignmentMonthSheetRows(
       ...row.trip,
     ]),
   ];
+  // 하단 합계: 한 달 동안 입력된 일정 칸 수(이름 있는 행의 비어 있지 않은 일정)를 출력한다.
+  const totalScheduleCount = bodyRows.reduce((sum, row) => sum + row.schedules.length, 0);
+  const totalRow: SimpleXlsxCell[] = Array.from({ length: header.length }, () => "");
+  totalRow[0] = "총 일정";
+  totalRow[6] = `${totalScheduleCount}개`;
+  rows.push(Array.from({ length: header.length }, () => ""), totalRow);
   const columnWidths = [12, 8, 12, 10, 14, 14, ...Array.from({ length: scheduleColumnCount }, () => 30), 10, 20];
 
-  return { rows, columnWidths };
+  return { rows, columnWidths, totalScheduleCount };
+}
+
+// 엑셀 하단 합계와 같은 기준으로 한 달 일정 총개수를 센다(월 버튼 팝업용).
+export function countScheduleAssignmentMonthSchedules(
+  monthSchedule: GeneratedSchedule,
+  store: ScheduleAssignmentDataStore,
+  bigEvents: ScheduleBigEvent[] | null,
+) {
+  const monthEntries = store.entries[monthSchedule.monthKey] ?? {};
+  const monthRows = store.rows[monthSchedule.monthKey] ?? {};
+  let total = 0;
+
+  monthSchedule.days
+    .filter((day) => day.month === monthSchedule.month && day.year === monthSchedule.year)
+    .forEach((day) => {
+      const rows = getScheduleAssignmentRows(
+        day,
+        monthRows[day.dateKey] ?? createDefaultScheduleAssignmentDayRows(),
+        bigEvents,
+      );
+      rows.forEach((row) => {
+        if (!row.name.trim()) return;
+        const entry = monthEntries[row.key];
+        if (!entry) return;
+        total += entry.schedules.filter((schedule) => schedule.trim()).length;
+      });
+    });
+
+  return total;
 }
 
 export function downloadXlsxFile(bytes: Uint8Array, fileName: string) {
