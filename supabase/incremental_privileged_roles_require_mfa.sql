@@ -1,6 +1,6 @@
 -- 총괄팀장 · DESK · admin 권한은 2단계 인증(인증 앱 6자리)을 마친 로그인에서만 쓴다. (DB 강제, 2단계)
 --
--- 적용 시점: 유예가 끝난 뒤(2026-12-01 이후), 대상 계정 모두 인증 앱 등록을 마친 것을 확인하고 적용한다.
+-- 적용: 2026-11-24 운영 DB 적용 완료(대상 4명 모두 인증 앱 등록 확인 후, 유예 종료 전 앞당겨 적용).
 --   확인 쿼리(등록 안 한 대상 계정):
 --     select p.name, p.role from public.profiles p
 --     where p.approved and p.role in ('team_lead', 'desk', 'admin')

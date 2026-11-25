@@ -36,6 +36,10 @@ test("live participation is readable by approved users and writable only by desk
     create function auth.uid() returns uuid language sql as $$
       select nullif(current_setting('test.uid', true), '')::uuid
     $$;
+    -- 기본은 2단계 인증을 마친 로그인(aal2). aal1 동작은 mfa.test.mjs가 따로 검사한다.
+    create function auth.jwt() returns jsonb language sql as $$
+      select coalesce(nullif(current_setting('test.jwt', true), ''), '{"aal":"aal2"}')::jsonb
+    $$;
     grant usage on schema auth, public to anon, authenticated, service_role;
   `);
   await db.exec(schema.slice(0, schema.indexOf("alter table public.profiles enable row level security;")));

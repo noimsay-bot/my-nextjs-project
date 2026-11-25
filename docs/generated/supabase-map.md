@@ -14,12 +14,12 @@
 - 테이블 선언: 67
 - enum 선언: 1
 - policy 선언: 233
-- function 선언: 89
+- function 선언: 90
 - trigger 선언: 59
 - RLS enable 선언: 67
 - table grant 선언: 98
 - table revoke 선언: 72
-- function execute grant 선언: 63
+- function execute grant 선언: 64
 - function execute revoke 선언: 43
 
 ## Tables
@@ -576,6 +576,7 @@
 | public.current_profile_role | supabase/incremental_privileged_roles_require_mfa.sql |
 | public.current_profile_role | supabase/schema.sql |
 | public.current_session_mfa_ok | supabase/incremental_privileged_roles_require_mfa.sql |
+| public.current_session_mfa_ok | supabase/schema.sql |
 | public.find_email_by_login_id | supabase/schema.sql |
 | public.get_home_current_trips | supabase/incremental_home_current_trips_range_rpc.sql |
 | public.get_home_current_trips | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
@@ -667,6 +668,7 @@
 | public.current_profile_role() | supabase/incremental_revoke_security_definer_execute.sql |
 | public.current_profile_role() | supabase/schema.sql |
 | public.current_session_mfa_ok() | supabase/incremental_privileged_roles_require_mfa.sql |
+| public.current_session_mfa_ok() | supabase/schema.sql |
 | public.get_home_current_trips() | supabase/incremental_home_current_trips_range_rpc.sql |
 | public.get_home_current_trips() | supabase/incremental_vercel_egress_rpc_and_community_attachments.sql |
 | public.get_home_current_trips() | supabase/schema.sql |

@@ -31,6 +31,20 @@ before update on public.profiles
 for each row
 execute function public.set_updated_at();
 
+-- 총괄팀장 · DESK · admin 권한은 2단계 인증(aal2)을 마친 로그인에서만 쓴다.
+-- (incremental_privileged_roles_require_mfa.sql)
+create or replace function public.current_session_mfa_ok()
+returns boolean
+language sql
+stable
+set search_path = public
+as $$
+  select coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2';
+$$;
+
+revoke all on function public.current_session_mfa_ok() from public, anon;
+grant execute on function public.current_session_mfa_ok() to authenticated, service_role;
+
 create or replace function public.current_profile_role()
 returns public.app_role
 language sql
@@ -38,7 +52,11 @@ stable
 security definer
 set search_path = public
 as $$
-  select role
+  select case
+    when role in ('team_lead', 'desk', 'admin') and not public.current_session_mfa_ok()
+      then 'member'::public.app_role
+    else role
+  end
   from public.profiles
   where id = auth.uid();
 $$;
@@ -81,7 +99,8 @@ as $$
     where id = auth.uid()
       and role in ('admin', 'team_lead')
       and approved = true
-  );
+  )
+  and public.current_session_mfa_ok();
 $$;
 
 create or replace function public.handle_new_user()
