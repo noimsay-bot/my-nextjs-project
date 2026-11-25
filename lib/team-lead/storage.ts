@@ -3121,7 +3121,30 @@ const SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES = new Set(["team_lead", "desk", "
 
 // 같은 사람이 공백·유니코드 조합 차이로 따로 집계되지 않게 이름을 맞춘다.
 function normalizeScheduleAssignmentStatsName(name: string) {
-  return name.normalize("NFC").replace(/\s+/g, " ").trim();
+  return name
+    .normalize("NFC")
+    .replace(/[​-‍⁠﻿]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// 일정 통계에서 뺄 이름. 이름만으로 사람을 구분하므로, 같은 이름의 계정이 여럿이면
+// 승인된 계정 중 하나라도 포함 등급(팀원·관리자 등)이면 그 이름은 집계한다.
+// 승인 대기·비활성 계정이나 같은 이름의 다른 등급 계정 때문에 팀원이 통째로 빠지지 않게 한다.
+function getScheduleAssignmentStatsExcludedNames() {
+  const activeUsers = getUsers().filter((user) => user.status === "ACTIVE");
+  const includedNames = new Set(
+    activeUsers
+      .filter((user) => !SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES.has(user.role))
+      .map((user) => normalizeScheduleAssignmentStatsName(user.username))
+      .filter(Boolean),
+  );
+  return new Set(
+    activeUsers
+      .filter((user) => SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES.has(user.role))
+      .map((user) => normalizeScheduleAssignmentStatsName(user.username))
+      .filter((name) => name && !includedNames.has(name)),
+  );
 }
 
 /**
@@ -3137,12 +3160,7 @@ export function getScheduleAssignmentYearStats(
   const allSchedules = getTeamLeadSchedules();
   const schedules = allSchedules.filter((schedule) => monthIndex.has(schedule.monthKey));
   const store = getScheduleAssignmentStore();
-  const excludedNames = new Set(
-    getUsers()
-      .filter((user) => SCHEDULE_ASSIGNMENT_STATS_EXCLUDED_ROLES.has(user.role))
-      .map((user) => normalizeScheduleAssignmentStatsName(user.username))
-      .filter(Boolean),
-  );
+  const excludedNames = getScheduleAssignmentStatsExcludedNames();
   const personMap = new Map<string, ScheduleAssignmentPersonStats>();
   const getPerson = (name: string) => {
     const current = personMap.get(name);
